@@ -1,0 +1,1 @@
+{"format":"mrt-sharded-json-v1","kind":"array","count":71243,"parts":[{"path":"recipes/eiotank/parts/part-000.json","start":0,"count":52909,"bytes":8388444},{"path":"recipes/eiotank/parts/part-001.json","start":52909,"count":18334,"bytes":3049550}]}

@@ -1,0 +1,382 @@
+import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
+import {chmod, mkdir, mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {dirname, join} from 'node:path';
+import test from 'node:test';
+import {
+  readPreviewIngestToken,
+  uploadRecipePreviewSidecar,
+} from './upload-recipe-preview-sidecar.mjs';
+
+const ASSET_SET_ID = 'a'.repeat(64);
+const DATASET_PUBLICATION_ID = 'b'.repeat(64);
+const TOKEN = 'operator-token-'.repeat(4);
+const BASE_URL = 'http://preview.test/api/admin/preview-assets';
+const SHA256_HEADER = 'x-mrt-content-sha256';
+const DATASET_HEADER = 'x-mrt-dataset-publication-id';
+const CACHE_CONTROL = 'public, max-age=31536000, immutable, no-transform';
+
+function sha256(bytes) {
+  return createHash('sha256').update(bytes).digest('hex');
+}
+
+function record(path, bytes) {
+  return {path, bytes: bytes.length, sha256: sha256(bytes)};
+}
+
+async function fixture() {
+  const root = await mkdtemp(join(tmpdir(), 'mrt-preview-upload-'));
+  const files = new Map([
+    ['assets/pack-000.bin', Buffer.from([1, 2, 3, 4])],
+    ['indexes/pack-000.bin', Buffer.from([5, 6, 7])],
+    ['categories/000.json', Buffer.from('{"previews":[]}\n')],
+  ]);
+  for (const [path, bytes] of files) {
+    const target = join(root, ...path.split('/'));
+    await mkdir(dirname(target), {recursive: true});
+    await writeFile(target, bytes);
+  }
+  const pack = {
+    ...record('assets/pack-000.bin', files.get('assets/pack-000.bin')),
+    index: {
+      ...record('indexes/pack-000.bin', files.get('indexes/pack-000.bin')),
+      entries: 1,
+    },
+  };
+  const manifest = {
+    assetSetId: ASSET_SET_ID,
+    datasetPublicationId: DATASET_PUBLICATION_ID,
+    packs: [pack],
+    categoryDocuments: [record('categories/000.json', files.get('categories/000.json'))],
+  };
+  const manifestBytes = Buffer.from(`${JSON.stringify(manifest)}\n`);
+  await writeFile(join(root, 'manifest.json'), manifestBytes);
+  const records = [
+    {...pack, index: undefined},
+    pack.index,
+    ...manifest.categoryDocuments,
+  ].map(({path, bytes, sha256: digest}) => ({path, bytes, sha256: digest}));
+  return {
+    root,
+    files,
+    records,
+    manifest,
+    manifestBytes,
+    localValidator: async () => ({root, manifest, manifestBytes}),
+  };
+}
+
+function responseHeadersForObject(object) {
+  return {
+    'content-length': String(object.bytes.length),
+    [SHA256_HEADER]: object.sha256,
+    [DATASET_HEADER]: DATASET_PUBLICATION_ID,
+  };
+}
+
+function createIngestionApi(fixtureState, options = {}) {
+  const state = {
+    stagedManifest: null,
+    committed: false,
+    objects: new Map(options.objects ?? []),
+    events: [],
+  };
+  const expected = new Map(fixtureState.records.map(value => [value.path, value]));
+
+  async function fetchImpl(url, init) {
+    const parsed = new URL(url);
+    const method = init.method ?? 'GET';
+    const headers = new Headers(init.headers);
+    const segments = parsed.pathname
+      .slice('/api/admin/preview-assets/'.length)
+      .split('/')
+      .map(decodeURIComponent);
+    const [assetSetId, operation, ...tail] = segments;
+    state.events.push({method, operation, path: tail.join('/'), headers});
+    assert.equal(init.redirect, 'error');
+    assert.equal(init.cache, 'no-store');
+    if (headers.get('authorization') !== `Bearer ${TOKEN}`) {
+      return new Response(null, {status: 401});
+    }
+    if (assetSetId !== ASSET_SET_ID) return new Response(null, {status: 404});
+
+    if (operation === 'begin' && method === 'POST') {
+      const bytes = Buffer.from(await new Response(init.body).arrayBuffer());
+      if (
+        headers.get(SHA256_HEADER) !== sha256(bytes) ||
+        headers.get(DATASET_HEADER) !== DATASET_PUBLICATION_ID ||
+        headers.get('content-length') !== String(bytes.length)
+      ) {
+        return new Response(null, {status: 422});
+      }
+      if (state.stagedManifest && !state.stagedManifest.equals(bytes)) {
+        return new Response(null, {status: 409});
+      }
+      const resumed = !!state.stagedManifest;
+      state.stagedManifest = bytes;
+      return new Response(null, {status: resumed ? 200 : 201});
+    }
+
+    if (operation === 'status' && method === 'HEAD') {
+      if (!state.stagedManifest) return new Response(null, {status: 404});
+      return new Response(null, {
+        status: 200,
+        headers: {
+          [SHA256_HEADER]: options.statusSha256 ?? sha256(state.stagedManifest),
+          'x-mrt-manifest-bytes': String(state.stagedManifest.length),
+          [DATASET_HEADER]: DATASET_PUBLICATION_ID,
+          'x-mrt-publication-state': state.committed ? 'committed' : 'staged',
+        },
+      });
+    }
+
+    if (operation === 'objects' && tail.length > 0) {
+      const path = tail.join('/');
+      const stored = state.objects.get(path);
+      if (method === 'HEAD') {
+        return stored
+          ? new Response(null, {status: 200, headers: responseHeadersForObject(stored)})
+          : new Response(null, {status: 404});
+      }
+      if (method === 'PUT') {
+        assert.equal(headers.get('if-none-match'), '*');
+        assert.equal(headers.get('cache-control'), CACHE_CONTROL);
+        if (stored) return new Response(null, {status: options.raceStatus ?? 409});
+        const declared = expected.get(path);
+        if (!declared) return new Response(null, {status: 400});
+        const bytes = Buffer.from(await new Response(init.body).arrayBuffer());
+        const digest = sha256(bytes);
+        if (
+          bytes.length !== declared.bytes ||
+          digest !== declared.sha256 ||
+          headers.get('content-length') !== String(declared.bytes) ||
+          headers.get(SHA256_HEADER) !== declared.sha256 ||
+          headers.get(DATASET_HEADER) !== DATASET_PUBLICATION_ID
+        ) {
+          return new Response(null, {status: 422});
+        }
+        state.objects.set(path, {bytes, sha256: digest});
+        return new Response(null, {status: 201});
+      }
+    }
+
+    if (operation === 'commit' && method === 'POST') {
+      if (init.body !== undefined && init.body !== null) return new Response(null, {status: 400});
+      if (
+        headers.get('content-length') !== '0' ||
+        [...expected].some(([path, declared]) => {
+          const stored = state.objects.get(path);
+          return !stored || stored.bytes.length !== declared.bytes || stored.sha256 !== declared.sha256;
+        })
+      ) {
+        return new Response(null, {status: 409});
+      }
+      const resumed = state.committed;
+      state.committed = true;
+      return new Response(null, {status: resumed ? 200 : 201});
+    }
+
+    return new Response(null, {status: 404});
+  }
+
+  return {state, fetchImpl};
+}
+
+function loggerCapture() {
+  const entries = [];
+  return {
+    entries,
+    logger: {
+      info: (...values) => entries.push(['info', values.join(' ')]),
+      warn: (...values) => entries.push(['warn', values.join(' ')]),
+      error: (...values) => entries.push(['error', values.join(' ')]),
+    },
+  };
+}
+
+async function runUpload(fixtureState, api, overrides = {}) {
+  return uploadRecipePreviewSidecar({
+    local: fixtureState.root,
+    ingestBaseUrl: BASE_URL,
+    token: TOKEN,
+    concurrency: 2,
+    logger: loggerCapture().logger,
+    fetchImpl: api.fetchImpl,
+    localValidator: fixtureState.localValidator,
+    allowHttpForTests: true,
+    ...overrides,
+  });
+}
+
+test('fresh upload stages the manifest, verifies immutable objects, and commits manifest last', async () => {
+  const data = await fixture();
+  try {
+    const api = createIngestionApi(data);
+    const result = await runUpload(data, api);
+    assert.deepEqual(result, {
+      assetSetId: ASSET_SET_ID,
+      datasetPublicationId: DATASET_PUBLICATION_ID,
+      objects: 3,
+      uploaded: 3,
+      reused: 0,
+      committed: true,
+    });
+    assert.equal(api.state.committed, true);
+    assert.deepEqual([...api.state.objects.keys()].sort(), data.records.map(value => value.path).sort());
+    assert.equal(api.state.objects.has('manifest.json'), false);
+    const begin = api.state.events.findIndex(event => event.operation === 'begin');
+    const firstPut = api.state.events.findIndex(event => event.method === 'PUT');
+    const commit = api.state.events.findIndex(event => event.operation === 'commit');
+    const lastObjectHead = api.state.events.reduce(
+      (last, event, index) => event.operation === 'objects' && event.method === 'HEAD' ? index : last,
+      -1,
+    );
+    assert.ok(begin >= 0 && begin < firstPut);
+    assert.ok(lastObjectHead < commit);
+    assert.equal(api.state.events.at(-1).operation, 'status');
+  } finally {
+    await rm(data.root, {recursive: true, force: true});
+  }
+});
+
+test('a committed exact publication resumes without object or commit requests', async () => {
+  const data = await fixture();
+  try {
+    const api = createIngestionApi(data);
+    await runUpload(data, api);
+    const boundary = api.state.events.length;
+    const result = await runUpload(data, api);
+    assert.equal(result.uploaded, 0);
+    assert.equal(result.reused, 3);
+    const resumedEvents = api.state.events.slice(boundary);
+    assert.deepEqual(resumedEvents.map(event => `${event.method}:${event.operation}`), [
+      'POST:begin',
+      'HEAD:status',
+    ]);
+  } finally {
+    await rm(data.root, {recursive: true, force: true});
+  }
+});
+
+test('partial staging skips exact objects and accepts a conditional 412 race only after HEAD verification', async () => {
+  const data = await fixture();
+  try {
+    const first = data.records[0];
+    const preseeded = new Map([[first.path, {
+      bytes: data.files.get(first.path),
+      sha256: first.sha256,
+    }]]);
+    const api = createIngestionApi(data, {objects: preseeded, raceStatus: 412});
+    const originalFetch = api.fetchImpl;
+    let injectedRace = false;
+    api.fetchImpl = async (url, init) => {
+      const parsed = new URL(url);
+      const path = parsed.pathname.split('/objects/')[1];
+      if (!injectedRace && init.method === 'PUT' && path) {
+        const decoded = path.split('/').map(decodeURIComponent).join('/');
+        const declared = data.records.find(value => value.path === decoded);
+        const bytes = data.files.get(decoded);
+        api.state.objects.set(decoded, {bytes, sha256: declared.sha256});
+        injectedRace = true;
+      }
+      return originalFetch(url, init);
+    };
+    const result = await runUpload(data, api);
+    assert.equal(result.uploaded, 1);
+    assert.equal(result.reused, 2);
+    assert.equal(result.committed, true);
+  } finally {
+    await rm(data.root, {recursive: true, force: true});
+  }
+});
+
+test('conflicting remote metadata fails explicitly before commit', async () => {
+  const data = await fixture();
+  try {
+    const first = data.records[0];
+    const api = createIngestionApi(data, {
+      objects: new Map([[first.path, {
+        bytes: data.files.get(first.path),
+        sha256: 'f'.repeat(64),
+      }]]),
+    });
+    await assert.rejects(runUpload(data, api), /x-mrt-content-sha256=.*expected/);
+    assert.equal(api.state.events.some(event => event.operation === 'commit'), false);
+  } finally {
+    await rm(data.root, {recursive: true, force: true});
+  }
+});
+
+test('local mutation after validation cannot be uploaded or committed', async () => {
+  const data = await fixture();
+  try {
+    const changedPath = join(data.root, 'assets', 'pack-000.bin');
+    await writeFile(changedPath, Buffer.from([9, 9, 9, 9]));
+    const api = createIngestionApi(data);
+    await assert.rejects(runUpload(data, api, {concurrency: 1}), /changed after validation/);
+    assert.equal(api.state.events.some(event => event.method === 'PUT'), false);
+    assert.equal(api.state.events.some(event => event.operation === 'commit'), false);
+  } finally {
+    await rm(data.root, {recursive: true, force: true});
+  }
+});
+
+test('status digest mismatch and insecure production URLs fail closed without logging the token', async () => {
+  const data = await fixture();
+  try {
+    const api = createIngestionApi(data, {statusSha256: 'c'.repeat(64)});
+    const capture = loggerCapture();
+    await assert.rejects(
+      runUpload(data, api, {logger: capture.logger}),
+      /x-mrt-content-sha256=.*expected/,
+    );
+    assert.equal(capture.entries.flat().join('\n').includes(TOKEN), false);
+    const leakingFetch = async () => {
+      throw new Error(`transport accidentally included ${TOKEN}`);
+    };
+    const networkError = await assert.rejects(
+      runUpload(data, api, {logger: capture.logger, fetchImpl: leakingFetch}),
+      /\[REDACTED\]/,
+    );
+    assert.equal(networkError?.message?.includes(TOKEN) ?? false, false);
+    assert.equal(capture.entries.flat().join('\n').includes(TOKEN), false);
+    await assert.rejects(
+      uploadRecipePreviewSidecar({
+        local: data.root,
+        ingestBaseUrl: 'http://preview.test/api/admin/preview-assets',
+        token: TOKEN,
+        logger: capture.logger,
+        fetchImpl: api.fetchImpl,
+        localValidator: data.localValidator,
+      }),
+      /requires HTTPS/,
+    );
+  } finally {
+    await rm(data.root, {recursive: true, force: true});
+  }
+});
+
+test('token files require private permissions and accept one trailing newline', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mrt-preview-token-'));
+  try {
+    assert.equal(
+      await readPreviewIngestToken({env: {PREVIEW_UPLOAD_TOKEN: TOKEN}}),
+      TOKEN,
+    );
+    const path = join(root, 'token');
+    await writeFile(path, `${TOKEN}\n`, {mode: 0o600});
+    await chmod(path, 0o600);
+    assert.equal(await readPreviewIngestToken({tokenFile: path, env: {}}), TOKEN);
+    if (process.platform !== 'win32') {
+      await chmod(path, 0o644);
+      await assert.rejects(
+        readPreviewIngestToken({tokenFile: path, env: {}}),
+        /must not be readable or writable by group\/other/,
+      );
+    }
+    assert.equal((await readFile(path, 'utf8')).includes(TOKEN), true);
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
+});

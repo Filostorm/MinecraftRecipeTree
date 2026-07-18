@@ -1,0 +1,1 @@
+[{"in":[[["item|techreborn:nuke",1]],[["fluid|fluid:areated_molten_californium_250",1000]]],"out":[[["fluid|fluid:californium_256",1000]]]},{"in":[[["item|techreborn:nuke",1]],[["fluid|fluid:unholy_nuke_catalyst",1000]]],"out":[[["fluid|fluid:cold_plasma",1000]]]},{"in":[[["item|techreborn:nuke",1]],[["fluid|fluid:polonium",1000]]],"out":[[["fluid|fluid:californium_256",1000]]]}]

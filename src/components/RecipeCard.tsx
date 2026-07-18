@@ -1,0 +1,272 @@
+import React from 'react';
+import {StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {recipeImagePath, useData} from '../data/DataContext';
+import {recipePresentationKind} from '../data/recipePresentation';
+import {displayIngredientName, inferIngredientTag} from '../data/ingredientTags';
+import {
+  formatIngredientQuantityPrefix,
+  normalizeIngredientAmount,
+  shouldShowIngredientQuantity,
+} from '../data/ingredientQuantities';
+import {recipeDisplayTitle} from '../data/recipeTitles';
+import {pixelArtDisplaySize} from '../data/pixelArtSizing';
+import {theme} from '../theme';
+import {Recipe, SlotEntry} from '../types';
+import {useUi} from '../ui/UiContext';
+import {ItemIcon, pixelated} from './ItemIcon';
+import {RecipePreviewImage} from './RecipePreviewImage';
+
+/** Display scale for recipe PNGs (logical GUI px -> screen px). */
+export function recipeDisplaySize(recipe: Recipe, maxW = 360, maxH = 280): {w: number; h: number} {
+  const w = recipe.w ?? 160;
+  const h = recipe.h ?? 60;
+  return pixelArtDisplaySize(w, h, maxW, maxH);
+}
+
+export interface SlotSummary {
+  key: string;
+  /** null means the exporter could not determine the quantity. */
+  amount: number | null;
+  variants: number;
+  alternatives: string[];
+  tag?: string;
+}
+
+/** Logical ingredients with amounts, preserving tag-resolved alternatives. */
+export function slotSummary(slots: SlotEntry[][] | undefined): SlotSummary[] {
+  return summarizeSlots(slots, true);
+}
+
+/** Prerequisite/catalyst slots are graph edges but never material consumption. */
+export function prerequisiteSummary(slots: SlotEntry[][] | undefined): SlotSummary[] {
+  return summarizeSlots(slots, false);
+}
+
+function summarizeSlots(
+  slots: SlotEntry[][] | undefined,
+  consumed: boolean,
+): SlotSummary[] {
+  const out = new Map<string, SlotSummary>();
+  for (const slot of slots ?? []) {
+    if (!slot.length) continue;
+    const [key, rawAmount] = slot[0];
+    const amount = consumed
+      ? normalizeIngredientAmount(key, rawAmount)
+      : Number.isFinite(rawAmount) && rawAmount > 0
+        ? rawAmount
+        : null;
+    const alternatives = [...new Set(slot.map(([entryKey]) => entryKey))];
+    const tag = inferIngredientTag(slot);
+    const logicalKey = tag ? `#${tag}` : key;
+    const cur = out.get(logicalKey) ?? {
+      key,
+      amount: amount == null ? null : 0,
+      variants: alternatives.length,
+      alternatives,
+      tag,
+    };
+    if (cur.amount != null) {
+      cur.amount = amount == null ? null : cur.amount + amount;
+    }
+    cur.variants = Math.max(cur.variants, alternatives.length);
+    cur.alternatives = [...new Set([...cur.alternatives, ...alternatives])];
+    out.set(logicalKey, cur);
+  }
+  return [...out.values()];
+}
+
+export function RecipeCard({
+  recipe,
+  dir,
+  catTitle,
+  onPress,
+}: {
+  recipe: Recipe;
+  dir: string;
+  catTitle?: string;
+  onPress?: () => void;
+}) {
+  const data = useData();
+  const presentation = recipePresentationKind(recipe);
+  if (presentation === 'failure') {
+    return (
+      <View style={styles.card}>
+        <Text style={styles.errText}>recipe failed to export{recipe.id ? ` (${recipe.id})` : ''}</Text>
+      </View>
+    );
+  }
+  const {w, h} = recipeDisplaySize(recipe);
+  const inputs = slotSummary(recipe.in);
+  const outputs = slotSummary(recipe.out);
+  const prerequisites = prerequisiteSummary(recipe.cat);
+  const displayTitle = catTitle ? recipeDisplayTitle(catTitle, recipe) : undefined;
+  return (
+    <TouchableOpacity
+      accessibilityRole={onPress ? 'button' : undefined}
+      accessibilityLabel={onPress ? `Open ${displayTitle ?? 'recipe'} in graph` : undefined}
+      activeOpacity={onPress ? 0.72 : 1}
+      disabled={!onPress}
+      onPress={onPress}
+      style={[styles.card, onPress && styles.cardAction]}>
+      {displayTitle ? <Text style={styles.catTitle}>{displayTitle}</Text> : null}
+      {presentation === 'image' && recipe.img ? (
+        <RecipePreviewImage
+          uri={data.imageUrl(recipeImagePath(dir, recipe.img))!}
+          context={recipe.id ?? `${catTitle ?? dir} recipe`}
+          style={[{width: w, height: h}, styles.recipeImage, pixelated as object]}
+          resizeMode="contain"
+        />
+      ) : (
+        <Text style={styles.previewUnavailable}>
+          Structured recipe · layout preview unavailable
+        </Text>
+      )}
+      {(inputs.length > 0 || outputs.length > 0) && (
+        <View style={styles.recipeItems}>
+          {inputs.map(item => (
+            <ItemChip
+              key={`input-${item.key}`}
+              itemKey={item.key}
+              amount={item.amount}
+              variants={item.variants}
+              tag={item.tag}
+              interactive={!onPress}
+            />
+          ))}
+          <Text style={styles.recipeArrow}>→</Text>
+          {outputs.map(item => (
+            <ItemChip
+              key={`output-${item.key}`}
+              itemKey={item.key}
+              amount={item.amount}
+              variants={item.variants}
+              tag={item.tag}
+              highlight
+              interactive={!onPress}
+            />
+          ))}
+        </View>
+      )}
+      {prerequisites.length > 0 && (
+        <View style={styles.prerequisites}>
+          <Text style={styles.prerequisiteLabel}>Required · not consumed</Text>
+          <View style={styles.prerequisiteItems}>
+            {prerequisites.map(item => (
+              <ItemChip
+                key={`prerequisite-${item.key}`}
+                itemKey={item.key}
+                amount={item.amount}
+                variants={item.variants}
+                tag={item.tag}
+                interactive={!onPress}
+              />
+            ))}
+          </View>
+        </View>
+      )}
+      {recipe.id ? (
+        <Text style={styles.recipeId} numberOfLines={1}>
+          {recipe.id}
+        </Text>
+      ) : null}
+    </TouchableOpacity>
+  );
+}
+
+export function ItemChip({
+  itemKey,
+  amount,
+  variants,
+  tag,
+  highlight,
+  interactive = true,
+}: {
+  itemKey: string;
+  amount?: number | null;
+  variants?: number;
+  tag?: string;
+  highlight?: boolean;
+  interactive?: boolean;
+}) {
+  const data = useData();
+  const {openItem} = useUi();
+  const item = data.itemsByKey.get(itemKey);
+  const name = item?.n ?? itemKey.split('|').pop() ?? itemKey;
+  const displayName = displayIngredientName(name, tag);
+  const content = (
+    <>
+      <ItemIcon item={item} itemKey={itemKey} size={16} />
+      <Text style={styles.chipText} numberOfLines={1}>
+        {amount !== undefined && shouldShowIngredientQuantity(itemKey, amount)
+          ? `${formatIngredientQuantityPrefix(itemKey, amount)} `
+          : ''}
+        {displayName}
+        {!tag && variants != null && variants > 1 ? ` (+${variants - 1} alternatives)` : ''}
+      </Text>
+    </>
+  );
+  if (!interactive) {
+    return <View style={[styles.chip, highlight && styles.chipHighlight]}>{content}</View>;
+  }
+  return (
+    <TouchableOpacity
+      accessibilityRole="button"
+      accessibilityLabel={`Open ${displayName}`}
+      style={[styles.chip, highlight && styles.chipHighlight]}
+      onPress={event => {
+        event.stopPropagation();
+        openItem(itemKey);
+      }}>
+      {content}
+    </TouchableOpacity>
+  );
+}
+
+const styles = StyleSheet.create({
+  card: {
+    backgroundColor: theme.panelAlt,
+    borderColor: theme.border,
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 10,
+    alignSelf: 'flex-start',
+    maxWidth: '100%',
+  },
+  cardAction: {borderColor: theme.borderLight},
+  catTitle: {color: theme.textDim, fontSize: 11, marginBottom: 6},
+  recipeImage: {borderRadius: 4},
+  previewUnavailable: {
+    color: theme.textDim,
+    fontSize: 11,
+    fontStyle: 'italic',
+    marginBottom: 8,
+  },
+  recipeItems: {
+    marginTop: 8,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 6,
+  },
+  recipeArrow: {color: theme.textDim, fontSize: 14},
+  prerequisites: {marginTop: 8, gap: 5},
+  prerequisiteLabel: {color: theme.textDim, fontSize: 10, fontWeight: '600'},
+  prerequisiteItems: {flexDirection: 'row', flexWrap: 'wrap', gap: 6},
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.panel,
+    borderColor: theme.border,
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    gap: 5,
+    maxWidth: 240,
+  },
+  chipHighlight: {borderColor: theme.accent},
+  chipText: {color: theme.text, fontSize: 11},
+  errText: {color: theme.danger, fontSize: 12},
+  recipeId: {color: theme.textDim, fontSize: 10, marginTop: 6},
+});

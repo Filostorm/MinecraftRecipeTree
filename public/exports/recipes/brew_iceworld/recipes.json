@@ -1,0 +1,1 @@
+[{"in":[[["item|bewitchment:mandrake_root",1]],[["item|minecraft:ice",1]],[["item|minecraft:gunpowder",1]],[["item|bewitchment:witches_cauldron",1]],[["item|minecraft:glass_bottle:empty;",1]]],"out":[[["item|minecraft:splash_potion:empty;bewitchment.iceworld, Duration: 1",1]],[["item|bewitchment:perpetual_ice",1]],[["fluid|fluid:potion{Potion:\"minecraft:empty\"}",250]]]}]
