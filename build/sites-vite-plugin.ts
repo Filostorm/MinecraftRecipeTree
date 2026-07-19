@@ -25,6 +25,14 @@ export function sites(): Plugin {
       root = config.root;
     },
     async closeBundle() {
+      const retiredStaticExportDirectory = resolve(root, 'dist', 'client', 'exports');
+      if (await exists(retiredStaticExportDirectory)) {
+        console.error(
+          `Sites build failed: retired static dataset output exists at ${retiredStaticExportDirectory}`,
+        );
+        throw new Error('Static dataset exports must not be bundled; publish immutable datasets through R2');
+      }
+
       const outputDirectory = resolve(root, 'dist', '.openai');
       const hostingConfig = resolve(root, '.openai', 'hosting.json');
 

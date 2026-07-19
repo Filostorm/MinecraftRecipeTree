@@ -94,10 +94,13 @@ export interface Category {
 }
 
 /**
- * [catalog key, amount]. In `in`/`out`, amount <= 0 means an explicitly unknown dynamic flow.
+ * [catalog key, amount, optional logical ingredient id]. The third field preserves
+ * identities such as Forge 1.12 OreDictionary entries (`ore:ingotCopper`) while
+ * retaining the resolved catalog alternatives used for icons and source picking.
+ * In `in`/`out`, amount <= 0 means an explicitly unknown dynamic flow.
  * In `cat`, a positive amount is the minimum non-consumed reservoir/threshold requirement.
  */
-export type SlotEntry = [string, number];
+export type SlotEntry = [string, number, string?];
 
 export interface Recipe {
   /** Present when the export of this recipe failed; image/slots missing. */

@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  EXPORT_QUALITY_PROFILE_IDS,
   exportQualityIssues,
   MEATBALLCRAFT_112_PROFILE,
+  MULTIBLOCK_MADNESS_112_PROFILE,
+  MULTIBLOCK_MADNESS_2_118_PROFILE,
+  qualityProfileRequirementsFor,
   resolveQualityProfile,
 } from './export-quality-policy.mjs';
 
@@ -22,6 +26,80 @@ test('accepts the exact MeatballCraft 1.12.2 exporter contract', () => {
     ),
     [],
   );
+});
+
+test('registers explicit immutable requirements for all production pack profiles', () => {
+  assert.deepEqual(EXPORT_QUALITY_PROFILE_IDS, [
+    MEATBALLCRAFT_112_PROFILE,
+    MULTIBLOCK_MADNESS_112_PROFILE,
+    MULTIBLOCK_MADNESS_2_118_PROFILE,
+  ]);
+  assert.deepEqual(qualityProfileRequirementsFor(MULTIBLOCK_MADNESS_112_PROFILE), {
+    id: MULTIBLOCK_MADNESS_112_PROFILE,
+    label: 'Multiblock Madness',
+    minecraft: '1.12.2',
+    format: 1,
+    iconScale: 1,
+    recipeScale: 2,
+    recipeViewer: 'HEI',
+    corpus: 'dynamic-complete',
+  });
+  assert.deepEqual(qualityProfileRequirementsFor(MULTIBLOCK_MADNESS_2_118_PROFILE), {
+    id: MULTIBLOCK_MADNESS_2_118_PROFILE,
+    label: 'Multiblock Madness 2',
+    minecraft: '1.18.2',
+    format: 1,
+    iconScale: 1,
+    recipeScale: 2,
+    recipeViewer: 'REI',
+    corpus: 'dynamic-complete',
+  });
+});
+
+test('accepts dynamic complete Multiblock Madness profiles only at 16px icons and 2x layouts', () => {
+  for (const [profile, minecraft] of [
+    [MULTIBLOCK_MADNESS_112_PROFILE, '1.12.2'],
+    [MULTIBLOCK_MADNESS_2_118_PROFILE, '1.18.2'],
+  ]) {
+    assert.deepEqual(
+      exportQualityIssues(
+        {
+          manifest: {
+            ...validManifest,
+            minecraft,
+            settings: {iconScale: 1, recipeScale: 2},
+          },
+          failures: [],
+          semanticErrorRecipes: 0,
+        },
+        profile,
+      ),
+      [],
+    );
+  }
+});
+
+test('rejects Multiblock Madness version, scale, semantic, and unclassified-zero drift', () => {
+  const issues = exportQualityIssues(
+    {
+      manifest: {
+        ...validManifest,
+        minecraft: '1.12.2',
+        settings: {iconScale: 3, recipeScale: 1},
+      },
+      failures: [
+        'recipe output ingredient rei.machine #2: ZERO_UNCLASSIFIED no exact semantic adapter exists',
+      ],
+      semanticErrorRecipes: 1,
+    },
+    MULTIBLOCK_MADNESS_2_118_PROFILE,
+  );
+  assert.match(issues.join('\n'), /manifest\.minecraft "1\.18\.2"/);
+  assert.match(issues.join('\n'), /16×16 item canvases/);
+  assert.match(issues.join('\n'), /REI layouts rendered at 2×/);
+  assert.match(issues.join('\n'), /unclassified zero-quantity/);
+  assert.match(issues.join('\n'), /ingredient-semantics/);
+  assert.match(issues.join('\n'), /err=true/);
 });
 
 test('rejects version, abort, omitted, category, quantity, catalog, and semantic defects', () => {

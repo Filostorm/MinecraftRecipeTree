@@ -1,4 +1,4 @@
-import {SlotEntry} from '../types';
+import type {SlotEntry} from '../types';
 
 /**
  * JEI exports tag ingredients as their resolved item variants, not as the
@@ -45,6 +45,16 @@ function itemPath(key: string): string | null {
 }
 
 export function inferIngredientTag(slot: SlotEntry[]): string | undefined {
+  const explicitIdentities = [...new Set(slot.map(([, , identity]) => identity).filter(Boolean))];
+  if (explicitIdentities.length === 1) return explicitIdentities[0];
+  if (explicitIdentities.length > 1) {
+    console.error('Ingredient slot contains conflicting explicit logical identities.', {
+      identities: explicitIdentities,
+      slot,
+    });
+    return undefined;
+  }
+
   const uniqueKeys = [...new Set(slot.map(([key]) => key))];
   if (uniqueKeys.length < 2) return undefined;
   const paths = uniqueKeys.map(itemPath);

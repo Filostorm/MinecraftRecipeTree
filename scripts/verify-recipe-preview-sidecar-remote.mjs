@@ -736,9 +736,13 @@ function normalizeBaseUrl(url, allowHttpForTests) {
   return url;
 }
 
-function objectUrl(baseUrl, assetSetId, relativePath) {
+function objectUrl(baseUrl, assetSetId, datasetPublicationId, relativePath) {
   const segments = [assetSetId, ...relativePath.split('/')].map(encodeURIComponent);
-  return new URL(`${baseUrl.pathname}/${segments.join('/')}`, baseUrl.origin);
+  const url = new URL(`${baseUrl.pathname}/${segments.join('/')}`, baseUrl.origin);
+  // The public Worker fails closed unless both immutable identities are present in this exact
+  // order. Binding every probe prevents verification from crossing dataset/preview publications.
+  url.search = `?dataset=${datasetPublicationId}&preview=${assetSetId}`;
+  return url;
 }
 
 async function fetchWithTimeout(fetchImpl, url, init, timeoutMs, label) {
@@ -841,7 +845,12 @@ async function digestExactResponseBody(response, expected, label) {
 }
 
 async function verifyCommitMarker({localState, baseUrl, mode, fetchImpl, timeoutMs}) {
-  const url = objectUrl(baseUrl, localState.manifest.assetSetId, 'manifest.json');
+  const url = objectUrl(
+    baseUrl,
+    localState.manifest.assetSetId,
+    localState.manifest.datasetPublicationId,
+    'manifest.json',
+  );
   if (mode === 'precommit') {
     const response = await fetchWithTimeout(fetchImpl, url, {method: 'HEAD'}, timeoutMs, 'Commit marker');
     await cancelBody(response);
@@ -871,8 +880,15 @@ async function verifyCommitMarker({localState, baseUrl, mode, fetchImpl, timeout
   }
 }
 
-async function verifyRemoteHead({record, baseUrl, assetSetId, fetchImpl, timeoutMs}) {
-  const url = objectUrl(baseUrl, assetSetId, record.path);
+async function verifyRemoteHead({
+  record,
+  baseUrl,
+  assetSetId,
+  datasetPublicationId,
+  fetchImpl,
+  timeoutMs,
+}) {
+  const url = objectUrl(baseUrl, assetSetId, datasetPublicationId, record.path);
   const response = await fetchWithTimeout(fetchImpl, url, {method: 'HEAD'}, timeoutMs, `HEAD ${record.path}`);
   if (response.status !== 200) {
     await cancelBody(response);
@@ -883,8 +899,16 @@ async function verifyRemoteHead({record, baseUrl, assetSetId, fetchImpl, timeout
   await cancelBody(response);
 }
 
-async function verifyRemoteSmallObject({record, localBytes, baseUrl, assetSetId, fetchImpl, timeoutMs}) {
-  const url = objectUrl(baseUrl, assetSetId, record.path);
+async function verifyRemoteSmallObject({
+  record,
+  localBytes,
+  baseUrl,
+  assetSetId,
+  datasetPublicationId,
+  fetchImpl,
+  timeoutMs,
+}) {
+  const url = objectUrl(baseUrl, assetSetId, datasetPublicationId, record.path);
   const response = await fetchWithTimeout(fetchImpl, url, {method: 'GET'}, timeoutMs, `GET ${record.path}`);
   if (response.status !== 200) {
     await cancelBody(response);
@@ -898,8 +922,15 @@ async function verifyRemoteSmallObject({record, localBytes, baseUrl, assetSetId,
   }
 }
 
-async function verifyRemotePackDigest({pack, baseUrl, assetSetId, fetchImpl, timeoutMs}) {
-  const url = objectUrl(baseUrl, assetSetId, pack.path);
+async function verifyRemotePackDigest({
+  pack,
+  baseUrl,
+  assetSetId,
+  datasetPublicationId,
+  fetchImpl,
+  timeoutMs,
+}) {
+  const url = objectUrl(baseUrl, assetSetId, datasetPublicationId, pack.path);
   const label = `Full digest ${pack.path}`;
   const response = await fetchWithTimeout(fetchImpl, url, {method: 'GET'}, timeoutMs, label);
   if (response.status !== 200) {
@@ -934,8 +965,17 @@ async function readLocalRange(root, path, start, length) {
   }
 }
 
-async function verifyRemoteRange({pack, sample, root, baseUrl, assetSetId, fetchImpl, timeoutMs}) {
-  const url = objectUrl(baseUrl, assetSetId, pack.path);
+async function verifyRemoteRange({
+  pack,
+  sample,
+  root,
+  baseUrl,
+  assetSetId,
+  datasetPublicationId,
+  fetchImpl,
+  timeoutMs,
+}) {
+  const url = objectUrl(baseUrl, assetSetId, datasetPublicationId, pack.path);
   const label = `Range ${pack.path} bytes=${sample.start}-${sample.end}`;
   const response = await fetchWithTimeout(
     fetchImpl,
@@ -1016,6 +1056,7 @@ export async function verifyRemoteRecipePreviewSidecar({
         record,
         baseUrl: normalizedBaseUrl,
         assetSetId: manifest.assetSetId,
+        datasetPublicationId: manifest.datasetPublicationId,
         fetchImpl,
         timeoutMs,
       }),
@@ -1028,6 +1069,7 @@ export async function verifyRemoteRecipePreviewSidecar({
         localBytes: localState.categoryBytes[index],
         baseUrl: normalizedBaseUrl,
         assetSetId: manifest.assetSetId,
+        datasetPublicationId: manifest.datasetPublicationId,
         fetchImpl,
         timeoutMs,
       }),
@@ -1041,6 +1083,7 @@ export async function verifyRemoteRecipePreviewSidecar({
         localBytes: localState.packIndexBytes[index],
         baseUrl: normalizedBaseUrl,
         assetSetId: manifest.assetSetId,
+        datasetPublicationId: manifest.datasetPublicationId,
         fetchImpl,
         timeoutMs,
       }),
@@ -1056,6 +1099,7 @@ export async function verifyRemoteRecipePreviewSidecar({
           pack,
           baseUrl: normalizedBaseUrl,
           assetSetId: manifest.assetSetId,
+          datasetPublicationId: manifest.datasetPublicationId,
           fetchImpl,
           timeoutMs,
         }),
@@ -1081,6 +1125,7 @@ export async function verifyRemoteRecipePreviewSidecar({
         root: localState.root,
         baseUrl: normalizedBaseUrl,
         assetSetId: manifest.assetSetId,
+        datasetPublicationId: manifest.datasetPublicationId,
         fetchImpl,
         timeoutMs,
       }),
@@ -1136,7 +1181,7 @@ function parseCliArgs(argv) {
   if (!options.local || !options.baseUrl || !options.mode) {
     throw new Error(
       'Usage: node scripts/verify-recipe-preview-sidecar-remote.mjs ' +
-        '--local <sidecar-root> --base-url <public-bucket-path-before-assetSetId> ' +
+        '--local <sidecar-root> --base-url <public-preview-route-before-assetSetId> ' +
         '(--precommit | --committed) [--concurrency <1-32>] [--timeout-ms <1-120000>]',
     );
   }

@@ -14,6 +14,10 @@ export default defineConfig(async () => {
   const {cloudflare} = await import('@cloudflare/vite-plugin');
 
   return {
+    // Complete recipe publications are served from the Sites-managed R2 binding. Keeping Vite's
+    // public-directory copy enabled would silently rebundle the legacy 315 MiB MeatballCraft
+    // snapshot into every application release and defeat content-addressed dataset delivery.
+    publicDir: false as const,
     resolve: {
       alias: {
         'react-native': 'react-native-web',
@@ -35,8 +39,12 @@ export default defineConfig(async () => {
             binding: 'ASSETS',
             run_worker_first: [
               '/api/admin/preview-assets/*',
-              '/dataset/exports/*',
-              '/dataset/previews/*',
+              '/api/admin/core-datasets/*',
+              '/api/admin/dataset-channels/*',
+              '/api/datasets',
+              '/api/modpacks*',
+              '/dataset/publications/*',
+              '/dataset/preview-sets/*',
             ],
           },
           d1_databases: hostingConfig.d1

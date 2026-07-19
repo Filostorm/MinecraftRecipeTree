@@ -17,10 +17,15 @@ import {dirname, join, relative, sep} from 'node:path';
 import test from 'node:test';
 import {promisify} from 'node:util';
 import {
-  importExportData,
+  importExportData as importExportDataImplementation,
   importWorkspaceRootForDestination,
   publishTransactional,
 } from './import-export-data.mjs';
+import {
+  MEATBALLCRAFT_112_PROFILE,
+  MULTIBLOCK_MADNESS_112_PROFILE,
+  MULTIBLOCK_MADNESS_2_118_PROFILE,
+} from './export-quality-policy.mjs';
 import {PUBLICATION_ID_PATTERN} from './publication-id.mjs';
 import {
   createRawExportFixture,
@@ -32,6 +37,10 @@ import {validateExportData} from './validate-export-data.mjs';
 
 const execFileAsync = promisify(execFile);
 const PRODUCTION_RENDER_SETTINGS = Object.freeze({iconScale: 3, recipeScale: 2});
+
+function importExportData(options) {
+  return importExportDataImplementation({profile: MEATBALLCRAFT_112_PROFILE, ...options});
+}
 
 async function pathIsMissing(path) {
   try {
@@ -75,6 +84,80 @@ async function addSingleRecipePreview(source) {
   });
   return {categoryRoot, previewPath, physicalPreview};
 }
+
+test('requires an explicit quality profile before inspecting source or creating work data', async () => {
+  await assert.rejects(
+    importExportDataImplementation({source: '/unused', dryRun: true}),
+    /explicit export quality profile is required/i,
+  );
+});
+
+test('imports both Multiblock Madness versions with dynamic counts and production scales', async () => {
+  for (const [profile, minecraft] of [
+    [MULTIBLOCK_MADNESS_112_PROFILE, '1.12.2'],
+    [MULTIBLOCK_MADNESS_2_118_PROFILE, '1.18.2'],
+  ]) {
+    const root = await mkdtemp(join(tmpdir(), 'recipe-tree-import-profile-test-'));
+    try {
+      const source = join(root, 'raw-source');
+      const destination = join(root, 'public', 'exports');
+      await createRawExportFixture(source, {iconScale: 1, recipeScale: 2});
+      const manifestPath = join(source, 'manifest.json');
+      const manifest = await readJson(manifestPath);
+      manifest.minecraft = minecraft;
+      await writeJson(manifestPath, manifest);
+      await mkdir(dirname(destination), {recursive: true});
+
+      await importExportDataImplementation({source, destination, profile, dryRun: true});
+      assert.equal(await pathIsMissing(destination), true);
+      assert.equal(await pathIsMissing(importWorkspaceRootForDestination(destination)), true);
+    } finally {
+      await rm(root, {recursive: true, force: true});
+    }
+  }
+});
+
+test('Multiblock import rejects a dynamically counted corpus with a missing recipe preview', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'recipe-tree-import-missing-preview-test-'));
+  try {
+    const source = join(root, 'raw-source');
+    const destination = join(root, 'public', 'exports');
+    await createRawExportFixture(source, {iconScale: 1, recipeScale: 2});
+    await writeJson(join(source, 'recipes', 'minecraft_crafting', 'recipes.json'), [
+      {
+        id: 'minecraft:missing_preview',
+        in: [[['minecraft:stone', 1]]],
+        out: [[['minecraft:stone', 1]]],
+      },
+    ]);
+    const manifestPath = join(source, 'manifest.json');
+    const manifest = await readJson(manifestPath);
+    manifest.counts.recipes = 1;
+    await writeJson(manifestPath, manifest);
+    const categoriesPath = join(source, 'categories.json');
+    const categories = await readJson(categoriesPath);
+    categories.categories[0].count = 1;
+    await writeJson(categoriesPath, categories);
+    await writeJson(join(source, 'index.json'), {
+      'minecraft:stone': {p: [[0, 0]], u: [[0, 0]]},
+    });
+    await mkdir(dirname(destination), {recursive: true});
+
+    await assert.rejects(
+      importExportDataImplementation({
+        source,
+        destination,
+        profile: MULTIBLOCK_MADNESS_112_PROFILE,
+        dryRun: true,
+        omitRecipeImages: true,
+      }),
+      /requires one recipe preview per recipe.*missing.*1/i,
+    );
+    assert.equal(await pathIsMissing(destination), true);
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
+});
 
 test('dry run stages outside public and leaves the destination unchanged', async () => {
   const root = await mkdtemp(join(tmpdir(), 'recipe-tree-import-test-'));

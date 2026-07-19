@@ -327,17 +327,30 @@ export async function validateExportData(exportRoot = defaultExportRoot, options
       for (const [variantIndex, entry] of variants.entries()) {
         if (
           !Array.isArray(entry) ||
-          entry.length !== 2 ||
+          (entry.length !== 2 && entry.length !== 3) ||
           typeof entry[0] !== 'string' ||
           typeof entry[1] !== 'number' ||
-          !Number.isFinite(entry[1])
+          !Number.isFinite(entry[1]) ||
+          (entry.length === 3 &&
+            (typeof entry[2] !== 'string' || !/^ore:\S+$/.test(entry[2])))
         ) {
-          fail(`${location}[${slotIndex}][${variantIndex}] must be [catalog key, amount].`);
+          fail(
+            `${location}[${slotIndex}][${variantIndex}] must be ` +
+              '[catalog key, amount, optional logical ingredient id].',
+          );
           continue;
         }
         if (!itemKeys.has(entry[0])) {
           fail(`${location}[${slotIndex}][${variantIndex}] references unknown key ${entry[0]}.`);
         }
+      }
+      const logicalIdentities = variants.map(entry => entry?.[2]);
+      const exportedIdentityCount = logicalIdentities.filter(Boolean).length;
+      if (
+        exportedIdentityCount > 0 &&
+        (exportedIdentityCount !== variants.length || new Set(logicalIdentities).size !== 1)
+      ) {
+        fail(`${location}[${slotIndex}] must use one logical ingredient id for every variant.`);
       }
     }
   };

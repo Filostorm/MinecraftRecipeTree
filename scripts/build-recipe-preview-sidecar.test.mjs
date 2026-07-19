@@ -24,10 +24,16 @@ import {
   MAX_PACK_BYTES,
   MAX_PACK_INDEX_BYTES,
   MEATBALLCRAFT_CONTRACT,
+  recipePreviewContractForProfile,
   RECIPE_PREVIEW_CATEGORY_FORMAT,
   RECIPE_PREVIEW_PACK_INDEX_FORMAT,
   RECIPE_PREVIEW_SIDECAR_FORMAT,
 } from './build-recipe-preview-sidecar.mjs';
+import {
+  MEATBALLCRAFT_112_PROFILE,
+  MULTIBLOCK_MADNESS_112_PROFILE,
+  MULTIBLOCK_MADNESS_2_118_PROFILE,
+} from './export-quality-policy.mjs';
 import {
   requireRecipePreviewCategory,
   requireRecipePreviewManifest,
@@ -73,6 +79,24 @@ const SCALED_FIXTURE_CONTRACT = Object.freeze({
     }),
   }),
 });
+
+function completeProfileFixtureContract(profile, minecraft, failures = 0) {
+  return recipePreviewContractForProfile(profile, {
+    format: 1,
+    minecraft,
+    aborted: false,
+    settings: {iconScale: 1, recipeScale: 2, mobCanvas: 256},
+    counts: {
+      items: 2,
+      recipes: FIXTURE_RECIPE_COUNT,
+      categories: 1,
+      mobs: 0,
+      blockDrops: 0,
+      failures,
+    },
+    diagnostics: {failureEvents: failures, failureEventsOmitted: 0},
+  });
+}
 
 const quietLogger = Object.freeze({
   info() {},
@@ -130,6 +154,57 @@ test('production contract pins the repaired complete MeatballCraft corpus', () =
   });
 });
 
+test('profile contract resolution preserves MeatballCraft and derives only new-pack counts', () => {
+  assert.equal(
+    recipePreviewContractForProfile(MEATBALLCRAFT_112_PROFILE, {counts: {recipes: 1}}),
+    MEATBALLCRAFT_CONTRACT,
+  );
+
+  const first = completeProfileFixtureContract(
+    MULTIBLOCK_MADNESS_112_PROFILE,
+    '1.12.2',
+  );
+  const second = completeProfileFixtureContract(
+    MULTIBLOCK_MADNESS_2_118_PROFILE,
+    '1.18.2',
+  );
+  for (const contract of [first, second]) {
+    assert.deepEqual(contract.settings, {iconScale: 1, recipeScale: 2, mobCanvas: 256});
+    assert.deepEqual(contract.recipeImages, {previews: FIXTURE_RECIPE_COUNT, missing: 0});
+    assert.equal(contract.counts.recipes, FIXTURE_RECIPE_COUNT);
+    assert.equal(contract.hostedWeb.packedImages, 'coordinate-v1');
+  }
+  assert.equal(first.minecraft, '1.12.2');
+  assert.equal(second.minecraft, '1.18.2');
+});
+
+test('profile contract resolution rejects unsupported scale and diagnostic drift', () => {
+  const manifest = {
+    format: 1,
+    minecraft: '1.18.2',
+    aborted: false,
+    settings: {iconScale: 3, recipeScale: 2, mobCanvas: 256},
+    counts: {
+      items: 2,
+      recipes: 3,
+      categories: 1,
+      mobs: 0,
+      blockDrops: 0,
+      failures: 1,
+    },
+    diagnostics: {failureEvents: 0, failureEventsOmitted: 0},
+  };
+  assert.throws(
+    () => recipePreviewContractForProfile(MULTIBLOCK_MADNESS_2_118_PROFILE, manifest),
+    /16×16 item canvases/,
+  );
+  manifest.settings.iconScale = 1;
+  assert.throws(
+    () => recipePreviewContractForProfile(MULTIBLOCK_MADNESS_2_118_PROFILE, manifest),
+    /diagnostics\/counts disagree/,
+  );
+});
+
 function json(value) {
   return `${JSON.stringify(value)}\n`;
 }
@@ -166,7 +241,11 @@ async function writePng(path, pixels, width, height, compressionLevel) {
     .toFile(path);
 }
 
-async function createFixture(root, contract = FIXTURE_CONTRACT, {repairProvenance} = {}) {
+async function createFixture(
+  root,
+  contract = FIXTURE_CONTRACT,
+  {repairProvenance, missingRecipeIndex = 2, failures = null} = {},
+) {
   const rawRoot = join(root, 'raw');
   const categoryRoot = join(rawRoot, 'recipes', 'fixture.category');
   const hostedRoot = join(root, 'hosted');
@@ -187,7 +266,7 @@ async function createFixture(root, contract = FIXTURE_CONTRACT, {repairProvenanc
   const recipes = [];
   let sourcePngBytes = 0;
   for (let index = 0; index < FIXTURE_RECIPE_COUNT; index += 1) {
-    if (index === 2) {
+    if (index === missingRecipeIndex) {
       recipes.push({id: `fixture:${index}`, in: [], out: []});
       continue;
     }
@@ -302,14 +381,19 @@ async function createFixture(root, contract = FIXTURE_CONTRACT, {repairProvenanc
     ...(repairProvenance === undefined ? {} : {repairProvenance}),
   };
   await writeFile(join(rawRoot, 'manifest.json'), json(commonManifest));
+  if (failures !== null) {
+    await writeFile(join(rawRoot, 'failures.json'), json(failures));
+  }
+  const previewCount = recipes.filter(recipe => Object.hasOwn(recipe, 'img')).length;
   const hostedManifest = {
     ...commonManifest,
     web: {
+      ...(contract.hostedWeb ?? {}),
       recipeImages: {
         mode: 'omitted',
         reason: 'hosting-archive-budget',
-        references: FIXTURE_RECIPE_COUNT - 1,
-        files: FIXTURE_RECIPE_COUNT - 1,
+        references: previewCount,
+        files: previewCount,
         encoding: 'png',
         bytes: sourcePngBytes,
         inventory: hostedRecipeImageInventory,
@@ -627,6 +711,107 @@ test('builder decodes scaled physical pixels while retaining logical recipe coor
     );
   } finally {
     await rm(root, {recursive: true, force: true});
+  }
+});
+
+test('builder accepts dynamic complete Multiblock Madness corpora with explicit profiles', async () => {
+  for (const [profile, minecraft] of [
+    [MULTIBLOCK_MADNESS_112_PROFILE, '1.12.2'],
+    [MULTIBLOCK_MADNESS_2_118_PROFILE, '1.18.2'],
+  ]) {
+    const root = await mkdtemp(join(tmpdir(), 'recipe-preview-sidecar-profile-test-'));
+    try {
+      const fixtureContract = completeProfileFixtureContract(profile, minecraft);
+      const fixture = await createFixture(root, fixtureContract, {
+        missingRecipeIndex: null,
+        failures: [],
+      });
+      const output = join(root, 'sidecar');
+      const manifest = await buildRecipePreviewSidecar({
+        source: fixture.rawRoot,
+        datasetManifest: fixture.hostedManifestPath,
+        output,
+        profile,
+        concurrency: 3,
+        logger: quietLogger,
+      });
+
+      assert.deepEqual(manifest.settings, {
+        itemIconPixels: 16,
+        recipeScale: 2,
+        webpEffort: 4,
+        maxCategoryBytes: MAX_CATEGORY_BYTES,
+      });
+      assert.equal(manifest.counts.recipes, FIXTURE_RECIPE_COUNT);
+      assert.equal(manifest.counts.previews, FIXTURE_RECIPE_COUNT);
+      assert.equal(manifest.counts.missing, 0);
+    } finally {
+      await rm(root, {recursive: true, force: true});
+    }
+  }
+});
+
+test('builder requires explicit profile or explicit programmatic contract', async () => {
+  await assert.rejects(
+    buildRecipePreviewSidecar({
+      source: '/unused',
+      datasetManifest: '/unused',
+      output: '/unused',
+      logger: quietLogger,
+    }),
+    /explicit recipe-preview quality profile is required/i,
+  );
+});
+
+test('dynamic pack profiles reject missing previews and semantic fallback diagnostics', async () => {
+  const missingRoot = await mkdtemp(join(tmpdir(), 'recipe-preview-sidecar-profile-missing-test-'));
+  try {
+    const contract = completeProfileFixtureContract(
+      MULTIBLOCK_MADNESS_112_PROFILE,
+      '1.12.2',
+    );
+    const fixture = await createFixture(missingRoot, contract, {failures: []});
+    await assert.rejects(
+      buildRecipePreviewSidecar({
+        source: fixture.rawRoot,
+        datasetManifest: fixture.hostedManifestPath,
+        output: join(missingRoot, 'sidecar'),
+        profile: MULTIBLOCK_MADNESS_112_PROFILE,
+        logger: quietLogger,
+      }),
+      /web\.recipeImages must match the audited preview contract/,
+    );
+  } finally {
+    await rm(missingRoot, {recursive: true, force: true});
+  }
+
+  const semanticRoot = await mkdtemp(
+    join(tmpdir(), 'recipe-preview-sidecar-profile-semantic-test-'),
+  );
+  try {
+    const failure =
+      'recipe input ingredient rei.machine #0: ZERO_UNCLASSIFIED no exact semantic adapter exists';
+    const contract = completeProfileFixtureContract(
+      MULTIBLOCK_MADNESS_2_118_PROFILE,
+      '1.18.2',
+      1,
+    );
+    const fixture = await createFixture(semanticRoot, contract, {
+      missingRecipeIndex: null,
+      failures: [failure],
+    });
+    await assert.rejects(
+      buildRecipePreviewSidecar({
+        source: fixture.rawRoot,
+        datasetManifest: fixture.hostedManifestPath,
+        output: join(semanticRoot, 'sidecar'),
+        profile: MULTIBLOCK_MADNESS_2_118_PROFILE,
+        logger: quietLogger,
+      }),
+      /ingredient-semantics|unclassified zero-quantity/,
+    );
+  } finally {
+    await rm(semanticRoot, {recursive: true, force: true});
   }
 });
 

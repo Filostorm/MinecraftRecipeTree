@@ -39,6 +39,8 @@ export interface ItemTreeNode {
   alternatives?: string[];
   /** Canonical tag id reconstructed from an unambiguous variant family. */
   tag?: string;
+  /** Required by the parent source but retained after the recipe runs. */
+  nonConsumed?: boolean;
   /** Keys of item ancestors, for cycle detection */
   ancestors: string[];
   /** This item already appears up the chain */

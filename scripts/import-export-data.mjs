@@ -11,11 +11,18 @@ import {
 } from 'node:fs/promises';
 import {basename, dirname, join, relative, resolve, sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {assertPlainDirectoryTree, readJsonDocument} from './export-data-utils.mjs';
 import {
+  assertPlainDirectoryTree,
+  isRecord,
+  readJsonDocument,
+} from './export-data-utils.mjs';
+import {
+  EXPORT_QUALITY_PROFILE_IDS,
   exportQualityIssues,
-  MEATBALLCRAFT_112_PROFILE,
+  qualityProfileRequirementsFor,
+  resolveQualityProfile,
 } from './export-quality-policy.mjs';
+import {readArrayDocument} from './sharded-documents.mjs';
 
 const scriptRoot = dirname(fileURLToPath(import.meta.url));
 const defaultDestination = join(process.cwd(), 'public', 'exports');
@@ -23,6 +30,7 @@ const defaultDestination = join(process.cwd(), 'public', 'exports');
 function usage() {
   return (
     'Usage: node scripts/import-export-data.mjs --source <raw-export-directory> ' +
+    `--profile <${EXPORT_QUALITY_PROFILE_IDS.join('|')}> ` +
     '[--destination <directory>] [--dry-run] [--omit-recipe-images]'
   );
 }
@@ -30,6 +38,7 @@ function usage() {
 function parseArguments(args) {
   let source = null;
   let destination = defaultDestination;
+  let profile = null;
   let dryRun = false;
   let omitRecipeImages = false;
   let showHelp = false;
@@ -43,6 +52,10 @@ function parseArguments(args) {
     } else if (argument === '--destination') {
       destination = args[++index];
       if (!destination) throw new Error('--destination requires a directory path.');
+    } else if (argument === '--profile') {
+      const value = args[++index];
+      if (!value) throw new Error('--profile requires a profile name.');
+      profile = resolveQualityProfile(value);
     } else if (argument === '--dry-run') {
       dryRun = true;
     } else if (argument === '--omit-recipe-images') {
@@ -52,9 +65,13 @@ function parseArguments(args) {
     }
   }
   if (!showHelp && !source) throw new Error(`A raw export source is required.\n${usage()}`);
+  if (!showHelp && !profile) {
+    throw new Error(`An explicit export quality profile is required.\n${usage()}`);
+  }
   return {
     source: source ? resolve(source) : null,
     destination: resolve(destination),
+    profile,
     dryRun,
     omitRecipeImages,
     showHelp,
@@ -118,19 +135,119 @@ export function importWorkspaceRootForDestination(destination) {
   return join(dirname(destinationParent), '.import-work');
 }
 
-async function assertQualityMetadata(exportRoot, label) {
-  const manifest = await readJsonDocument(join(exportRoot, 'manifest.json'), `${label}/manifest.json`);
-  const failures = await readJsonDocument(join(exportRoot, 'failures.json'), `${label}/failures.json`);
+async function assertQualityMetadata(exportRoot, label, profile) {
+  const manifest = await readJsonDocument(
+    join(exportRoot, 'manifest.json'),
+    `${label}/manifest.json`,
+  );
+  const failures = await readJsonDocument(
+    join(exportRoot, 'failures.json'),
+    `${label}/failures.json`,
+  );
   const issues = exportQualityIssues(
     {manifest, failures, semanticErrorRecipes: 0},
-    MEATBALLCRAFT_112_PROFILE,
+    profile,
   );
   if (issues.length > 0) {
+    const requirements = qualityProfileRequirementsFor(profile);
     throw new Error(
-      `${label} failed the MeatballCraft metadata quality gate with ${issues.length} issue(s):\n` +
+      `${label} failed the ${requirements.label} metadata quality gate with ` +
+        `${issues.length} issue(s):\n` +
         issues.map(issue => `- ${issue}`).join('\n'),
     );
   }
+}
+
+async function assertPackedRecipePreviewCompleteness(exportRoot, profile) {
+  const requirements = qualityProfileRequirementsFor(profile);
+  const manifest = await readJsonDocument(
+    join(exportRoot, 'manifest.json'),
+    'Packed export/manifest.json',
+  );
+  const expectedRecipes = manifest?.counts?.recipes;
+  if (!Number.isSafeInteger(expectedRecipes) || expectedRecipes < 0) {
+    throw new Error(
+      `${requirements.label} packed manifest has an invalid counts.recipes value.`,
+    );
+  }
+
+  const recipeImages = manifest?.web?.recipeImages;
+  if (recipeImages?.mode === 'omitted') {
+    const previews = recipeImages.inventory?.previews;
+    const missing = recipeImages.inventory?.missing;
+    if (
+      previews !== expectedRecipes ||
+      missing !== 0 ||
+      recipeImages.references !== expectedRecipes ||
+      recipeImages.files !== expectedRecipes
+    ) {
+      throw new Error(
+        `${requirements.label} requires one recipe preview per recipe; packed omission ` +
+          `accounting reports recipes/previews/missing/references/files=${expectedRecipes}/` +
+          `${String(previews)}/${String(missing)}/${String(recipeImages.references)}/` +
+          `${String(recipeImages.files)}.`,
+      );
+    }
+    console.log(
+      `[import-data] ${requirements.label} zero-missing preview gate accepted ` +
+        `${previews} omission-inventoried recipe preview(s).`,
+    );
+    return;
+  }
+  if (recipeImages?.mode !== 'included') {
+    throw new Error(
+      `${requirements.label} packed manifest must declare web.recipeImages.mode as ` +
+        '"included" or "omitted".',
+    );
+  }
+
+  const categoriesDocument = await readJsonDocument(
+    join(exportRoot, 'categories.json'),
+    'Packed export/categories.json',
+  );
+  if (!isRecord(categoriesDocument) || !Array.isArray(categoriesDocument.categories)) {
+    throw new Error(
+      `${requirements.label} packed categories.json must contain a categories array.`,
+    );
+  }
+  let recipes = 0;
+  let missing = 0;
+  let firstMissing = null;
+  for (const [categoryIndex, category] of categoriesDocument.categories.entries()) {
+    if (!isRecord(category) || typeof category.dir !== 'string') {
+      throw new Error(`${requirements.label} packed category ${categoryIndex} is malformed.`);
+    }
+    const recipesPath = join(exportRoot, ...category.dir.split('/'), 'recipes.json');
+    const recipesDocument = await readJsonDocument(
+      recipesPath,
+      `Packed export/${category.dir}/recipes.json`,
+    );
+    const categoryRecipes = (
+      await readArrayDocument(
+        exportRoot,
+        recipesDocument,
+        `Packed export/${category.dir}/recipes.json`,
+      )
+    ).value;
+    recipes += categoryRecipes.length;
+    for (const [recipeIndex, recipe] of categoryRecipes.entries()) {
+      if (!isRecord(recipe) || recipe.img === undefined) {
+        missing += 1;
+        firstMissing ??= `${category.id ?? categoryIndex} recipe ${recipeIndex}`;
+      }
+    }
+  }
+  if (recipes !== expectedRecipes || missing !== 0) {
+    throw new Error(
+      `${requirements.label} requires one recipe preview per recipe; packed included-image ` +
+        `scan reports recipes/expected/missing=${recipes}/${expectedRecipes}/${missing}` +
+        `${firstMissing ? `; first missing: ${firstMissing}` : ''}.`,
+    );
+  }
+  console.log(
+    `[import-data] ${requirements.label} zero-missing preview gate accepted ` +
+      `${recipes} included recipe preview(s).`,
+  );
 }
 
 async function runStage(label, scriptName, args) {
@@ -302,12 +419,20 @@ async function removeImportWorkRootIfEmpty(workRoot) {
 
 export async function importExportData({
   source,
+  profile,
   destination = defaultDestination,
   dryRun = false,
   omitRecipeImages = false,
 }) {
   if (typeof source !== 'string' || !source) {
     throw new Error('A raw export source directory is required.');
+  }
+  const resolvedProfile = resolveQualityProfile(profile);
+  if (resolvedProfile === null) {
+    throw new Error(
+      `An explicit export quality profile is required. Supported profiles: ` +
+        EXPORT_QUALITY_PROFILE_IDS.join(', '),
+    );
   }
   const resolvedSource = resolve(source);
   const resolvedDestination = resolve(destination);
@@ -354,7 +479,7 @@ export async function importExportData({
 
   // Fail fast before a potentially large copy. The staged copy is checked
   // again by the exhaustive validator, so source mutation cannot bypass gates.
-  await assertQualityMetadata(sourceReal, 'Raw source export');
+  await assertQualityMetadata(sourceReal, 'Raw source export', resolvedProfile);
 
   const workRoot = importWorkspaceRootForDestination(resolvedDestination);
   const workKind = await pathKindNoFollow(workRoot);
@@ -431,7 +556,7 @@ export async function importExportData({
       );
       throw error;
     }
-    await assertQualityMetadata(stagingReal, 'Staged raw export');
+    await assertQualityMetadata(stagingReal, 'Staged raw export', resolvedProfile);
 
     const optimizationArgs = ['--root', stagingReal];
     if (omitRecipeImages) optimizationArgs.push('--omit-recipe-images');
@@ -442,13 +567,14 @@ export async function importExportData({
       'optimize-export-assets.mjs',
       optimizationArgs,
     );
-    const packingArgs = ['--root', stagingReal, '--profile', MEATBALLCRAFT_112_PROFILE];
+    const packingArgs = ['--root', stagingReal, '--profile', resolvedProfile];
     if (omitRecipeImages) packingArgs.push('--omit-recipe-images');
     await runStage(
       'exhaustive raw validation, asset packing, and exact publication validation',
       'pack-export-assets.mjs',
       packingArgs,
     );
+    await assertPackedRecipePreviewCompleteness(stagingReal, resolvedProfile);
     await existingRealDirectory(stagingRoot, 'Final validated staging root');
 
     if (dryRun) {

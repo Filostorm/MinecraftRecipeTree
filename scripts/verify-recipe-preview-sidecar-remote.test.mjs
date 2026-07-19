@@ -142,6 +142,8 @@ async function createSidecarFixture(
 async function startBucketServer(fixture, options = {}) {
   const requests = [];
   const prefix = `/bucket/${fixture.manifest.assetSetId}/`;
+  const expectedSearch =
+    `?dataset=${fixture.manifest.datasetPublicationId}&preview=${fixture.manifest.assetSetId}`;
   const objects = new Map([
     [`${prefix}manifest.json`, fixture.manifestBytes],
     [`${prefix}assets/pack-000.bin`, fixture.packBytes],
@@ -150,7 +152,17 @@ async function startBucketServer(fixture, options = {}) {
   ]);
   const server = createServer((request, response) => {
     const url = new URL(request.url, 'http://fixture.test');
-    requests.push({method: request.method, path: url.pathname, range: request.headers.range});
+    requests.push({
+      method: request.method,
+      path: url.pathname,
+      search: url.search,
+      range: request.headers.range,
+    });
+    if (url.search !== expectedSearch) {
+      response.writeHead(400, {'content-length': '0'});
+      response.end();
+      return;
+    }
     const isManifest = url.pathname === `${prefix}manifest.json`;
     if (isManifest && options.manifestPresent === false) {
       response.writeHead(404, {'content-length': '0'});
@@ -217,6 +229,7 @@ async function startBucketServer(fixture, options = {}) {
   const address = server.address();
   return {
     baseUrl: `http://127.0.0.1:${address.port}/bucket`,
+    expectedSearch,
     requests,
     close: () => new Promise((resolveClose, rejectClose) => {
       server.close(error => (error ? rejectClose(error) : resolveClose()));
@@ -261,6 +274,11 @@ test('precommit verifies immutable objects and exact non-whole ranges while mani
         fullyHashedPacks: 1,
         rangeSamples: 3,
       });
+      assert.ok(bucket.requests.length > 0);
+      assert.ok(
+        bucket.requests.every(request => request.search === bucket.expectedSearch),
+        'every public preview request must carry the exact dataset/preview identity query',
+      );
       assert.ok(
         bucket.requests.some(request =>
           request.method === 'HEAD' && request.path.endsWith('/manifest.json'),

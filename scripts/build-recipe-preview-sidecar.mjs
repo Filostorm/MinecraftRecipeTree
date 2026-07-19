@@ -13,6 +13,13 @@ import {basename, dirname, join, posix, resolve, sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {isDeepStrictEqual} from 'node:util';
 import sharp from 'sharp';
+import {
+  EXPORT_QUALITY_PROFILE_IDS,
+  exportQualityIssues,
+  MEATBALLCRAFT_112_PROFILE,
+  qualityProfileRequirementsFor,
+  resolveQualityProfile,
+} from './export-quality-policy.mjs';
 import {parsePackedImagePath} from './packed-assets.mjs';
 import {computePublicationId} from './publication-id.mjs';
 import {
@@ -40,6 +47,21 @@ const PACK_INDEX_MAGIC = Buffer.from('MRPI', 'ascii');
 const PACK_INDEX_VERSION = 1;
 const PACK_INDEX_HEADER_BYTES = 20;
 const PACK_INDEX_ENTRY_BYTES = 8;
+const DATASET_COUNT_KEYS = Object.freeze([
+  'items',
+  'recipes',
+  'categories',
+  'mobs',
+  'blockDrops',
+  'failures',
+]);
+const HOSTED_WEB_CONTRACT = Object.freeze({
+  format: 2,
+  packedImages: 'coordinate-v1',
+  maxPackBytes: 1024 * 1024,
+  shardedJson: 'mrt-sharded-json-v1',
+  maxShardBytes: 8 * 1024 * 1024,
+});
 
 export const MEATBALLCRAFT_CONTRACT = Object.freeze({
   format: 1,
@@ -67,13 +89,7 @@ export const MEATBALLCRAFT_CONTRACT = Object.freeze({
   }),
   diagnostics: Object.freeze({failureEvents: 130, failureEventsOmitted: 0}),
   recipeImages: Object.freeze({previews: 359215, missing: 0}),
-  hostedWeb: Object.freeze({
-    format: 2,
-    packedImages: 'coordinate-v1',
-    maxPackBytes: 1024 * 1024,
-    shardedJson: 'mrt-sharded-json-v1',
-    maxShardBytes: 8 * 1024 * 1024,
-  }),
+  hostedWeb: HOSTED_WEB_CONTRACT,
   repairProvenance: Object.freeze({
     format: 'mrt-recipe-preview-repair-overlay-v1',
     method: 'canonical-deep-equality-sample-overlay',
@@ -91,6 +107,87 @@ export const MEATBALLCRAFT_CONTRACT = Object.freeze({
 
 function isRecord(value) {
   return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function profileQualityFailureMessage(profile, label, issues) {
+  const requirements = qualityProfileRequirementsFor(profile);
+  return (
+    `${label} failed the ${requirements.label} quality gate with ${issues.length} issue(s):\n` +
+    issues.map(issue => `- ${issue}`).join('\n')
+  );
+}
+
+function assertProfileQuality(input, profile, label) {
+  if (profile === null) return;
+  const issues = exportQualityIssues(input, profile);
+  if (issues.length > 0) throw new Error(profileQualityFailureMessage(profile, label, issues));
+}
+
+/**
+ * Resolve the sidecar's audited corpus contract. MeatballCraft remains pinned
+ * to its immutable known-good counts and repair provenance. New pack profiles
+ * derive counts from the validated raw manifest, but require every declared
+ * recipe to have a preview and retain exact hosted/raw identity checks.
+ */
+export function recipePreviewContractForProfile(profile, rawManifest) {
+  const resolvedProfile = resolveQualityProfile(profile);
+  if (resolvedProfile === null) {
+    throw new Error(
+      `An explicit recipe-preview quality profile is required. Supported profiles: ` +
+        EXPORT_QUALITY_PROFILE_IDS.join(', '),
+    );
+  }
+  if (resolvedProfile === MEATBALLCRAFT_112_PROFILE) return MEATBALLCRAFT_CONTRACT;
+
+  const requirements = qualityProfileRequirementsFor(resolvedProfile);
+  assertProfileQuality(
+    {manifest: rawManifest, failures: [], semanticErrorRecipes: 0},
+    resolvedProfile,
+    'Raw export manifest',
+  );
+  if (!isRecord(rawManifest?.settings)) {
+    throw new Error(`${requirements.label} manifest.settings must be an object.`);
+  }
+  if (!hasExactKeys(rawManifest?.counts, DATASET_COUNT_KEYS)) {
+    throw new Error(
+      `${requirements.label} manifest.counts must contain exactly ` +
+        `${DATASET_COUNT_KEYS.join(', ')}.`,
+    );
+  }
+  if (!hasExactKeys(rawManifest?.diagnostics, ['failureEvents', 'failureEventsOmitted'])) {
+    throw new Error(
+      `${requirements.label} manifest.diagnostics must contain exactly ` +
+        'failureEvents and failureEventsOmitted.',
+    );
+  }
+  if (rawManifest.diagnostics.failureEvents !== rawManifest.counts.failures) {
+    throw new Error(
+      `${requirements.label} manifest diagnostics/counts disagree: ` +
+        `failureEvents=${String(rawManifest.diagnostics.failureEvents)}, ` +
+        `counts.failures=${String(rawManifest.counts.failures)}.`,
+    );
+  }
+
+  return Object.freeze({
+    format: requirements.format,
+    minecraft: requirements.minecraft,
+    settings: Object.freeze({
+      ...rawManifest.settings,
+      ...(isRecord(rawManifest.settings.worldStartupOptimization)
+        ? {
+            worldStartupOptimization: Object.freeze({
+              ...rawManifest.settings.worldStartupOptimization,
+            }),
+          }
+        : {}),
+    }),
+    counts: Object.freeze(
+      Object.fromEntries(DATASET_COUNT_KEYS.map(name => [name, rawManifest.counts[name]])),
+    ),
+    diagnostics: Object.freeze({...rawManifest.diagnostics}),
+    recipeImages: Object.freeze({previews: rawManifest.counts.recipes, missing: 0}),
+    hostedWeb: HOSTED_WEB_CONTRACT,
+  });
 }
 
 function sha256(bytes) {
@@ -220,13 +317,13 @@ function validateContract(contract) {
   }
   if (
     !isRecord(contract.settings) ||
-    !isRecord(contract.counts) ||
+    !hasExactKeys(contract.counts, DATASET_COUNT_KEYS) ||
     !hasExactKeys(contract.diagnostics, ['failureEvents', 'failureEventsOmitted']) ||
     !hasExactKeys(contract.recipeImages, ['previews', 'missing'])
   ) {
     throw new Error(
       'Expected dataset contract must contain settings/counts plus exact diagnostics and ' +
-        'recipeImages fields.',
+        `recipeImages fields; counts must contain exactly ${DATASET_COUNT_KEYS.join(', ')}.`,
     );
   }
   const worldStartupOptimization = contract.settings.worldStartupOptimization;
@@ -1428,13 +1525,24 @@ export async function buildRecipePreviewSidecar({
   source,
   datasetManifest,
   output,
-  contract = MEATBALLCRAFT_CONTRACT,
+  profile,
+  contract,
   maxPackBytes = MAX_PACK_BYTES,
   maxCategoryBytes = MAX_CATEGORY_BYTES,
   concurrency = Math.max(1, Math.min(8, availableParallelism())),
   logger = console,
 }) {
-  validateContract(contract);
+  const resolvedProfile = profile === undefined ? null : resolveQualityProfile(profile);
+  if (resolvedProfile === null && contract === undefined) {
+    throw new Error(
+      `An explicit recipe-preview quality profile is required. Supported profiles: ` +
+        EXPORT_QUALITY_PROFILE_IDS.join(', '),
+    );
+  }
+  if (resolvedProfile !== null && contract !== undefined) {
+    throw new Error('profile and an explicit contract are mutually exclusive.');
+  }
+  if (contract !== undefined) validateContract(contract);
   validateBuildOptions({maxPackBytes, maxCategoryBytes, concurrency});
   if (typeof source !== 'string' || source.length === 0) {
     throw new Error('source must be a non-empty raw export directory path.');
@@ -1492,24 +1600,59 @@ export async function buildRecipePreviewSidecar({
   await mkdir(dirname(outputRoot), {recursive: true});
   await mkdir(stagingRoot, {recursive: false});
 
-  logger.info(`Building recipe preview sidecar from ${rawRoot}.`);
+  logger.info(
+    `Building recipe preview sidecar from ${rawRoot} with ` +
+      `${resolvedProfile ?? 'an explicit programmatic contract'}.`,
+  );
   logger.info(`Writing transaction staging directory ${stagingRoot}.`);
 
   try {
-    const [rawManifest, hostedPublication, categoriesDocument] = await Promise.all([
+    const [rawManifest, hostedPublication, categoriesDocument, failures] = await Promise.all([
       readJsonFile(join(rawRoot, 'manifest.json'), 'Raw export manifest'),
       readHostedPublication(datasetManifest),
       readJsonFile(join(rawRoot, 'categories.json'), 'Raw export categories'),
+      resolvedProfile === null
+        ? Promise.resolve(null)
+        : readJsonFile(join(rawRoot, 'failures.json'), 'Raw export failures'),
     ]);
+    const datasetContract =
+      contract ?? recipePreviewContractForProfile(resolvedProfile, rawManifest);
+    validateContract(datasetContract);
+    if (resolvedProfile !== null) {
+      if (!Array.isArray(failures)) {
+        throw new Error('Raw export failures.json must contain an array.');
+      }
+      const malformedFailureIndex = failures.findIndex(
+        failure => typeof failure !== 'string' || failure.length === 0,
+      );
+      if (malformedFailureIndex >= 0) {
+        throw new Error(
+          `Raw export failures.json[${malformedFailureIndex}] must be a non-empty string.`,
+        );
+      }
+      if (failures.length !== rawManifest?.counts?.failures) {
+        throw new Error(
+          `Raw export failures.json contains ${failures.length} entries, but ` +
+            `manifest.counts.failures is ${String(rawManifest?.counts?.failures)}.`,
+        );
+      }
+      assertProfileQuality(
+        {manifest: rawManifest, failures, semanticErrorRecipes: 0},
+        resolvedProfile,
+        'Raw export metadata',
+      );
+    }
     const hostedManifest = hostedPublication.manifest;
-    validateDatasetManifest(rawManifest, contract, 'Raw export manifest');
-    validateDatasetManifest(hostedManifest, contract, 'Hosted dataset manifest', {hosted: true});
+    validateDatasetManifest(rawManifest, datasetContract, 'Raw export manifest');
+    validateDatasetManifest(hostedManifest, datasetContract, 'Hosted dataset manifest', {
+      hosted: true,
+    });
     assertRawAndHostedIdentity(rawManifest, hostedManifest);
     await verifyHostedPublicationId(hostedPublication, logger);
     const categories = validateCategories(
       categoriesDocument,
-      contract.counts.categories,
-      contract.counts.recipes,
+      datasetContract.counts.categories,
+      datasetContract.counts.recipes,
     );
     const hostedCategoriesDocument = (
       await hostedPublication.readDocument('categories.json', 'Hosted categories.json')
@@ -1517,11 +1660,11 @@ export async function buildRecipePreviewSidecar({
     assertRawAndHostedCategoryIdentity(categories, hostedCategoriesDocument);
     logger.info(
       `Validated dataset publication ${hostedManifest.publicationId} manifest and exact ` +
-        `category identity for ${contract.counts.categories} categories.`,
+        `category identity for ${datasetContract.counts.categories} categories.`,
     );
 
     const packWriter = new PackWriter(stagingRoot, maxPackBytes);
-    const visualCatalog = new VisualCatalog(packWriter, contract.counts.recipes);
+    const visualCatalog = new VisualCatalog(packWriter, datasetContract.counts.recipes);
     const rawRecipeImageInventory = createRecipeImageInventory();
     const categoryDocuments = [];
     let categoryPartCount = 0;
@@ -1529,6 +1672,7 @@ export async function buildRecipePreviewSidecar({
     let previewReferences = 0;
     let sourcePngBytes = 0;
     let encodedWebpBytes = 0;
+    let semanticErrorRecipes = 0;
 
     for (const [categoryIndex, category] of categories.entries()) {
       const categoryRoot = resolveInside(rawRoot, category.dir, `Category ${category.id}.dir`);
@@ -1554,6 +1698,10 @@ export async function buildRecipePreviewSidecar({
         hostedPublication,
         category,
       );
+      semanticErrorRecipes += recipes.reduce(
+        (count, recipe) => count + (isRecord(recipe) && recipe.err === true ? 1 : 0),
+        0,
+      );
       rawRecipeImageInventory.beginCategory({
         categoryIndex,
         categoryId: category.id,
@@ -1570,7 +1718,7 @@ export async function buildRecipePreviewSidecar({
             category,
             recipeIndex,
             rawRoot,
-            contract.settings.recipeScale,
+            datasetContract.settings.recipeScale,
           );
           if (sourceImage === null) {
             jobs.push(Promise.resolve(null));
@@ -1627,13 +1775,22 @@ export async function buildRecipePreviewSidecar({
       if ((categoryIndex + 1) % 25 === 0 || categoryIndex + 1 === categories.length) {
         logger.info(
           `Processed ${categoryIndex + 1}/${categories.length} categories and ` +
-            `${recipeCount}/${contract.counts.recipes} recipes.`,
+            `${recipeCount}/${datasetContract.counts.recipes} recipes.`,
         );
       }
     }
 
-    if (recipeCount !== contract.counts.recipes) {
-      throw new Error(`Processed ${recipeCount} recipes; expected ${contract.counts.recipes}.`);
+    if (recipeCount !== datasetContract.counts.recipes) {
+      throw new Error(
+        `Processed ${recipeCount} recipes; expected ${datasetContract.counts.recipes}.`,
+      );
+    }
+    if (resolvedProfile !== null) {
+      assertProfileQuality(
+        {manifest: rawManifest, failures, semanticErrorRecipes},
+        resolvedProfile,
+        'Raw export corpus',
+      );
     }
     const omittedRecipeImages = hostedManifest.web.recipeImages;
     const computedRecipeImageInventory = rawRecipeImageInventory.finish();
@@ -1686,12 +1843,13 @@ export async function buildRecipePreviewSidecar({
     );
     const missingPreviews = recipeCount - previewReferences;
     if (
-      previewReferences !== contract.recipeImages.previews ||
-      missingPreviews !== contract.recipeImages.missing
+      previewReferences !== datasetContract.recipeImages.previews ||
+      missingPreviews !== datasetContract.recipeImages.missing
     ) {
       throw new Error(
         'Processed recipe previews do not match the audited contract: ' +
-          `expected previews/missing=${contract.recipeImages.previews}/${contract.recipeImages.missing}, ` +
+          `expected previews/missing=${datasetContract.recipeImages.previews}/` +
+          `${datasetContract.recipeImages.missing}, ` +
           `received ${previewReferences}/${missingPreviews}.`,
       );
     }
@@ -1705,8 +1863,8 @@ export async function buildRecipePreviewSidecar({
       imageFormat: IMAGE_FORMAT,
       categoryFormat: RECIPE_PREVIEW_CATEGORY_FORMAT,
       settings: {
-        itemIconPixels: 16 * contract.settings.iconScale,
-        recipeScale: contract.settings.recipeScale,
+        itemIconPixels: 16 * datasetContract.settings.iconScale,
+        recipeScale: datasetContract.settings.recipeScale,
         webpEffort: WEBP_EFFORT,
         maxCategoryBytes,
       },
@@ -1773,6 +1931,7 @@ function parseCliArgs(argv) {
     ['--source', 'source'],
     ['--dataset-manifest', 'datasetManifest'],
     ['--output', 'output'],
+    ['--profile', 'profile'],
     ['--concurrency', 'concurrency'],
   ]);
   for (let index = 0; index < argv.length; index += 1) {
@@ -1787,15 +1946,17 @@ function parseCliArgs(argv) {
     options[name] = name === 'concurrency' ? Number(value) : value;
     index += 1;
   }
-  for (const required of ['source', 'datasetManifest', 'output']) {
+  for (const required of ['source', 'datasetManifest', 'output', 'profile']) {
     if (options[required] === undefined) {
       throw new Error(
         'Usage: node scripts/build-recipe-preview-sidecar.mjs --source <raw-export> ' +
           '--dataset-manifest <local-hosted-manifest-path> --output <new-directory> ' +
+          `--profile <${EXPORT_QUALITY_PROFILE_IDS.join('|')}> ` +
           '[--concurrency <1-64>]',
       );
     }
   }
+  options.profile = resolveQualityProfile(options.profile);
   return options;
 }
 

@@ -1,5 +1,4 @@
 import React, {createContext, useContext, useEffect, useRef, useState} from 'react';
-import {Platform} from 'react-native';
 import {
   BlockDropEntry,
   BlockDropsFile,
@@ -14,6 +13,7 @@ import {
   ShardedJsonDescriptor,
   ShardedJsonPart,
 } from '../types';
+import type {DatasetDescriptor} from './datasetCatalog';
 import {
   datasetIdentityFromManifest,
   isDatasetPublicationId,
@@ -25,7 +25,6 @@ import {
   type ItemIconLoadFailure,
 } from './itemIconDiagnostics';
 import {
-  PREVIEW_VIRTUAL_BASE,
   PREVIEW_MAX_CATEGORY_BYTES,
   RecipePreviewCategoryDocument,
   RecipePreviewEntry,
@@ -45,7 +44,6 @@ import {
   isSecondaryRecipeCategory,
 } from './recipeCategories';
 
-const DEFAULT_NATIVE_URL = 'http://localhost:8787';
 const SHARDED_JSON_FORMAT = 'mrt-sharded-json-v1';
 const MAX_SHARD_BYTES = 8 * 1024 * 1024;
 const MAX_RECIPE_PART_CACHE_BYTES = 32 * 1024 * 1024;
@@ -199,28 +197,6 @@ function supplementCustomDeathDrops(exportedMobs: Mob[]): Mob[] {
     });
     return {...mob, drops: [...(mob.drops ?? []), ...missing]};
   });
-}
-
-/**
- * Where the jei-exports data lives.
- * - web: requested through a virtual Worker-gated path; physical files remain in public/exports
- * - native: a local HTTP server (npx serve --cors -l 8787 jei-exports),
- *   overridable with EXPO_PUBLIC_DATA_URL.
- */
-export function resolveBase(): string {
-  const env = process.env.EXPO_PUBLIC_DATA_URL;
-  if (env) return env.replace(/\/+$/, '');
-  if (Platform.OS === 'web') return '/dataset/exports';
-  return DEFAULT_NATIVE_URL;
-}
-
-function resolvePreviewBase(): string {
-  const env = process.env.EXPO_PUBLIC_PREVIEW_DATA_URL;
-  if (env) return env.replace(/\/+$/, '');
-  if (Platform.OS === 'web') return PREVIEW_VIRTUAL_BASE;
-  throw new Error(
-    'This publication requires external JEI layout previews; set EXPO_PUBLIC_PREVIEW_DATA_URL for native clients.',
-  );
 }
 
 class ExportHttpError extends Error {
@@ -667,6 +643,7 @@ export interface ModInfo {
 }
 
 export interface Data {
+  descriptor: DatasetDescriptor;
   base: string;
   datasetIdentity: string;
   manifest: Manifest;
@@ -722,7 +699,8 @@ function exportLoadErrorState(
       kind: 'stale',
       base,
       message:
-        'A newer export publication is now deployed. Reload to use one coherent recipe dataset.',
+        'The selected immutable publication was rejected by the dataset service. Reload the ' +
+        'catalog before requesting this pack again.',
     };
   }
   return {
@@ -735,7 +713,17 @@ function exportLoadErrorState(
 
 const DataContext = createContext<LoadState>({status: 'loading', step: 'init'});
 
-export function DataProvider({children}: {children: React.ReactNode}) {
+export function DataProvider({
+  children,
+  descriptor,
+  base,
+  previewBase: configuredPreviewBase,
+}: {
+  children: React.ReactNode;
+  descriptor: DatasetDescriptor;
+  base: string;
+  previewBase: string;
+}) {
   const [state, setState] = useState<LoadState>({status: 'loading', step: 'manifest.json'});
   const recipeDocumentCache = useRef(new Map<number, Promise<RecipeDocument>>());
   const recipePartCache = useRef(new RecipePartCache());
@@ -756,35 +744,46 @@ export function DataProvider({children}: {children: React.ReactNode}) {
 
   useEffect(() => {
     let alive = true;
-    const base = resolveBase();
     recipeDocumentCache.current.clear();
     recipePartCache.current.clear();
     previewCategoryCache.current.clear();
     previewPartCache.current.clear();
     missingPreviewDiagnostics.current.clear();
+    absentItemIconSummaryDataset.current = null;
     (async () => {
       try {
         setState({status: 'loading', step: 'manifest.json'});
+        if (!isDatasetPublicationId(descriptor.publicationId)) {
+          throw new Error(
+            `Dataset ${JSON.stringify(descriptor.slug)} has an invalid publication identity.`,
+          );
+        }
+        if (!isDatasetPublicationId(descriptor.previewAssetSetId)) {
+          throw new Error(
+            `Dataset ${JSON.stringify(descriptor.slug)} has an invalid preview asset-set identity.`,
+          );
+        }
+        const datasetIdentity = descriptor.publicationId;
         const manifestUrl = `${base}/manifest.json`;
-        // Manifest discovery cannot use an identity that has not been read yet. no-store keeps
-        // this bootstrap read out of the browser cache; the versioned re-read below is authoritative.
-        const discoveredManifest = requireDocument<Manifest>(
-          await fetchJson<unknown>(manifestUrl, {cache: 'no-store'}),
-          manifestUrl,
-          isManifestDocument,
-          'a manifest object with a SHA-256 publicationId and required export metadata',
-        );
-        const datasetIdentity = datasetIdentityFromManifest(discoveredManifest);
         const versionedManifestUrl = versionExportUrl(manifestUrl, datasetIdentity);
         const manifest = requireDocument<Manifest>(
-          await fetchJson<unknown>(versionedManifestUrl),
+          await fetchJson<unknown>(versionedManifestUrl, {cache: 'no-store'}),
           versionedManifestUrl,
           isManifestDocument,
           'a manifest object with a SHA-256 publicationId and required export metadata',
         );
         if (datasetIdentityFromManifest(manifest) !== datasetIdentity) {
           throw new Error(
-            `Export dataset changed while loading ${manifestUrl}; reload to obtain one coherent snapshot.`,
+            `Dataset ${JSON.stringify(descriptor.slug)} returned publication ` +
+              `${JSON.stringify(manifest.publicationId)} from ${manifestUrl}; expected ` +
+              `${JSON.stringify(datasetIdentity)}.`,
+          );
+        }
+        if (manifest.minecraft !== descriptor.minecraftVersion) {
+          throw new Error(
+            `Dataset ${JSON.stringify(descriptor.slug)} returned Minecraft version ` +
+              `${JSON.stringify(manifest.minecraft)}; catalog declares ` +
+              `${JSON.stringify(descriptor.minecraftVersion)}.`,
           );
         }
         if (manifest.aborted) {
@@ -815,9 +814,13 @@ export function DataProvider({children}: {children: React.ReactNode}) {
           manifest.web?.recipeImages?.mode === 'omitted'
             ? manifest.web.recipeImages.references
             : null;
-        const previewBase = externalPreviewsRequired ? resolvePreviewBase() : null;
+        const previewBase = externalPreviewsRequired ? configuredPreviewBase : null;
         const previewManifestUrl = previewBase
-          ? versionPreviewUrl(`${previewBase}/manifest.json`, datasetIdentity)
+          ? versionPreviewUrl(
+              `${previewBase}/manifest.json`,
+              datasetIdentity,
+              descriptor.previewAssetSetId,
+            )
           : null;
         const [itemsRoot, categoriesValue, indexRoot, mobsDoc, blockDropsDoc, previewManifest] =
           await Promise.all([
@@ -839,9 +842,17 @@ export function DataProvider({children}: {children: React.ReactNode}) {
               {blocks: {}},
             ),
             previewManifestUrl
-              ? fetchBoundedJson(previewManifestUrl).then(({value}) =>
-                  requireRecipePreviewManifest(value, datasetIdentity),
-                )
+              ? fetchBoundedJson(previewManifestUrl).then(({value}) => {
+                  const previewManifest = requireRecipePreviewManifest(value, datasetIdentity);
+                  if (previewManifest.assetSetId !== descriptor.previewAssetSetId) {
+                    throw new Error(
+                      `Dataset ${JSON.stringify(descriptor.slug)} returned preview asset set ` +
+                        `${JSON.stringify(previewManifest.assetSetId)}; expected ` +
+                        `${JSON.stringify(descriptor.previewAssetSetId)}.`,
+                    );
+                  }
+                  return previewManifest;
+                })
               : Promise.resolve<RecipePreviewManifest | null>(null),
           ]);
         const itemsDescriptor = parseShardedDescriptor(itemsRoot.value, 'array', itemsUrl);
@@ -1314,6 +1325,7 @@ export function DataProvider({children}: {children: React.ReactNode}) {
         };
 
         const data: Data = {
+          descriptor,
           base,
           datasetIdentity,
           manifest,
@@ -1377,7 +1389,7 @@ export function DataProvider({children}: {children: React.ReactNode}) {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [base, configuredPreviewBase, descriptor, descriptor.previewAssetSetId, descriptor.publicationId]);
 
   return <DataContext.Provider value={state}>{children}</DataContext.Provider>;
 }

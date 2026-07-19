@@ -13,7 +13,7 @@ import {formatDropStat} from '../components/DropList';
 import {ItemIcon, pixelated} from '../components/ItemIcon';
 import {MobSprite} from '../components/MobSprite';
 import {PickerModal, PickerOption} from '../components/PickerModal';
-import {slotSummary} from '../components/RecipeCard';
+import {prerequisiteSummary, slotSummary} from '../components/RecipeCard';
 import {RecipePreviewImage} from '../components/RecipePreviewImage';
 import {recipeImagePath, useData} from '../data/DataContext';
 import {
@@ -125,6 +125,7 @@ interface TreeTotal {
 
 interface TreeTotals {
   inputs: TreeTotal[];
+  prerequisites: TreeTotal[];
   byproducts: TreeTotal[];
 }
 
@@ -134,6 +135,7 @@ interface TreeCalculation extends TreeTotals {
 
 function calculateTreeTotals(root: ItemTreeNode): TreeCalculation {
   const inputs = new Map<string, TreeTotal>();
+  const prerequisites = new Map<string, TreeTotal>();
   const byproducts = new Map<string, TreeTotal>();
   const requiredByNode = new Map<string, number | null>();
 
@@ -143,6 +145,7 @@ function calculateTreeTotals(root: ItemTreeNode): TreeCalculation {
     amount: number | null,
     variants = 1,
     tag?: string,
+    aggregate: 'sum' | 'max' = 'sum',
   ) => {
     const logicalKey = tag ? `#${tag}` : key;
     const current = target.get(logicalKey) ?? {
@@ -152,7 +155,11 @@ function calculateTreeTotals(root: ItemTreeNode): TreeCalculation {
       tag,
     };
     if (current.amount != null) {
-      current.amount = amount == null ? null : current.amount + amount;
+      current.amount = amount == null
+        ? null
+        : aggregate === 'max'
+          ? Math.max(current.amount, amount)
+          : current.amount + amount;
     }
     current.variants = Math.max(current.variants, variants);
     target.set(logicalKey, current);
@@ -160,9 +167,21 @@ function calculateTreeTotals(root: ItemTreeNode): TreeCalculation {
 
   const visit = (node: ItemTreeNode, required: number | null) => {
     requiredByNode.set(node.id, required);
+    if (node.nonConsumed) {
+      add(
+        prerequisites,
+        node.key,
+        required,
+        node.variantCount ?? 1,
+        node.tag,
+        'max',
+      );
+    }
     const source = node.source;
     if (!source || source.kind !== 'recipe' || !source.recipe || node.cyclic) {
-      add(inputs, node.key, required, node.variantCount ?? 1, node.tag);
+      if (!node.nonConsumed) {
+        add(inputs, node.key, required, node.variantCount ?? 1, node.tag);
+      }
       return;
     }
 
@@ -189,7 +208,14 @@ function calculateTreeTotals(root: ItemTreeNode): TreeCalculation {
         ? Math.ceil(required / outputYield)
         : required / outputYield;
     for (const child of source.inputs) {
-      visit(child, child.amount == null || runs == null ? null : child.amount * runs);
+      visit(
+        child,
+        child.amount == null || runs == null
+          ? null
+          : child.nonConsumed
+            ? child.amount
+            : child.amount * runs,
+      );
     }
     for (const slot of source.recipe.out ?? []) {
       if (slot === matchingSlot || slot.length === 0) continue;
@@ -200,7 +226,12 @@ function calculateTreeTotals(root: ItemTreeNode): TreeCalculation {
   };
 
   visit(root, root.amount === undefined ? 1 : root.amount);
-  return {inputs: [...inputs.values()], byproducts: [...byproducts.values()], requiredByNode};
+  return {
+    inputs: [...inputs.values()],
+    prerequisites: [...prerequisites.values()],
+    byproducts: [...byproducts.values()],
+    requiredByNode,
+  };
 }
 
 function requiredAmountFor(node: ItemTreeNode, calculation: TreeCalculation): number | null {
@@ -320,7 +351,11 @@ export function GraphScreen() {
           return;
         }
         const sourceId = `${node.id}.s`;
-        const inputs = slotSummary(recipe.in).map((spec, i) => {
+        const inputSpecs = [
+          ...slotSummary(recipe.in).map(spec => ({...spec, nonConsumed: false})),
+          ...prerequisiteSummary(recipe.cat).map(spec => ({...spec, nonConsumed: true})),
+        ];
+        const inputs = inputSpecs.map((spec, i) => {
           const child: ItemTreeNode = {
             id: `${sourceId}.${i}`,
             key: spec.key,
@@ -328,6 +363,7 @@ export function GraphScreen() {
             variantCount: spec.variants,
             alternatives: spec.alternatives,
             tag: spec.tag,
+            nonConsumed: spec.nonConsumed,
             ancestors: [...node.ancestors, node.key],
             cyclic: node.ancestors.includes(spec.key) || spec.key === node.key,
           };
@@ -537,11 +573,19 @@ export function GraphScreen() {
   const graphRef = useRef(graph);
   graphRef.current = graph;
   const treeTotals = useMemo(() => {
-    if (!root) return {inputs: [], byproducts: [], requiredByNode: new Map()} as TreeCalculation;
+    if (!root) {
+      return {
+        inputs: [],
+        prerequisites: [],
+        byproducts: [],
+        requiredByNode: new Map(),
+      } as TreeCalculation;
+    }
     const totals = calculateTreeTotals(root);
     const byName = (a: TreeTotal, b: TreeTotal) =>
       (data.itemsByKey.get(a.key)?.n ?? a.key).localeCompare(data.itemsByKey.get(b.key)?.n ?? b.key);
     totals.inputs.sort(byName);
+    totals.prerequisites.sort(byName);
     totals.byproducts.sort(byName);
     return totals;
   }, [root, version, data.itemsByKey]);
@@ -610,16 +654,32 @@ export function GraphScreen() {
           zoomAt(e.clientX - rect.left, e.clientY - rect.top, e.deltaY < 0 ? 1.12 : 1 / 1.12);
         };
         const preventNativeDrag = (e: Event) => e.preventDefault();
+        const preventPagePinch = (event: Event) => {
+          const touchEvent = event as TouchEvent;
+          if (!touchEvent.touches || touchEvent.touches.length >= 2) {
+            event.preventDefault();
+          }
+        };
 
         // Safari can begin text selection before PanResponder crosses its movement
         // threshold. Capture selection and image-drag events at the canvas boundary.
         el.style.setProperty('user-select', 'none');
         el.style.setProperty('-webkit-user-select', 'none');
+        el.style.setProperty('touch-action', 'none');
+        el.style.setProperty('overscroll-behavior', 'contain');
         el.addEventListener('wheel', onWheel, {passive: false});
+        el.addEventListener('touchstart', preventPagePinch, {passive: false});
+        el.addEventListener('touchmove', preventPagePinch, {passive: false});
+        el.addEventListener('gesturestart', preventNativeDrag, {passive: false});
+        el.addEventListener('gesturechange', preventNativeDrag, {passive: false});
         el.addEventListener('selectstart', preventNativeDrag, true);
         el.addEventListener('dragstart', preventNativeDrag, true);
         canvasCleanup.current = () => {
           el.removeEventListener('wheel', onWheel);
+          el.removeEventListener('touchstart', preventPagePinch);
+          el.removeEventListener('touchmove', preventPagePinch);
+          el.removeEventListener('gesturestart', preventNativeDrag);
+          el.removeEventListener('gesturechange', preventNativeDrag);
           el.removeEventListener('selectstart', preventNativeDrag, true);
           el.removeEventListener('dragstart', preventNativeDrag, true);
         };
@@ -644,7 +704,11 @@ export function GraphScreen() {
   const responder = useMemo(
     () =>
       PanResponder.create({
+        onStartShouldSetPanResponder: event => event.nativeEvent.touches?.length === 2,
+        onStartShouldSetPanResponderCapture: event => event.nativeEvent.touches?.length === 2,
         onMoveShouldSetPanResponder: (_e, g) =>
+          Math.abs(g.dx) + Math.abs(g.dy) > 6 || g.numberActiveTouches === 2,
+        onMoveShouldSetPanResponderCapture: (_e, g) =>
           Math.abs(g.dx) + Math.abs(g.dy) > 6 || g.numberActiveTouches === 2,
         onPanResponderGrant: () => {
           clearWebSelection();
@@ -668,6 +732,7 @@ export function GraphScreen() {
           pinchDist.current = 0;
           setTransform(t => ({...t, x: panStart.current.x + g.dx, y: panStart.current.y + g.dy}));
         },
+        onPanResponderTerminationRequest: () => false,
       }),
     [clearWebSelection, zoomAt],
   );
@@ -824,6 +889,11 @@ function TreeTotalsPanel({
       <ScrollView style={styles.totalsScroll} contentContainerStyle={styles.totalsContent}>
         <TreeTotalsSection title="Inputs" totals={totals.inputs} onOpenItem={onOpenItem} />
         <TreeTotalsSection
+          title="Required · not consumed"
+          totals={totals.prerequisites}
+          onOpenItem={onOpenItem}
+        />
+        <TreeTotalsSection
           title="Byproducts"
           totals={totals.byproducts}
           onOpenItem={onOpenItem}
@@ -895,13 +965,14 @@ function CompactItemNodeView({
   return (
     <Pressable
       accessibilityRole={selectable ? 'button' : undefined}
-      accessibilityLabel={`${name}, quantity ${amount}${selectable ? ', choose source' : ''}`}
+      accessibilityLabel={`${name}, quantity ${amount}${node.nonConsumed ? ', not consumed' : ''}${selectable ? ', choose source' : ''}`}
       disabled={!selectable || node.loading}
       onPress={onTap}
       style={[
         styles.compactItemNode,
         {left: x, top: y},
         isRoot && styles.nodeRoot,
+        node.nonConsumed && styles.nodePrerequisite,
         node.cyclic && styles.nodeCyclic,
         node.loading && styles.nodeLoading,
       ]}>
@@ -943,6 +1014,7 @@ function ItemNodeView({
         styles.itemNode,
         {left: x, top: y, width: ITEM_W, height: ITEM_H},
         isRoot && styles.nodeRoot,
+        node.nonConsumed && styles.nodePrerequisite,
         node.cyclic && styles.nodeCyclic,
       ]}>
       <ItemIcon item={item} itemKey={node.key} size={32} />
@@ -956,6 +1028,7 @@ function ItemNodeView({
             ? `  ${formatIngredientQuantity(node.key, requiredAmount)}`
             : ''}
           {node.cyclic ? '  ↻' : ''}
+          {node.nonConsumed ? '  retained' : ''}
         </Text>
       </View>
       <TouchableOpacity onPress={onInfo} style={styles.infoBtn} hitSlop={6}>
@@ -1011,6 +1084,7 @@ function SourceNodeView({
         styles.sourceNode,
         {left: x, top: y, width: w, height: h},
         isRoot && styles.nodeRoot,
+        item.nonConsumed && styles.nodePrerequisite,
         item.cyclic && styles.nodeCyclic,
       ]}>
       <Pressable onPress={onCollapse} style={styles.sourceHeader}>
@@ -1140,6 +1214,7 @@ const styles = StyleSheet.create({
   compactCountText: {color: theme.text, fontSize: 9, fontWeight: '700'},
   nodeLoading: {opacity: 0.55},
   nodeRoot: {borderColor: theme.accent, borderWidth: 2},
+  nodePrerequisite: {borderColor: theme.warn, borderStyle: 'dashed'},
   nodeCyclic: {borderColor: theme.warn},
   itemNodeName: {color: theme.text, fontSize: 11, lineHeight: 14},
   itemNodeSub: {color: theme.textDim, fontSize: 10, marginTop: 2},

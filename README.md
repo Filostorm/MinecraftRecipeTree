@@ -5,9 +5,10 @@ Expo (React Native Web) app for browsing a `jei-exports` dataset produced by
 views, a mob gallery, and a pan/zoom crafting flowchart built from the exported recipe images.
 
 The web publication is content-addressed. Item/block source textures retain Minecraft's native
-16×16 pixel-art grid, while the production 1.12 exporter rasterizes the real item renderer into
-48×48 canvases for a 1:1 match with the dominant 48 CSS-pixel UI slot. Composite JEI layouts are
-rasterized at 2× physical resolution but retain logical layout dimensions in recipe metadata.
+16×16 pixel-art grid. Multiblock Madness and Multiblock Madness 2 preserve those renderer
+outputs as 16×16 canvases; the already-audited MeatballCraft corpus remains pinned to its
+historical 48×48 canvases. Composite HEI/REI layouts are rasterized at 2× physical resolution
+but retain logical layout dimensions in recipe metadata.
 They live in a separate immutable sidecar so the 359k-preview MeatballCraft corpus does not
 inflate the Sites deployment archive or create one storage object per recipe.
 
@@ -19,15 +20,31 @@ npm run sample-data        # optional: fake demo dataset, no Minecraft needed
 npm run web                # http://localhost:8081
 ```
 
-The production dataset in `public/exports/` is a validated, packed publication rather than a
-raw exporter directory. Use the transactional importer for a new core publication; do not copy
-raw files directly over the live dataset:
+Each production dataset begins as a validated local packed publication outside `public/`.
+Vite's public-directory copier is disabled deliberately: complete exports are uploaded to R2
+and never embedded in the application deployment. Use the transactional importer; do not copy
+raw exporter files into the viewer:
 
 ```bash
 npm run import-data -- \
   --source /path/to/raw/jei-exports \
+  --destination /path/to/packed/multiblock-madness \
+  --profile multiblock-madness-1.12.2 \
   --omit-recipe-images
 ```
+
+`--profile` is mandatory and has no implicit default. Supported production profiles are:
+
+| Profile | Minecraft | Item canvas | Recipe layout | Corpus contract |
+|---|---:|---:|---:|---|
+| `meatballcraft-1.12.2` | 1.12.2 | 48×48 (`iconScale=3`) | 2× | immutable audited counts/provenance |
+| `multiblock-madness-1.12.2` | 1.12.2 | 16×16 (`iconScale=1`) | 2× | dynamically counted, zero missing previews |
+| `multiblock-madness-2-1.18.2` | 1.18.2 | 16×16 (`iconScale=1`) | 2× | dynamically counted, zero missing previews |
+
+Dynamic counting means the pack's item, recipe, and category totals are accepted from that
+specific completed export rather than hard-coded in source. It does not weaken completeness:
+manifest/document counts, failure diagnostics, semantic direction, raw/hosted identity, and
+one preview per recipe still fail closed.
 
 In omission mode, the importer losslessly converts and packs retained item, category, and mob
 assets, but deliberately leaves declared recipe PNGs in their original encoding until the raw
@@ -85,18 +102,20 @@ and publishes by one sibling rename only after the final missing-image count rea
 `manifest.json` records deterministic source, sample, normalized-tree, raw-PNG, and decoded-RGBA
 SHA-256 provenance for later auditing.
 
-## External JEI preview sidecar
+## External recipe-preview sidecar
 
 Build the sidecar from the raw exporter output and the exact local hosted publication:
 
 ```bash
 npm run build:recipe-previews -- \
   --source /path/to/raw/jei-exports \
-  --dataset-manifest public/exports/manifest.json \
-  --output /new/path/recipe-preview-sidecar
+  --dataset-manifest /path/to/packed/multiblock-madness/manifest.json \
+  --output /new/path/recipe-preview-sidecar \
+  --profile multiblock-madness-1.12.2
 ```
 
-The builder verifies the hosted publication hash twice, proves raw/hosted recipe identity,
+The profile is mandatory here too. The builder verifies the hosted publication hash twice,
+proves raw/hosted recipe identity,
 binds ordered decoded RGBA pixels to the publication, deduplicates equal visuals, and emits
 approximately 1 MiB payload packs plus exact-range authorization indexes. It fails rather than
 falling back when provenance, image decoding, or output isolation cannot be proven.
@@ -106,10 +125,9 @@ CLI never receives R2 credentials: it sends an authorization token only to the a
 which validates the staged manifest and writes through its native `PREVIEW_ASSETS` binding.
 Set the hosted `PREVIEW_UPLOAD_ENABLED=true` feature gate, the new sidecar's
 `PREVIEW_UPLOAD_ASSET_SET_ID`, and a fresh `PREVIEW_UPLOAD_TOKEN` before deploying an operator
-upload session. Keep the serving `PREVIEW_ASSET_SET_ID` pinned to the current committed
-sidecar while the new immutable object set is staged and committed, then switch it only in the
-final publication deployment. The ingestion route fails explicitly when the upload identity is
-missing or malformed; it never falls back to the serving identity.
+upload session. These variables authorize only the temporary ingestion route; public delivery
+is selected later by the D1 dataset-channel descriptor. The ingestion route fails explicitly
+when the upload identity is missing or malformed and never infers another asset-set identity.
 Prefer the `PREVIEW_UPLOAD_TOKEN` environment variable; a `--token-file` must be a plain file
 with mode `0600`. Never use an `EXPO_PUBLIC_*` variable for this secret.
 
@@ -133,6 +151,73 @@ publication. Rerunning is idempotent. After a successful seed, delete the hosted
 feature gate disables the retained route with an explicit HTTP 503 before touching R2.
 Re-enable all three only for an authorized operator upload. Future end-user publishing
 must use authenticated upload sessions and per-user quotas rather than sharing this operator token.
+
+## Publish an immutable dataset and activate its channel
+
+Build and upload the core publication after the packed export passes validation. The detailed
+R2 object, MRPI authorization-index, and manifest-last protocol is documented in
+[`docs/core-dataset-r2-publication.md`](docs/core-dataset-r2-publication.md).
+
+```bash
+npm run build:core-publication -- \
+  --root /path/to/packed/multiblock-madness \
+  --output /new/path/multiblock-madness-core
+
+npm run upload:core-publication -- \
+  --root /path/to/packed/multiblock-madness \
+  --publication /new/path/multiblock-madness-core/publication.json \
+  --ingest-base-url https://<app-origin>/api/admin/core-datasets \
+  --token-file /private/path/dataset-operator-token
+
+npm run verify:core-publication-remote -- \
+  --root /path/to/packed/multiblock-madness \
+  --publication /new/path/multiblock-madness-core/publication.json \
+  --base-url https://<app-origin>/dataset/publications
+```
+
+The public verifier re-derives the complete local control bundle, checks every public JSON
+object through `HEAD`, compares `manifest.json` byte-for-byte, and downloads the first, middle,
+and last MRPI-authorized image in every pack. This bounds client-side verification bandwidth
+while forcing the Worker to validate every pack's full authorization index.
+
+Once both immutable uploads are committed, activate a D1 channel pointer. The CLI accepts only
+canonical identifiers and exact response shapes, then independently reads `/api/datasets` and
+requires the requested descriptor to be visible. Stale or transient catalog reads are retried
+exactly three times with bounded 200/500/1000 ms backoff; the authenticated mutation itself is
+never repeated. If all four reads remain inconclusive after an exact mutation receipt, the CLI
+exits with status `2` and explicitly reports `mutation committed; verification inconclusive`.
+This is distinct from status `1`, where no committed mutation receipt was accepted. The token
+file must be a plain mode-`0600` file; `CORE_DATASET_UPLOAD_TOKEN` is accepted when
+`--token-file` is omitted.
+
+```bash
+npm run activate:dataset-channel -- \
+  --slug multiblock-madness \
+  --display-name "Multiblock Madness" \
+  --minecraft-version 1.12.2 \
+  --pack-version 3.2.3 \
+  --publication-id <core-publication-sha256> \
+  --preview-asset-set-id <preview-asset-set-sha256> \
+  --default false \
+  --admin-base-url https://<app-origin>/api/admin/dataset-channels \
+  --token-file /private/path/dataset-operator-token
+```
+
+Rollback removes only a non-default channel pointer; it deliberately retains all immutable R2
+objects for later reactivation. Deactivation requires the exact current core-publication and
+preview-set identities and applies them in the D1 `DELETE` predicate. A stale operator command
+therefore cannot remove a channel that another publication has repointed. The Worker refuses
+deletion of the default channel, so promote a replacement first when rolling back the current
+default.
+
+```bash
+npm run deactivate:dataset-channel -- \
+  --slug multiblock-madness \
+  --publication-id <currently-selected-core-publication-sha256> \
+  --preview-asset-set-id <currently-selected-preview-asset-set-sha256> \
+  --admin-base-url https://<app-origin>/api/admin/dataset-channels \
+  --token-file /private/path/dataset-operator-token
+```
 
 ## Run (iOS/Android via Expo)
 
@@ -160,9 +245,13 @@ EXPO_PUBLIC_DATA_URL=http://<your-lan-ip>:8787 npx expo start
 | `src/graph/GraphScreen.tsx` | pan/zoom canvas, expansion, multi-recipe picker |
 | `scripts/build-recipe-preview-sidecar.mjs` | provenance-bound, deduplicated preview pack builder |
 | `scripts/repair-missing-recipe-previews.mjs` | deterministic APFS repair overlay for the 27 audited legacy-layout previews |
+| `scripts/build-core-dataset-publication.mjs` | immutable R2 control bundle and exact-range index builder |
+| `scripts/upload-core-dataset-publication.mjs` | resumable authenticated core-publication uploader |
+| `scripts/verify-core-dataset-publication-remote.mjs` | bounded public core/object and MRPI delivery verifier |
 | `scripts/upload-recipe-preview-sidecar.mjs` | resumable authenticated manifest-last R2 seed client |
 | `scripts/verify-recipe-preview-sidecar-remote.mjs` | exhaustive local and two-phase remote verifier |
-| `worker/index.ts` | publication gate, exact-range authorization, and edge caching |
+| `scripts/dataset-channel-admin.mjs` | strict activation/deactivation client with public-catalog verification |
+| `worker/index.ts` | immutable delivery, channel registry, exact-range authorization, and edge caching |
 | `scripts/make-sample-data.mjs` | zero-dependency fake dataset generator (hand-rolled PNG encoder) |
 
 Graph interactions: tap a node to expand/collapse how the item is obtained — recipes,

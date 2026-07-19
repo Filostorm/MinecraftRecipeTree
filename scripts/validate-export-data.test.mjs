@@ -33,6 +33,72 @@ test('strict manifest metadata accepts the complete exporter contract', async ()
   });
 });
 
+test('recipe slots accept one shared 1.12 OreDictionary identity on every alternative', async () => {
+  await withFixture(async root => {
+    const manifestPath = join(root, 'manifest.json');
+    const manifest = await readJson(manifestPath);
+    manifest.counts.recipes = 1;
+    await writeJson(manifestPath, manifest);
+
+    const categoriesPath = join(root, 'categories.json');
+    const categories = await readJson(categoriesPath);
+    categories.categories[0].count = 1;
+    await writeJson(categoriesPath, categories);
+
+    await writeJson(join(root, 'recipes', 'minecraft_crafting', 'recipes.json'), [
+      {
+        in: [
+          [
+            ['minecraft:stone', 1, 'ore:stone'],
+            ['minecraft:stone', 1, 'ore:stone'],
+          ],
+        ],
+        out: [[['minecraft:stone', 1]]],
+      },
+    ]);
+    await writeJson(join(root, 'index.json'), {
+      'minecraft:stone': {p: [[0, 0]], u: [[0, 0]]},
+    });
+
+    const summary = await validateExportData(root, {assetMode: 'raw'});
+    assert.equal(summary.recipes, 1);
+  });
+});
+
+test('recipe slots reject partial logical identities instead of silently merging variants', async () => {
+  await withFixture(async root => {
+    const manifestPath = join(root, 'manifest.json');
+    const manifest = await readJson(manifestPath);
+    manifest.counts.recipes = 1;
+    await writeJson(manifestPath, manifest);
+
+    const categoriesPath = join(root, 'categories.json');
+    const categories = await readJson(categoriesPath);
+    categories.categories[0].count = 1;
+    await writeJson(categoriesPath, categories);
+
+    await writeJson(join(root, 'recipes', 'minecraft_crafting', 'recipes.json'), [
+      {
+        in: [
+          [
+            ['minecraft:stone', 1, 'ore:stone'],
+            ['minecraft:stone', 1],
+          ],
+        ],
+        out: [[['minecraft:stone', 1]]],
+      },
+    ]);
+    await writeJson(join(root, 'index.json'), {
+      'minecraft:stone': {p: [[0, 0]], u: [[0, 0]]},
+    });
+
+    await assert.rejects(
+      validateExportData(root, {assetMode: 'raw'}),
+      /must use one logical ingredient id for every variant/,
+    );
+  });
+});
+
 test('raw image validation accepts uniform visible assets and rejects fully transparent assets', async () => {
   await withFixture(async root => {
     const iconPath = join(root, 'icons', 'stone.png');
