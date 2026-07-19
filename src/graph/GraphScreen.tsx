@@ -13,12 +13,11 @@ import {formatDropStat} from '../components/DropList';
 import {ItemIcon, pixelated} from '../components/ItemIcon';
 import {MobSprite} from '../components/MobSprite';
 import {PickerModal, PickerOption} from '../components/PickerModal';
-import {prerequisiteSummary, slotSummary} from '../components/RecipeCard';
+import {prerequisiteSummary, slotSummary} from '../data/slotSummary';
 import {RecipePreviewImage} from '../components/RecipePreviewImage';
 import {recipeImagePath, useData} from '../data/DataContext';
 import {
   formatIngredientQuantity,
-  normalizeIngredientAmount,
   shouldShowIngredientQuantity,
 } from '../data/ingredientQuantities';
 import {displayIngredientName} from '../data/ingredientTags';
@@ -43,6 +42,19 @@ import {
 } from './preferredSources';
 import {automaticGraphFitScale} from './fitScale';
 import {ItemTreeNode, SourceTreeNode, makeRoot} from './model';
+import {
+  buildTreeTotalsCsv,
+  dataUrlToBlob,
+  downloadBlob,
+  safeExportFilename,
+} from './treeExports';
+import {
+  TreeCalculation,
+  TreeTotal,
+  TreeTotals,
+  calculateTreeTotals,
+  requiredAmountFor,
+} from './treeTotals';
 
 interface Transform {
   x: number;
@@ -82,8 +94,12 @@ function choiceMatchesPreference(choice: SourceChoice, preferred: PreferredSourc
 /** Dragging the canvas must never start a text selection (web). */
 const noSelect = Platform.OS === 'web' ? ({userSelect: 'none'} as unknown as object) : null;
 const COMPACT_MODE_KEY = 'graphCompactMode';
+const USE_BYPRODUCTS_KEY = 'graphUseByproducts';
 const MAX_RECIPE_PICKER_CHOICES = 40;
-const warnedMissingTreeYields = new Set<string>();
+const GRAPH_EXPORT_PADDING = 48;
+const GRAPH_EXPORT_PIXEL_RATIO = 3;
+const GRAPH_EXPORT_MAX_DIMENSION = 16_384;
+const GRAPH_EXPORT_MAX_PIXELS = 64_000_000;
 
 function recipeRefKey([categoryIndex, recipeIndex]: RecipeRef): string {
   return `${categoryIndex}:${recipeIndex}`;
@@ -116,136 +132,20 @@ function choicesForPicker(
   return [...mobChoices, ...blockChoices, ...visibleRecipes];
 }
 
-interface TreeTotal {
-  key: string;
-  amount: number | null;
-  variants: number;
-  tag?: string;
-}
-
-interface TreeTotals {
-  inputs: TreeTotal[];
-  prerequisites: TreeTotal[];
-  byproducts: TreeTotal[];
-}
-
-interface TreeCalculation extends TreeTotals {
-  requiredByNode: Map<string, number | null>;
-}
-
-function calculateTreeTotals(root: ItemTreeNode): TreeCalculation {
-  const inputs = new Map<string, TreeTotal>();
-  const prerequisites = new Map<string, TreeTotal>();
-  const byproducts = new Map<string, TreeTotal>();
-  const requiredByNode = new Map<string, number | null>();
-
-  const add = (
-    target: Map<string, TreeTotal>,
-    key: string,
-    amount: number | null,
-    variants = 1,
-    tag?: string,
-    aggregate: 'sum' | 'max' = 'sum',
-  ) => {
-    const logicalKey = tag ? `#${tag}` : key;
-    const current = target.get(logicalKey) ?? {
-      key,
-      amount: amount == null ? null : 0,
-      variants: 1,
-      tag,
-    };
-    if (current.amount != null) {
-      current.amount = amount == null
-        ? null
-        : aggregate === 'max'
-          ? Math.max(current.amount, amount)
-          : current.amount + amount;
-    }
-    current.variants = Math.max(current.variants, variants);
-    target.set(logicalKey, current);
-  };
-
-  const visit = (node: ItemTreeNode, required: number | null) => {
-    requiredByNode.set(node.id, required);
-    if (node.nonConsumed) {
-      add(
-        prerequisites,
-        node.key,
-        required,
-        node.variantCount ?? 1,
-        node.tag,
-        'max',
-      );
-    }
-    const source = node.source;
-    if (!source || source.kind !== 'recipe' || !source.recipe || node.cyclic) {
-      if (!node.nonConsumed) {
-        add(inputs, node.key, required, node.variantCount ?? 1, node.tag);
-      }
-      return;
-    }
-
-    const matchingSlot = source.recipe.out?.find(slot => slot.some(([key]) => key === node.key));
-    const matchingEntry = matchingSlot?.find(([key]) => key === node.key);
-    let outputYield: number | null;
-    if (!matchingEntry) {
-      const warningKey = `${source.ref?.[0] ?? 'unknown'}:${source.ref?.[1] ?? 'unknown'}:${node.key}`;
-      if (!warnedMissingTreeYields.has(warningKey)) {
-        warnedMissingTreeYields.add(warningKey);
-        console.warn('Tree totals could not identify the selected item output; assuming a yield of one.', {
-          recipe: source.ref,
-          itemKey: node.key,
-        });
-      }
-      outputYield = 1;
-    } else {
-      outputYield = normalizeIngredientAmount(node.key, matchingEntry[1]);
-    }
-
-    const runs = required == null || outputYield == null
-      ? null
-      : node.key.startsWith('item|')
-        ? Math.ceil(required / outputYield)
-        : required / outputYield;
-    for (const child of source.inputs) {
-      visit(
-        child,
-        child.amount == null || runs == null
-          ? null
-          : child.nonConsumed
-            ? child.amount
-            : child.amount * runs,
-      );
-    }
-    for (const slot of source.recipe.out ?? []) {
-      if (slot === matchingSlot || slot.length === 0) continue;
-      const [key, rawAmount] = slot[0];
-      const amount = normalizeIngredientAmount(key, rawAmount);
-      add(byproducts, key, amount == null || runs == null ? null : amount * runs, slot.length);
-    }
-  };
-
-  visit(root, root.amount === undefined ? 1 : root.amount);
-  return {
-    inputs: [...inputs.values()],
-    prerequisites: [...prerequisites.values()],
-    byproducts: [...byproducts.values()],
-    requiredByNode,
-  };
-}
-
-function requiredAmountFor(node: ItemTreeNode, calculation: TreeCalculation): number | null {
-  if (calculation.requiredByNode.has(node.id)) {
-    return calculation.requiredByNode.get(node.id) ?? null;
-  }
-  return node.amount === undefined ? 1 : node.amount;
-}
-
 function loadCompactMode(): boolean {
   try {
     return globalThis.localStorage?.getItem(COMPACT_MODE_KEY) === '1';
   } catch (error) {
     console.error('Compact graph mode could not be loaded from localStorage.', error);
+    return false;
+  }
+}
+
+function loadUseByproducts(): boolean {
+  try {
+    return globalThis.localStorage?.getItem(USE_BYPRODUCTS_KEY) === '1';
+  } catch (error) {
+    console.error('Byproduct-credit preference could not be loaded from localStorage.', error);
     return false;
   }
 }
@@ -262,6 +162,9 @@ export function GraphScreen() {
   const [picker, setPicker] = useState<PickerState | null>(null);
   const [compactMode, setCompactMode] = useState(loadCompactMode);
   const [showTreeTotals, setShowTreeTotals] = useState(true);
+  const [useByproducts, setUseByproducts] = useState(loadUseByproducts);
+  const [exportingTree, setExportingTree] = useState(false);
+  const [exportMessage, setExportMessage] = useState<string | null>(null);
   const [preferredSources, setPreferredSources] =
     useState<PreferredSources>(loadPreferredSources);
   const preferredSourcesRef = useRef(preferredSources);
@@ -273,6 +176,7 @@ export function GraphScreen() {
   const viewportRef = useRef({w: 0, h: 0});
   const needsFitRef = useRef(false);
   const wrapRef = useRef<View>(null);
+  const anchorRef = useRef<View>(null);
 
   const recipesFor = useCallback(
     (key: string): RecipeRef[] => {
@@ -577,18 +481,144 @@ export function GraphScreen() {
       return {
         inputs: [],
         prerequisites: [],
+        byproductCredits: [],
         byproducts: [],
         requiredByNode: new Map(),
       } as TreeCalculation;
     }
-    const totals = calculateTreeTotals(root);
+    const totals = calculateTreeTotals(root, useByproducts);
     const byName = (a: TreeTotal, b: TreeTotal) =>
       (data.itemsByKey.get(a.key)?.n ?? a.key).localeCompare(data.itemsByKey.get(b.key)?.n ?? b.key);
     totals.inputs.sort(byName);
     totals.prerequisites.sort(byName);
+    totals.byproductCredits.sort(byName);
     totals.byproducts.sort(byName);
     return totals;
-  }, [root, version, data.itemsByKey]);
+  }, [root, version, data.itemsByKey, useByproducts]);
+
+  const rootExportName = useMemo(
+    () => {
+      const rootKey = root?.key ?? 'recipe-tree';
+      return safeExportFilename(data.itemsByKey.get(rootKey)?.n ?? rootKey);
+    },
+    [data.itemsByKey, root?.key],
+  );
+
+  const exportTotals = useCallback(() => {
+    try {
+      const csv = buildTreeTotalsCsv(treeTotals, (key, tag) =>
+        displayIngredientName(data.itemsByKey.get(key)?.n ?? key, tag),
+      );
+      downloadBlob(
+        `${rootExportName}-resources.csv`,
+        new Blob([csv], {type: 'text/csv;charset=utf-8'}),
+      );
+      setExportMessage('Resource list exported.');
+    } catch (error) {
+      console.error('Tree resource-list export failed.', error);
+      setExportMessage(error instanceof Error ? error.message : 'Resource-list export failed.');
+    }
+  }, [data.itemsByKey, rootExportName, treeTotals]);
+
+  const exportTreeImage = useCallback(async () => {
+    if (Platform.OS !== 'web') {
+      const message = 'High-quality tree export is currently available in the web viewer.';
+      console.error(message);
+      setExportMessage(message);
+      return;
+    }
+    const source = anchorRef.current as unknown as HTMLElement | null;
+    const currentGraph = graphRef.current;
+    if (!source || !currentGraph) {
+      const message = 'The tree export surface is not ready.';
+      console.error(message);
+      setExportMessage(message);
+      return;
+    }
+
+    setExportingTree(true);
+    setExportMessage('Rendering high-quality PNG…');
+    let staging: HTMLDivElement | null = null;
+    try {
+      const width = Math.ceil(currentGraph.maxX - currentGraph.minX + GRAPH_EXPORT_PADDING * 2);
+      const height = Math.ceil(currentGraph.maxY - currentGraph.minY + GRAPH_EXPORT_PADDING * 2);
+      const pixelRatio = Math.min(
+        GRAPH_EXPORT_PIXEL_RATIO,
+        GRAPH_EXPORT_MAX_DIMENSION / width,
+        GRAPH_EXPORT_MAX_DIMENSION / height,
+        Math.sqrt(GRAPH_EXPORT_MAX_PIXELS / (width * height)),
+      );
+      if (!Number.isFinite(pixelRatio) || pixelRatio < 1) {
+        throw new Error(
+          'This tree exceeds the browser image limit. Collapse branches or enable Compact mode before exporting.',
+        );
+      }
+      if (pixelRatio < GRAPH_EXPORT_PIXEL_RATIO) {
+        console.warn('Tree PNG resolution was capped to stay within browser canvas limits.', {
+          requestedPixelRatio: GRAPH_EXPORT_PIXEL_RATIO,
+          appliedPixelRatio: pixelRatio,
+          width,
+          height,
+        });
+      }
+
+      staging = document.createElement('div');
+      Object.assign(staging.style, {
+        position: 'fixed',
+        left: '-100000px',
+        top: '0',
+        width: `${width}px`,
+        height: `${height}px`,
+        overflow: 'hidden',
+        backgroundColor: theme.bg,
+      });
+      const clone = source.cloneNode(true) as HTMLElement;
+      Object.assign(clone.style, {
+        position: 'absolute',
+        left: `${GRAPH_EXPORT_PADDING - currentGraph.minX}px`,
+        top: `${GRAPH_EXPORT_PADDING - currentGraph.minY}px`,
+        width: '0px',
+        height: '0px',
+        transform: 'none',
+      });
+      staging.appendChild(clone);
+      document.body.appendChild(staging);
+
+      await document.fonts?.ready;
+      const images = [...clone.querySelectorAll('img')];
+      await Promise.all(
+        images.map(async image => {
+          if (image.complete && image.naturalWidth > 0) return;
+          try {
+            await image.decode();
+          } catch (error) {
+            console.error('A tree image asset failed to decode during PNG export.', {
+              source: image.currentSrc || image.src,
+              error,
+            });
+            throw error;
+          }
+        }),
+      );
+
+      const {toPng} = await import('html-to-image');
+      const dataUrl = await toPng(staging, {
+        width,
+        height,
+        pixelRatio,
+        backgroundColor: theme.bg,
+        cacheBust: true,
+      });
+      downloadBlob(`${rootExportName}-tree.png`, await dataUrlToBlob(dataUrl));
+      setExportMessage(`Tree exported at ${pixelRatio.toFixed(1)}× resolution.`);
+    } catch (error) {
+      console.error('High-quality tree PNG export failed.', error);
+      setExportMessage(error instanceof Error ? error.message : 'Tree PNG export failed.');
+    } finally {
+      staging?.remove();
+      setExportingTree(false);
+    }
+  }, [rootExportName]);
 
   /** @returns false when the viewport isn't measurable yet (hidden tab) */
   const fitView = useCallback(() => {
@@ -635,6 +665,19 @@ export function GraphScreen() {
       }
       return next;
     });
+  }, []);
+
+  const updateUseByproducts = useCallback((value: boolean) => {
+    setUseByproducts(value);
+    try {
+      const storage = globalThis.localStorage;
+      if (storage) storage.setItem(USE_BYPRODUCTS_KEY, value ? '1' : '0');
+      else if (Platform.OS === 'web') {
+        console.warn('Byproduct-credit preference is using memory only because localStorage is unavailable.');
+      }
+    } catch (error) {
+      console.error('Byproduct-credit preference could not be saved to localStorage.', error);
+    }
   }, []);
 
   // Native web listeners handle browser behaviors that React Native Web's
@@ -770,6 +813,7 @@ export function GraphScreen() {
         {...responder.panHandlers}>
         {/* 0x0 anchor so translate/scale apply around the top-left origin */}
         <View
+          ref={anchorRef}
           style={[
             styles.anchor,
             {
@@ -840,7 +884,16 @@ export function GraphScreen() {
         <CtrlBtn label="fit" onPress={fitView} />
       </View>
       {showTreeTotals && (
-        <TreeTotalsPanel totals={treeTotals} onOpenItem={openItem} />
+        <TreeTotalsPanel
+          totals={treeTotals}
+          useByproducts={useByproducts}
+          exportingTree={exportingTree}
+          exportMessage={exportMessage}
+          onUseByproductsChange={updateUseByproducts}
+          onExportTotals={exportTotals}
+          onExportTree={() => void exportTreeImage()}
+          onOpenItem={openItem}
+        />
       )}
       <Text style={styles.hint}>
         {compactMode
@@ -878,14 +931,49 @@ export function GraphScreen() {
 
 function TreeTotalsPanel({
   totals,
+  useByproducts,
+  exportingTree,
+  exportMessage,
+  onUseByproductsChange,
+  onExportTotals,
+  onExportTree,
   onOpenItem,
 }: {
   totals: TreeTotals;
+  useByproducts: boolean;
+  exportingTree: boolean;
+  exportMessage: string | null;
+  onUseByproductsChange: (value: boolean) => void;
+  onExportTotals: () => void;
+  onExportTree: () => void;
   onOpenItem: (key: string) => void;
 }) {
   return (
     <View style={styles.totalsPanel}>
-      <Text style={[styles.totalsTitle, noSelect]}>Tree totals</Text>
+      <View style={styles.totalsHeader}>
+        <Text style={[styles.totalsTitle, noSelect]}>Tree totals</Text>
+        <TouchableOpacity
+          accessibilityRole="checkbox"
+          accessibilityState={{checked: useByproducts}}
+          style={[styles.totalsOption, useByproducts && styles.totalsOptionActive]}
+          onPress={() => onUseByproductsChange(!useByproducts)}>
+          <Text style={[styles.totalsOptionText, useByproducts && styles.totalsOptionTextActive]}>
+            {useByproducts ? '✓ ' : ''}Use byproducts
+          </Text>
+        </TouchableOpacity>
+      </View>
+      <View style={styles.exportActions}>
+        <TouchableOpacity style={styles.exportBtn} onPress={onExportTotals}>
+          <Text style={styles.exportBtnText}>Export resources CSV</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.exportBtn, exportingTree && styles.exportBtnDisabled]}
+          disabled={exportingTree}
+          onPress={onExportTree}>
+          <Text style={styles.exportBtnText}>{exportingTree ? 'Rendering…' : 'Export HQ tree PNG'}</Text>
+        </TouchableOpacity>
+      </View>
+      {exportMessage && <Text style={[styles.exportMessage, noSelect]}>{exportMessage}</Text>}
       <ScrollView style={styles.totalsScroll} contentContainerStyle={styles.totalsContent}>
         <TreeTotalsSection title="Inputs" totals={totals.inputs} onOpenItem={onOpenItem} />
         <TreeTotalsSection
@@ -893,8 +981,15 @@ function TreeTotalsPanel({
           totals={totals.prerequisites}
           onOpenItem={onOpenItem}
         />
+        {useByproducts && (
+          <TreeTotalsSection
+            title="Byproducts used"
+            totals={totals.byproductCredits}
+            onOpenItem={onOpenItem}
+          />
+        )}
         <TreeTotalsSection
-          title="Byproducts"
+          title={useByproducts ? 'Byproducts remaining' : 'Byproducts'}
           totals={totals.byproducts}
           onOpenItem={onOpenItem}
         />
@@ -1253,7 +1348,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 54,
     right: 10,
-    width: 300,
+    width: 360,
     maxWidth: '92%',
     maxHeight: '62%',
     backgroundColor: 'rgba(23,29,38,0.97)',
@@ -1266,9 +1361,45 @@ const styles = StyleSheet.create({
     color: theme.text,
     fontSize: 14,
     fontWeight: '700',
+    flex: 1,
+  },
+  totalsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     paddingHorizontal: 12,
     paddingTop: 10,
   },
+  totalsOption: {
+    borderColor: theme.border,
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+  },
+  totalsOptionActive: {borderColor: theme.accent, backgroundColor: '#173724'},
+  totalsOptionText: {color: theme.textDim, fontSize: 10, fontWeight: '700'},
+  totalsOptionTextActive: {color: theme.accent},
+  exportActions: {
+    flexDirection: 'row',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingTop: 8,
+  },
+  exportBtn: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 30,
+    borderColor: theme.border,
+    borderWidth: 1,
+    borderRadius: 6,
+    backgroundColor: theme.panelAlt,
+    paddingHorizontal: 6,
+  },
+  exportBtnDisabled: {opacity: 0.55},
+  exportBtnText: {color: theme.text, fontSize: 10, fontWeight: '700'},
+  exportMessage: {color: theme.textDim, fontSize: 9, paddingHorizontal: 12, paddingTop: 6},
   totalsScroll: {flexShrink: 1},
   totalsContent: {paddingHorizontal: 12, paddingBottom: 10},
   totalsSection: {marginTop: 10},

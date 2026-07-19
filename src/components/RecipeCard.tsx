@@ -2,15 +2,15 @@ import React from 'react';
 import {StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import {recipeImagePath, useData} from '../data/DataContext';
 import {recipePresentationKind} from '../data/recipePresentation';
-import {displayIngredientName, inferIngredientTag} from '../data/ingredientTags';
+import {displayIngredientName} from '../data/ingredientTags';
 import {
   formatIngredientQuantityPrefix,
-  normalizeIngredientAmount,
   shouldShowIngredientQuantity,
 } from '../data/ingredientQuantities';
 import {recipeDisplayTitle} from '../data/recipeTitles';
 import {theme} from '../theme';
-import {Recipe, SlotEntry} from '../types';
+import {prerequisiteSummary, slotSummary} from '../data/slotSummary';
+import {Recipe} from '../types';
 import {useUi} from '../ui/UiContext';
 import {ItemIcon, pixelated} from './ItemIcon';
 import {RecipePreviewImage} from './RecipePreviewImage';
@@ -19,58 +19,6 @@ import {
   RECIPE_CARD_PADDING,
   responsiveRecipePreviewSize,
 } from './recipePreviewSizing';
-
-export interface SlotSummary {
-  key: string;
-  /** null means the exporter could not determine the quantity. */
-  amount: number | null;
-  variants: number;
-  alternatives: string[];
-  tag?: string;
-}
-
-/** Logical ingredients with amounts, preserving tag-resolved alternatives. */
-export function slotSummary(slots: SlotEntry[][] | undefined): SlotSummary[] {
-  return summarizeSlots(slots, true);
-}
-
-/** Prerequisite/catalyst slots are graph edges but never material consumption. */
-export function prerequisiteSummary(slots: SlotEntry[][] | undefined): SlotSummary[] {
-  return summarizeSlots(slots, false);
-}
-
-function summarizeSlots(
-  slots: SlotEntry[][] | undefined,
-  consumed: boolean,
-): SlotSummary[] {
-  const out = new Map<string, SlotSummary>();
-  for (const slot of slots ?? []) {
-    if (!slot.length) continue;
-    const [key, rawAmount] = slot[0];
-    const amount = consumed
-      ? normalizeIngredientAmount(key, rawAmount)
-      : Number.isFinite(rawAmount) && rawAmount > 0
-        ? rawAmount
-        : null;
-    const alternatives = [...new Set(slot.map(([entryKey]) => entryKey))];
-    const tag = inferIngredientTag(slot);
-    const logicalKey = tag ? `#${tag}` : key;
-    const cur = out.get(logicalKey) ?? {
-      key,
-      amount: amount == null ? null : 0,
-      variants: alternatives.length,
-      alternatives,
-      tag,
-    };
-    if (cur.amount != null) {
-      cur.amount = amount == null ? null : cur.amount + amount;
-    }
-    cur.variants = Math.max(cur.variants, alternatives.length);
-    cur.alternatives = [...new Set([...cur.alternatives, ...alternatives])];
-    out.set(logicalKey, cur);
-  }
-  return [...out.values()];
-}
 
 export function RecipeCard({
   recipe,

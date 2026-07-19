@@ -15,13 +15,14 @@ import {
   compareRecipeCategories,
   isDefaultDisabledRecipeCategory,
 } from '../data/recipeCategories';
+import {slotSummary} from '../data/slotSummary';
 import {theme} from '../theme';
 import {Recipe, RecipeRef} from '../types';
 import {useUi} from '../ui/UiContext';
 import {DropList, DropRow, formatDropStat} from './DropList';
 import {ItemIcon} from './ItemIcon';
 import {MobSprite} from './MobSprite';
-import {ItemChip, RecipeCard, slotSummary} from './RecipeCard';
+import {ItemChip, RecipeCard} from './RecipeCard';
 
 const PAGE = 15;
 
