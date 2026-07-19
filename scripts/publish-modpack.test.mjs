@@ -8,9 +8,17 @@ import {
   PUBLICATION_PLAN_FORMAT,
   loadPreparedPlan,
   parsePublishModpackArguments,
+  prepareModpackPublication,
+  requireFullPublicationManifest,
   requirePublicationPlan,
   uploadPreparedModpackPublication,
 } from './publish-modpack.mjs';
+import {
+  createRawExportFixture,
+  readJson,
+  writeJson,
+  writeNonUniformImage,
+} from './test-export-fixture.mjs';
 
 const ID_A = 'a'.repeat(64);
 const ID_B = 'b'.repeat(64);
@@ -36,17 +44,66 @@ function plan(overrides = {}) {
   };
 }
 
-async function preparedWorkspace(t) {
+function mm2Plan(overrides = {}) {
+  return plan({
+    profile: 'multiblock-madness-2-1.18.2',
+    pack: {
+      name: 'Multiblock Madness 2',
+      version: '1.0.0',
+      identitySource: 'explicit-request',
+    },
+    minecraftVersion: '1.18.2',
+    slug: 'multiblock-madness-2',
+    ...overrides,
+  });
+}
+
+async function preparedWorkspace(t, publicationPlan = plan()) {
   const root = await mkdtemp(join(tmpdir(), 'mrt-publish-modpack-test-'));
   t.after(() => rm(root, {recursive: true, force: true}));
   await mkdir(join(root, 'packed-export'));
   await mkdir(join(root, 'core-publication'));
   await mkdir(join(root, 'preview-sidecar'));
-  await writeFile(join(root, 'publication-plan.json'), `${JSON.stringify(plan())}\n`);
+  await writeFile(join(root, 'publication-plan.json'), `${JSON.stringify(publicationPlan)}\n`);
   await writeFile(join(root, 'packed-export', 'manifest.json'), '{}\n');
   await writeFile(join(root, 'core-publication', 'publication.json'), '{}\n');
   await writeFile(join(root, 'preview-sidecar', 'manifest.json'), '{}\n');
   return root;
+}
+
+async function rawPublicationFixture(t, publicationPlan, {qualitySample} = {}) {
+  const root = await mkdtemp(join(tmpdir(), 'mrt-publish-modpack-raw-test-'));
+  t.after(() => rm(root, {recursive: true, force: true}));
+  const source = join(root, 'raw');
+  const workspace = join(root, 'publication');
+  await createRawExportFixture(source, {iconScale: 1, recipeScale: 2});
+  await writeNonUniformImage(join(source, 'recipes', 'minecraft_crafting', 'r0.png'), 32);
+  await writeJson(join(source, 'recipes', 'minecraft_crafting', 'recipes.json'), [{
+    id: 'minecraft:test',
+    img: 'r0.png',
+    w: 16,
+    h: 16,
+    in: [[['minecraft:stone', 1]]],
+    out: [[['minecraft:stone', 1]]],
+  }]);
+  await writeJson(join(source, 'index.json'), {
+    'minecraft:stone': {p: [[0, 0]], u: [[0, 0]]},
+  });
+  const categories = await readJson(join(source, 'categories.json'));
+  categories.categories[0].count = 1;
+  await writeJson(join(source, 'categories.json'), categories);
+  const manifest = await readJson(join(source, 'manifest.json'));
+  manifest.minecraft = publicationPlan.minecraftVersion;
+  manifest.pack = publicationPlan.pack;
+  manifest.counts.recipes = 1;
+  if (publicationPlan.profile === 'multiblock-madness-2-1.18.2') {
+    manifest.counts.nativeIconCorrections = 0;
+    manifest.diagnostics.nativeIconCorrections = 0;
+    manifest.diagnostics.transparentIcons = 0;
+  }
+  if (qualitySample !== undefined) manifest.qualitySample = qualitySample;
+  await writeJson(join(source, 'manifest.json'), manifest);
+  return {root, source, workspace};
 }
 
 const quietLogger = Object.freeze({
@@ -113,6 +170,59 @@ test('publication plan validation binds pack metadata and exact artifact paths',
     () => requirePublicationPlan(plan({pack: {name: 'Pack', identitySource: 'curseforge'}})),
     /version is required/,
   );
+});
+
+test('production manifest gate rejects own qualitySample fields and admits full manifests', () => {
+  for (const publicationPlan of [plan(), mm2Plan()]) {
+    const full = {
+      minecraft: publicationPlan.minecraftVersion,
+      pack: publicationPlan.pack,
+    };
+    assert.equal(requireFullPublicationManifest(full, 'Fixture manifest'), full);
+    assert.throws(
+      () => requireFullPublicationManifest({...full, qualitySample: {}}, 'Fixture manifest'),
+      /Fixture manifest contains manifest\.qualitySample.*diagnostic mini export/,
+    );
+  }
+});
+
+test('preparation rejects MM1 and MM2 mini exports before creating a workspace', async t => {
+  for (const publicationPlan of [plan(), mm2Plan()]) {
+    const fixture = await rawPublicationFixture(t, publicationPlan, {qualitySample: {}});
+    await assert.rejects(
+      prepareModpackPublication({
+        source: fixture.source,
+        workspace: fixture.workspace,
+        profile: publicationPlan.profile,
+        slug: publicationPlan.slug,
+        stagingMode: 'copy',
+        concurrency: 1,
+        logger: quietLogger,
+      }),
+      /Raw manifest\.json contains manifest\.qualitySample.*full exporter result/,
+    );
+    await assert.rejects(realpath(fixture.workspace), error => error?.code === 'ENOENT');
+  }
+});
+
+test('preparation admits full MM1 and MM2 exports and commits production plans', async t => {
+  for (const publicationPlan of [plan(), mm2Plan()]) {
+    const fixture = await rawPublicationFixture(t, publicationPlan);
+    const prepared = await prepareModpackPublication({
+      source: fixture.source,
+      workspace: fixture.workspace,
+      profile: publicationPlan.profile,
+      slug: publicationPlan.slug,
+      stagingMode: 'copy',
+      concurrency: 1,
+      logger: quietLogger,
+    });
+    assert.equal(prepared.profile, publicationPlan.profile);
+    assert.equal(prepared.slug, publicationPlan.slug);
+    assert.deepEqual(prepared.pack, publicationPlan.pack);
+    assert.match(prepared.publicationId, /^[a-f0-9]{64}$/);
+    assert.match(prepared.previewAssetSetId, /^[a-f0-9]{64}$/);
+  }
 });
 
 test('prepared-plan loading accepts only the fixed plain artifact tree', async t => {
@@ -209,11 +319,12 @@ function currentDescriptor() {
   };
 }
 
-async function writeValidPackedManifest(root) {
+async function writeValidPackedManifest(root, publicationPlan = plan(), overrides = {}) {
   await writeFile(join(root, 'packed-export', 'manifest.json'), `${JSON.stringify({
-    publicationId: ID_A,
-    minecraft: '1.12.2',
-    pack: plan().pack,
+    publicationId: publicationPlan.publicationId,
+    minecraft: publicationPlan.minecraftVersion,
+    pack: publicationPlan.pack,
+    ...overrides,
   })}\n`);
 }
 
@@ -276,6 +387,26 @@ test('upload orchestration preflights both targets and CAS-activates only after 
   assert.equal(activation.isDefault, true);
   assert.equal(result.channelAction, 'update');
   assert.equal(result.shareUrl, 'https://viewer.test/?pack=multiblock-madness');
+});
+
+test('upload rejects prepared MM1 and MM2 mini exports before catalog or credential access', async t => {
+  for (const publicationPlan of [plan(), mm2Plan()]) {
+    const root = await preparedWorkspace(t, publicationPlan);
+    await writeValidPackedManifest(root, publicationPlan, {qualitySample: {}});
+    const events = [];
+    await assert.rejects(
+      uploadPreparedModpackPublication({
+        workspace: root,
+        channelAction: 'create',
+        isDefault: false,
+        appOrigin: 'https://viewer.test',
+        logger: quietLogger,
+        dependencies: orchestrationDependencies(events),
+      }),
+      /Packed manifest\.json contains manifest\.qualitySample.*full exporter result/,
+    );
+    assert.deepEqual(events, []);
+  }
 });
 
 test('authenticated endpoint-preflight failure starts no bulk upload', async t => {

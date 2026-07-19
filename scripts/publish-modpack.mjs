@@ -144,6 +144,17 @@ function isRecord(value) {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
+export function requireFullPublicationManifest(value, label = 'Publication manifest') {
+  if (isRecord(value) && Object.prototype.hasOwnProperty.call(value, 'qualitySample')) {
+    throw new Error(
+      `${label} contains manifest.qualitySample and is a diagnostic mini export. ` +
+        'Production publication requires a full exporter result without qualitySample; ' +
+        'run the full export request and publish its new output directory.',
+    );
+  }
+  return value;
+}
+
 function exactKeys(value, expected) {
   if (!isRecord(value)) return false;
   const actual = Object.keys(value).sort();
@@ -236,10 +247,13 @@ export async function prepareModpackPublication({
   const sourceRoot = await realpath(resolve(source));
   const workspaceRoot = resolve(workspace);
   await requireMissingWorkspace(workspaceRoot);
+  const rawManifest = requireFullPublicationManifest(
+    await readJsonDocument(join(sourceRoot, 'manifest.json'), 'Raw manifest.json'),
+    'Raw manifest.json',
+  );
   await mkdir(workspaceRoot);
   const paths = planPaths(workspaceRoot);
   try {
-    const rawManifest = await readJsonDocument(join(sourceRoot, 'manifest.json'), 'Raw manifest.json');
     const pack = requirePublishablePackIdentity(rawManifest?.pack);
     if (typeof rawManifest.minecraft !== 'string' || rawManifest.minecraft.length === 0) {
       throw new Error('Raw manifest.minecraft must be a non-empty string.');
@@ -582,6 +596,7 @@ export async function uploadPreparedModpackPublication({
       `${counts.files} files in ${counts.directories} directories.`,
   );
   const packedManifest = await readJsonDocument(join(packedExport, 'manifest.json'), 'Packed manifest.json');
+  requireFullPublicationManifest(packedManifest, 'Packed manifest.json');
   const packedPack = requirePublishablePackIdentity(packedManifest?.pack, 'Packed manifest.pack');
   if (
     packedManifest?.publicationId !== plan.publicationId ||
