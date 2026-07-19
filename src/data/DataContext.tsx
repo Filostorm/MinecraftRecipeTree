@@ -532,6 +532,61 @@ function isStringRecord(value: unknown): value is Record<string, string> {
   return isRecord(value) && Object.values(value).every(name => typeof name === 'string');
 }
 
+const PACK_IDENTITY_SOURCES = new Set([
+  'explicit-request',
+  'curseforge',
+  'prism',
+  'modrinth-index',
+  'game-directory',
+]);
+const PACK_PROVIDERS = new Set(['curseforge', 'prism', 'modrinth']);
+const UNSAFE_PACK_TEXT = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/u;
+
+function isBoundedPackText(value: unknown, maximum: number): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= maximum &&
+    value.trim() === value &&
+    !UNSAFE_PACK_TEXT.test(value)
+  );
+}
+
+function isManifestPack(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  const allowed = new Set([
+    'identitySource',
+    'instanceName',
+    'name',
+    'projectId',
+    'provider',
+    'version',
+    'versionId',
+  ]);
+  if (Object.keys(value).some(key => !allowed.has(key))) return false;
+  if (
+    !isBoundedPackText(value.name, 120) ||
+    !isBoundedPackText(value.identitySource, 40) ||
+    !PACK_IDENTITY_SOURCES.has(value.identitySource)
+  ) {
+    return false;
+  }
+  if (value.version !== undefined && !isBoundedPackText(value.version, 80)) return false;
+  if (value.instanceName !== undefined && !isBoundedPackText(value.instanceName, 120)) return false;
+  if (
+    value.provider !== undefined &&
+    (!isBoundedPackText(value.provider, 40) || !PACK_PROVIDERS.has(value.provider))
+  ) {
+    return false;
+  }
+  if (value.projectId !== undefined && !isBoundedPackText(value.projectId, 120)) return false;
+  if (value.versionId !== undefined && !isBoundedPackText(value.versionId, 120)) return false;
+  return !(
+    (value.projectId !== undefined || value.versionId !== undefined) &&
+    value.provider === undefined
+  );
+}
+
 function isManifestWeb(value: unknown, expectedRecipes: number): boolean {
   const recipeImages = isRecord(value) ? value.recipeImages : undefined;
   const recipeImageInventory = isRecord(recipeImages) ? recipeImages.inventory : undefined;
@@ -595,6 +650,7 @@ function isManifestDocument(value: unknown): value is Manifest {
     value.durationMs >= 0 &&
     typeof value.minecraft === 'string' &&
     value.minecraft.length > 0 &&
+    (value.pack === undefined || isManifestPack(value.pack)) &&
     isDatasetPublicationId(value.publicationId) &&
     typeof value.aborted === 'boolean' &&
     isManifestCounts(value.counts) &&
@@ -785,6 +841,31 @@ export function DataProvider({
               `${JSON.stringify(manifest.minecraft)}; catalog declares ` +
               `${JSON.stringify(descriptor.minecraftVersion)}.`,
           );
+        }
+        if (manifest.pack === undefined) {
+          console.warn(
+            'The active dataset predates exporter-provided pack identity. Catalog labels remain ' +
+              'available for compatibility, but every newly prepared publication must contain manifest.pack.',
+            {datasetIdentity, slug: descriptor.slug},
+          );
+        } else {
+          if (manifest.pack.name !== descriptor.displayName) {
+            throw new Error(
+              `Dataset ${JSON.stringify(descriptor.slug)} identifies itself as ` +
+                `${JSON.stringify(manifest.pack.name)}; catalog declares ` +
+                `${JSON.stringify(descriptor.displayName)}.`,
+            );
+          }
+          if (
+            manifest.pack.version !== undefined &&
+            manifest.pack.version !== descriptor.packVersion
+          ) {
+            throw new Error(
+              `Dataset ${JSON.stringify(descriptor.slug)} identifies pack version ` +
+                `${JSON.stringify(manifest.pack.version)}; catalog declares ` +
+                `${JSON.stringify(descriptor.packVersion)}.`,
+            );
+          }
         }
         if (manifest.aborted) {
           throw new Error(

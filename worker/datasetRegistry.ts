@@ -14,6 +14,7 @@ export const DATASET_CHANNEL_DELETION_ROUTE =
   /^\/api\/admin\/dataset-channels\/([a-z0-9]+(?:-[a-z0-9]+)*)$/;
 const EXPECTED_PUBLICATION_HEADER = 'x-mrt-expected-dataset-publication-id';
 const EXPECTED_PREVIEW_HEADER = 'x-mrt-expected-preview-asset-set-id';
+const UNSAFE_IDENTITY_TEXT_PATTERN = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/u;
 
 const createPublicationsTableSql = `
   CREATE TABLE IF NOT EXISTS dataset_publications (
@@ -181,9 +182,10 @@ function hasExactKeys(value: Record<string, unknown>, expected: readonly string[
 function boundedText(value: unknown, maximum: number): value is string {
   return (
     typeof value === 'string' &&
-    value.length > 0 &&
-    value.length <= maximum &&
-    value.trim() === value
+    [...value].length > 0 &&
+    [...value].length <= maximum &&
+    value.trim() === value &&
+    !UNSAFE_IDENTITY_TEXT_PATTERN.test(value)
   );
 }
 
@@ -194,6 +196,7 @@ interface ActivationInput {
   publicationId: string;
   previewAssetSetId: string;
   isDefault: boolean;
+  expectedPreviousPublicationId: string | null;
 }
 
 function requireActivationInput(value: unknown): ActivationInput {
@@ -206,6 +209,7 @@ function requireActivationInput(value: unknown): ActivationInput {
       'publicationId',
       'previewAssetSetId',
       'isDefault',
+      'expectedPreviousPublicationId',
     ]) ||
     !boundedText(value.displayName, 120) ||
     !boundedText(value.minecraftVersion, 40) ||
@@ -214,7 +218,10 @@ function requireActivationInput(value: unknown): ActivationInput {
     !CORE_DATASET_PUBLICATION_ID_PATTERN.test(value.publicationId) ||
     typeof value.previewAssetSetId !== 'string' ||
     !CORE_DATASET_PUBLICATION_ID_PATTERN.test(value.previewAssetSetId) ||
-    typeof value.isDefault !== 'boolean'
+    typeof value.isDefault !== 'boolean' ||
+    (value.expectedPreviousPublicationId !== null &&
+      (typeof value.expectedPreviousPublicationId !== 'string' ||
+        !CORE_DATASET_PUBLICATION_ID_PATTERN.test(value.expectedPreviousPublicationId)))
   ) {
     throw new Error('Activation body does not satisfy the exact dataset descriptor contract.');
   }
@@ -283,57 +290,110 @@ export async function handleDatasetChannelActivation(
     }
     await verifyPair(input.publicationId, input.previewAssetSetId);
 
-    if (!input.isDefault) {
-      const existingDefault = await db
-        .prepare('SELECT slug FROM dataset_channels WHERE is_default = 1 AND slug <> ? LIMIT 1')
-        .bind(slug)
-        .first<{slug: string}>();
-      if (!existingDefault) {
-        return noStoreJson(
-          {error: 'A non-default activation would leave the catalog without a default dataset.'},
-          409,
-        );
-      }
-    }
-
     const now = Date.now();
     const statements = [];
     if (input.isDefault) {
-      statements.push(db.prepare('UPDATE dataset_channels SET is_default = 0 WHERE is_default = 1'));
+      const expectationGuard = input.expectedPreviousPublicationId === null
+        ? 'NOT EXISTS (SELECT 1 FROM dataset_channels target WHERE target.slug = ?)'
+        : `EXISTS (
+             SELECT 1 FROM dataset_channels target
+             WHERE target.slug = ? AND target.publication_id = ?
+           )`;
+      statements.push(
+        db
+          .prepare(
+            `UPDATE dataset_channels
+             SET is_default = 0
+             WHERE is_default = 1 AND slug <> ? AND ${expectationGuard}`,
+          )
+          .bind(
+            slug,
+            slug,
+            ...(input.expectedPreviousPublicationId === null
+              ? []
+              : [input.expectedPreviousPublicationId]),
+          ),
+      );
     }
-    statements.push(
-      db
-        .prepare(
-          `INSERT INTO dataset_channels
-             (slug, display_name, minecraft_version, pack_version, publication_id,
-              preview_asset_set_id, is_default, revision, activated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
-           ON CONFLICT(slug) DO UPDATE SET
-             display_name = excluded.display_name,
-             minecraft_version = excluded.minecraft_version,
-             pack_version = excluded.pack_version,
-             publication_id = excluded.publication_id,
-             preview_asset_set_id = excluded.preview_asset_set_id,
-             is_default = excluded.is_default,
-             revision = dataset_channels.revision + 1,
-             activated_at = excluded.activated_at`,
-        )
-        .bind(
-          slug,
-          input.displayName,
-          input.minecraftVersion,
-          input.packVersion,
-          input.publicationId,
-          input.previewAssetSetId,
-          input.isDefault ? 1 : 0,
-          now,
-        ),
-    );
+    if (input.expectedPreviousPublicationId === null) {
+      statements.push(
+        db
+          .prepare(
+            `INSERT INTO dataset_channels
+               (slug, display_name, minecraft_version, pack_version, publication_id,
+                preview_asset_set_id, is_default, revision, activated_at)
+             SELECT ?, ?, ?, ?, ?, ?, ?, 1, ?
+             WHERE NOT EXISTS (SELECT 1 FROM dataset_channels target WHERE target.slug = ?)
+               AND (
+                 ? = 1 OR EXISTS (
+                   SELECT 1 FROM dataset_channels existing_default
+                   WHERE existing_default.is_default = 1 AND existing_default.slug <> ?
+                 )
+               )`,
+          )
+          .bind(
+            slug,
+            input.displayName,
+            input.minecraftVersion,
+            input.packVersion,
+            input.publicationId,
+            input.previewAssetSetId,
+            input.isDefault ? 1 : 0,
+            now,
+            slug,
+            input.isDefault ? 1 : 0,
+            slug,
+          ),
+      );
+    } else {
+      statements.push(
+        db
+          .prepare(
+            `UPDATE dataset_channels
+             SET display_name = ?, minecraft_version = ?, pack_version = ?,
+                 publication_id = ?, preview_asset_set_id = ?, is_default = ?,
+                 revision = revision + 1, activated_at = ?
+             WHERE slug = ? AND publication_id = ?
+               AND (
+                 ? = 1 OR EXISTS (
+                   SELECT 1 FROM dataset_channels existing_default
+                   WHERE existing_default.is_default = 1 AND existing_default.slug <> ?
+                 )
+               )`,
+          )
+          .bind(
+            input.displayName,
+            input.minecraftVersion,
+            input.packVersion,
+            input.publicationId,
+            input.previewAssetSetId,
+            input.isDefault ? 1 : 0,
+            now,
+            slug,
+            input.expectedPreviousPublicationId,
+            input.isDefault ? 1 : 0,
+            slug,
+          ),
+      );
+    }
     const results = await db.batch(statements);
     if (results.some(result => !result.success)) {
       throw new Error('D1 reported an unsuccessful atomic channel activation statement.');
     }
-    const descriptor: DatasetDescriptor = {slug, ...input};
+    const mutation = results.at(-1);
+    if (mutation?.meta?.changes !== 1) {
+      console.warn('Dataset channel activation refused a stale expected previous state.', {
+        slug,
+        expectedPreviousPublicationId: input.expectedPreviousPublicationId,
+        changes: mutation?.meta?.changes,
+      });
+      return noStoreJson(
+        {error: 'Dataset channel state changed or the requested default invariant is invalid; refresh before retrying.'},
+        409,
+      );
+    }
+    const {expectedPreviousPublicationId: _expectedPreviousPublicationId, ...descriptorInput} = input;
+    const descriptor: DatasetDescriptor = {slug, ...descriptorInput};
     return noStoreJson({dataset: descriptor}, 200);
   } catch (error) {
     console.error('Dataset channel activation failed closed.', {

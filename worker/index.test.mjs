@@ -178,17 +178,47 @@ class MemoryD1 {
       return {success: true, meta: {changes: 1}};
     }
     if (sql.startsWith('UPDATE dataset_channels SET is_default = 0')) {
-      for (const row of this.channels.values()) row.is_default = 0;
-      return {success: true};
+      const [targetSlug, guardedSlug, expectedPublicationId] = values;
+      const target = this.channels.get(guardedSlug);
+      const expectationMatches = values.length === 2
+        ? !target
+        : target?.publication_id === expectedPublicationId;
+      let changes = 0;
+      if (expectationMatches) {
+        for (const row of this.channels.values()) {
+          if (row.is_default === 1 && row.slug !== targetSlug) {
+            row.is_default = 0;
+            changes += 1;
+          }
+        }
+      }
+      return {success: true, meta: {changes}};
     }
     if (sql.startsWith('INSERT INTO dataset_channels')) {
-      const [slug, displayName, minecraftVersion, packVersion, publicationId, previewId, isDefault, now] = values;
+      const [
+        slug,
+        displayName,
+        minecraftVersion,
+        packVersion,
+        publicationId,
+        previewId,
+        isDefault,
+        now,
+        guardedSlug,
+        guardedDefault,
+        defaultExclusionSlug,
+      ] = values;
+      const hasOtherDefault = [...this.channels.values()].some(
+        row => row.is_default === 1 && row.slug !== defaultExclusionSlug,
+      );
+      if (this.channels.has(guardedSlug) || (guardedDefault !== 1 && !hasOtherDefault)) {
+        return {success: true, meta: {changes: 0}};
+      }
       for (const [otherSlug, row] of this.channels) {
         if (otherSlug !== slug && row.publication_id === publicationId) throw new Error('publication unique conflict');
         if (otherSlug !== slug && row.preview_asset_set_id === previewId) throw new Error('preview unique conflict');
         if (otherSlug !== slug && isDefault === 1 && row.is_default === 1) throw new Error('default unique conflict');
       }
-      const previous = this.channels.get(slug);
       this.channels.set(slug, {
         slug,
         display_name: displayName,
@@ -197,7 +227,50 @@ class MemoryD1 {
         publication_id: publicationId,
         preview_asset_set_id: previewId,
         is_default: isDefault,
-        revision: previous ? previous.revision + 1 : 1,
+        revision: 1,
+        activated_at: now,
+      });
+      return {success: true, meta: {changes: 1}};
+    }
+    if (sql.startsWith('UPDATE dataset_channels SET display_name = ?')) {
+      const [
+        displayName,
+        minecraftVersion,
+        packVersion,
+        publicationId,
+        previewId,
+        isDefault,
+        now,
+        slug,
+        expectedPublicationId,
+        guardedDefault,
+        defaultExclusionSlug,
+      ] = values;
+      const previous = this.channels.get(slug);
+      const hasOtherDefault = [...this.channels.values()].some(
+        row => row.is_default === 1 && row.slug !== defaultExclusionSlug,
+      );
+      if (
+        !previous ||
+        previous.publication_id !== expectedPublicationId ||
+        (guardedDefault !== 1 && !hasOtherDefault)
+      ) {
+        return {success: true, meta: {changes: 0}};
+      }
+      for (const [otherSlug, row] of this.channels) {
+        if (otherSlug !== slug && row.publication_id === publicationId) throw new Error('publication unique conflict');
+        if (otherSlug !== slug && row.preview_asset_set_id === previewId) throw new Error('preview unique conflict');
+        if (otherSlug !== slug && isDefault === 1 && row.is_default === 1) throw new Error('default unique conflict');
+      }
+      this.channels.set(slug, {
+        slug,
+        display_name: displayName,
+        minecraft_version: minecraftVersion,
+        pack_version: packVersion,
+        publication_id: publicationId,
+        preview_asset_set_id: previewId,
+        is_default: isDefault,
+        revision: (previous.revision ?? 0) + 1,
         activated_at: now,
       });
       return {success: true, meta: {changes: 1}};
@@ -437,6 +510,19 @@ function channelDeletionHeaders(publicationId, previewAssetSetId, extra = {}) {
   };
 }
 
+function activateChannel(env, slug, body) {
+  const serialized = JSON.stringify(body);
+  return send(env, `/api/admin/dataset-channels/${slug}/activate`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${TOKEN}`,
+      'Content-Length': String(Buffer.byteLength(serialized)),
+      'Content-Type': 'application/json',
+    },
+    body: serialized,
+  });
+}
+
 async function beginCore(env, fixture) {
   return send(env, '/api/admin/core-datasets/begin', {
     method: 'POST',
@@ -622,30 +708,39 @@ test('activation verifies the committed core/preview pair and publishes the exac
   const preview = await previewFixture();
   seedPreview(env.PREVIEW_ASSETS, preview);
   const body = {
-    displayName: 'Multiblock Madness',
+    displayName: '🧱'.repeat(120),
     minecraftVersion: '1.12.2',
     packVersion: '3.2.2',
     publicationId: PUBLICATION,
     previewAssetSetId: preview.assetSetId,
     isDefault: true,
+    expectedPreviousPublicationId: null,
   };
-  const response = await send(env, '/api/admin/dataset-channels/multiblock-madness/activate', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${TOKEN}`,
-      'Content-Length': String(Buffer.byteLength(JSON.stringify(body))),
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
+  const response = await activateChannel(env, 'multiblock-madness', body);
   assert.equal(response.status, 200);
-  assert.deepEqual((await response.json()).dataset, {slug: 'multiblock-madness', ...body});
+  const {expectedPreviousPublicationId: _expectedPreviousPublicationId, ...descriptor} = body;
+  assert.deepEqual((await response.json()).dataset, {slug: 'multiblock-madness', ...descriptor});
   assert.ok(env.DB.batches.some(batch => batch.some(sql => sql.startsWith('INSERT INTO dataset_channels'))));
 
   const catalog = await send(env, '/api/datasets');
   assert.equal(catalog.status, 200);
-  assert.deepEqual(await catalog.json(), {datasets: [{slug: 'multiblock-madness', ...body}]});
+  assert.deepEqual(await catalog.json(), {datasets: [{slug: 'multiblock-madness', ...descriptor}]});
   assert.equal(catalog.headers.get('cache-control'), 'no-store');
+});
+
+test('activation rejects invisible identity controls before publication verification', async () => {
+  const env = environment();
+  const response = await activateChannel(env, 'unsafe-identity', {
+    displayName: 'Unsafe\u200bPack',
+    minecraftVersion: '1.12.2',
+    packVersion: '1',
+    publicationId: PUBLICATION,
+    previewAssetSetId: 'c'.repeat(64),
+    isDefault: true,
+    expectedPreviousPublicationId: null,
+  });
+  assert.equal(response.status, 400);
+  assert.equal(env.DB.channels.size, 0);
 });
 
 test('activation fails closed for a sidecar bound to another core and never mutates the channel', async () => {
@@ -660,18 +755,171 @@ test('activation fails closed for a sidecar bound to another core and never muta
     publicationId: PUBLICATION,
     previewAssetSetId: preview.assetSetId,
     isDefault: true,
+    expectedPreviousPublicationId: null,
   };
-  const response = await send(env, '/api/admin/dataset-channels/mismatch/activate', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${TOKEN}`,
-      'Content-Length': String(Buffer.byteLength(JSON.stringify(body))),
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
+  const response = await activateChannel(env, 'mismatch', body);
   assert.equal(response.status, 409);
   assert.equal(env.DB.channels.size, 0);
+});
+
+test('activation refuses an omitted expected previous channel state', async () => {
+  const env = environment();
+  const response = await activateChannel(env, 'missing-expectation', {
+    displayName: 'Missing expectation',
+    minecraftVersion: '1.12.2',
+    packVersion: '1',
+    publicationId: PUBLICATION,
+    previewAssetSetId: 'c'.repeat(64),
+    isDefault: true,
+  });
+  assert.equal(response.status, 400);
+  assert.equal(env.DB.channels.size, 0);
+});
+
+test('activation requires create-only absence and refuses to overwrite an existing slug', async () => {
+  const env = environment();
+  await publishCore(env);
+  const preview = await previewFixture();
+  seedPreview(env.PREVIEW_ASSETS, preview);
+  env.DB.channels.set('claimed-pack', {
+    slug: 'claimed-pack',
+    display_name: 'Claimed pack',
+    minecraft_version: '1.12.2',
+    pack_version: 'old',
+    publication_id: OTHER_PUBLICATION,
+    preview_asset_set_id: 'c'.repeat(64),
+    is_default: 1,
+    revision: 7,
+  });
+
+  const response = await activateChannel(env, 'claimed-pack', {
+    displayName: 'Replacement',
+    minecraftVersion: '1.12.2',
+    packVersion: 'new',
+    publicationId: PUBLICATION,
+    previewAssetSetId: preview.assetSetId,
+    isDefault: true,
+    expectedPreviousPublicationId: null,
+  });
+  assert.equal(response.status, 409);
+  assert.equal(env.DB.channels.get('claimed-pack').publication_id, OTHER_PUBLICATION);
+  assert.equal(env.DB.channels.get('claimed-pack').is_default, 1);
+  assert.equal(env.DB.channels.get('claimed-pack').revision, 7);
+});
+
+test('activation updates only the exact expected previous publication ID', async () => {
+  const env = environment();
+  await publishCore(env);
+  const preview = await previewFixture();
+  seedPreview(env.PREVIEW_ASSETS, preview);
+  env.DB.channels.set('updatable-pack', {
+    slug: 'updatable-pack',
+    display_name: 'Old title',
+    minecraft_version: '1.12.2',
+    pack_version: '1',
+    publication_id: PUBLICATION,
+    preview_asset_set_id: preview.assetSetId,
+    is_default: 1,
+    revision: 3,
+  });
+
+  const response = await activateChannel(env, 'updatable-pack', {
+    displayName: 'Updated title',
+    minecraftVersion: '1.12.2',
+    packVersion: '2',
+    publicationId: PUBLICATION,
+    previewAssetSetId: preview.assetSetId,
+    isDefault: true,
+    expectedPreviousPublicationId: PUBLICATION,
+  });
+  assert.equal(response.status, 200);
+  assert.equal(env.DB.channels.get('updatable-pack').display_name, 'Updated title');
+  assert.equal(env.DB.channels.get('updatable-pack').pack_version, '2');
+  assert.equal(env.DB.channels.get('updatable-pack').revision, 4);
+});
+
+test('activation CAS preserves the previous default when the target changes at mutation time', async () => {
+  const env = environment();
+  await publishCore(env);
+  const preview = await previewFixture();
+  seedPreview(env.PREVIEW_ASSETS, preview);
+  const stablePublication = 'e'.repeat(64);
+  const racedPublication = 'f'.repeat(64);
+  env.DB.channels.set('stable-default', {
+    slug: 'stable-default',
+    display_name: 'Stable default',
+    minecraft_version: '1.12.2',
+    pack_version: '1',
+    publication_id: stablePublication,
+    preview_asset_set_id: 'c'.repeat(64),
+    is_default: 1,
+    revision: 1,
+  });
+  env.DB.channels.set('raced-pack', {
+    slug: 'raced-pack',
+    display_name: 'Raced pack',
+    minecraft_version: '1.12.2',
+    pack_version: '1',
+    publication_id: OTHER_PUBLICATION,
+    preview_asset_set_id: 'd'.repeat(64),
+    is_default: 0,
+    revision: 1,
+  });
+  const executeRun = env.DB.executeRun.bind(env.DB);
+  let raced = false;
+  env.DB.executeRun = async (sql, values) => {
+    if (!raced && sql.startsWith('UPDATE dataset_channels SET is_default = 0')) {
+      raced = true;
+      env.DB.channels.get('raced-pack').publication_id = racedPublication;
+    }
+    return executeRun(sql, values);
+  };
+
+  const response = await activateChannel(env, 'raced-pack', {
+    displayName: 'Would-be replacement',
+    minecraftVersion: '1.12.2',
+    packVersion: '2',
+    publicationId: PUBLICATION,
+    previewAssetSetId: preview.assetSetId,
+    isDefault: true,
+    expectedPreviousPublicationId: OTHER_PUBLICATION,
+  });
+  assert.equal(response.status, 409);
+  assert.equal(raced, true);
+  assert.equal(env.DB.channels.get('stable-default').is_default, 1);
+  assert.equal(env.DB.channels.get('raced-pack').publication_id, racedPublication);
+  assert.equal(env.DB.channels.get('raced-pack').is_default, 0);
+});
+
+test('activation cannot demote the only default through a non-default update', async () => {
+  const env = environment();
+  await publishCore(env);
+  const preview = await previewFixture();
+  seedPreview(env.PREVIEW_ASSETS, preview);
+  env.DB.channels.set('only-default', {
+    slug: 'only-default',
+    display_name: 'Only default',
+    minecraft_version: '1.12.2',
+    pack_version: '1',
+    publication_id: PUBLICATION,
+    preview_asset_set_id: preview.assetSetId,
+    is_default: 1,
+    revision: 2,
+  });
+
+  const response = await activateChannel(env, 'only-default', {
+    displayName: 'Only default',
+    minecraftVersion: '1.12.2',
+    packVersion: '2',
+    publicationId: PUBLICATION,
+    previewAssetSetId: preview.assetSetId,
+    isDefault: false,
+    expectedPreviousPublicationId: PUBLICATION,
+  });
+  assert.equal(response.status, 409);
+  assert.equal(env.DB.channels.get('only-default').is_default, 1);
+  assert.equal(env.DB.channels.get('only-default').pack_version, '1');
+  assert.equal(env.DB.channels.get('only-default').revision, 2);
 });
 
 test('authenticated deletion removes a non-default channel but never its immutable publications', async () => {

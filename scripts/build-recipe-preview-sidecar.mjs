@@ -16,11 +16,17 @@ import sharp from 'sharp';
 import {
   EXPORT_QUALITY_PROFILE_IDS,
   exportQualityIssues,
+  GENERIC_JEI_120_PROFILE,
+  GTNH_1710_PROFILE,
+  gtnhManifestQualityIssues,
   MEATBALLCRAFT_112_PROFILE,
+  MULTIBLOCK_MADNESS_112_PROFILE,
+  MULTIBLOCK_MADNESS_2_118_PROFILE,
   qualityProfileRequirementsFor,
   resolveQualityProfile,
 } from './export-quality-policy.mjs';
 import {parsePackedImagePath} from './packed-assets.mjs';
+import {requirePackIdentity} from './pack-identity.mjs';
 import {computePublicationId} from './publication-id.mjs';
 import {
   createRecipeImageInventory,
@@ -55,6 +61,25 @@ const DATASET_COUNT_KEYS = Object.freeze([
   'blockDrops',
   'failures',
 ]);
+const DATASET_DIAGNOSTIC_KEYS = Object.freeze([
+  'failureEvents',
+  'failureEventsOmitted',
+]);
+const MM2_DATASET_COUNT_KEYS = Object.freeze([
+  ...DATASET_COUNT_KEYS,
+  'nativeIconCorrections',
+]);
+const MM2_DATASET_DIAGNOSTIC_KEYS = Object.freeze([
+  ...DATASET_DIAGNOSTIC_KEYS,
+  'nativeIconCorrections',
+  'transparentIcons',
+]);
+const GTNH_DATASET_DIAGNOSTIC_KEYS = Object.freeze([
+  ...DATASET_DIAGNOSTIC_KEYS,
+  'nei',
+]);
+const GTNH_PROVENANCE_KEYS = Object.freeze(['profile', 'forge', 'nei']);
+const RESOURCE_LOCATION_PATTERN = /^[a-z0-9_.-]+:[a-z0-9_./-]+$/;
 const HOSTED_WEB_CONTRACT = Object.freeze({
   format: 2,
   packedImages: 'coordinate-v1',
@@ -117,6 +142,204 @@ function profileQualityFailureMessage(profile, label, issues) {
   );
 }
 
+function manifestCountKeysForProfile(profile) {
+  return profile === MULTIBLOCK_MADNESS_2_118_PROFILE
+    ? MM2_DATASET_COUNT_KEYS
+    : DATASET_COUNT_KEYS;
+}
+
+function manifestDiagnosticKeysForProfile(profile) {
+  if (profile === MULTIBLOCK_MADNESS_2_118_PROFILE) return MM2_DATASET_DIAGNOSTIC_KEYS;
+  if (profile === GTNH_1710_PROFILE) return GTNH_DATASET_DIAGNOSTIC_KEYS;
+  return DATASET_DIAGNOSTIC_KEYS;
+}
+
+function requireNonNegativeSafeInteger(value, label) {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`${label} must be a non-negative safe integer.`);
+  }
+  return value;
+}
+
+function validateMm1QualitySample(value, manifest, label) {
+  if (!hasExactKeys(value, ['enabled', 'recipeTargets', 'selectorCounts'])) {
+    throw new Error(
+      `${label} must contain exactly enabled, recipeTargets, and selectorCounts.`,
+    );
+  }
+  if (value.enabled !== true) throw new Error(`${label}.enabled must be true.`);
+  const recipeTargets = requireNonNegativeSafeInteger(
+    value.recipeTargets,
+    `${label}.recipeTargets`,
+  );
+  if (recipeTargets <= 0) throw new Error(`${label}.recipeTargets must be positive.`);
+  if (!hasExactKeys(value.selectorCounts, ['recipeId', 'sourceIndex'])) {
+    throw new Error(`${label}.selectorCounts must contain exactly recipeId and sourceIndex.`);
+  }
+  const recipeId = requireNonNegativeSafeInteger(
+    value.selectorCounts.recipeId,
+    `${label}.selectorCounts.recipeId`,
+  );
+  const sourceIndex = requireNonNegativeSafeInteger(
+    value.selectorCounts.sourceIndex,
+    `${label}.selectorCounts.sourceIndex`,
+  );
+  if (recipeId + sourceIndex !== recipeTargets) {
+    throw new Error(`${label}.selectorCounts must sum to recipeTargets.`);
+  }
+  if (recipeTargets !== manifest.counts.recipes) {
+    throw new Error(
+      `${label}.recipeTargets must equal manifest.counts.recipes for a sampled export.`,
+    );
+  }
+  return Object.freeze({
+    enabled: true,
+    recipeTargets,
+    selectorCounts: Object.freeze({recipeId, sourceIndex}),
+  });
+}
+
+function validateMm2QualitySample(value, manifest, label) {
+  if (!hasExactKeys(value, ['selectorCounts', 'requested'])) {
+    throw new Error(`${label} must contain exactly selectorCounts and requested.`);
+  }
+  if (!hasExactKeys(value.selectorCounts, ['recipeId', 'sourceIndex'])) {
+    throw new Error(`${label}.selectorCounts must contain exactly recipeId and sourceIndex.`);
+  }
+  const recipeId = requireNonNegativeSafeInteger(
+    value.selectorCounts.recipeId,
+    `${label}.selectorCounts.recipeId`,
+  );
+  const sourceIndex = requireNonNegativeSafeInteger(
+    value.selectorCounts.sourceIndex,
+    `${label}.selectorCounts.sourceIndex`,
+  );
+  if (recipeId !== 0) {
+    throw new Error(`${label}.selectorCounts.recipeId must be 0 for the REI exporter.`);
+  }
+  if (!Array.isArray(value.requested) || value.requested.length === 0 || value.requested.length > 32) {
+    throw new Error(`${label}.requested must contain 1..32 selectors.`);
+  }
+  if (sourceIndex !== value.requested.length) {
+    throw new Error(`${label}.selectorCounts.sourceIndex must equal requested.length.`);
+  }
+  if (value.requested.length !== manifest.counts.recipes) {
+    throw new Error(
+      `${label}.requested.length must equal manifest.counts.recipes for a sampled export.`,
+    );
+  }
+  const seen = new Set();
+  const requested = value.requested.map((selector, index) => {
+    const selectorLabel = `${label}.requested[${index}]`;
+    if (!hasExactKeys(selector, ['categoryId', 'sourceIndex'])) {
+      throw new Error(`${selectorLabel} must contain exactly categoryId and sourceIndex.`);
+    }
+    if (
+      typeof selector.categoryId !== 'string' ||
+      !RESOURCE_LOCATION_PATTERN.test(selector.categoryId)
+    ) {
+      throw new Error(`${selectorLabel}.categoryId must be a canonical resource location.`);
+    }
+    const selectorSourceIndex = requireNonNegativeSafeInteger(
+      selector.sourceIndex,
+      `${selectorLabel}.sourceIndex`,
+    );
+    const identity = `${selector.categoryId}\u0000${selectorSourceIndex}`;
+    if (seen.has(identity)) throw new Error(`${selectorLabel} duplicates an earlier selector.`);
+    seen.add(identity);
+    return Object.freeze({
+      categoryId: selector.categoryId,
+      sourceIndex: selectorSourceIndex,
+    });
+  });
+  return Object.freeze({
+    selectorCounts: Object.freeze({recipeId, sourceIndex}),
+    requested: Object.freeze(requested),
+  });
+}
+
+function validateProfileManifestExtensions(manifest, profile, label) {
+  const qualitySample = manifest.qualitySample;
+  let normalizedQualitySample;
+  if (qualitySample !== undefined) {
+    if (profile === MULTIBLOCK_MADNESS_112_PROFILE) {
+      normalizedQualitySample = validateMm1QualitySample(
+        qualitySample,
+        manifest,
+        `${label}.qualitySample`,
+      );
+    } else if (profile === MULTIBLOCK_MADNESS_2_118_PROFILE) {
+      normalizedQualitySample = validateMm2QualitySample(
+        qualitySample,
+        manifest,
+        `${label}.qualitySample`,
+      );
+    } else {
+      throw new Error(`${label}.qualitySample is not permitted by this profile contract.`);
+    }
+  }
+
+  if (profile === MULTIBLOCK_MADNESS_2_118_PROFILE) {
+    const count = requireNonNegativeSafeInteger(
+      manifest.counts.nativeIconCorrections,
+      `${label}.counts.nativeIconCorrections`,
+    );
+    const diagnostic = requireNonNegativeSafeInteger(
+      manifest.diagnostics.nativeIconCorrections,
+      `${label}.diagnostics.nativeIconCorrections`,
+    );
+    const transparentIcons = requireNonNegativeSafeInteger(
+      manifest.diagnostics.transparentIcons,
+      `${label}.diagnostics.transparentIcons`,
+    );
+    if (count !== diagnostic) {
+      throw new Error(
+        `${label} native-icon correction counts disagree: counts=${count}, diagnostics=${diagnostic}.`,
+      );
+    }
+    if (count > manifest.counts.items) {
+      throw new Error(
+        `${label}.counts.nativeIconCorrections cannot exceed manifest.counts.items.`,
+      );
+    }
+    if (transparentIcons !== 0) {
+      throw new Error(
+        `${label}.diagnostics.transparentIcons must be 0 for publication; received ${transparentIcons}.`,
+      );
+    }
+  }
+  if (profile === GENERIC_JEI_120_PROFILE) {
+    requirePackIdentity(manifest.pack, `${label}.pack`);
+  }
+  if (profile === GTNH_1710_PROFILE) {
+    const issues = gtnhManifestQualityIssues(manifest, label);
+    if (issues.length > 0) {
+      throw new Error(
+        `${label} failed the strict GTNH NEI telemetry contract with ` +
+          `${issues.length} issue(s):\n${issues.map(issue => `- ${issue}`).join('\n')}`,
+      );
+    }
+    const requirements = qualityProfileRequirementsFor(profile);
+    for (const [name, expected] of Object.entries(requirements.provenance)) {
+      if (manifest[name] !== expected) {
+        throw new Error(
+          `${label}.${name} must be ${JSON.stringify(expected)}; received ` +
+            `${JSON.stringify(manifest[name])}.`,
+        );
+      }
+    }
+    const pack = requirePackIdentity(manifest.pack, `${label}.pack`);
+    if (!isDeepStrictEqual(pack, requirements.packIdentity)) {
+      throw new Error(
+        `${label}.pack must be the exact GTNH identity ${JSON.stringify(
+          requirements.packIdentity,
+        )}; received ${JSON.stringify(pack)}.`,
+      );
+    }
+  }
+  return normalizedQualitySample;
+}
+
 function assertProfileQuality(input, profile, label) {
   if (profile === null) return;
   const issues = exportQualityIssues(input, profile);
@@ -137,7 +360,13 @@ export function recipePreviewContractForProfile(profile, rawManifest) {
         EXPORT_QUALITY_PROFILE_IDS.join(', '),
     );
   }
-  if (resolvedProfile === MEATBALLCRAFT_112_PROFILE) return MEATBALLCRAFT_CONTRACT;
+  if (resolvedProfile === MEATBALLCRAFT_112_PROFILE) {
+    if (rawManifest?.pack === undefined) return MEATBALLCRAFT_CONTRACT;
+    return Object.freeze({
+      ...MEATBALLCRAFT_CONTRACT,
+      pack: requirePackIdentity(rawManifest.pack, 'MeatballCraft manifest.pack'),
+    });
+  }
 
   const requirements = qualityProfileRequirementsFor(resolvedProfile);
   assertProfileQuality(
@@ -145,19 +374,21 @@ export function recipePreviewContractForProfile(profile, rawManifest) {
     resolvedProfile,
     'Raw export manifest',
   );
+  const countKeys = manifestCountKeysForProfile(resolvedProfile);
+  const diagnosticKeys = manifestDiagnosticKeysForProfile(resolvedProfile);
   if (!isRecord(rawManifest?.settings)) {
     throw new Error(`${requirements.label} manifest.settings must be an object.`);
   }
-  if (!hasExactKeys(rawManifest?.counts, DATASET_COUNT_KEYS)) {
+  if (!hasExactKeys(rawManifest?.counts, countKeys)) {
     throw new Error(
       `${requirements.label} manifest.counts must contain exactly ` +
-        `${DATASET_COUNT_KEYS.join(', ')}.`,
+        `${countKeys.join(', ')}.`,
     );
   }
-  if (!hasExactKeys(rawManifest?.diagnostics, ['failureEvents', 'failureEventsOmitted'])) {
+  if (!hasExactKeys(rawManifest?.diagnostics, diagnosticKeys)) {
     throw new Error(
       `${requirements.label} manifest.diagnostics must contain exactly ` +
-        'failureEvents and failureEventsOmitted.',
+        `${diagnosticKeys.join(', ')}.`,
     );
   }
   if (rawManifest.diagnostics.failureEvents !== rawManifest.counts.failures) {
@@ -167,10 +398,26 @@ export function recipePreviewContractForProfile(profile, rawManifest) {
         `counts.failures=${String(rawManifest.counts.failures)}.`,
     );
   }
+  const qualitySample = validateProfileManifestExtensions(
+    rawManifest,
+    resolvedProfile,
+    `${requirements.label} manifest`,
+  );
+
+  const diagnostics = Object.fromEntries(
+    diagnosticKeys.map(name => [name, rawManifest.diagnostics[name]]),
+  );
+  if (resolvedProfile === GTNH_1710_PROFILE) {
+    diagnostics.nei = Object.freeze({...diagnostics.nei});
+  }
 
   return Object.freeze({
     format: requirements.format,
     minecraft: requirements.minecraft,
+    ...(requirements.provenance ?? {}),
+    ...(rawManifest.pack === undefined
+      ? {}
+      : {pack: requirePackIdentity(rawManifest.pack, `${requirements.label} manifest.pack`)}),
     settings: Object.freeze({
       ...rawManifest.settings,
       ...(isRecord(rawManifest.settings.worldStartupOptimization)
@@ -182,9 +429,10 @@ export function recipePreviewContractForProfile(profile, rawManifest) {
         : {}),
     }),
     counts: Object.freeze(
-      Object.fromEntries(DATASET_COUNT_KEYS.map(name => [name, rawManifest.counts[name]])),
+      Object.fromEntries(countKeys.map(name => [name, rawManifest.counts[name]])),
     ),
-    diagnostics: Object.freeze({...rawManifest.diagnostics}),
+    diagnostics: Object.freeze(diagnostics),
+    ...(qualitySample === undefined ? {} : {qualitySample}),
     recipeImages: Object.freeze({previews: rawManifest.counts.recipes, missing: 0}),
     hostedWeb: HOSTED_WEB_CONTRACT,
   });
@@ -307,23 +555,29 @@ function validateRepairProvenance(manifest, contract, label) {
   }
 }
 
-function validateContract(contract) {
+function validateContract(contract, profile = null) {
   if (!isRecord(contract)) throw new Error('Expected dataset contract must be an object.');
+  const countKeys = manifestCountKeysForProfile(profile);
+  const diagnosticKeys = manifestDiagnosticKeysForProfile(profile);
   if (!Number.isSafeInteger(contract.format)) {
     throw new Error('Expected dataset contract format must be a safe integer.');
   }
   if (typeof contract.minecraft !== 'string' || contract.minecraft.length === 0) {
     throw new Error('Expected dataset contract minecraft version must be a non-empty string.');
   }
+  if (contract.pack !== undefined) {
+    requirePackIdentity(contract.pack, 'Expected dataset contract.pack');
+  }
   if (
     !isRecord(contract.settings) ||
-    !hasExactKeys(contract.counts, DATASET_COUNT_KEYS) ||
-    !hasExactKeys(contract.diagnostics, ['failureEvents', 'failureEventsOmitted']) ||
+    !hasExactKeys(contract.counts, countKeys) ||
+    !hasExactKeys(contract.diagnostics, diagnosticKeys) ||
     !hasExactKeys(contract.recipeImages, ['previews', 'missing'])
   ) {
     throw new Error(
       'Expected dataset contract must contain settings/counts plus exact diagnostics and ' +
-        `recipeImages fields; counts must contain exactly ${DATASET_COUNT_KEYS.join(', ')}.`,
+        `recipeImages fields; counts must contain exactly ${countKeys.join(', ')} and ` +
+        `diagnostics exactly ${diagnosticKeys.join(', ')}.`,
     );
   }
   const worldStartupOptimization = contract.settings.worldStartupOptimization;
@@ -349,6 +603,12 @@ function validateContract(contract) {
       throw new Error(`Expected dataset count ${name} must be a non-negative safe integer.`);
     }
   }
+  for (const [name, value] of Object.entries(contract.diagnostics)) {
+    if (profile === GTNH_1710_PROFILE && name === 'nei') continue;
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new Error(`Expected dataset diagnostic ${name} must be a non-negative safe integer.`);
+    }
+  }
   for (const [name, value] of Object.entries(contract.recipeImages)) {
     if (!Number.isSafeInteger(value) || value < 0) {
       throw new Error(
@@ -369,6 +629,7 @@ function validateContract(contract) {
       'Expected diagnostics must serialize every audited failure event without omission.',
     );
   }
+  validateProfileManifestExtensions(contract, profile, 'Expected dataset contract');
   if (contract.hostedWeb !== undefined && !isRecord(contract.hostedWeb)) {
     throw new Error('Expected hostedWeb contract must be an object when provided.');
   }
@@ -404,6 +665,11 @@ function validateDatasetManifest(manifest, contract, label, {hosted = false} = {
     'settings',
   ];
   if (contract.repairProvenance !== undefined) expectedManifestKeys.push('repairProvenance');
+  if (contract.qualitySample !== undefined) expectedManifestKeys.push('qualitySample');
+  for (const name of GTNH_PROVENANCE_KEYS) {
+    if (contract[name] !== undefined) expectedManifestKeys.push(name);
+  }
+  if (contract.pack !== undefined) expectedManifestKeys.push('pack');
   if (hosted) expectedManifestKeys.push('publicationId', 'web');
   if (!hasExactKeys(manifest, expectedManifestKeys)) {
     throw new Error(
@@ -437,6 +703,20 @@ function validateDatasetManifest(manifest, contract, label, {hosted = false} = {
     throw new Error(`${label}.generatedAt must be a valid timestamp.`);
   }
   assertExactRecord(manifest.settings, contract.settings, `${label}.settings`);
+  for (const name of GTNH_PROVENANCE_KEYS) {
+    if (contract[name] !== undefined && manifest[name] !== contract[name]) {
+      throw new Error(
+        `${label}.${name} must be ${JSON.stringify(contract[name])}; received ` +
+          `${JSON.stringify(manifest[name])}.`,
+      );
+    }
+  }
+  if (contract.pack !== undefined) {
+    assertExactRecord(manifest.pack, contract.pack, `${label}.pack`);
+  }
+  if (contract.qualitySample !== undefined) {
+    assertExactRecord(manifest.qualitySample, contract.qualitySample, `${label}.qualitySample`);
+  }
   assertExactRecord(manifest.counts, contract.counts, `${label}.counts`);
   assertExactRecord(manifest.diagnostics, contract.diagnostics, `${label}.diagnostics`);
   validateRepairProvenance(manifest, contract, label);
@@ -1617,7 +1897,7 @@ export async function buildRecipePreviewSidecar({
     ]);
     const datasetContract =
       contract ?? recipePreviewContractForProfile(resolvedProfile, rawManifest);
-    validateContract(datasetContract);
+    validateContract(datasetContract, resolvedProfile);
     if (resolvedProfile !== null) {
       if (!Array.isArray(failures)) {
         throw new Error('Raw export failures.json must contain an array.');

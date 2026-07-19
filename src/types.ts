@@ -11,6 +11,11 @@ export interface Manifest {
   durationMs: number;
   aborted: boolean;
   minecraft: string;
+  /**
+   * Canonical modpack identity emitted by current exporters. It remains optional while the
+   * existing pre-identity publication is online; new hosted publications require it.
+   */
+  pack?: PackIdentity;
   settings: { iconScale: number; recipeScale: number; mobCanvas: number };
   counts: {
     items: number;
@@ -46,6 +51,23 @@ export interface Manifest {
           };
         };
   };
+}
+
+export interface PackIdentity {
+  /** User-facing canonical pack name, distinct from a mutable local instance name. */
+  name: string;
+  /** Pack release/version. Current publication tooling requires it. */
+  version?: string;
+  identitySource:
+    | 'explicit-request'
+    | 'curseforge'
+    | 'prism'
+    | 'modrinth-index'
+    | 'game-directory';
+  instanceName?: string;
+  provider?: 'curseforge' | 'prism' | 'modrinth';
+  projectId?: string;
+  versionId?: string;
 }
 
 export interface ShardedJsonPart {

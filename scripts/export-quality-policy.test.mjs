@@ -3,6 +3,8 @@ import test from 'node:test';
 import {
   EXPORT_QUALITY_PROFILE_IDS,
   exportQualityIssues,
+  GENERIC_JEI_120_PROFILE,
+  GTNH_1710_PROFILE,
   MEATBALLCRAFT_112_PROFILE,
   MULTIBLOCK_MADNESS_112_PROFILE,
   MULTIBLOCK_MADNESS_2_118_PROFILE,
@@ -30,10 +32,23 @@ test('accepts the exact MeatballCraft 1.12.2 exporter contract', () => {
 
 test('registers explicit immutable requirements for all production pack profiles', () => {
   assert.deepEqual(EXPORT_QUALITY_PROFILE_IDS, [
+    GENERIC_JEI_120_PROFILE,
     MEATBALLCRAFT_112_PROFILE,
     MULTIBLOCK_MADNESS_112_PROFILE,
     MULTIBLOCK_MADNESS_2_118_PROFILE,
+    GTNH_1710_PROFILE,
   ]);
+  assert.deepEqual(qualityProfileRequirementsFor(GENERIC_JEI_120_PROFILE), {
+    id: GENERIC_JEI_120_PROFILE,
+    label: 'Generic JEI 1.20.1',
+    minecraft: '1.20.1',
+    format: 1,
+    iconScale: 4,
+    recipeScale: 2,
+    recipeViewer: 'JEI',
+    corpus: 'dynamic-complete',
+    requiresPackIdentity: true,
+  });
   assert.deepEqual(qualityProfileRequirementsFor(MULTIBLOCK_MADNESS_112_PROFILE), {
     id: MULTIBLOCK_MADNESS_112_PROFILE,
     label: 'Multiblock Madness',
@@ -54,6 +69,155 @@ test('registers explicit immutable requirements for all production pack profiles
     recipeViewer: 'REI',
     corpus: 'dynamic-complete',
   });
+  assert.deepEqual(qualityProfileRequirementsFor(GTNH_1710_PROFILE), {
+    id: GTNH_1710_PROFILE,
+    label: 'GT New Horizons',
+    minecraft: '1.7.10',
+    format: 1,
+    iconScale: 1,
+    recipeScale: 2,
+    recipeViewer: 'NEI',
+    corpus: 'dynamic-complete',
+    provenance: {
+      profile: GTNH_1710_PROFILE,
+      forge: '10.13.4.1614',
+      nei: '2.8.44-GTNH',
+    },
+    packIdentity: {
+      name: 'GT New Horizons',
+      version: '2.8.4',
+      identitySource: 'explicit-request',
+    },
+  });
+});
+
+function validGenericJeiManifest() {
+  return {
+    format: 1,
+    minecraft: '1.20.1',
+    pack: {
+      name: 'Example Modern Pack',
+      version: '4.2.0',
+      identitySource: 'explicit-request',
+    },
+    aborted: false,
+    settings: {iconScale: 4, recipeScale: 2, mobCanvas: 256},
+    counts: {items: 3, recipes: 2, categories: 1, mobs: 0, blockDrops: 0, failures: 1},
+    diagnostics: {failureEvents: 1, failureEventsOmitted: 0},
+  };
+}
+
+test('accepts the strict generic JEI 1.20.1 manifest telemetry and pack identity', () => {
+  assert.deepEqual(
+    exportQualityIssues(
+      {
+        manifest: validGenericJeiManifest(),
+        failures: ['mob example:missing_renderer: renderer unavailable'],
+        semanticErrorRecipes: 0,
+      },
+      GENERIC_JEI_120_PROFILE,
+    ),
+    [],
+  );
+});
+
+test('generic JEI profile rejects drifted diagnostics, counts, and identity', () => {
+  const manifest = validGenericJeiManifest();
+  manifest.counts.futureCounter = 1;
+  manifest.diagnostics.futureCounter = 1;
+  manifest.diagnostics.failureEvents = 0;
+  manifest.pack.identitySource = 'untrusted-launcher';
+  const issues = exportQualityIssues(
+    {manifest, failures: [], semanticErrorRecipes: 0},
+    GENERIC_JEI_120_PROFILE,
+  );
+  assert.match(issues.join('\n'), /manifest\.counts must contain exactly/);
+  assert.match(issues.join('\n'), /manifest\.diagnostics must contain exactly/);
+  assert.match(issues.join('\n'), /failureEvents \(0\).*counts\.failures \(1\)/);
+  assert.match(issues.join('\n'), /identitySource/);
+});
+
+function validGtnhManifest() {
+  return {
+    format: 1,
+    minecraft: '1.7.10',
+    profile: GTNH_1710_PROFILE,
+    forge: '10.13.4.1614',
+    nei: '2.8.44-GTNH',
+    pack: {
+      name: 'GT New Horizons',
+      version: '2.8.4',
+      identitySource: 'explicit-request',
+    },
+    aborted: false,
+    settings: {iconScale: 1, recipeScale: 2},
+    counts: {items: 2, recipes: 3, categories: 1, mobs: 0, blockDrops: 0, failures: 0},
+    diagnostics: {
+      failureEvents: 0,
+      failureEventsOmitted: 0,
+      nei: {
+        itemListLoaded: true,
+        registeredCraftingHandlers: 1,
+        loadedCategories: 1,
+        recipesEnumerated: 3,
+        recipeWidgetsRendered: 3,
+        itemIconsRendered: 2,
+        unloadedHandlerCategories: 0,
+        ambiguousHandlerCategories: 0,
+        duplicateHandlerCategories: 0,
+      },
+    },
+  };
+}
+
+test('accepts only a complete zero-failure GTNH NEI export contract', () => {
+  assert.deepEqual(
+    exportQualityIssues(
+      {manifest: validGtnhManifest(), failures: [], semanticErrorRecipes: 0},
+      GTNH_1710_PROFILE,
+    ),
+    [],
+  );
+});
+
+test('GTNH rejects unloaded, unknown, inconsistent, or drifted NEI diagnostics', () => {
+  const manifest = validGtnhManifest();
+  manifest.diagnostics.nei.unloadedHandlerCategories = 1;
+  manifest.diagnostics.nei.recipeWidgetsRendered = 2;
+  manifest.diagnostics.nei.unexpectedHandlerCategories = 1;
+  manifest.pack.version = '2.8.3';
+  const issues = exportQualityIssues(
+    {manifest, failures: [], semanticErrorRecipes: 0},
+    GTNH_1710_PROFILE,
+  );
+  assert.match(issues.join('\n'), /diagnostics\.nei must contain exactly/);
+  assert.match(issues.join('\n'), /unloadedHandlerCategories.*0/);
+  assert.match(issues.join('\n'), /recipeWidgetsRendered.*counts\.recipes/);
+  assert.match(issues.join('\n'), /manifest\.pack\.version "2\.8\.4"/);
+});
+
+test('GTNH rejects every serialized failure and classifies exporter failure prefixes', () => {
+  const manifest = validGtnhManifest();
+  const failures = [
+    'HANDLER_UNLOADED: nei.handler',
+    'RECIPE_SEMANTICS: nei.handler #4',
+    'QUANTITY_INVALID: nei.handler #4 input 0',
+    'RECIPE_WIDGET_RENDER: nei.handler #4',
+    'UNRECOGNIZED_FUTURE_FAILURE: must remain fail-closed',
+  ];
+  manifest.counts.failures = failures.length;
+  manifest.diagnostics.failureEvents = failures.length;
+  const issues = exportQualityIssues(
+    {manifest, failures, semanticErrorRecipes: 0},
+    GTNH_1710_PROFILE,
+  );
+  assert.match(issues.join('\n'), /counts\.failures to be 0/);
+  assert.match(issues.join('\n'), /failureEvents to be 0/);
+  assert.match(issues.join('\n'), /failures\.json to be empty/);
+  assert.match(issues.join('\n'), /category failure/);
+  assert.match(issues.join('\n'), /ingredient-semantics/);
+  assert.match(issues.join('\n'), /ingredient-quantity/);
+  assert.match(issues.join('\n'), /recipe-preview render\/write/);
 });
 
 test('accepts dynamic complete Multiblock Madness profiles only at 16px icons and 2x layouts', () => {

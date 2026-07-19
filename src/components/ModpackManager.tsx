@@ -98,7 +98,7 @@ export function ModpackManager({
   const saveCurrent = async () => {
     const trimmed = name.trim();
     if (!trimmed) {
-      setError('Enter a name for this modpack.');
+      setError('Enter a name for this snapshot.');
       return;
     }
     setBusy(true);
@@ -149,9 +149,9 @@ export function ModpackManager({
         <Pressable style={styles.card} onPress={() => {}}>
           <View style={styles.header}>
             <View style={{flex: 1}}>
-              <Text style={styles.title}>Saved modpacks</Text>
+              <Text style={styles.title}>Saved snapshots</Text>
               <Text style={styles.subtitle}>
-                Save or refresh a snapshot from the active recipe export.
+                Save or refresh a named snapshot of the active recipe export.
               </Text>
             </View>
             <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
@@ -163,7 +163,7 @@ export function ModpackManager({
             <TextInput
               value={name}
               onChangeText={setName}
-              placeholder="Modpack name"
+              placeholder="Snapshot name"
               placeholderTextColor={theme.textDim}
               style={styles.input}
               maxLength={80}
@@ -192,7 +192,7 @@ export function ModpackManager({
             {busy && packs.length === 0 ? (
               <ActivityIndicator color={theme.accent} style={{margin: 24}} />
             ) : packs.length === 0 ? (
-              <Text style={styles.empty}>No modpacks saved yet.</Text>
+              <Text style={styles.empty}>No snapshots saved yet.</Text>
             ) : (
               packs.map(pack => (
                 <View key={pack.id} style={styles.pack}>

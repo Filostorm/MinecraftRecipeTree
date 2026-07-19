@@ -1,10 +1,11 @@
-import React from 'react';
+import React, {useEffect, useMemo, useState} from 'react';
 import {
   Modal,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -24,6 +25,31 @@ export function DatasetPicker({
   onSelect(slug: string): void;
   onClose(): void;
 }) {
+  const [query, setQuery] = useState('');
+
+  useEffect(() => {
+    if (!visible) setQuery('');
+  }, [visible]);
+
+  const filteredDatasets = useMemo(() => {
+    const normalizedQuery = query.trim().toLocaleLowerCase();
+    const matches = normalizedQuery.length === 0
+      ? [...datasets]
+      : datasets.filter(dataset =>
+          [
+            dataset.displayName,
+            dataset.slug,
+            dataset.minecraftVersion,
+            dataset.packVersion,
+          ].some(value => value.toLocaleLowerCase().includes(normalizedQuery)),
+        );
+    return matches.sort((left, right) => {
+      if (left.slug === selectedSlug) return -1;
+      if (right.slug === selectedSlug) return 1;
+      return left.displayName.localeCompare(right.displayName, undefined, {sensitivity: 'base'});
+    });
+  }, [datasets, query, selectedSlug]);
+
   return (
     <Modal
       visible={visible}
@@ -58,13 +84,52 @@ export function DatasetPicker({
             </TouchableOpacity>
           </View>
 
+          <View style={styles.searchRegion}>
+            <TextInput
+              value={query}
+              onChangeText={setQuery}
+              placeholder="Search name, Minecraft version, or pack version"
+              placeholderTextColor={theme.textDim}
+              style={styles.searchInput}
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="search"
+              accessibilityLabel="Search published modpacks"
+              accessibilityHint="Filters by pack name, identifier, Minecraft version, or pack version"
+              onSubmitEditing={() => {
+                if (filteredDatasets.length === 1) onSelect(filteredDatasets[0].slug);
+              }}
+            />
+            {query.length > 0 && (
+              <TouchableOpacity
+                style={styles.clearButton}
+                onPress={() => setQuery('')}
+                accessibilityRole="button"
+                accessibilityLabel="Clear modpack search"
+                focusable>
+                <Text style={styles.clearButtonText}>Clear</Text>
+              </TouchableOpacity>
+            )}
+            <Text style={styles.resultCount} accessibilityLiveRegion="polite">
+              {filteredDatasets.length} of {datasets.length}{' '}
+              {datasets.length === 1 ? 'pack' : 'packs'}
+            </Text>
+          </View>
+
           <ScrollView
             style={styles.list}
             contentContainerStyle={styles.listContent}
             keyboardShouldPersistTaps="handled"
             accessibilityRole="list"
             accessibilityLabel="Published modpacks">
-            {datasets.map(dataset => {
+            {filteredDatasets.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyTitle}>No matching modpacks</Text>
+                <Text style={styles.emptyText}>
+                  Try a pack name, Minecraft version, or pack release number.
+                </Text>
+              </View>
+            ) : filteredDatasets.map(dataset => {
               const selected = dataset.slug === selectedSlug;
               return (
                 <TouchableOpacity
@@ -138,6 +203,43 @@ const styles = StyleSheet.create({
     backgroundColor: theme.panelAlt,
   },
   closeText: {color: theme.textDim, fontSize: 16},
+  searchRegion: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.border,
+  },
+  searchInput: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 260,
+    minWidth: 0,
+    minHeight: 44,
+    color: theme.text,
+    backgroundColor: theme.bg,
+    borderColor: theme.border,
+    borderWidth: 1,
+    borderRadius: 9,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    outlineStyle: 'none',
+  } as object,
+  clearButton: {
+    minHeight: 44,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.panelAlt,
+  },
+  clearButtonText: {color: theme.accent, fontSize: 12, fontWeight: '700'},
+  resultCount: {color: theme.textDim, fontSize: 10, paddingHorizontal: 2},
   list: {minHeight: 0},
   listContent: {padding: 12, gap: 10},
   option: {
@@ -162,4 +264,7 @@ const styles = StyleSheet.create({
   optionMeta: {color: theme.textDim, fontSize: 12, lineHeight: 17, marginTop: 3},
   selection: {color: theme.textDim, fontSize: 12, fontWeight: '700'},
   selectionActive: {color: theme.accent},
+  emptyState: {alignItems: 'center', paddingHorizontal: 18, paddingVertical: 38},
+  emptyTitle: {color: theme.text, fontSize: 15, fontWeight: '700'},
+  emptyText: {color: theme.textDim, fontSize: 12, lineHeight: 18, marginTop: 5, textAlign: 'center'},
 });

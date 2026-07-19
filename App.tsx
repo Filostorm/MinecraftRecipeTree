@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import {ItemDetailModal} from './src/components/ItemDetailModal';
 import {DatasetPicker} from './src/components/DatasetPicker';
+import {DatasetSwitcher} from './src/components/DatasetSwitcher';
 import {ItemsScreen} from './src/components/ItemsScreen';
 import {MobsScreen} from './src/components/MobsScreen';
 import {ModpackManager} from './src/components/ModpackManager';
@@ -37,53 +38,81 @@ export default function App() {
 
 function DatasetRoot() {
   const catalog = useDatasetCatalog();
+  const [showDatasetPicker, setShowDatasetPicker] = useState(false);
+  const datasets = catalog.state.status === 'loading' ? [] : catalog.state.datasets;
+  const selectedSlug = catalog.state.status === 'ready' ? catalog.state.selected.slug : null;
+
+  const datasetControls = (
+    <>
+      <DatasetSwitcher
+        status={catalog.state.status}
+        datasets={datasets}
+        selectedSlug={selectedSlug}
+        onSelect={catalog.select}
+        onOpenPicker={() => setShowDatasetPicker(true)}
+      />
+      <DatasetPicker
+        visible={showDatasetPicker}
+        datasets={datasets}
+        selectedSlug={selectedSlug}
+        onSelect={slug => {
+          catalog.select(slug);
+          setShowDatasetPicker(false);
+        }}
+        onClose={() => setShowDatasetPicker(false)}
+      />
+    </>
+  );
+
   if (catalog.state.status === 'loading') {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator color={theme.accent} size="large" />
-        <Text style={styles.loadingText}>loading published modpacks</Text>
+      <View style={styles.datasetRoot}>
+        {datasetControls}
+        <View style={styles.center}>
+          <ActivityIndicator color={theme.accent} size="large" />
+          <Text style={styles.loadingText}>loading published modpacks</Text>
+        </View>
       </View>
     );
   }
   if (catalog.state.status === 'error') {
     return (
-      <View style={styles.center}>
-        <Text style={styles.errorTitle}>Modpack selection unavailable</Text>
-        <Text style={styles.errorText}>{catalog.state.message}</Text>
-        {catalog.state.datasets.length > 0 && (
-          <View style={styles.datasetRecovery}>
-            <Text style={styles.datasetRecoveryLabel}>Choose a valid published pack:</Text>
-            {catalog.state.datasets.map(dataset => (
-              <TouchableOpacity
-                key={dataset.slug}
-                style={styles.datasetRecoveryButton}
-                onPress={() => catalog.select(dataset.slug)}
-                accessibilityRole="button"
-                accessibilityLabel={`Open ${dataset.displayName}, Minecraft ${dataset.minecraftVersion}`}
-                focusable>
-                <Text style={styles.datasetRecoveryName}>{dataset.displayName}</Text>
-                <Text style={styles.datasetRecoveryMeta}>
-                  Minecraft {dataset.minecraftVersion} · pack {dataset.packVersion}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
+      <View style={styles.datasetRoot}>
+        {datasetControls}
+        <View style={styles.center}>
+          <Text style={styles.errorTitle}>Modpack selection unavailable</Text>
+          <Text style={styles.errorText}>{catalog.state.message}</Text>
+          {catalog.state.datasets.length > 0 && (
+            <TouchableOpacity
+              style={styles.reloadBtn}
+              onPress={() => setShowDatasetPicker(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Choose a valid published modpack"
+              focusable>
+              <Text style={styles.reloadBtnText}>Choose a published modpack</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
     );
   }
 
   const {source} = catalog.state;
   return (
-    <DataProvider
-      key={datasetMountKey(source.descriptor)}
-      descriptor={source.descriptor}
-      base={source.base}
-      previewBase={source.previewBase}>
-      <UiProvider>
-        <Root />
-      </UiProvider>
-    </DataProvider>
+    <View style={styles.datasetRoot}>
+      {datasetControls}
+      <View style={styles.datasetContent}>
+        <DataProvider
+          key={datasetMountKey(source.descriptor)}
+          descriptor={source.descriptor}
+          base={source.base}
+          previewBase={source.previewBase}>
+          <UiProvider>
+            <Root />
+          </UiProvider>
+        </DataProvider>
+      </View>
+    </View>
   );
 }
 
@@ -136,17 +165,11 @@ function Root() {
 
 function Shell() {
   const data = useData();
-  const catalog = useDatasetCatalog();
   const {tab} = useUi();
-  const [showDatasetPicker, setShowDatasetPicker] = useState(false);
-  const [showModpacks, setShowModpacks] = useState(false);
-  if (catalog.state.status !== 'ready') {
-    throw new Error('Loaded recipe data has no active dataset catalog descriptor.');
-  }
+  const [showSnapshots, setShowSnapshots] = useState(false);
   return (
     <View style={styles.shell}>
       <View style={styles.header}>
-        <Text style={styles.title}>⛏ Recipe Tree</Text>
         <Text style={styles.subtitle}>
           Minecraft {data.descriptor.minecraftVersion} · pack {data.descriptor.packVersion} ·{' '}
           {Object.keys(data.manifest.mods ?? {}).length} mods · {data.items.length} items ·{' '}
@@ -157,25 +180,12 @@ function Shell() {
             ? ' · JEI layout previews available'
             : ' · JEI layout previews unavailable'}
         </Text>
-        <View style={{flex: 1}} />
-        <TouchableOpacity
-          style={styles.datasetButton}
-          onPress={() => setShowDatasetPicker(true)}
-          accessibilityRole="button"
-          accessibilityLabel={`Change modpack. Current pack is ${data.descriptor.displayName}`}
-          accessibilityHint="Opens the published recipe dataset picker"
-          focusable>
-          <Text style={styles.datasetButtonLabel}>MODPACK</Text>
-          <Text style={styles.datasetButtonText} numberOfLines={1}>
-            {data.descriptor.displayName} ▾
-          </Text>
-        </TouchableOpacity>
         <TouchableOpacity
           style={styles.modpackBtn}
-          onPress={() => setShowModpacks(true)}
+          onPress={() => setShowSnapshots(true)}
           accessibilityRole="button"
-          accessibilityLabel="Open saved modpack snapshots">
-          <Text style={styles.modpackBtnText}>▣ Saved views</Text>
+          accessibilityLabel="Open saved export snapshots">
+          <Text style={styles.modpackBtnText}>▣ Saved snapshots</Text>
         </TouchableOpacity>
         <TabBtn tab="items" label="Items" />
         <TabBtn tab="graph" label="Graph" />
@@ -194,17 +204,7 @@ function Shell() {
         </View>
       )}
       <ItemDetailModal />
-      <DatasetPicker
-        visible={showDatasetPicker}
-        datasets={catalog.state.datasets}
-        selectedSlug={catalog.state.selected.slug}
-        onSelect={slug => {
-          catalog.select(slug);
-          setShowDatasetPicker(false);
-        }}
-        onClose={() => setShowDatasetPicker(false)}
-      />
-      <ModpackManager visible={showModpacks} onClose={() => setShowModpacks(false)} />
+      <ModpackManager visible={showSnapshots} onClose={() => setShowSnapshots(false)} />
     </View>
   );
 }
@@ -221,6 +221,8 @@ function TabBtn({tab, label}: {tab: Tab; label: string}) {
 
 const styles = StyleSheet.create({
   app: {flex: 1, minHeight: 0, backgroundColor: theme.bg},
+  datasetRoot: {flex: 1, minHeight: 0, backgroundColor: theme.bg},
+  datasetContent: {flex: 1, minHeight: 0},
   center: {flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24},
   loadingText: {color: theme.textDim, marginTop: 14},
   errorTitle: {color: theme.text, fontSize: 18, fontWeight: '700'},
@@ -240,20 +242,6 @@ const styles = StyleSheet.create({
     borderColor: theme.accent,
   },
   reloadBtnText: {color: theme.accent, fontSize: 13, fontWeight: '700'},
-  datasetRecovery: {width: '100%', maxWidth: 560, marginTop: 20, gap: 10},
-  datasetRecoveryLabel: {color: theme.textDim, fontSize: 12},
-  datasetRecoveryButton: {
-    minHeight: 58,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 9,
-    borderWidth: 1,
-    borderColor: theme.border,
-    backgroundColor: theme.panel,
-    justifyContent: 'center',
-  },
-  datasetRecoveryName: {color: theme.accent, fontSize: 14, fontWeight: '700'},
-  datasetRecoveryMeta: {color: theme.textDim, fontSize: 11, marginTop: 3},
   shell: {flex: 1, minHeight: 0},
   header: {
     flexDirection: 'row',
@@ -266,8 +254,7 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 8,
   },
-  title: {color: theme.text, fontSize: 17, fontWeight: '800'},
-  subtitle: {color: theme.textDim, fontSize: 11, marginLeft: 10},
+  subtitle: {color: theme.textDim, fontSize: 11, flexGrow: 1, flexShrink: 1, minWidth: 220},
   tabBtn: {
     paddingHorizontal: 14,
     paddingVertical: 7,
@@ -278,19 +265,6 @@ const styles = StyleSheet.create({
   tabBtnActive: {backgroundColor: theme.panelAlt, borderColor: theme.border},
   tabBtnText: {color: theme.textDim, fontSize: 13},
   tabBtnTextActive: {color: theme.accent, fontWeight: '700'},
-  datasetButton: {
-    minWidth: 150,
-    maxWidth: 260,
-    minHeight: 44,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: theme.accent,
-    justifyContent: 'center',
-  },
-  datasetButtonLabel: {color: theme.textDim, fontSize: 9, fontWeight: '800'},
-  datasetButtonText: {color: theme.accent, fontSize: 12, fontWeight: '700', marginTop: 1},
   modpackBtn: {
     minHeight: 44,
     paddingHorizontal: 12,

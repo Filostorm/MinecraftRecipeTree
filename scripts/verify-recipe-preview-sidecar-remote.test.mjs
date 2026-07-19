@@ -8,11 +8,21 @@ import test from 'node:test';
 import {verifyRemoteRecipePreviewSidecar} from './verify-recipe-preview-sidecar-remote.mjs';
 
 const DATASET_PUBLICATION_ID = 'a'.repeat(64);
-const quietLogger = Object.freeze({
-  info() {},
-  warn() {},
-  error() {},
-});
+const PUBLIC_BASE_PATH = '/dataset/preview-sets';
+
+function quietLogger() {
+  return {info() {}, warn() {}, error() {}};
+}
+
+function recordingLogger() {
+  const messages = {info: [], warn: [], error: []};
+  return {
+    messages,
+    info(message) { messages.info.push(message); },
+    warn(message) { messages.warn.push(message); },
+    error(message) { messages.error.push(message); },
+  };
+}
 
 function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
@@ -57,6 +67,16 @@ function packIndexBytes(packNumber, packBytes, entries) {
   return bytes;
 }
 
+function publicHeaders(bytes, contentType, {image = false, omitNoTransform = false} = {}) {
+  const directives = ['public', 'max-age=31536000', 'immutable'];
+  if (image && !omitNoTransform) directives.push('no-transform');
+  return {
+    'cache-control': directives.join(', '),
+    'content-length': String(bytes),
+    'content-type': contentType,
+  };
+}
+
 async function createSidecarFixture(
   root,
   {itemIconPixels = 16, recipeScale = 1} = {},
@@ -64,22 +84,29 @@ async function createSidecarFixture(
   const local = join(root, 'sidecar');
   await mkdir(join(local, 'assets'), {recursive: true});
   await mkdir(join(local, 'categories'), {recursive: true});
+  await mkdir(join(local, 'indexes'), {recursive: true});
   const packBytes = Buffer.from(
     Array.from({length: 64}, (_, index) => (index * 37 + 11) % 256),
   );
-  const indexBytes = packIndexBytes(0, packBytes.length, [[0, packBytes.length]]);
+  const entries = [[0, 17], [17, 23], [40, 24]];
+  const indexBytes = packIndexBytes(0, packBytes.length, entries);
   const categoryBytes = jsonBytes({
     format: 'mrt-recipe-preview-category-v1',
     categoryIndex: 0,
     categoryId: 'fixture.category',
-    count: 2,
-    previews: [[0, 0, 64, 8, 8], null],
+    count: 4,
+    previews: [
+      [0, 0, 17, 8, 8],
+      [0, 17, 23, 9, 7],
+      [0, 40, 24, 10, 6],
+      null,
+    ],
   });
   const index = {
     path: 'indexes/pack-000.bin',
     bytes: indexBytes.length,
     sha256: sha256(indexBytes),
-    entries: 1,
+    entries: entries.length,
   };
   const pack = {
     path: 'assets/pack-000.bin',
@@ -110,16 +137,16 @@ async function createSidecarFixture(
     },
     counts: {
       categories: 1,
-      recipes: 2,
-      previews: 1,
+      recipes: 4,
+      previews: 3,
       missing: 1,
-      uniqueImages: 1,
+      uniqueImages: 3,
       duplicates: 0,
       packs: 1,
-      inputBytes: 64,
-      hostedOmittedPngBytes: 64,
-      encodedBytes: 64,
-      storedBytes: 64,
+      inputBytes: packBytes.length,
+      hostedOmittedPngBytes: packBytes.length,
+      encodedBytes: packBytes.length,
+      storedBytes: packBytes.length,
       packIndexBytes: indexBytes.length,
     },
     packs: [pack],
@@ -129,27 +156,18 @@ async function createSidecarFixture(
   const manifestBytes = jsonBytes(manifest);
   await Promise.all([
     writeFile(join(local, 'assets', 'pack-000.bin'), packBytes),
-    mkdir(join(local, 'indexes'), {recursive: true}),
-  ]);
-  await Promise.all([
     writeFile(join(local, 'indexes', 'pack-000.bin'), indexBytes),
     writeFile(join(local, 'categories', '000.json'), categoryBytes),
     writeFile(join(local, 'manifest.json'), manifestBytes),
   ]);
-  return {local, manifest, manifestBytes, packBytes, indexBytes, categoryBytes};
+  return {local, manifest, manifestBytes, packBytes, indexBytes, categoryBytes, entries};
 }
 
-async function startBucketServer(fixture, options = {}) {
+async function startPublicServer(fixture, options = {}) {
   const requests = [];
-  const prefix = `/bucket/${fixture.manifest.assetSetId}/`;
+  const prefix = `${PUBLIC_BASE_PATH}/${fixture.manifest.assetSetId}/`;
   const expectedSearch =
     `?dataset=${fixture.manifest.datasetPublicationId}&preview=${fixture.manifest.assetSetId}`;
-  const objects = new Map([
-    [`${prefix}manifest.json`, fixture.manifestBytes],
-    [`${prefix}assets/pack-000.bin`, fixture.packBytes],
-    [`${prefix}indexes/pack-000.bin`, fixture.indexBytes],
-    [`${prefix}categories/000.json`, fixture.categoryBytes],
-  ]);
   const server = createServer((request, response) => {
     const url = new URL(request.url, 'http://fixture.test');
     requests.push({
@@ -159,67 +177,74 @@ async function startBucketServer(fixture, options = {}) {
       range: request.headers.range,
     });
     if (url.search !== expectedSearch) {
-      response.writeHead(400, {'content-length': '0'});
+      response.writeHead(400, {'cache-control': 'no-store', 'content-length': '0'});
       response.end();
       return;
     }
-    const isManifest = url.pathname === `${prefix}manifest.json`;
-    if (isManifest && options.manifestPresent === false) {
-      response.writeHead(404, {'content-length': '0'});
+    if (/\/assets\/pack-\d+\.bin$|\/indexes\//.test(url.pathname)) {
+      response.writeHead(500, {'cache-control': 'no-store', 'content-length': '0'});
       response.end();
       return;
     }
-    let bytes = objects.get(url.pathname);
-    if (!bytes) {
-      response.writeHead(404, {'content-length': '0'});
-      response.end();
-      return;
+
+    let bytes;
+    let contentType;
+    let image = false;
+    if (url.pathname === `${prefix}manifest.json`) {
+      if (options.manifestPresent === false) {
+        response.writeHead(404, {'cache-control': 'no-store', 'content-length': '0'});
+        response.end();
+        return;
+      }
+      bytes = fixture.manifestBytes;
+      contentType = 'application/json; charset=utf-8';
+    } else if (url.pathname === `${prefix}categories/000.json`) {
+      bytes = options.corruptCategory
+        ? Buffer.from(fixture.categoryBytes.map((value, index) => index === 0 ? value ^ 1 : value))
+        : fixture.categoryBytes;
+      contentType = 'application/json; charset=utf-8';
+    } else {
+      const match = new RegExp(
+        `^${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}assets/s/000-(\\d+)-(\\d+)\\.webp$`,
+      ).exec(url.pathname);
+      if (!match) {
+        response.writeHead(404, {'cache-control': 'no-store', 'content-length': '0'});
+        response.end();
+        return;
+      }
+      const offset = Number(match[1]);
+      const length = Number(match[2]);
+      if (!fixture.entries.some(entry => entry[0] === offset && entry[1] === length)) {
+        response.writeHead(400, {'cache-control': 'no-store', 'content-length': '0'});
+        response.end();
+        return;
+      }
+      if (options.missingImageOffset === offset) {
+        response.writeHead(404, {'cache-control': 'no-store', 'content-length': '0'});
+        response.end();
+        return;
+      }
+      bytes = Buffer.from(fixture.packBytes.subarray(offset, offset + length));
+      if (options.corruptImageOffset === offset) bytes[0] ^= 1;
+      contentType = options.imageContentType ?? 'image/webp';
+      image = true;
     }
-    if (url.pathname.endsWith('/categories/000.json') && options.corruptCategory) {
-      bytes = Buffer.from(bytes);
-      bytes[0] ^= 1;
-    }
-    if (url.pathname.endsWith('/assets/pack-000.bin') && options.corruptPack) {
-      bytes = Buffer.from(bytes);
-      bytes[45] ^= 1;
-    }
-    if (url.pathname.endsWith('/indexes/pack-000.bin') && options.corruptIndex) {
-      bytes = Buffer.from(bytes);
-      bytes[20] ^= 1;
-    }
+
+    const headers = publicHeaders(bytes.length, contentType, {
+      image,
+      omitNoTransform: image && options.omitNoTransform,
+    });
     if (request.method === 'HEAD') {
-      response.writeHead(200, {'content-length': String(bytes.length)});
+      response.writeHead(200, headers);
       response.end();
       return;
     }
     if (request.method !== 'GET') {
-      response.writeHead(405, {'content-length': '0'});
+      response.writeHead(405, {'cache-control': 'no-store', 'content-length': '0'});
       response.end();
       return;
     }
-    if (request.headers.range && url.pathname.endsWith('/assets/pack-000.bin')) {
-      if (options.ignoreRange) {
-        response.writeHead(200, {'content-length': String(bytes.length)});
-        response.end(bytes);
-        return;
-      }
-      const match = /^bytes=(\d+)-(\d+)$/.exec(request.headers.range);
-      if (!match) {
-        response.writeHead(416, {'content-length': '0'});
-        response.end();
-        return;
-      }
-      const start = Number(match[1]);
-      const end = Number(match[2]);
-      const body = bytes.subarray(start, end + 1);
-      response.writeHead(206, {
-        'content-length': String(body.length),
-        'content-range': `bytes ${start}-${end}/${bytes.length}`,
-      });
-      response.end(body);
-      return;
-    }
-    response.writeHead(200, {'content-length': String(bytes.length)});
+    response.writeHead(200, headers);
     response.end(bytes);
   });
   await new Promise((resolveListen, rejectListen) => {
@@ -228,12 +253,12 @@ async function startBucketServer(fixture, options = {}) {
   });
   const address = server.address();
   return {
-    baseUrl: `http://127.0.0.1:${address.port}/bucket`,
+    baseUrl: `http://127.0.0.1:${address.port}${PUBLIC_BASE_PATH}`,
     expectedSearch,
     requests,
     close: () => new Promise((resolveClose, rejectClose) => {
-      server.close(error => (error ? rejectClose(error) : resolveClose()));
       server.closeAllConnections();
+      server.close(error => (error ? rejectClose(error) : resolveClose()));
     }),
   };
 }
@@ -247,79 +272,84 @@ async function withFixture(operation, settings) {
   }
 }
 
-async function verify(fixture, bucket, mode) {
+async function verify(fixture, server, mode, logger = quietLogger()) {
   return verifyRemoteRecipePreviewSidecar({
     local: fixture.local,
-    baseUrl: bucket.baseUrl,
+    baseUrl: server.baseUrl,
     mode,
     concurrency: 3,
     timeoutMs: 5_000,
-    logger: quietLogger,
+    logger,
     allowHttpForTests: true,
   });
 }
 
-test('precommit verifies immutable objects and exact non-whole ranges while manifest is absent', async () => {
+test('committed verification reads only public category documents and authorized coordinates', async () => {
   await withFixture(async fixture => {
-    const bucket = await startBucketServer(fixture, {manifestPresent: false});
+    const server = await startPublicServer(fixture, {manifestPresent: true});
     try {
-      const result = await verify(fixture, bucket, 'precommit');
+      const result = await verify(fixture, server, 'committed');
+      assert.deepEqual(result, {
+        mode: 'committed',
+        assetSetId: fixture.manifest.assetSetId,
+        datasetPublicationId: DATASET_PUBLICATION_ID,
+        packs: 1,
+        categoryDocuments: 1,
+        imageSamples: 3,
+      });
+      assert.ok(server.requests.every(request => request.search === server.expectedSearch));
+      assert.ok(server.requests.some(request =>
+        request.method === 'GET' && request.path.endsWith('/manifest.json')));
+      assert.ok(server.requests.some(request =>
+        request.method === 'GET' && request.path.endsWith('/categories/000.json')));
+      const imageRequests = server.requests.filter(request => request.path.includes('/assets/s/'));
+      assert.equal(imageRequests.length, 3);
+      assert.ok(imageRequests.every(request => request.method === 'GET' && request.range === undefined));
+      assert.equal(
+        server.requests.some(request => /\/assets\/pack-\d+\.bin$|\/indexes\//.test(request.path)),
+        false,
+        'public verification must never request private raw packs or MRPI indexes',
+      );
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+test('precommit verifies only that the public commit marker is absent', async () => {
+  await withFixture(async fixture => {
+    const server = await startPublicServer(fixture, {manifestPresent: false});
+    const logger = recordingLogger();
+    try {
+      const result = await verify(fixture, server, 'precommit', logger);
       assert.deepEqual(result, {
         mode: 'precommit',
         assetSetId: fixture.manifest.assetSetId,
         datasetPublicationId: DATASET_PUBLICATION_ID,
         packs: 1,
-        packIndexes: 1,
-        categoryDocuments: 1,
-        fullyHashedPacks: 1,
-        rangeSamples: 3,
+        categoryDocuments: 0,
+        imageSamples: 0,
       });
-      assert.ok(bucket.requests.length > 0);
-      assert.ok(
-        bucket.requests.every(request => request.search === bucket.expectedSearch),
-        'every public preview request must carry the exact dataset/preview identity query',
+      assert.deepEqual(
+        server.requests.map(request => ({method: request.method, path: request.path})),
+        [{
+          method: 'HEAD',
+          path: `${PUBLIC_BASE_PATH}/${fixture.manifest.assetSetId}/manifest.json`,
+        }],
       );
-      assert.ok(
-        bucket.requests.some(request =>
-          request.method === 'HEAD' && request.path.endsWith('/manifest.json'),
-        ),
-      );
-      assert.ok(
-        bucket.requests.some(request =>
-          request.method === 'GET' && request.path.endsWith('/categories/000.json'),
-        ),
-      );
-      assert.ok(
-        bucket.requests.some(request =>
-          request.method === 'GET' && request.path.endsWith('/indexes/pack-000.bin'),
-        ),
-      );
-      const fullPackGets = bucket.requests.filter(request =>
-        request.method === 'GET' &&
-        request.path.endsWith('/assets/pack-000.bin') &&
-        request.range === undefined,
-      );
-      assert.equal(fullPackGets.length, 1, 'precommit must hash every complete pack exactly once');
-      const rangeGets = bucket.requests.filter(request =>
-        request.method === 'GET' &&
-        request.path.endsWith('/assets/pack-000.bin') &&
-        request.range !== undefined,
-      );
-      assert.equal(rangeGets.length, 3);
-      assert.ok(rangeGets.every(request => /^bytes=\d+-\d+$/.test(request.range)));
-      assert.ok(rangeGets.every(request => request.range !== 'bytes=0-63'));
+      assert.match(logger.messages.info.join('\n'), /staging verifies private packs and indexes/);
     } finally {
-      await bucket.close();
+      await server.close();
     }
   });
 });
 
 test('verifier accepts grid-aligned high-resolution render settings', async () => {
   await withFixture(async fixture => {
-    const bucket = await startBucketServer(fixture, {manifestPresent: false});
+    const server = await startPublicServer(fixture, {manifestPresent: true});
     try {
-      const result = await verify(fixture, bucket, 'precommit');
-      assert.equal(result.assetSetId, fixture.manifest.assetSetId);
+      const result = await verify(fixture, server, 'committed');
+      assert.equal(result.imageSamples, 3);
       assert.deepEqual(
         {
           itemIconPixels: fixture.manifest.settings.itemIconPixels,
@@ -328,163 +358,149 @@ test('verifier accepts grid-aligned high-resolution render settings', async () =
         {itemIconPixels: 48, recipeScale: 2},
       );
     } finally {
-      await bucket.close();
+      await server.close();
     }
   }, {itemIconPixels: 48, recipeScale: 2});
 });
 
-test('committed mode requires an exact remote manifest and repeats object verification', async () => {
-  await withFixture(async fixture => {
-    const bucket = await startBucketServer(fixture, {manifestPresent: true});
-    try {
-      const result = await verify(fixture, bucket, 'committed');
-      assert.equal(result.mode, 'committed');
-      assert.equal(result.fullyHashedPacks, 0);
-      assert.ok(
-        bucket.requests.some(request =>
-          request.method === 'GET' && request.path.endsWith('/manifest.json'),
-        ),
-      );
-      assert.ok(
-        bucket.requests.some(request =>
-          request.method === 'HEAD' && request.path.endsWith('/assets/pack-000.bin'),
-        ),
-      );
-      assert.equal(
-        bucket.requests.filter(request =>
-          request.method === 'GET' &&
-          request.path.endsWith('/assets/pack-000.bin') &&
-          request.range === undefined,
-        ).length,
-        0,
-        'committed verification must not repeat the full precommit corpus download',
-      );
-    } finally {
-      await bucket.close();
-    }
-  });
-});
-
 test('precommit refuses an already-published manifest commit marker', async () => {
   await withFixture(async fixture => {
-    const bucket = await startBucketServer(fixture, {manifestPresent: true});
+    const server = await startPublicServer(fixture, {manifestPresent: true});
     try {
       await assert.rejects(
-        verify(fixture, bucket, 'precommit'),
+        verify(fixture, server, 'precommit'),
         /requires remote manifest\.json to be absent.*HTTP 200/,
       );
     } finally {
-      await bucket.close();
+      await server.close();
     }
   });
 });
 
-test('range verification refuses an origin that returns a whole pack with HTTP 200', async () => {
+test('committed mode detects a byte-different manifest even when the length matches', async () => {
   await withFixture(async fixture => {
-    const bucket = await startBucketServer(fixture, {manifestPresent: false, ignoreRange: true});
+    const server = await startPublicServer(fixture, {manifestPresent: true});
+    fixture.manifestBytes[fixture.manifestBytes.length - 2] ^= 1;
     try {
-      await assert.rejects(verify(fixture, bucket, 'precommit'), /requires HTTP 206; received HTTP 200/);
+      await assert.rejects(verify(fixture, server, 'committed'), /not byte-for-byte identical/);
     } finally {
-      await bucket.close();
+      await server.close();
     }
   });
 });
 
-test('precommit streams and hashes every pack byte, including bytes outside its range probes', async () => {
+test('committed mode fails closed and logs when a public category document is corrupt', async () => {
   await withFixture(async fixture => {
-    const bucket = await startBucketServer(fixture, {manifestPresent: false, corruptPack: true});
-    try {
-      await assert.rejects(
-        verify(fixture, bucket, 'precommit'),
-        /Full digest assets\/pack-000\.bin SHA-256.*manifest declares/,
-      );
-      assert.ok(
-        bucket.requests.some(request =>
-          request.method === 'GET' &&
-          request.path.endsWith('/assets/pack-000.bin') &&
-          request.range === undefined,
-        ),
-      );
-    } finally {
-      await bucket.close();
-    }
-  });
-});
-
-test('remote category documents are fully downloaded and digest checked', async () => {
-  await withFixture(async fixture => {
-    const bucket = await startBucketServer(fixture, {manifestPresent: false, corruptCategory: true});
-    try {
-      await assert.rejects(verify(fixture, bucket, 'precommit'), /exact remote SHA-256\/byte comparison/);
-    } finally {
-      await bucket.close();
-    }
-  });
-});
-
-test('remote pack authorization indexes are fully downloaded and digest checked', async () => {
-  await withFixture(async fixture => {
-    const bucket = await startBucketServer(fixture, {manifestPresent: false, corruptIndex: true});
+    const server = await startPublicServer(fixture, {manifestPresent: true, corruptCategory: true});
+    const logger = recordingLogger();
     try {
       await assert.rejects(
-        verify(fixture, bucket, 'precommit'),
-        /indexes\/pack-000\.bin failed its exact remote SHA-256\/byte comparison/,
+        verify(fixture, server, 'committed', logger),
+        /exact remote SHA-256\/byte comparison/,
       );
-      assert.equal(
-        bucket.requests.some(request =>
-          request.method === 'GET' && request.path.endsWith('/assets/pack-000.bin'),
-        ),
-        false,
-        'small-object validation must reject the corrupt index before full pack downloads',
-      );
+      assert.match(logger.messages.error.join('\n'), /verification failed closed/);
     } finally {
-      await bucket.close();
+      await server.close();
     }
   });
 });
 
-test('local digest validation and credential-free HTTPS are fail-closed', async () => {
+test('committed mode rejects an authorized image that differs from the local pack range', async () => {
+  await withFixture(async fixture => {
+    const server = await startPublicServer(fixture, {manifestPresent: true, corruptImageOffset: 17});
+    try {
+      await assert.rejects(
+        verify(fixture, server, 'committed'),
+        /differs from the local MRPI-authorized pack range/,
+      );
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+test('committed mode rejects a missing authorized public image coordinate', async () => {
+  await withFixture(async fixture => {
+    const server = await startPublicServer(fixture, {manifestPresent: true, missingImageOffset: 40});
+    try {
+      await assert.rejects(
+        verify(fixture, server, 'committed'),
+        /GET assets\/s\/000-40-24\.webp returned HTTP 404/,
+      );
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+test('committed mode requires WebP content type and the no-transform cache directive', async () => {
+  await withFixture(async fixture => {
+    const wrongType = await startPublicServer(fixture, {
+      manifestPresent: true,
+      imageContentType: 'image/png',
+    });
+    try {
+      await assert.rejects(
+        verify(fixture, wrongType, 'committed'),
+        /Content-Type.*expected image\/webp/,
+      );
+    } finally {
+      await wrongType.close();
+    }
+
+    const transformed = await startPublicServer(fixture, {
+      manifestPresent: true,
+      omitNoTransform: true,
+    });
+    try {
+      await assert.rejects(
+        verify(fixture, transformed, 'committed'),
+        /omitted the required no-transform image directive/,
+      );
+    } finally {
+      await transformed.close();
+    }
+  });
+});
+
+test('local validation and the exact credential-free public route are fail-closed', async () => {
   await withFixture(async fixture => {
     await writeFile(join(fixture.local, 'assets', 'pack-000.bin'), Buffer.alloc(64, 7));
     await assert.rejects(
       verifyRemoteRecipePreviewSidecar({
         local: fixture.local,
-        baseUrl: 'https://example.test/public/previews',
-        mode: 'precommit',
-        logger: quietLogger,
+        baseUrl: 'https://example.test/dataset/preview-sets',
+        mode: 'committed',
+        logger: quietLogger(),
       }),
       /failed its local SHA-256 digest/,
     );
     await assert.rejects(
       verifyRemoteRecipePreviewSidecar({
         local: fixture.local,
-        baseUrl: 'http://example.test/public/previews',
-        mode: 'precommit',
-        logger: quietLogger,
+        baseUrl: 'http://example.test/dataset/preview-sets',
+        mode: 'committed',
+        logger: quietLogger(),
       }),
-      /must use credential-free HTTPS/,
+      /requires HTTPS/,
     );
     await assert.rejects(
       verifyRemoteRecipePreviewSidecar({
         local: fixture.local,
-        baseUrl: 'https://user:secret@example.test/public/previews',
-        mode: 'precommit',
-        logger: quietLogger,
+        baseUrl: 'https://user:secret@example.test/dataset/preview-sets',
+        mode: 'committed',
+        logger: quietLogger(),
       }),
       /must not contain credentials/,
     );
-  });
-});
-
-test('committed mode detects a byte-different manifest even when the length matches', async () => {
-  await withFixture(async fixture => {
-    const bucket = await startBucketServer(fixture, {manifestPresent: true});
-    // The server retained this Buffer by reference, while the local manifest is a separate file.
-    fixture.manifestBytes[fixture.manifestBytes.length - 2] ^= 1;
-    try {
-      await assert.rejects(verify(fixture, bucket, 'committed'), /not byte-for-byte identical/);
-    } finally {
-      await bucket.close();
-    }
+    await assert.rejects(
+      verifyRemoteRecipePreviewSidecar({
+        local: fixture.local,
+        baseUrl: 'https://example.test/public/previews',
+        mode: 'committed',
+        logger: quietLogger(),
+      }),
+      /exact \/dataset\/preview-sets route/,
+    );
   });
 });

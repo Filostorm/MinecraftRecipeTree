@@ -1,0 +1,67 @@
+{
+  "format": "mrt-exporter-releases-v1",
+  "generatedAt": "2026-07-19T19:29:12.004Z",
+  "releases": [
+    {
+      "id": "forge-jei-1.20.1",
+      "minecraftVersion": "1.20.1",
+      "recipeViewer": "JEI 15",
+      "loader": "Forge 47",
+      "version": "1.0.0",
+      "filename": "recipe-tree-exporter-forge-1.20.1-1.0.0.jar",
+      "qualityProfiles": [
+        "generic-jei-1.20.1"
+      ],
+      "compatibility": "Forge 47 with JEI 15.x",
+      "downloadUrl": "/exporters/recipe-tree-exporter-forge-1.20.1-1.0.0.jar",
+      "sha256": "8e526ae9d751a569cd3a8392f5af27c08663ba7a0d11ab13b01f3611374b944b",
+      "bytes": 90336
+    },
+    {
+      "id": "forge-rei-1.18.2",
+      "minecraftVersion": "1.18.2",
+      "recipeViewer": "REI 8",
+      "loader": "Forge 40",
+      "version": "1.0.0",
+      "filename": "recipe-tree-exporter-forge-1.18.2-1.0.0.jar",
+      "qualityProfiles": [
+        "multiblock-madness-2-1.18.2"
+      ],
+      "compatibility": "Forge 40 with REI 8.4.x",
+      "downloadUrl": "/exporters/recipe-tree-exporter-forge-1.18.2-1.0.0.jar",
+      "sha256": "8d286afef963d4b58fdfb8aef2c3c78d99f02d98ca9b5a0db2f4e57138ead4e3",
+      "bytes": 156626
+    },
+    {
+      "id": "forge-hei-1.12.2",
+      "minecraftVersion": "1.12.2",
+      "recipeViewer": "HEI/JEI 4",
+      "loader": "Forge 14.23.5",
+      "version": "1.0.0",
+      "filename": "recipe-tree-exporter-forge-1.12.2-1.0.0.jar",
+      "qualityProfiles": [
+        "meatballcraft-1.12.2",
+        "multiblock-madness-1.12.2"
+      ],
+      "compatibility": "Forge 14.23.5 with HEI 4.30.3 (validated target)",
+      "downloadUrl": "/exporters/recipe-tree-exporter-forge-1.12.2-1.0.0.jar",
+      "sha256": "c8c72a535e064046eb13863d19c12625974ff30961e4521e546aa3980335efe4",
+      "bytes": 210918
+    },
+    {
+      "id": "forge-nei-gtnh-1.7.10",
+      "minecraftVersion": "1.7.10",
+      "recipeViewer": "NEI 2.8.44-GTNH",
+      "loader": "Forge 10.13.4.1614",
+      "version": "1.0.0",
+      "filename": "recipe-tree-exporter-gtnh-1.7.10-1.0.0.jar",
+      "qualityProfiles": [
+        "gtnh-1.7.10"
+      ],
+      "compatibility": "GT New Horizons 2.8.4 with NEI 2.8.44-GTNH",
+      "downloadUrl": "/exporters/recipe-tree-exporter-gtnh-1.7.10-1.0.0.jar",
+      "sha256": "da2de8a1d040e223174021e5b94b1eb191cae98f4f4cf3cb035869765e803c11",
+      "bytes": 70322
+    }
+  ]
+}

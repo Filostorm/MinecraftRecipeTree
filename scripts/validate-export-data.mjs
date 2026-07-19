@@ -5,11 +5,12 @@ import {fileURLToPath} from 'node:url';
 import sharp from 'sharp';
 import {collectFiles, isRecord, pathKind, readJsonDocument} from './export-data-utils.mjs';
 import {
+  EXPORT_QUALITY_PROFILE_IDS,
   exportQualityIssues,
-  MEATBALLCRAFT_112_PROFILE,
   resolveQualityProfile,
 } from './export-quality-policy.mjs';
 import {computePublicationId, PUBLICATION_ID_PATTERN} from './publication-id.mjs';
+import {requirePackIdentity} from './pack-identity.mjs';
 import {
   createRecipeImageInventory,
   decodedRgbaSha256,
@@ -110,6 +111,22 @@ export async function validateExportData(exportRoot = defaultExportRoot, options
   }
   if (typeof manifest?.minecraft !== 'string' || !manifest.minecraft) {
     fail('manifest.minecraft must be a non-empty string.');
+  }
+  if (manifest?.pack === undefined) {
+    if (options.requirePackIdentity === true) {
+      fail('manifest.pack is required for a new hosted publication.');
+    } else {
+      console.warn(
+        '[validate-data] manifest.pack is absent. This legacy export remains readable, but the ' +
+          'publisher will require a new identity-bearing export.',
+      );
+    }
+  } else {
+    try {
+      requirePackIdentity(manifest.pack);
+    } catch (error) {
+      fail(error instanceof Error ? error.message : String(error));
+    }
   }
   if (manifest?.aborted !== false) {
     fail('manifest.aborted must be false; partial exports cannot be published.');
@@ -556,7 +573,9 @@ export async function validateExportData(exportRoot = defaultExportRoot, options
     console.info('Optional failures.json is absent and the manifest reports no failures.');
   }
   if (qualityProfile && !fileKeys.has('failures.json')) {
-    fail('MeatballCraft requires failures.json even when it contains no entries.');
+    fail(
+      `Export quality profile ${qualityProfile} requires failures.json even when it contains no entries.`,
+    );
   }
   const declaredFailureCount = countValue(manifest?.counts?.failures);
   if (declaredFailureCount === null) {
@@ -1127,6 +1146,7 @@ if (invokedPath && fileURLToPath(import.meta.url) === invokedPath) {
   let requirePublicationId = false;
   let verifyPublicationId = false;
   let allowLegacyRecipeImageAccounting = false;
+  let requirePackIdentity = false;
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === '--help' || argument === '-h') {
@@ -1147,6 +1167,8 @@ if (invokedPath && fileURLToPath(import.meta.url) === invokedPath) {
       verifyPublicationId = true;
     } else if (argument === '--allow-legacy-recipe-image-accounting') {
       allowLegacyRecipeImageAccounting = true;
+    } else if (argument === '--require-pack-identity') {
+      requirePackIdentity = true;
     } else if (!argument.startsWith('-') && !positionalRootSeen) {
       exportRoot = argument;
       positionalRootSeen = true;
@@ -1158,15 +1180,16 @@ if (invokedPath && fileURLToPath(import.meta.url) === invokedPath) {
   if (showHelp) {
     console.log(
       'Usage: node scripts/validate-export-data.mjs [--root <directory>] ' +
-        `[--profile ${MEATBALLCRAFT_112_PROFILE}] ` +
+        `[--profile <${EXPORT_QUALITY_PROFILE_IDS.join('|')}>] ` +
         '[--require-publication-id] [--verify-publication-id] ' +
-        '[--allow-legacy-recipe-image-accounting]',
+        '[--require-pack-identity] [--allow-legacy-recipe-image-accounting]',
     );
   } else {
     validateExportData(exportRoot, {
       profile,
       requirePublicationId,
       verifyPublicationId,
+      requirePackIdentity,
       allowLegacyRecipeImageAccounting,
     }).catch(error => {
       console.error(error instanceof Error ? error.message : error);

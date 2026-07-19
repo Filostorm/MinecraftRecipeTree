@@ -25,6 +25,11 @@ test('Cloudflare routes catalog, immutable datasets, and administration through 
     /resolve\(root, ['"]dist['"], ['"]client['"], ['"]exports['"]\)[\s\S]*?if \(await exists\(retiredStaticExportDirectory\)\)[\s\S]*?throw new Error\(['"]Static dataset exports must not be bundled/,
     'the build must fail closed if any retired static export directory reaches dist/client',
   );
+  assert.match(
+    sitesVitePlugin,
+    /resolve\(root, ['"]public['"], ['"]exporters['"]\)[\s\S]*?resolve\(root, ['"]dist['"], ['"]client['"], ['"]exporters['"]\)[\s\S]*?lstat\(source\)[\s\S]*?metadata\.nlink !== 1[\s\S]*?copyFile/,
+    'only bounded single-link exporter release files may be copied into the deployable client',
+  );
   const workerFirstSource = /run_worker_first:\s*\[([\s\S]*?)\]/.exec(viteConfig)?.[1];
   assert.ok(workerFirstSource, 'vite.config.ts must define an explicit run_worker_first route list');
   const workerFirstRoutes = [...workerFirstSource.matchAll(/['"]([^'"]+)['"]/g)].map(

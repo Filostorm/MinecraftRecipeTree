@@ -1,4 +1,12 @@
-import React, {createContext, useCallback, useContext, useEffect, useMemo, useState} from 'react';
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {Platform} from 'react-native';
 import {
   type DatasetDescriptor,
@@ -117,6 +125,7 @@ export function DatasetCatalogProvider({children}: {children: React.ReactNode}) 
   const [assetOrigin, setAssetOrigin] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const selectedSlugRef = useRef<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -150,6 +159,7 @@ export function DatasetCatalogProvider({children}: {children: React.ReactNode}) 
         const nextSelected = selectDataset(nextDatasets, currentWebRequestSlug());
         datasetSource(nextSelected, configuration.assetOrigin);
         if (!alive) return;
+        selectedSlugRef.current = nextSelected.slug;
         setSelected(nextSelected);
         setError(null);
         setLoading(false);
@@ -175,12 +185,18 @@ export function DatasetCatalogProvider({children}: {children: React.ReactNode}) 
         }
         const nextSelected = selectDataset(datasets, slug);
         datasetSource(nextSelected, assetOrigin);
+        if (selectedSlugRef.current === nextSelected.slug) {
+          setError(null);
+          return;
+        }
         writeWebRequestSlug(nextSelected.slug);
+        selectedSlugRef.current = nextSelected.slug;
         setSelected(nextSelected);
         setError(null);
       } catch (cause) {
         const message = errorMessage(cause);
         console.error('Dataset selection failed.', {slug, cause});
+        selectedSlugRef.current = null;
         setSelected(null);
         setError(message);
       }
@@ -194,11 +210,13 @@ export function DatasetCatalogProvider({children}: {children: React.ReactNode}) 
       try {
         const nextSelected = selectDataset(datasets, currentWebRequestSlug());
         datasetSource(nextSelected, assetOrigin);
+        selectedSlugRef.current = nextSelected.slug;
         setSelected(nextSelected);
         setError(null);
       } catch (cause) {
         const message = errorMessage(cause);
         console.error('Browser history selected an invalid dataset.', cause);
+        selectedSlugRef.current = null;
         setSelected(null);
         setError(message);
       }

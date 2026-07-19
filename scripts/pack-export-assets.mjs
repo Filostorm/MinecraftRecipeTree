@@ -18,7 +18,10 @@ import {
   requireDirectory,
 } from './export-data-utils.mjs';
 import {validateExportData} from './validate-export-data.mjs';
-import {MEATBALLCRAFT_112_PROFILE, resolveQualityProfile} from './export-quality-policy.mjs';
+import {
+  EXPORT_QUALITY_PROFILE_IDS,
+  resolveQualityProfile,
+} from './export-quality-policy.mjs';
 import {writePublicationId} from './publication-id.mjs';
 import {
   MAX_SHARD_BYTES,
@@ -42,7 +45,7 @@ const defaultExportRoot = join(process.cwd(), 'public', 'exports');
 function usage() {
   return (
     'Usage: node scripts/pack-export-assets.mjs [--root <directory>] ' +
-    `[--profile ${MEATBALLCRAFT_112_PROFILE}] [--omit-recipe-images]`
+    `[--profile <${EXPORT_QUALITY_PROFILE_IDS.join('|')}>] [--omit-recipe-images]`
   );
 }
 

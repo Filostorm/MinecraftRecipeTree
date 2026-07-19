@@ -22,6 +22,7 @@ import {
   publishTransactional,
 } from './import-export-data.mjs';
 import {
+  GTNH_1710_PROFILE,
   MEATBALLCRAFT_112_PROFILE,
   MULTIBLOCK_MADNESS_112_PROFILE,
   MULTIBLOCK_MADNESS_2_118_PROFILE,
@@ -114,6 +115,115 @@ test('imports both Multiblock Madness versions with dynamic counts and productio
     } finally {
       await rm(root, {recursive: true, force: true});
     }
+  }
+});
+
+async function configureGtnhFixture(source) {
+  await addSingleRecipePreview(source);
+  const manifestPath = join(source, 'manifest.json');
+  const manifest = await readJson(manifestPath);
+  manifest.minecraft = '1.7.10';
+  manifest.profile = GTNH_1710_PROFILE;
+  manifest.forge = '10.13.4.1614';
+  manifest.nei = '2.8.44-GTNH';
+  manifest.pack = {
+    name: 'GT New Horizons',
+    version: '2.8.4',
+    identitySource: 'explicit-request',
+  };
+  manifest.diagnostics.nei = {
+    itemListLoaded: true,
+    registeredCraftingHandlers: 1,
+    loadedCategories: 1,
+    recipesEnumerated: 1,
+    recipeWidgetsRendered: 1,
+    itemIconsRendered: 1,
+    unloadedHandlerCategories: 0,
+    ambiguousHandlerCategories: 0,
+    duplicateHandlerCategories: 0,
+  };
+  await writeJson(manifestPath, manifest);
+  return manifest;
+}
+
+test('imports GTNH 2.8.4 with its strict dynamic NEI telemetry contract', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'recipe-tree-import-gtnh-profile-test-'));
+  try {
+    const source = join(root, 'raw-source');
+    const destination = join(root, 'public', 'exports');
+    await createRawExportFixture(source, {iconScale: 1, recipeScale: 2});
+    await configureGtnhFixture(source);
+    await mkdir(dirname(destination), {recursive: true});
+
+    await importExportDataImplementation({
+      source,
+      destination,
+      profile: GTNH_1710_PROFILE,
+      dryRun: true,
+    });
+    assert.equal(await pathIsMissing(destination), true);
+    assert.equal(await pathIsMissing(importWorkspaceRootForDestination(destination)), true);
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
+});
+
+test('GTNH import rejects unloaded NEI categories before creating staging data', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'recipe-tree-import-gtnh-handler-test-'));
+  try {
+    const source = join(root, 'raw-source');
+    const destination = join(root, 'public', 'exports');
+    await createRawExportFixture(source, {iconScale: 1, recipeScale: 2});
+    const manifest = await configureGtnhFixture(source);
+    manifest.diagnostics.nei.unloadedHandlerCategories = 1;
+    await writeJson(join(source, 'manifest.json'), manifest);
+    await mkdir(dirname(destination), {recursive: true});
+
+    await assert.rejects(
+      importExportDataImplementation({
+        source,
+        destination,
+        profile: GTNH_1710_PROFILE,
+        dryRun: true,
+      }),
+      /unloadedHandlerCategories.*0/,
+    );
+    assert.equal(await pathIsMissing(destination), true);
+    assert.equal(await pathIsMissing(importWorkspaceRootForDestination(destination)), true);
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
+});
+
+test('GTNH import rejects a recipe record without its rendered NEI preview', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'recipe-tree-import-gtnh-preview-test-'));
+  try {
+    const source = join(root, 'raw-source');
+    const destination = join(root, 'public', 'exports');
+    await createRawExportFixture(source, {iconScale: 1, recipeScale: 2});
+    await configureGtnhFixture(source);
+    const recipePath = join(source, 'recipes', 'minecraft_crafting', 'recipes.json');
+    const recipes = await readJson(recipePath);
+    delete recipes[0].img;
+    delete recipes[0].w;
+    delete recipes[0].h;
+    await writeJson(recipePath, recipes);
+    await rm(join(source, 'recipes', 'minecraft_crafting', 'r0.png'));
+    await mkdir(dirname(destination), {recursive: true});
+
+    await assert.rejects(
+      importExportDataImplementation({
+        source,
+        destination,
+        profile: GTNH_1710_PROFILE,
+        dryRun: true,
+        omitRecipeImages: true,
+      }),
+      /requires one recipe preview per recipe.*missing.*1/i,
+    );
+    assert.equal(await pathIsMissing(destination), true);
+  } finally {
+    await rm(root, {recursive: true, force: true});
   }
 });
 

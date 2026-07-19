@@ -65,6 +65,27 @@ test('rejects catalog contract drift, ambiguous defaults, and repeated identitie
   );
 });
 
+test('identity bounds count Unicode code points and reject invisible formatting controls', () => {
+  assert.equal(
+    requireDatasetCatalog({
+      datasets: [{...meatball, displayName: '🧱'.repeat(120)}],
+    })[0].displayName,
+    '🧱'.repeat(120),
+  );
+  assert.throws(
+    () => requireDatasetCatalog({
+      datasets: [{...meatball, displayName: '🧱'.repeat(121)}],
+    }),
+    /exact immutable dataset contract/,
+  );
+  assert.throws(
+    () => requireDatasetCatalog({
+      datasets: [{...meatball, displayName: 'Invisible\u200bName'}],
+    }),
+    /exact immutable dataset contract/,
+  );
+});
+
 test('builds immutable core and preview routes only from validated content identities', () => {
   assert.deepEqual(datasetSource(madness), {
     descriptor: madness,

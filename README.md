@@ -1,14 +1,25 @@
 # Recipe Tree viewer
 
+For the complete contributor/operator workflow—from installing an exporter through preparing,
+uploading, updating, and sharing a pack—see
+[`docs/publish-your-modpack.md`](docs/publish-your-modpack.md). The guided two-phase command is:
+
+```bash
+npm run publish:modpack -- --help
+```
+
+The deployed [/publish](https://minecraftrecipetree.craftsmannsoftware.com/publish) guide exposes
+the version-matched release JARs and their generated SHA-256 checksums to external contributors.
+
 Expo (React Native Web) app for browsing a `jei-exports` dataset produced by
 [recipe-export-mod](../recipe-export-mod): searchable item grid, JEI-style recipe/usage
 views, a mob gallery, and a pan/zoom crafting flowchart built from the exported recipe images.
 
 The web publication is content-addressed. Item/block source textures retain Minecraft's native
-16×16 pixel-art grid. Multiblock Madness and Multiblock Madness 2 preserve those renderer
-outputs as 16×16 canvases; the already-audited MeatballCraft corpus remains pinned to its
-historical 48×48 canvases. Composite HEI/REI layouts are rasterized at 2× physical resolution
-but retain logical layout dimensions in recipe metadata.
+16×16 pixel-art grid. GT New Horizons, Multiblock Madness, and Multiblock Madness 2 preserve
+those renderer outputs as 16×16 canvases; the already-audited MeatballCraft corpus remains
+pinned to its historical 48×48 canvases. Composite NEI/HEI/REI layouts are rasterized at 2×
+physical resolution but retain logical layout dimensions in recipe metadata.
 They live in a separate immutable sidecar so the 359k-preview MeatballCraft corpus does not
 inflate the Sites deployment archive or create one storage object per recipe.
 
@@ -27,9 +38,9 @@ raw exporter files into the viewer:
 
 ```bash
 npm run import-data -- \
-  --source /path/to/raw/jei-exports \
-  --destination /path/to/packed/multiblock-madness \
-  --profile multiblock-madness-1.12.2 \
+  --source /path/to/raw/gtnh-2.8.4-export \
+  --destination /path/to/packed/gtnh-2.8.4 \
+  --profile gtnh-1.7.10 \
   --omit-recipe-images
 ```
 
@@ -37,14 +48,25 @@ npm run import-data -- \
 
 | Profile | Minecraft | Item canvas | Recipe layout | Corpus contract |
 |---|---:|---:|---:|---|
+| `generic-jei-1.20.1` | 1.20.1 | 64×64 (`iconScale=4`) | 2× JEI | dynamically counted, exact diagnostics, zero missing previews |
 | `meatballcraft-1.12.2` | 1.12.2 | 48×48 (`iconScale=3`) | 2× | immutable audited counts/provenance |
 | `multiblock-madness-1.12.2` | 1.12.2 | 16×16 (`iconScale=1`) | 2× | dynamically counted, zero missing previews |
 | `multiblock-madness-2-1.18.2` | 1.18.2 | 16×16 (`iconScale=1`) | 2× | dynamically counted, zero missing previews |
+| `gtnh-1.7.10` | 1.7.10 | 16×16 (`iconScale=1`) | 2× NEI | GTNH 2.8.4, dynamically counted, zero failures/missing previews |
 
 Dynamic counting means the pack's item, recipe, and category totals are accepted from that
 specific completed export rather than hard-coded in source. It does not weaken completeness:
 manifest/document counts, failure diagnostics, semantic direction, raw/hosted identity, and
 one preview per recipe still fail closed.
+
+The GTNH profile pins the latest stable pack release, 2.8.4, plus Forge `10.13.4.1614`
+and NotEnoughItems `2.8.44-GTNH`. Its raw manifest must identify the pack as
+`{name: "GT New Horizons", version: "2.8.4", identitySource: "explicit-request"}` and include
+the exact NEI telemetry schema. Publication requires the item list to load, every registered
+crafting handler to produce exactly one loaded category, every enumerated recipe widget and
+item icon to render, all handler-anomaly counters to remain zero, and `failures.json` to be
+empty. Missing or unknown telemetry fields are schema drift and abort the import; they are not
+treated as compatibility fallbacks.
 
 In omission mode, the importer losslessly converts and packs retained item, category, and mob
 assets, but deliberately leaves declared recipe PNGs in their original encoding until the raw
@@ -108,10 +130,10 @@ Build the sidecar from the raw exporter output and the exact local hosted public
 
 ```bash
 npm run build:recipe-previews -- \
-  --source /path/to/raw/jei-exports \
-  --dataset-manifest /path/to/packed/multiblock-madness/manifest.json \
-  --output /new/path/recipe-preview-sidecar \
-  --profile multiblock-madness-1.12.2
+  --source /path/to/raw/gtnh-2.8.4-export \
+  --dataset-manifest /path/to/packed/gtnh-2.8.4/manifest.json \
+  --output /new/path/gtnh-2.8.4-recipe-preview-sidecar \
+  --profile gtnh-1.7.10
 ```
 
 The profile is mandatory here too. The builder verifies the hosted publication hash twice,
@@ -151,6 +173,10 @@ publication. Rerunning is idempotent. After a successful seed, delete the hosted
 feature gate disables the retained route with an explicit HTTP 503 before touching R2.
 Re-enable all three only for an authorized operator upload. Future end-user publishing
 must use authenticated upload sessions and per-user quotas rather than sharing this operator token.
+
+The guided publisher keeps that boundary explicit: contributors run the local `prepare` phase,
+while an operator runs `upload` with private credentials. The command derives the catalog label and
+version from integrity-bound exporter metadata rather than asking the operator to retype them.
 
 ## Publish an immutable dataset and activate its channel
 

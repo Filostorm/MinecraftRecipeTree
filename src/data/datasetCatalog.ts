@@ -1,6 +1,7 @@
 import {isDatasetPublicationId} from './datasetIdentity.ts';
 
 const DATASET_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const UNSAFE_IDENTITY_TEXT_PATTERN = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/u;
 const DATASET_DESCRIPTOR_KEYS = [
   'slug',
   'displayName',
@@ -43,9 +44,10 @@ function hasExactKeys(value: Record<string, unknown>, expected: readonly string[
 function isBoundedText(value: unknown, maxLength: number): value is string {
   return (
     typeof value === 'string' &&
-    value.length > 0 &&
-    value.length <= maxLength &&
-    value.trim() === value
+    [...value].length > 0 &&
+    [...value].length <= maxLength &&
+    value.trim() === value &&
+    !UNSAFE_IDENTITY_TEXT_PATTERN.test(value)
   );
 }
 

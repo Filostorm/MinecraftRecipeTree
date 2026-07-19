@@ -24,7 +24,6 @@ const DEFAULT_CONCURRENCY = 8;
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_CONCURRENCY = 32;
 const MAX_TIMEOUT_MS = 120_000;
-const RANGE_SAMPLE_BYTES = 256;
 
 function isRecord(value) {
   return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -696,7 +695,14 @@ export async function validateLocalRecipePreviewSidecar(local, concurrency = DEF
       `Local sidecar assetSetId is ${manifest.assetSetId}; content computes to ${computedAssetSetId}.`,
     );
   }
-  return {root, manifest, manifestBytes, categoryBytes, packIndexBytes};
+  return {
+    root,
+    manifest,
+    manifestBytes,
+    categoryBytes,
+    packIndexBytes,
+    coordinatesByPack: rangesByPack,
+  };
 }
 
 function validateOptions({local, baseUrl, mode, concurrency, timeoutMs, logger, fetchImpl}) {
@@ -727,12 +733,17 @@ function validateOptions({local, baseUrl, mode, concurrency, timeoutMs, logger, 
 
 function normalizeBaseUrl(url, allowHttpForTests) {
   if (url.protocol !== 'https:' && !(allowHttpForTests && url.protocol === 'http:')) {
-    throw new Error(`Public bucket base URL must use credential-free HTTPS; received ${url.protocol}.`);
+    throw new Error(`Public preview verification requires HTTPS; received ${url.protocol}.`);
   }
   if (url.username || url.password || url.search || url.hash) {
-    throw new Error('Public bucket base URL must not contain credentials, query parameters, or a hash.');
+    throw new Error(
+      'Public preview verification URL must not contain credentials, query parameters, or a hash.',
+    );
   }
   url.pathname = url.pathname.replace(/\/+$/, '');
+  if (url.pathname !== '/dataset/preview-sets') {
+    throw new Error('baseUrl must end at the exact /dataset/preview-sets route.');
+  }
   return url;
 }
 
@@ -765,29 +776,42 @@ async function fetchWithTimeout(fetchImpl, url, init, timeoutMs, label) {
   return response;
 }
 
-function parseContentLength(response, expected, label) {
+function assertResponseHeaders(response, {bytes, contentType, noTransform, label}) {
   const raw = response.headers.get('content-length');
   if (!/^(0|[1-9]\d*)$/.test(raw ?? '')) {
     throw new Error(`${label} did not provide one valid Content-Length header.`);
   }
   const received = Number(raw);
-  if (!Number.isSafeInteger(received) || received !== expected) {
-    throw new Error(`${label} Content-Length is ${raw}; expected ${expected}.`);
+  if (!Number.isSafeInteger(received) || received !== bytes) {
+    throw new Error(`${label} Content-Length is ${raw}; expected ${bytes}.`);
   }
-}
-
-function assertIdentityEncoding(response, label) {
+  const actualType = response.headers.get('content-type')?.split(';', 1)[0].trim().toLowerCase();
+  if (actualType !== contentType) {
+    throw new Error(
+      `${label} Content-Type is ${JSON.stringify(actualType)}; expected ${contentType}.`,
+    );
+  }
   const encoding = response.headers.get('content-encoding');
   if (encoding && encoding.toLowerCase() !== 'identity') {
     throw new Error(`${label} returned Content-Encoding ${encoding}; exact stored bytes are required.`);
   }
+  const cacheDirectives = (response.headers.get('cache-control') ?? '')
+    .toLowerCase()
+    .split(',')
+    .map(value => value.trim());
+  if (!cacheDirectives.includes('public') || !cacheDirectives.includes('immutable')) {
+    throw new Error(`${label} omitted the required public immutable cache contract.`);
+  }
+  if (noTransform && !cacheDirectives.includes('no-transform')) {
+    throw new Error(`${label} omitted the required no-transform image directive.`);
+  }
 }
 
-async function cancelBody(response) {
+async function cancelBody(response, logger, label) {
   try {
     await response.body?.cancel();
-  } catch {
-    // The status/header error remains authoritative; cancellation is only resource cleanup.
+  } catch (error) {
+    logger.warn(`${label} response-body cancellation failed during verifier cleanup: ${error.message}`);
   }
 }
 
@@ -819,32 +843,7 @@ async function readExactResponseBody(response, expected, label) {
   return Buffer.concat(chunks, bytes);
 }
 
-async function digestExactResponseBody(response, expected, label) {
-  if (!response.body) throw new Error(`${label} returned no response body.`);
-  const reader = response.body.getReader();
-  const hash = createHash('sha256');
-  let bytes = 0;
-  try {
-    for (;;) {
-      const {done, value} = await reader.read();
-      if (done) break;
-      bytes += value.byteLength;
-      if (bytes > expected) {
-        await reader.cancel();
-        throw new Error(`${label} response body exceeded the declared ${expected}-byte bound.`);
-      }
-      hash.update(Buffer.from(value.buffer, value.byteOffset, value.byteLength));
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  if (bytes !== expected) {
-    throw new Error(`${label} returned ${bytes} body bytes; expected ${expected}.`);
-  }
-  return hash.digest('hex');
-}
-
-async function verifyCommitMarker({localState, baseUrl, mode, fetchImpl, timeoutMs}) {
+async function verifyCommitMarker({localState, baseUrl, mode, fetchImpl, timeoutMs, logger}) {
   const url = objectUrl(
     baseUrl,
     localState.manifest.assetSetId,
@@ -853,7 +852,7 @@ async function verifyCommitMarker({localState, baseUrl, mode, fetchImpl, timeout
   );
   if (mode === 'precommit') {
     const response = await fetchWithTimeout(fetchImpl, url, {method: 'HEAD'}, timeoutMs, 'Commit marker');
-    await cancelBody(response);
+    await cancelBody(response, logger, 'Commit marker');
     if (response.status !== 404) {
       throw new Error(
         `Precommit requires remote manifest.json to be absent (HTTP 404); received HTTP ` +
@@ -865,11 +864,15 @@ async function verifyCommitMarker({localState, baseUrl, mode, fetchImpl, timeout
 
   const response = await fetchWithTimeout(fetchImpl, url, {method: 'GET'}, timeoutMs, 'Commit marker');
   if (response.status !== 200) {
-    await cancelBody(response);
+    await cancelBody(response, logger, 'Committed manifest');
     throw new Error(`Committed manifest request returned HTTP ${response.status} at ${url}.`);
   }
-  assertIdentityEncoding(response, 'Committed manifest');
-  parseContentLength(response, localState.manifestBytes.length, 'Committed manifest');
+  assertResponseHeaders(response, {
+    bytes: localState.manifestBytes.length,
+    contentType: 'application/json',
+    noTransform: false,
+    label: 'Committed manifest',
+  });
   const bytes = await readExactResponseBody(
     response,
     localState.manifestBytes.length,
@@ -880,26 +883,7 @@ async function verifyCommitMarker({localState, baseUrl, mode, fetchImpl, timeout
   }
 }
 
-async function verifyRemoteHead({
-  record,
-  baseUrl,
-  assetSetId,
-  datasetPublicationId,
-  fetchImpl,
-  timeoutMs,
-}) {
-  const url = objectUrl(baseUrl, assetSetId, datasetPublicationId, record.path);
-  const response = await fetchWithTimeout(fetchImpl, url, {method: 'HEAD'}, timeoutMs, `HEAD ${record.path}`);
-  if (response.status !== 200) {
-    await cancelBody(response);
-    throw new Error(`HEAD ${record.path} returned HTTP ${response.status} at ${url}.`);
-  }
-  assertIdentityEncoding(response, `HEAD ${record.path}`);
-  parseContentLength(response, record.bytes, `HEAD ${record.path}`);
-  await cancelBody(response);
-}
-
-async function verifyRemoteSmallObject({
+async function verifyRemoteCategoryDocument({
   record,
   localBytes,
   baseUrl,
@@ -907,48 +891,28 @@ async function verifyRemoteSmallObject({
   datasetPublicationId,
   fetchImpl,
   timeoutMs,
+  logger,
 }) {
   const url = objectUrl(baseUrl, assetSetId, datasetPublicationId, record.path);
   const response = await fetchWithTimeout(fetchImpl, url, {method: 'GET'}, timeoutMs, `GET ${record.path}`);
   if (response.status !== 200) {
-    await cancelBody(response);
+    await cancelBody(response, logger, `GET ${record.path}`);
     throw new Error(`GET ${record.path} returned HTTP ${response.status} at ${url}.`);
   }
-  assertIdentityEncoding(response, `GET ${record.path}`);
-  parseContentLength(response, record.bytes, `GET ${record.path}`);
+  assertResponseHeaders(response, {
+    bytes: record.bytes,
+    contentType: 'application/json',
+    noTransform: false,
+    label: `GET ${record.path}`,
+  });
   const bytes = await readExactResponseBody(response, record.bytes, `GET ${record.path}`);
   if (sha256(bytes) !== record.sha256 || !bytes.equals(localBytes)) {
     throw new Error(`GET ${record.path} failed its exact remote SHA-256/byte comparison.`);
   }
 }
 
-async function verifyRemotePackDigest({
-  pack,
-  baseUrl,
-  assetSetId,
-  datasetPublicationId,
-  fetchImpl,
-  timeoutMs,
-}) {
-  const url = objectUrl(baseUrl, assetSetId, datasetPublicationId, pack.path);
-  const label = `Full digest ${pack.path}`;
-  const response = await fetchWithTimeout(fetchImpl, url, {method: 'GET'}, timeoutMs, label);
-  if (response.status !== 200) {
-    await cancelBody(response);
-    throw new Error(`${label} returned HTTP ${response.status} at ${url}.`);
-  }
-  assertIdentityEncoding(response, label);
-  parseContentLength(response, pack.bytes, label);
-  const digest = await digestExactResponseBody(response, pack.bytes, label);
-  if (digest !== pack.sha256) {
-    throw new Error(`${label} SHA-256 is ${digest}; manifest declares ${pack.sha256}.`);
-  }
-}
-
-function deterministicRangeSamples(packBytes) {
-  const length = Math.min(RANGE_SAMPLE_BYTES, Math.max(1, Math.floor(packBytes / 4)));
-  const starts = [0, Math.floor((packBytes - length) / 2), packBytes - length];
-  return [...new Set(starts)].map(start => ({start, end: start + length - 1, length}));
+function sampleCoordinateIndexes(entryCount) {
+  return [...new Set([0, Math.floor((entryCount - 1) / 2), entryCount - 1])];
 }
 
 async function readLocalRange(root, path, start, length) {
@@ -965,8 +929,8 @@ async function readLocalRange(root, path, start, length) {
   }
 }
 
-async function verifyRemoteRange({
-  pack,
+async function verifyRemoteImageCoordinate({
+  coordinate,
   sample,
   root,
   baseUrl,
@@ -974,37 +938,34 @@ async function verifyRemoteRange({
   datasetPublicationId,
   fetchImpl,
   timeoutMs,
+  logger,
 }) {
-  const url = objectUrl(baseUrl, assetSetId, datasetPublicationId, pack.path);
-  const label = `Range ${pack.path} bytes=${sample.start}-${sample.end}`;
+  const path = `assets/s/${coordinate}.webp`;
+  const url = objectUrl(baseUrl, assetSetId, datasetPublicationId, path);
+  const label = `GET ${path}`;
   const response = await fetchWithTimeout(
     fetchImpl,
     url,
-    {method: 'GET', headers: {range: `bytes=${sample.start}-${sample.end}`}},
+    {method: 'GET'},
     timeoutMs,
     label,
   );
-  if (response.status !== 206) {
-    await cancelBody(response);
-    throw new Error(`${label} requires HTTP 206; received HTTP ${response.status} at ${url}.`);
+  if (response.status !== 200) {
+    await cancelBody(response, logger, label);
+    throw new Error(`${label} returned HTTP ${response.status} at ${url}.`);
   }
-  assertIdentityEncoding(response, label);
-  const contentRange = response.headers.get('content-range');
-  const expectedContentRange = `bytes ${sample.start}-${sample.end}/${pack.bytes}`;
-  if (contentRange !== expectedContentRange) {
-    await cancelBody(response);
-    throw new Error(
-      `${label} Content-Range is ${JSON.stringify(contentRange)}; expected ` +
-        `${JSON.stringify(expectedContentRange)}.`,
-    );
-  }
-  parseContentLength(response, sample.length, label);
+  assertResponseHeaders(response, {
+    bytes: sample.length,
+    contentType: 'image/webp',
+    noTransform: true,
+    label,
+  });
   const [remoteBytes, localBytes] = await Promise.all([
     readExactResponseBody(response, sample.length, label),
-    readLocalRange(root, pack.path, sample.start, sample.length),
+    readLocalRange(root, sample.packPath, sample.offset, sample.length),
   ]);
   if (!remoteBytes.equals(localBytes)) {
-    throw new Error(`${label} does not match the local pack bytes.`);
+    throw new Error(`${label} differs from the local MRPI-authorized pack range.`);
   }
 }
 
@@ -1042,6 +1003,7 @@ export async function verifyRemoteRecipePreviewSidecar({
       mode,
       fetchImpl,
       timeoutMs,
+      logger,
     });
     logger.info(
       mode === 'precommit'
@@ -1049,22 +1011,23 @@ export async function verifyRemoteRecipePreviewSidecar({
         : 'Verified the committed remote manifest byte-for-byte.',
     );
 
-    const packIndexRecords = manifest.packs.map(pack => pack.index);
-    const records = [...manifest.packs, ...packIndexRecords, ...manifest.categoryDocuments];
-    await mapConcurrent(records, concurrency, record =>
-      verifyRemoteHead({
-        record,
-        baseUrl: normalizedBaseUrl,
+    if (mode === 'precommit') {
+      logger.info(
+        'Precommit public verification stops after proving the commit marker is absent. ' +
+          'Authenticated upload staging verifies private packs and indexes before commit.',
+      );
+      return {
+        mode,
         assetSetId: manifest.assetSetId,
         datasetPublicationId: manifest.datasetPublicationId,
-        fetchImpl,
-        timeoutMs,
-      }),
-    );
-    logger.info(`Verified exact remote Content-Length for ${records.length} immutable objects.`);
+        packs: manifest.packs.length,
+        categoryDocuments: 0,
+        imageSamples: 0,
+      };
+    }
 
     await mapConcurrent(manifest.categoryDocuments, concurrency, (record, index) =>
-      verifyRemoteSmallObject({
+      verifyRemoteCategoryDocument({
         record,
         localBytes: localState.categoryBytes[index],
         baseUrl: normalizedBaseUrl,
@@ -1072,55 +1035,28 @@ export async function verifyRemoteRecipePreviewSidecar({
         datasetPublicationId: manifest.datasetPublicationId,
         fetchImpl,
         timeoutMs,
+        logger,
       }),
     );
     logger.info(
       `Downloaded and digest-verified ${manifest.categoryDocuments.length} category documents.`,
     );
-    await mapConcurrent(packIndexRecords, concurrency, (record, index) =>
-      verifyRemoteSmallObject({
-        record,
-        localBytes: localState.packIndexBytes[index],
-        baseUrl: normalizedBaseUrl,
-        assetSetId: manifest.assetSetId,
-        datasetPublicationId: manifest.datasetPublicationId,
-        fetchImpl,
-        timeoutMs,
+    const imageJobs = localState.coordinatesByPack.flatMap((entries, packNumber) =>
+      sampleCoordinateIndexes(entries.length).map(entryIndex => {
+        const entry = entries[entryIndex];
+        return {
+          coordinate:
+            `${String(packNumber).padStart(3, '0')}-${entry.offset}-${entry.length}`,
+          sample: {
+            ...entry,
+            packPath: manifest.packs[packNumber].path,
+          },
+        };
       }),
     );
-    logger.info(
-      `Downloaded and digest-verified ${packIndexRecords.length} pack authorization indexes.`,
-    );
-
-    let fullyHashedPacks = 0;
-    if (mode === 'precommit') {
-      await mapConcurrent(manifest.packs, concurrency, pack =>
-        verifyRemotePackDigest({
-          pack,
-          baseUrl: normalizedBaseUrl,
-          assetSetId: manifest.assetSetId,
-          datasetPublicationId: manifest.datasetPublicationId,
-          fetchImpl,
-          timeoutMs,
-        }),
-      );
-      fullyHashedPacks = manifest.packs.length;
-      logger.info(
-        `Streamed and SHA-256-verified all ${fullyHashedPacks} remote packs before publication.`,
-      );
-    } else {
-      logger.info(
-        'Committed verification intentionally performs zero full pack downloads; the exact ' +
-          'manifest is the commit marker for packs cryptographically verified during precommit.',
-      );
-    }
-
-    const rangeJobs = manifest.packs.flatMap(pack =>
-      deterministicRangeSamples(pack.bytes).map(sample => ({pack, sample})),
-    );
-    await mapConcurrent(rangeJobs, concurrency, ({pack, sample}) =>
-      verifyRemoteRange({
-        pack,
+    await mapConcurrent(imageJobs, concurrency, ({coordinate, sample}) =>
+      verifyRemoteImageCoordinate({
+        coordinate,
         sample,
         root: localState.root,
         baseUrl: normalizedBaseUrl,
@@ -1128,27 +1064,28 @@ export async function verifyRemoteRecipePreviewSidecar({
         datasetPublicationId: manifest.datasetPublicationId,
         fetchImpl,
         timeoutMs,
+        logger,
       }),
     );
     logger.info(
-      `Verified ${rangeJobs.length} exact HTTP 206 byte-range samples across ` +
-        `${manifest.packs.length} packs.`,
+      `Verified ${imageJobs.length} public MRPI-authorized image samples across ` +
+        `${manifest.packs.length} packs without requesting private packs or indexes.`,
     );
     logger.info(
-      `Remote recipe preview sidecar ${manifest.assetSetId} passed ${mode} verification.`,
+      `Public recipe preview sidecar ${manifest.assetSetId} passed committed verification.`,
     );
     return {
       mode,
       assetSetId: manifest.assetSetId,
       datasetPublicationId: manifest.datasetPublicationId,
       packs: manifest.packs.length,
-      packIndexes: manifest.packs.length,
       categoryDocuments: manifest.categoryDocuments.length,
-      fullyHashedPacks,
-      rangeSamples: rangeJobs.length,
+      imageSamples: imageJobs.length,
     };
   } catch (error) {
-    logger.error(`Remote recipe preview sidecar ${mode} verification failed: ${error.message}`);
+    logger.error(
+      `Public recipe preview sidecar ${mode} verification failed closed: ${error.message}`,
+    );
     throw error;
   }
 }

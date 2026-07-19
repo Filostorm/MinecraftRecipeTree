@@ -30,6 +30,7 @@ import {
   RECIPE_PREVIEW_SIDECAR_FORMAT,
 } from './build-recipe-preview-sidecar.mjs';
 import {
+  GTNH_1710_PROFILE,
   MEATBALLCRAFT_112_PROFILE,
   MULTIBLOCK_MADNESS_112_PROFILE,
   MULTIBLOCK_MADNESS_2_118_PROFILE,
@@ -48,6 +49,11 @@ import {
 import {SHARDED_JSON_FORMAT} from './sharded-documents.mjs';
 
 const FIXTURE_RECIPE_COUNT = 24;
+const GTNH_PACK_IDENTITY = Object.freeze({
+  name: 'GT New Horizons',
+  version: '2.8.4',
+  identitySource: 'explicit-request',
+});
 const FIXTURE_CONTRACT = Object.freeze({
   format: 1,
   minecraft: '1.12.2',
@@ -80,10 +86,45 @@ const SCALED_FIXTURE_CONTRACT = Object.freeze({
   }),
 });
 
-function completeProfileFixtureContract(profile, minecraft, failures = 0) {
+function qualitySampleForProfile(profile, recipeCount = FIXTURE_RECIPE_COUNT) {
+  if (profile === MULTIBLOCK_MADNESS_112_PROFILE) {
+    return {
+      enabled: true,
+      recipeTargets: recipeCount,
+      selectorCounts: {recipeId: 0, sourceIndex: recipeCount},
+    };
+  }
+  if (profile === MULTIBLOCK_MADNESS_2_118_PROFILE) {
+    return {
+      selectorCounts: {recipeId: 0, sourceIndex: recipeCount},
+      requested: Array.from({length: recipeCount}, (_, sourceIndex) => ({
+        categoryId: 'fixture:category',
+        sourceIndex,
+      })),
+    };
+  }
+  return undefined;
+}
+
+function completeProfileFixtureContract(
+  profile,
+  minecraft,
+  failures = 0,
+  {qualitySample, nativeIconCorrections = 2, transparentIcons = 0} = {},
+) {
+  const mm2 = profile === MULTIBLOCK_MADNESS_2_118_PROFILE;
+  const gtnh = profile === GTNH_1710_PROFILE;
   return recipePreviewContractForProfile(profile, {
     format: 1,
     minecraft,
+    ...(gtnh
+      ? {
+          profile: GTNH_1710_PROFILE,
+          forge: '10.13.4.1614',
+          nei: '2.8.44-GTNH',
+          pack: GTNH_PACK_IDENTITY,
+        }
+      : {}),
     aborted: false,
     settings: {iconScale: 1, recipeScale: 2, mobCanvas: 256},
     counts: {
@@ -92,9 +133,30 @@ function completeProfileFixtureContract(profile, minecraft, failures = 0) {
       categories: 1,
       mobs: 0,
       blockDrops: 0,
+      ...(mm2 ? {nativeIconCorrections} : {}),
       failures,
     },
-    diagnostics: {failureEvents: failures, failureEventsOmitted: 0},
+    diagnostics: {
+      failureEvents: failures,
+      failureEventsOmitted: 0,
+      ...(mm2 ? {nativeIconCorrections, transparentIcons} : {}),
+      ...(gtnh
+        ? {
+            nei: {
+              itemListLoaded: true,
+              registeredCraftingHandlers: 1,
+              loadedCategories: 1,
+              recipesEnumerated: FIXTURE_RECIPE_COUNT,
+              recipeWidgetsRendered: FIXTURE_RECIPE_COUNT,
+              itemIconsRendered: 2,
+              unloadedHandlerCategories: 0,
+              ambiguousHandlerCategories: 0,
+              duplicateHandlerCategories: 0,
+            },
+          }
+        : {}),
+    },
+    ...(qualitySample === undefined ? {} : {qualitySample}),
   });
 }
 
@@ -168,7 +230,8 @@ test('profile contract resolution preserves MeatballCraft and derives only new-p
     MULTIBLOCK_MADNESS_2_118_PROFILE,
     '1.18.2',
   );
-  for (const contract of [first, second]) {
+  const gtnh = completeProfileFixtureContract(GTNH_1710_PROFILE, '1.7.10');
+  for (const contract of [first, second, gtnh]) {
     assert.deepEqual(contract.settings, {iconScale: 1, recipeScale: 2, mobCanvas: 256});
     assert.deepEqual(contract.recipeImages, {previews: FIXTURE_RECIPE_COUNT, missing: 0});
     assert.equal(contract.counts.recipes, FIXTURE_RECIPE_COUNT);
@@ -176,6 +239,152 @@ test('profile contract resolution preserves MeatballCraft and derives only new-p
   }
   assert.equal(first.minecraft, '1.12.2');
   assert.equal(second.minecraft, '1.18.2');
+  assert.equal(second.counts.nativeIconCorrections, 2);
+  assert.equal(second.diagnostics.nativeIconCorrections, 2);
+  assert.equal(second.diagnostics.transparentIcons, 0);
+  assert.equal(gtnh.minecraft, '1.7.10');
+  assert.equal(gtnh.profile, GTNH_1710_PROFILE);
+  assert.equal(gtnh.forge, '10.13.4.1614');
+  assert.equal(gtnh.nei, '2.8.44-GTNH');
+  assert.deepEqual(gtnh.pack, GTNH_PACK_IDENTITY);
+  assert.deepEqual(gtnh.diagnostics.nei, {
+    itemListLoaded: true,
+    registeredCraftingHandlers: 1,
+    loadedCategories: 1,
+    recipesEnumerated: FIXTURE_RECIPE_COUNT,
+    recipeWidgetsRendered: FIXTURE_RECIPE_COUNT,
+    itemIconsRendered: 2,
+    unloadedHandlerCategories: 0,
+    ambiguousHandlerCategories: 0,
+    duplicateHandlerCategories: 0,
+  });
+});
+
+test('GTNH profile contract rejects NEI schema, handler, render, and pack-identity drift', () => {
+  const contract = completeProfileFixtureContract(GTNH_1710_PROFILE, '1.7.10');
+  const {recipeImages: _recipeImages, hostedWeb: _hostedWeb, ...rawManifest} = contract;
+  const manifest = {...rawManifest, aborted: false};
+
+  assert.throws(
+    () =>
+      recipePreviewContractForProfile(GTNH_1710_PROFILE, {
+        ...manifest,
+        diagnostics: {
+          ...manifest.diagnostics,
+          nei: {...manifest.diagnostics.nei, unloadedHandlerCategories: 1},
+        },
+      }),
+    /unloadedHandlerCategories.*0/,
+  );
+  assert.throws(
+    () =>
+      recipePreviewContractForProfile(GTNH_1710_PROFILE, {
+        ...manifest,
+        diagnostics: {
+          ...manifest.diagnostics,
+          nei: {...manifest.diagnostics.nei, futureHandlerFailure: 0},
+        },
+      }),
+    /diagnostics\.nei must contain exactly/,
+  );
+  assert.throws(
+    () =>
+      recipePreviewContractForProfile(GTNH_1710_PROFILE, {
+        ...manifest,
+        diagnostics: {
+          ...manifest.diagnostics,
+          nei: {...manifest.diagnostics.nei, recipeWidgetsRendered: FIXTURE_RECIPE_COUNT - 1},
+        },
+      }),
+    /recipeWidgetsRendered.*counts\.recipes/,
+  );
+  assert.throws(
+    () =>
+      recipePreviewContractForProfile(GTNH_1710_PROFILE, {
+        ...manifest,
+        pack: {...manifest.pack, version: '2.8.3'},
+      }),
+    /pack\.version "2\.8\.4"|exact GTNH identity/,
+  );
+});
+
+test('profile contracts accept only their exact sampled-export telemetry', () => {
+  const mm1Sample = qualitySampleForProfile(MULTIBLOCK_MADNESS_112_PROFILE);
+  const mm1 = completeProfileFixtureContract(
+    MULTIBLOCK_MADNESS_112_PROFILE,
+    '1.12.2',
+    0,
+    {qualitySample: mm1Sample},
+  );
+  assert.deepEqual(mm1.qualitySample, mm1Sample);
+
+  const mm2Sample = qualitySampleForProfile(MULTIBLOCK_MADNESS_2_118_PROFILE);
+  const mm2 = completeProfileFixtureContract(
+    MULTIBLOCK_MADNESS_2_118_PROFILE,
+    '1.18.2',
+    0,
+    {qualitySample: mm2Sample},
+  );
+  assert.deepEqual(mm2.qualitySample, mm2Sample);
+  const rawManifestFor = contract => {
+    const {recipeImages: _recipeImages, hostedWeb: _hostedWeb, ...manifest} = contract;
+    return {...manifest, aborted: false};
+  };
+
+  assert.throws(
+    () =>
+      completeProfileFixtureContract(
+        MULTIBLOCK_MADNESS_112_PROFILE,
+        '1.12.2',
+        0,
+        {qualitySample: {...mm1Sample, unexpected: true}},
+      ),
+    /must contain exactly enabled, recipeTargets, and selectorCounts/,
+  );
+  assert.throws(
+    () =>
+      completeProfileFixtureContract(
+        MULTIBLOCK_MADNESS_2_118_PROFILE,
+        '1.18.2',
+        0,
+        {qualitySample: {...mm2Sample, requested: [...mm2Sample.requested, mm2Sample.requested[0]]}},
+      ),
+    /sourceIndex must equal requested\.length|requested\.length must equal manifest\.counts\.recipes/,
+  );
+  assert.throws(
+    () =>
+      completeProfileFixtureContract(
+        MULTIBLOCK_MADNESS_2_118_PROFILE,
+        '1.18.2',
+        0,
+        {nativeIconCorrections: 2, transparentIcons: 1},
+      ),
+    /transparentIcons must be 0 for publication/,
+  );
+  assert.throws(
+    () =>
+      recipePreviewContractForProfile(MULTIBLOCK_MADNESS_112_PROFILE, {
+        ...rawManifestFor(mm1),
+        counts: {...mm1.counts, nativeIconCorrections: 0},
+      }),
+    /manifest\.counts must contain exactly items, recipes, categories, mobs, blockDrops, failures/,
+  );
+  assert.throws(
+    () =>
+      recipePreviewContractForProfile(MULTIBLOCK_MADNESS_2_118_PROFILE, {
+        ...rawManifestFor(mm2),
+        diagnostics: {...mm2.diagnostics, nativeIconCorrections: 1},
+      }),
+    /native-icon correction counts disagree/,
+  );
+  assert.throws(
+    () =>
+      recipePreviewContractForProfile(MULTIBLOCK_MADNESS_2_118_PROFILE, {
+        ...rawManifestFor(mm2),
+        diagnostics: {...mm2.diagnostics, unexpected: 0},
+      }),
+    /manifest\.diagnostics must contain exactly/,
+  );
 });
 
 test('profile contract resolution rejects unsupported scale and diagnostic drift', () => {
@@ -190,9 +399,15 @@ test('profile contract resolution rejects unsupported scale and diagnostic drift
       categories: 1,
       mobs: 0,
       blockDrops: 0,
+      nativeIconCorrections: 0,
       failures: 1,
     },
-    diagnostics: {failureEvents: 0, failureEventsOmitted: 0},
+    diagnostics: {
+      failureEvents: 0,
+      failureEventsOmitted: 0,
+      nativeIconCorrections: 0,
+      transparentIcons: 0,
+    },
   };
   assert.throws(
     () => recipePreviewContractForProfile(MULTIBLOCK_MADNESS_2_118_PROFILE, manifest),
@@ -374,9 +589,18 @@ async function createFixture(
     durationMs: 12,
     aborted: false,
     minecraft: contract.minecraft,
+    ...Object.fromEntries(
+      ['profile', 'forge', 'nei'].flatMap(name =>
+        contract[name] === undefined ? [] : [[name, contract[name]]],
+      ),
+    ),
+    ...(contract.pack === undefined ? {} : {pack: structuredClone(contract.pack)}),
     settings: {...contract.settings},
     counts: {...contract.counts},
     diagnostics: {...contract.diagnostics},
+    ...(contract.qualitySample === undefined
+      ? {}
+      : {qualitySample: structuredClone(contract.qualitySample)}),
     mods: {minecraft: 'Minecraft'},
     ...(repairProvenance === undefined ? {} : {repairProvenance}),
   };
@@ -714,14 +938,17 @@ test('builder decodes scaled physical pixels while retaining logical recipe coor
   }
 });
 
-test('builder accepts dynamic complete Multiblock Madness corpora with explicit profiles', async () => {
+test('builder accepts dynamic complete pack corpora with explicit profiles', async () => {
   for (const [profile, minecraft] of [
     [MULTIBLOCK_MADNESS_112_PROFILE, '1.12.2'],
     [MULTIBLOCK_MADNESS_2_118_PROFILE, '1.18.2'],
+    [GTNH_1710_PROFILE, '1.7.10'],
   ]) {
     const root = await mkdtemp(join(tmpdir(), 'recipe-preview-sidecar-profile-test-'));
     try {
-      const fixtureContract = completeProfileFixtureContract(profile, minecraft);
+      const fixtureContract = completeProfileFixtureContract(profile, minecraft, 0, {
+        qualitySample: qualitySampleForProfile(profile),
+      });
       const fixture = await createFixture(root, fixtureContract, {
         missingRecipeIndex: null,
         failures: [],

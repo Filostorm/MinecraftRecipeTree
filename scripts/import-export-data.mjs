@@ -1,6 +1,7 @@
 import {spawn} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {
+  cp,
   lstat,
   mkdir,
   realpath,
@@ -31,7 +32,8 @@ function usage() {
   return (
     'Usage: node scripts/import-export-data.mjs --source <raw-export-directory> ' +
     `--profile <${EXPORT_QUALITY_PROFILE_IDS.join('|')}> ` +
-    '[--destination <directory>] [--dry-run] [--omit-recipe-images]'
+    '[--destination <directory>] [--dry-run] [--omit-recipe-images] ' +
+    '[--staging-mode <clone|copy>]'
   );
 }
 
@@ -42,6 +44,7 @@ function parseArguments(args) {
   let dryRun = false;
   let omitRecipeImages = false;
   let showHelp = false;
+  let stagingMode = null;
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === '--help' || argument === '-h') {
@@ -60,6 +63,11 @@ function parseArguments(args) {
       dryRun = true;
     } else if (argument === '--omit-recipe-images') {
       omitRecipeImages = true;
+    } else if (argument === '--staging-mode') {
+      stagingMode = args[++index];
+      if (stagingMode !== 'clone' && stagingMode !== 'copy') {
+        throw new Error('--staging-mode must be exactly clone or copy.');
+      }
     } else {
       throw new Error(`Unknown import argument: ${argument}`);
     }
@@ -75,6 +83,7 @@ function parseArguments(args) {
     dryRun,
     omitRecipeImages,
     showHelp,
+    stagingMode,
   };
 }
 
@@ -302,6 +311,31 @@ async function cloneRawExport(source, destination, runRoot) {
   ]);
 }
 
+async function copyRawExport(source, destination) {
+  console.warn(
+    '[import-data] Full-copy staging was selected. This is cross-platform, but it duplicates the ' +
+      'raw export temporarily and can take substantially longer than APFS clonefile staging.',
+  );
+  await cp(source, destination, {
+    recursive: true,
+    errorOnExist: true,
+    force: false,
+    dereference: false,
+    preserveTimestamps: true,
+    verbatimSymlinks: true,
+  });
+}
+
+function resolveStagingMode(requested) {
+  if (requested !== null && requested !== undefined) return requested;
+  const selected = process.platform === 'darwin' ? 'clone' : 'copy';
+  console.info(
+    `[import-data] No staging mode was specified; selected ${selected} for platform ${process.platform}. ` +
+      'The importer never switches modes after a staging failure.',
+  );
+  return selected;
+}
+
 function retainImportWork(error) {
   Object.defineProperty(error, 'retainImportWork', {value: true});
   return error;
@@ -423,11 +457,16 @@ export async function importExportData({
   destination = defaultDestination,
   dryRun = false,
   omitRecipeImages = false,
+  stagingMode = null,
 }) {
   if (typeof source !== 'string' || !source) {
     throw new Error('A raw export source directory is required.');
   }
   const resolvedProfile = resolveQualityProfile(profile);
+  const resolvedStagingMode = resolveStagingMode(stagingMode);
+  if (resolvedStagingMode !== 'clone' && resolvedStagingMode !== 'copy') {
+    throw new Error('stagingMode must be exactly clone or copy.');
+  }
   if (resolvedProfile === null) {
     throw new Error(
       `An explicit export quality profile is required. Supported profiles: ` +
@@ -507,7 +546,7 @@ export async function importExportData({
       'Import work root and live destination are on different filesystems; atomic rename publication is unavailable.',
     );
   }
-  if (sourceDevice.dev !== workDevice.dev) {
+  if (resolvedStagingMode === 'clone' && sourceDevice.dev !== workDevice.dev) {
     throw new Error(
       'Raw export source and import work root are on different filesystems; required copy-on-write cloning is unavailable.',
     );
@@ -533,9 +572,13 @@ export async function importExportData({
     assertNoOverlap(stagingPotentialReal, 'Staging root', backupPotentialReal, 'rollback backup');
 
     console.log(
-      `[import-data] Cloning the raw export into out-of-public staging: ${stagingRoot} (copy-on-write is required; no fallback)`,
+      `[import-data] out-of-public staging: ${stagingRoot} (explicit ${resolvedStagingMode} mode)`,
     );
-    await cloneRawExport(sourceReal, stagingRoot, runRootReal);
+    if (resolvedStagingMode === 'clone') {
+      await cloneRawExport(sourceReal, stagingRoot, runRootReal);
+    } else {
+      await copyRawExport(sourceReal, stagingRoot);
+    }
     const stagingReal = await existingRealDirectory(stagingRoot, 'Copied staging root');
     if (stagingReal !== stagingPotentialReal) {
       throw new Error(

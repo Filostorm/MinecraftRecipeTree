@@ -47,6 +47,7 @@ test('activation sends the exact authenticated descriptor then independently ver
   const result = await administerDatasetChannel({
     operation: 'activate',
     ...MULTIBLOCK,
+    expectedPreviousPublicationId: null,
     adminBaseUrl: ADMIN_BASE_URL,
     token: TOKEN,
     allowHttpForTests: true,
@@ -75,10 +76,47 @@ test('activation sends the exact authenticated descriptor then independently ver
     publicationId: MULTIBLOCK.publicationId,
     previewAssetSetId: MULTIBLOCK.previewAssetSetId,
     isDefault: false,
+    expectedPreviousPublicationId: null,
   });
   assert.equal(calls[1].url, 'http://operator.example/api/datasets');
   assert.equal(calls[1].init.method, 'GET');
   assert.equal(calls[1].init.headers.Authorization, undefined);
+});
+
+test('channel administration counts identity bounds in Unicode code points', async () => {
+  const astralName = '🧱'.repeat(120);
+  const descriptor = {...MULTIBLOCK, displayName: astralName};
+  const result = await administerDatasetChannel({
+    operation: 'activate',
+    ...descriptor,
+    expectedPreviousPublicationId: null,
+    adminBaseUrl: ADMIN_BASE_URL,
+    token: TOKEN,
+    allowHttpForTests: true,
+    logger: silentLogger(),
+    async fetchImpl(_url, init) {
+      return init.method === 'POST'
+        ? jsonResponse({dataset: descriptor})
+        : jsonResponse({datasets: [DEFAULT_DATASET, descriptor]});
+    },
+  });
+  assert.equal(result.displayName, astralName);
+  await assert.rejects(
+    administerDatasetChannel({
+      operation: 'activate',
+      ...MULTIBLOCK,
+      displayName: 'Unsafe\u202eName',
+      expectedPreviousPublicationId: null,
+      adminBaseUrl: ADMIN_BASE_URL,
+      token: TOKEN,
+      allowHttpForTests: true,
+      logger: silentLogger(),
+      async fetchImpl() {
+        throw new Error('invalid identity must be rejected before transport');
+      },
+    }),
+    /descriptor violates/,
+  );
 });
 
 test('activation retries bounded stale catalog reads and succeeds without repeating the mutation', async () => {
@@ -88,6 +126,7 @@ test('activation retries bounded stale catalog reads and succeeds without repeat
   const result = await administerDatasetChannel({
     operation: 'activate',
     ...MULTIBLOCK,
+    expectedPreviousPublicationId: MULTIBLOCK.publicationId,
     adminBaseUrl: ADMIN_BASE_URL,
     token: TOKEN,
     allowHttpForTests: true,
@@ -115,6 +154,7 @@ test('activation reports a committed mutation with inconclusive verification aft
     administerDatasetChannel({
       operation: 'activate',
       ...MULTIBLOCK,
+      expectedPreviousPublicationId: null,
       adminBaseUrl: ADMIN_BASE_URL,
       token: TOKEN,
       allowHttpForTests: true,
@@ -210,6 +250,41 @@ test('transport failures redact the bearer token from errors and logs', async ()
 test('CLI parsing is exact and deactivation refuses descriptor arguments', () => {
   assert.deepEqual(
     parseDatasetChannelCliArguments([
+      'activate',
+      '--slug',
+      'multiblock-madness',
+      '--display-name',
+      'Multiblock Madness',
+      '--minecraft-version',
+      '1.12.2',
+      '--pack-version',
+      '3.2.3',
+      '--publication-id',
+      PUBLICATION,
+      '--preview-asset-set-id',
+      PREVIEW,
+      '--default',
+      'false',
+      '--expected-previous-publication-id',
+      'absent',
+      '--admin-base-url',
+      'https://viewer.example/api/admin/dataset-channels',
+    ]),
+    {
+      operation: 'activate',
+      slug: 'multiblock-madness',
+      displayName: 'Multiblock Madness',
+      minecraftVersion: '1.12.2',
+      packVersion: '3.2.3',
+      publicationId: PUBLICATION,
+      previewAssetSetId: PREVIEW,
+      isDefault: false,
+      expectedPreviousPublicationId: null,
+      adminBaseUrl: 'https://viewer.example/api/admin/dataset-channels',
+    },
+  );
+  assert.deepEqual(
+    parseDatasetChannelCliArguments([
       'deactivate',
       '--slug',
       'multiblock-madness',
@@ -230,6 +305,16 @@ test('CLI parsing is exact and deactivation refuses descriptor arguments', () =>
       adminBaseUrl: 'https://viewer.example/api/admin/dataset-channels',
       tokenFile: '/private/operator-token',
     },
+  );
+  assert.throws(
+    () => parseDatasetChannelCliArguments([
+      'activate', '--slug', 'multiblock-madness', '--display-name', 'Multiblock Madness',
+      '--minecraft-version', '1.12.2', '--pack-version', '3.2.3',
+      '--publication-id', PUBLICATION, '--preview-asset-set-id', PREVIEW,
+      '--default', 'false',
+      '--admin-base-url', 'https://viewer.example/api/admin/dataset-channels',
+    ]),
+    /expectedPreviousPublicationId/,
   );
   assert.throws(
     () => parseDatasetChannelCliArguments([

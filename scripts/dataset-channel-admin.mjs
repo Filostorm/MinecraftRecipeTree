@@ -7,6 +7,7 @@ const CONTENT_ID_PATTERN = /^[a-f0-9]{64}$/;
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_TIMEOUT_MS = 120_000;
 const MAX_RESPONSE_BYTES = 64 * 1024;
+const UNSAFE_IDENTITY_TEXT_PATTERN = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/u;
 const POST_MUTATION_CATALOG_RETRY_DELAYS_MS = Object.freeze([200, 500, 1_000]);
 const EXPECTED_PUBLICATION_HEADER = 'X-MRT-Expected-Dataset-Publication-ID';
 const EXPECTED_PREVIEW_HEADER = 'X-MRT-Expected-Preview-Asset-Set-ID';
@@ -33,9 +34,10 @@ function hasExactKeys(value, expected) {
 function boundedText(value, maximum) {
   return (
     typeof value === 'string' &&
-    value.length > 0 &&
-    value.length <= maximum &&
-    value.trim() === value
+    [...value].length > 0 &&
+    [...value].length <= maximum &&
+    value.trim() === value &&
+    !UNSAFE_IDENTITY_TEXT_PATTERN.test(value)
   );
 }
 
@@ -51,6 +53,11 @@ function requireContentId(value, label) {
     throw new Error(`${label} must be a lowercase 64-character SHA-256 identity.`);
   }
   return value;
+}
+
+function requireExpectedPreviousPublicationId(value) {
+  if (value === null) return null;
+  return requireContentId(value, 'expectedPreviousPublicationId');
 }
 
 function requireDescriptor(value, label = 'dataset descriptor') {
@@ -313,6 +320,7 @@ export async function administerDatasetChannel({
   publicationId,
   previewAssetSetId,
   isDefault,
+  expectedPreviousPublicationId,
   adminBaseUrl,
   token,
   timeoutMs,
@@ -345,6 +353,7 @@ export async function administerDatasetChannel({
   try {
     let expected;
     if (operation === 'activate') {
+      const expectedPrevious = requireExpectedPreviousPublicationId(expectedPreviousPublicationId);
       const descriptor = requireDescriptor({
         slug: validatedSlug,
         displayName,
@@ -361,6 +370,7 @@ export async function administerDatasetChannel({
         publicationId: descriptor.publicationId,
         previewAssetSetId: descriptor.previewAssetSetId,
         isDefault: descriptor.isDefault,
+        expectedPreviousPublicationId: expectedPrevious,
       });
       const value = await verifiedFetch({
         url: channelUrl(baseUrl, validatedSlug, '/activate'),
@@ -475,6 +485,7 @@ export function parseDatasetChannelCliArguments(argv) {
     ['--publication-id', 'publicationId'],
     ['--preview-asset-set-id', 'previewAssetSetId'],
     ['--default', 'isDefault'],
+    ['--expected-previous-publication-id', 'expectedPreviousPublicationId'],
     ['--admin-base-url', 'adminBaseUrl'],
     ['--token-file', 'tokenFile'],
     ['--timeout-ms', 'timeoutMs'],
@@ -487,15 +498,27 @@ export function parseDatasetChannelCliArguments(argv) {
     const value = argumentsAfterOperation[index + 1];
     if (value === undefined || value.startsWith('--')) throw new Error(`${flag} requires a value.`);
     if (options[name] !== undefined) throw new Error(`${flag} was provided more than once.`);
-    options[name] = name === 'isDefault' ? parseBoolean(value, flag) : name === 'timeoutMs' ? Number(value) : value;
+    options[name] = name === 'isDefault'
+      ? parseBoolean(value, flag)
+      : name === 'timeoutMs'
+        ? Number(value)
+        : name === 'expectedPreviousPublicationId' && value === 'absent'
+          ? null
+          : value;
     index += 1;
   }
   const required = operation === 'activate'
-    ? ['slug', 'displayName', 'minecraftVersion', 'packVersion', 'publicationId', 'previewAssetSetId', 'isDefault', 'adminBaseUrl']
+    ? ['slug', 'displayName', 'minecraftVersion', 'packVersion', 'publicationId', 'previewAssetSetId', 'isDefault', 'expectedPreviousPublicationId', 'adminBaseUrl']
     : ['slug', 'publicationId', 'previewAssetSetId', 'adminBaseUrl'];
   const missing = required.filter(name => options[name] === undefined);
   if (missing.length > 0) throw new Error(`Missing required dataset channel arguments: ${missing.join(', ')}.`);
-  const activationOnly = ['displayName', 'minecraftVersion', 'packVersion', 'isDefault'];
+  const activationOnly = [
+    'displayName',
+    'minecraftVersion',
+    'packVersion',
+    'isDefault',
+    'expectedPreviousPublicationId',
+  ];
   if (operation === 'deactivate' && activationOnly.some(name => options[name] !== undefined)) {
     throw new Error('Deactivation refuses activation-only descriptor arguments.');
   }
