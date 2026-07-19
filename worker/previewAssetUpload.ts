@@ -3,7 +3,7 @@ import {
   PREVIEW_ASSET_SET_PATTERN,
   type PreviewContentRecord,
   type ValidatedPreviewManifest,
-  requirePreviewManifest,
+  requireContentAddressedPreviewManifest,
 } from './previewAssetContract.ts';
 
 export const PREVIEW_UPLOAD_BASE_PATH = '/api/admin/preview-assets/';
@@ -52,6 +52,7 @@ export interface PreviewUploadR2Bucket {
 export interface PreviewUploadRuntime {
   PREVIEW_ASSETS?: PreviewUploadR2Bucket;
   PREVIEW_ASSET_SET_ID?: string;
+  PREVIEW_UPLOAD_ASSET_SET_ID?: string;
   PREVIEW_UPLOAD_ENABLED?: string;
   PREVIEW_UPLOAD_TOKEN?: string;
 }
@@ -261,7 +262,11 @@ async function readManifestObject(
     const detail = error instanceof Error ? error.message : String(error);
     throw new Error(`Preview manifest object ${object.key} contains invalid JSON: ${detail}`);
   }
-  return {bytes, digest, state: requirePreviewManifest(value, expectedAssetSetId)};
+  return {
+    bytes,
+    digest,
+    state: await requireContentAddressedPreviewManifest(value, expectedAssetSetId),
+  };
 }
 
 async function loadStagedManifest(
@@ -375,7 +380,7 @@ async function handleBegin(
 
   let state: ValidatedPreviewManifest;
   try {
-    state = requirePreviewManifest(value, assetSetId);
+    state = await requireContentAddressedPreviewManifest(value, assetSetId);
   } catch (error) {
     console.error('A preview staging manifest failed contract validation.', {assetSetId, error});
     return jsonResponse(422, {error: 'Manifest does not satisfy the preview sidecar contract.'});
@@ -774,10 +779,24 @@ export async function handlePreviewAssetUpload(
   const authorizationFailure = await authorizeUpload(request, runtime.PREVIEW_UPLOAD_TOKEN);
   if (authorizationFailure) return authorizationFailure;
   const bucket = runtime.PREVIEW_ASSETS;
-  const configuredAssetSetId = runtime.PREVIEW_ASSET_SET_ID;
-  if (!bucket || !configuredAssetSetId || !PREVIEW_ASSET_SET_PATTERN.test(configuredAssetSetId)) {
-    console.error('Preview ingestion requires PREVIEW_ASSETS R2 and PREVIEW_ASSET_SET_ID bindings.');
+  if (!bucket) {
+    console.error('Preview ingestion requires the PREVIEW_ASSETS R2 binding.');
     return jsonResponse(503, {error: 'Preview ingestion storage is misconfigured.'});
+  }
+  const configuredAssetSetId = runtime.PREVIEW_UPLOAD_ASSET_SET_ID;
+  if (!configuredAssetSetId) {
+    console.error(
+      'Preview ingestion is enabled but PREVIEW_UPLOAD_ASSET_SET_ID is unset; ' +
+        'the serving PREVIEW_ASSET_SET_ID is never used as an upload fallback.',
+    );
+    return jsonResponse(503, {error: 'Preview ingestion target is not configured.'});
+  }
+  if (!PREVIEW_ASSET_SET_PATTERN.test(configuredAssetSetId)) {
+    console.error(
+      'PREVIEW_UPLOAD_ASSET_SET_ID must be a lowercase SHA-256 digest; ' +
+        `received ${JSON.stringify(configuredAssetSetId)}.`,
+    );
+    return jsonResponse(503, {error: 'Preview ingestion target is misconfigured.'});
   }
 
   const remainder = url.pathname.slice(PREVIEW_UPLOAD_BASE_PATH.length);

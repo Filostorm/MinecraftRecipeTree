@@ -5,11 +5,46 @@ import {
   PREVIEW_UPLOAD_BASE_PATH,
   handlePreviewAssetUpload,
 } from './previewAssetUpload.ts';
+import {
+  PREVIEW_CATEGORY_ROUTE,
+  PREVIEW_PACK_INDEX_ROUTE,
+  PREVIEW_PACK_ROUTE,
+} from './previewAssetContract.ts';
 
-const ASSET_SET = 'a'.repeat(64);
+// Independent known vector for the builder's framed content-address algorithm over fixture().
+const ASSET_SET = '9b2bb8df647dcb22a5e755968bec7c0dcd46aae97b939e0cd47501a55a54e298';
+const SERVING_ASSET_SET = 'c'.repeat(64);
 const DATASET = 'b'.repeat(64);
 const TOKEN = 'upload-token-'.padEnd(48, 'x');
 const ORIGIN = 'https://viewer.example';
+
+test('preview object routes accept canonical indices beyond three digits', () => {
+  assert.equal(PREVIEW_PACK_ROUTE.test('assets/pack-999.bin'), true);
+  assert.equal(PREVIEW_PACK_ROUTE.test('assets/pack-1000.bin'), true);
+  assert.equal(PREVIEW_PACK_INDEX_ROUTE.test('indexes/pack-1000.bin'), true);
+  assert.equal(PREVIEW_CATEGORY_ROUTE.test('categories/1000.json'), true);
+  assert.equal(PREVIEW_CATEGORY_ROUTE.test('categories/1000/part-1000.json'), true);
+  assert.equal(PREVIEW_PACK_ROUTE.test('assets/pack-99.bin'), false);
+  assert.equal(PREVIEW_CATEGORY_ROUTE.test('categories/099/part-99.json'), false);
+  for (const noncanonical of [
+    'assets/pack-0000.bin',
+    'assets/pack-0123.bin',
+    'indexes/pack-00000.bin',
+    'indexes/pack-0123.bin',
+    'categories/0000.json',
+    'categories/0123.json',
+    'categories/1000/part-0000.json',
+    'categories/0123/part-1000.json',
+  ]) {
+    assert.equal(
+      PREVIEW_PACK_ROUTE.test(noncanonical) ||
+        PREVIEW_PACK_INDEX_ROUTE.test(noncanonical) ||
+        PREVIEW_CATEGORY_ROUTE.test(noncanonical),
+      false,
+      noncanonical,
+    );
+  }
+});
 
 function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
@@ -140,7 +175,8 @@ class PathologicalPaginationR2 extends MemoryR2 {
 function runtime(bucket = new MemoryR2(), overrides = {}) {
   return {
     PREVIEW_ASSETS: bucket,
-    PREVIEW_ASSET_SET_ID: ASSET_SET,
+    PREVIEW_ASSET_SET_ID: SERVING_ASSET_SET,
+    PREVIEW_UPLOAD_ASSET_SET_ID: ASSET_SET,
     PREVIEW_UPLOAD_ENABLED: 'true',
     PREVIEW_UPLOAD_TOKEN: TOKEN,
     ...overrides,
@@ -155,7 +191,7 @@ function authorizedHeaders(extra = {}) {
   return {Authorization: `Bearer ${TOKEN}`, ...extra};
 }
 
-async function beginUpload(env, manifestBytes) {
+async function beginUpload(env, manifestBytes, datasetPublicationId = DATASET) {
   return handlePreviewAssetUpload(
     new Request(endpoint('begin'), {
       method: 'POST',
@@ -163,7 +199,7 @@ async function beginUpload(env, manifestBytes) {
         'Content-Length': String(manifestBytes.byteLength),
         'Content-Type': 'application/json',
         'X-MRT-Content-SHA256': sha256(manifestBytes),
-        'X-MRT-Dataset-Publication-ID': DATASET,
+        'X-MRT-Dataset-Publication-ID': datasetPublicationId,
       }),
       body: manifestBytes,
     }),
@@ -206,6 +242,79 @@ test('preview ingestion requires both the explicit feature gate and a strong tok
   );
   assert.equal(unauthorized.status, 401);
   assert.match(unauthorized.headers.get('www-authenticate'), /^Bearer /);
+});
+
+test('preview ingestion requires a distinct canonical upload target and never falls back to the serving identity', async () => {
+  const missingTargetBucket = new MemoryR2();
+  const missingTarget = await handlePreviewAssetUpload(
+    new Request(endpoint('status'), {method: 'HEAD', headers: authorizedHeaders()}),
+    runtime(missingTargetBucket, {PREVIEW_UPLOAD_ASSET_SET_ID: undefined}),
+  );
+  assert.equal(missingTarget.status, 503);
+  assert.equal(missingTargetBucket.objects.size, 0);
+
+  const malformedTargetBucket = new MemoryR2();
+  const malformedTarget = await handlePreviewAssetUpload(
+    new Request(endpoint('status'), {method: 'HEAD', headers: authorizedHeaders()}),
+    runtime(malformedTargetBucket, {PREVIEW_UPLOAD_ASSET_SET_ID: 'not-a-sha256'}),
+  );
+  assert.equal(malformedTarget.status, 503);
+  assert.equal(malformedTargetBucket.objects.size, 0);
+
+  const servingTarget = await handlePreviewAssetUpload(
+    new Request(
+      `${ORIGIN}${PREVIEW_UPLOAD_BASE_PATH}${SERVING_ASSET_SET}/status`,
+      {method: 'HEAD', headers: authorizedHeaders()},
+    ),
+    runtime(),
+  );
+  assert.equal(servingTarget.status, 404);
+});
+
+test('preview ingestion independently rejects a false content address before staging and on reload', async () => {
+  const data = fixture();
+  const tamperedManifest = structuredClone(data.manifest);
+  tamperedManifest.packs[0].sha256 = 'f'.repeat(64);
+  const tamperedBytes = Buffer.from(`${JSON.stringify(tamperedManifest)}\n`);
+
+  const changedDatasetManifest = structuredClone(data.manifest);
+  changedDatasetManifest.datasetPublicationId = 'd'.repeat(64);
+  const changedDatasetBytes = Buffer.from(`${JSON.stringify(changedDatasetManifest)}\n`);
+  for (const [label, manifestBytes, datasetPublicationId] of [
+    ['record digest changed', tamperedBytes, DATASET],
+    ['dataset publication changed', changedDatasetBytes, changedDatasetManifest.datasetPublicationId],
+  ]) {
+    const freshBucket = new MemoryR2();
+    const rejectedBegin = await beginUpload(
+      runtime(freshBucket),
+      manifestBytes,
+      datasetPublicationId,
+    );
+    assert.equal(rejectedBegin.status, 422, label);
+    assert.equal(
+      freshBucket.objects.size,
+      0,
+      `${label}: a false content address must not write staging state`,
+    );
+  }
+
+  for (const manifestKey of [
+    `_staging/${ASSET_SET}/manifest.json`,
+    `${ASSET_SET}/manifest.json`,
+  ]) {
+    const bucket = new MemoryR2();
+    const digest = sha256(tamperedBytes);
+    bucket.objects.set(manifestKey, {
+      bytes: tamperedBytes,
+      digest,
+      customMetadata: {'mrt-sha256': digest},
+    });
+    const status = await handlePreviewAssetUpload(
+      new Request(endpoint('status'), {method: 'HEAD', headers: authorizedHeaders()}),
+      runtime(bucket),
+    );
+    assert.equal(status.status, 502, manifestKey);
+  }
 });
 
 test('preview ingestion stages, verifies, and commits the manifest last', async () => {
