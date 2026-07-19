@@ -10,6 +10,7 @@ const DEFAULT_CONCURRENCY = 8;
 const MAX_CONCURRENCY = 32;
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_TIMEOUT_MS = 120_000;
+const OBJECT_HEAD_RETRY_DELAYS_MS = Object.freeze([250, 500, 1_000, 2_000]);
 const MAX_TOKEN_BYTES = 8 * 1024;
 const IMMUTABLE_CACHE_CONTROL = 'public, max-age=31536000, immutable, no-transform';
 const SHA256_HEADER = 'x-mrt-content-sha256';
@@ -157,6 +158,10 @@ function authorizationHeaders(token) {
   return {authorization: `Bearer ${token}`};
 }
 
+function defaultSleep(delayMs) {
+  return new Promise(resolveSleep => setTimeout(resolveSleep, delayMs));
+}
+
 function exactHeader(response, name, expected, label) {
   const actual = response.headers.get(name);
   if (actual !== expected) {
@@ -260,29 +265,49 @@ async function headObject({
   timeoutMs,
   fetchImpl,
   logger,
-}) {
+  sleepImpl,
+}, {
+  retryNotFound = false,
+} = {}) {
   const label = `Preview object HEAD ${record.path}`;
-  const response = await request(
-    fetchImpl,
-    objectUrl(baseUrl, assetSetId, record.path),
-    {method: 'HEAD', headers: authorizationHeaders(token)},
-    timeoutMs,
-    label,
-  );
-  if (response.status === 404) {
-    await cancelResponse(response, logger, label);
-    return false;
-  }
-  if (response.status !== 200) {
+  const attempts = OBJECT_HEAD_RETRY_DELAYS_MS.length + 1;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const response = await request(
+      fetchImpl,
+      objectUrl(baseUrl, assetSetId, record.path),
+      {method: 'HEAD', headers: authorizationHeaders(token)},
+      timeoutMs,
+      label,
+    );
+    if (response.status === 200) {
+      exactHeader(response, 'content-length', String(record.bytes), label);
+      exactHeader(response, SHA256_HEADER, record.sha256, label);
+      exactHeader(response, DATASET_HEADER, datasetPublicationId, label);
+      await cancelResponse(response, logger, label);
+      return true;
+    }
+    const transientConflict = response.status === 409;
+    const transientNotFound = response.status === 404 && retryNotFound;
+    const canRetry = attempt < OBJECT_HEAD_RETRY_DELAYS_MS.length;
+    if ((transientConflict || transientNotFound) && canRetry) {
+      const delayMs = OBJECT_HEAD_RETRY_DELAYS_MS[attempt];
+      await cancelResponse(response, logger, label);
+      logger.warn(
+        `${label} returned transient HTTP ${response.status}; retrying exact verification ` +
+          `in ${delayMs} ms (attempt ${attempt + 2}/${attempts}).`,
+      );
+      await sleepImpl(delayMs);
+      continue;
+    }
+    if (response.status === 404) {
+      await cancelResponse(response, logger, label);
+      return false;
+    }
     const error = statusError(response, label);
     await cancelResponse(response, logger, label);
     throw error;
   }
-  exactHeader(response, 'content-length', String(record.bytes), label);
-  exactHeader(response, SHA256_HEADER, record.sha256, label);
-  exactHeader(response, DATASET_HEADER, datasetPublicationId, label);
-  await cancelResponse(response, logger, label);
-  return true;
+  throw new Error(`${label} exhausted its bounded consistency retry window.`);
 }
 
 function resolveRecordPath(root, relativePath) {
@@ -345,7 +370,7 @@ async function ensureObject(options) {
   }
   const raced = response.status === 409 || response.status === 412;
   await cancelResponse(response, logger, label);
-  if (!(await headObject(options))) {
+  if (!(await headObject(options, {retryNotFound: true}))) {
     throw new Error(`${label} succeeded or raced, but the exact object is still absent.`);
   }
   if (raced) logger.info(`${record.path} already appeared concurrently and matched exactly.`);
@@ -384,6 +409,7 @@ function validateOptions({
   fetchImpl,
   localValidator,
   allowHttpForTests,
+  sleepImpl,
 }) {
   if (typeof local !== 'string' || local.length === 0) {
     throw new Error('local must be a non-empty sidecar directory path.');
@@ -399,6 +425,7 @@ function validateOptions({
   }
   if (typeof fetchImpl !== 'function') throw new Error('fetchImpl must be a function.');
   if (typeof localValidator !== 'function') throw new Error('localValidator must be a function.');
+  if (typeof sleepImpl !== 'function') throw new Error('sleepImpl must be a function.');
   return {
     baseUrl: normalizeIngestBaseUrl(ingestBaseUrl, allowHttpForTests),
     token: validateToken(token),
@@ -415,6 +442,7 @@ export async function uploadRecipePreviewSidecar({
   fetchImpl = globalThis.fetch,
   localValidator = validateLocalRecipePreviewSidecar,
   allowHttpForTests = false,
+  sleepImpl = defaultSleep,
 }) {
   const validated = validateOptions({
     local,
@@ -426,6 +454,7 @@ export async function uploadRecipePreviewSidecar({
     fetchImpl,
     localValidator,
     allowHttpForTests,
+    sleepImpl,
   });
   const root = resolve(local);
   logger.info(`Validating local recipe preview sidecar at ${root}.`);
@@ -509,6 +538,7 @@ export async function uploadRecipePreviewSidecar({
         timeoutMs,
         fetchImpl,
         logger,
+        sleepImpl,
       });
       completed += 1;
       if (completed % 50 === 0 || completed === records.length) {

@@ -308,6 +308,193 @@ test('partial staging skips exact objects and accepts a conditional 412 race onl
   }
 });
 
+test('resume HEAD retries transient 409 responses with an explicit bounded backoff', async () => {
+  const data = await fixture();
+  try {
+    const preseeded = new Map(data.records.map(declared => [declared.path, {
+      bytes: data.files.get(declared.path),
+      sha256: declared.sha256,
+    }]));
+    const api = createIngestionApi(data, {objects: preseeded});
+    const originalFetch = api.fetchImpl;
+    const target = data.records[0].path;
+    const transientStatuses = [409, 409];
+    api.fetchImpl = async (url, init) => {
+      const parsed = new URL(url);
+      const encodedPath = parsed.pathname.split('/objects/')[1];
+      if (init.method === 'HEAD' && encodedPath) {
+        const path = encodedPath.split('/').map(decodeURIComponent).join('/');
+        if (path === target && transientStatuses.length > 0) {
+          return new Response(null, {status: transientStatuses.shift()});
+        }
+      }
+      return originalFetch(url, init);
+    };
+    const delays = [];
+    const capture = loggerCapture();
+    const result = await runUpload(data, api, {
+      concurrency: 1,
+      logger: capture.logger,
+      sleepImpl: async delayMs => delays.push(delayMs),
+    });
+    assert.equal(result.uploaded, 0);
+    assert.equal(result.reused, 3);
+    assert.deepEqual(delays, [250, 500]);
+    assert.equal(api.state.events.some(event => event.method === 'PUT'), false);
+    const warnings = capture.entries
+      .filter(([level]) => level === 'warn')
+      .map(([, message]) => message);
+    assert.deepEqual(warnings, [
+      `Preview object HEAD ${target} returned transient HTTP 409; ` +
+        'retrying exact verification in 250 ms (attempt 2/5).',
+      `Preview object HEAD ${target} returned transient HTTP 409; ` +
+        'retrying exact verification in 500 ms (attempt 3/5).',
+    ]);
+  } finally {
+    await rm(data.root, {recursive: true, force: true});
+  }
+});
+
+test('post-PUT HEAD retries transient 409 and 404 responses before exact verification', async () => {
+  const data = await fixture();
+  try {
+    const api = createIngestionApi(data);
+    const originalFetch = api.fetchImpl;
+    const target = data.records[0].path;
+    const transientStatuses = [409, 404];
+    let targetPutCompleted = false;
+    api.fetchImpl = async (url, init) => {
+      const parsed = new URL(url);
+      const encodedPath = parsed.pathname.split('/objects/')[1];
+      const path = encodedPath
+        ? encodedPath.split('/').map(decodeURIComponent).join('/')
+        : null;
+      if (
+        init.method === 'HEAD' &&
+        path === target &&
+        targetPutCompleted &&
+        transientStatuses.length > 0
+      ) {
+        return new Response(null, {status: transientStatuses.shift()});
+      }
+      const response = await originalFetch(url, init);
+      if (init.method === 'PUT' && path === target && response.status === 201) {
+        targetPutCompleted = true;
+      }
+      return response;
+    };
+    const delays = [];
+    const capture = loggerCapture();
+    const result = await runUpload(data, api, {
+      concurrency: 1,
+      logger: capture.logger,
+      sleepImpl: async delayMs => delays.push(delayMs),
+    });
+    assert.equal(result.uploaded, 3);
+    assert.equal(result.reused, 0);
+    assert.deepEqual(delays, [250, 500]);
+    const warnings = capture.entries
+      .filter(([level]) => level === 'warn')
+      .map(([, message]) => message);
+    assert.deepEqual(warnings, [
+      `Preview object HEAD ${target} returned transient HTTP 409; ` +
+        'retrying exact verification in 250 ms (attempt 2/5).',
+      `Preview object HEAD ${target} returned transient HTTP 404; ` +
+        'retrying exact verification in 500 ms (attempt 3/5).',
+    ]);
+  } finally {
+    await rm(data.root, {recursive: true, force: true});
+  }
+});
+
+test('a persistent HEAD conflict exhausts the retry window and fails before PUT or commit', async () => {
+  const data = await fixture();
+  try {
+    const api = createIngestionApi(data);
+    const originalFetch = api.fetchImpl;
+    const target = data.records[0].path;
+    api.fetchImpl = async (url, init) => {
+      const parsed = new URL(url);
+      const encodedPath = parsed.pathname.split('/objects/')[1];
+      const path = encodedPath
+        ? encodedPath.split('/').map(decodeURIComponent).join('/')
+        : null;
+      if (init.method === 'HEAD' && path === target) {
+        return new Response(null, {status: 409});
+      }
+      return originalFetch(url, init);
+    };
+    const delays = [];
+    const capture = loggerCapture();
+    await assert.rejects(
+      runUpload(data, api, {
+        concurrency: 1,
+        logger: capture.logger,
+        sleepImpl: async delayMs => delays.push(delayMs),
+      }),
+      new RegExp(`Preview object HEAD ${target} returned unexpected HTTP 409`),
+    );
+    assert.deepEqual(delays, [250, 500, 1_000, 2_000]);
+    assert.equal(api.state.events.some(event => event.method === 'PUT'), false);
+    assert.equal(api.state.events.some(event => event.operation === 'commit'), false);
+    assert.equal(
+      capture.entries.filter(([level, message]) =>
+        level === 'warn' && message.includes('returned transient HTTP 409')).length,
+      4,
+    );
+  } finally {
+    await rm(data.root, {recursive: true, force: true});
+  }
+});
+
+test('a persistent post-PUT 404 exhausts the retry window and fails before commit', async () => {
+  const data = await fixture();
+  try {
+    const api = createIngestionApi(data);
+    const originalFetch = api.fetchImpl;
+    const target = data.records[0].path;
+    let targetPutCompleted = false;
+    api.fetchImpl = async (url, init) => {
+      const parsed = new URL(url);
+      const encodedPath = parsed.pathname.split('/objects/')[1];
+      const path = encodedPath
+        ? encodedPath.split('/').map(decodeURIComponent).join('/')
+        : null;
+      if (init.method === 'HEAD' && path === target && targetPutCompleted) {
+        return new Response(null, {status: 404});
+      }
+      const response = await originalFetch(url, init);
+      if (init.method === 'PUT' && path === target && response.status === 201) {
+        targetPutCompleted = true;
+      }
+      return response;
+    };
+    const delays = [];
+    const capture = loggerCapture();
+    await assert.rejects(
+      runUpload(data, api, {
+        concurrency: 1,
+        logger: capture.logger,
+        sleepImpl: async delayMs => delays.push(delayMs),
+      }),
+      new RegExp(`Preview object PUT ${target} succeeded or raced, but the exact object is still absent`),
+    );
+    assert.deepEqual(delays, [250, 500, 1_000, 2_000]);
+    assert.equal(
+      api.state.events.some(event => event.method === 'PUT' && event.path === target),
+      true,
+    );
+    assert.equal(api.state.events.some(event => event.operation === 'commit'), false);
+    assert.equal(
+      capture.entries.filter(([level, message]) =>
+        level === 'warn' && message.includes('returned transient HTTP 404')).length,
+      4,
+    );
+  } finally {
+    await rm(data.root, {recursive: true, force: true});
+  }
+});
+
 test('conflicting remote metadata fails explicitly before commit', async () => {
   const data = await fixture();
   try {
