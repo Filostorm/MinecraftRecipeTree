@@ -13,6 +13,10 @@ const datasetCatalogContext = await readFile(
   'utf8',
 );
 const environmentExample = await readFile(new URL('../.env.example', import.meta.url), 'utf8');
+const d1Migrations = await Promise.all([
+  readFile(new URL('../drizzle/0000_yummy_impossible_man.sql', import.meta.url), 'utf8'),
+  readFile(new URL('../drizzle/0001_wide_the_hand.sql', import.meta.url), 'utf8'),
+]);
 
 test('Cloudflare routes catalog, immutable datasets, and administration through the Worker', () => {
   assert.match(
@@ -99,4 +103,14 @@ test('the environment template exposes only the current server-side operator con
   assert.ok(values.PREVIEW_UPLOAD_TOKEN.length >= 32);
   assert.doesNotMatch(environmentExample, /^PREVIEW_ASSET_SET_ID=/m);
   assert.doesNotMatch(environmentExample, /^EXPO_PUBLIC_.*TOKEN=/m);
+});
+
+test('D1 migrations are idempotent with the Worker runtime schema initializer', () => {
+  for (const migration of d1Migrations) {
+    assert.doesNotMatch(
+      migration,
+      /CREATE\s+(?:UNIQUE\s+INDEX|TABLE)\s+(?!IF\s+NOT\s+EXISTS)/i,
+      'checked-in migrations must not fail when an identical runtime-initialized object exists',
+    );
+  }
 });

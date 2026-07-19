@@ -1,4 +1,4 @@
-CREATE TABLE `modpacks` (
+CREATE TABLE IF NOT EXISTS `modpacks` (
 	`id` text PRIMARY KEY NOT NULL,
 	`name` text NOT NULL,
 	`minecraft_version` text NOT NULL,
