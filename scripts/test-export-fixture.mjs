@@ -6,12 +6,12 @@ export async function writeJson(path, value) {
   await writeFile(path, `${JSON.stringify(value)}\n`);
 }
 
-export async function writeNonUniformImage(path) {
-  const pixels = Buffer.alloc(16 * 16 * 4, 255);
+export async function writeNonUniformImage(path, size = 16) {
+  const pixels = Buffer.alloc(size * size * 4, 255);
   pixels[0] = 0;
   pixels[1] = 80;
   pixels[2] = 160;
-  await sharp(pixels, {raw: {width: 16, height: 16, channels: 4}}).png().toFile(path);
+  await sharp(pixels, {raw: {width: size, height: size, channels: 4}}).png().toFile(path);
 }
 
 export async function writeUniformVisibleImage(path) {
@@ -30,18 +30,24 @@ export async function writeTransparentImage(path) {
   await sharp(pixels, {raw: {width: 16, height: 16, channels: 4}}).png().toFile(path);
 }
 
-export async function createRawExportFixture(root) {
+export async function createRawExportFixture(
+  root,
+  {iconScale = 1, recipeScale = 1} = {},
+) {
   await mkdir(join(root, 'icons'), {recursive: true});
   await mkdir(join(root, 'recipes', 'minecraft_crafting'), {recursive: true});
-  await writeNonUniformImage(join(root, 'icons', 'stone.png'));
-  await writeNonUniformImage(join(root, 'recipes', 'minecraft_crafting', 'icon.png'));
+  await writeNonUniformImage(join(root, 'icons', 'stone.png'), 16 * iconScale);
+  await writeNonUniformImage(
+    join(root, 'recipes', 'minecraft_crafting', 'icon.png'),
+    16 * iconScale,
+  );
   await writeJson(join(root, 'manifest.json'), {
     format: 1,
     generatedAt: '2026-07-18T00:00:00Z',
     durationMs: 1,
     aborted: false,
     minecraft: '1.12.2',
-    settings: {iconScale: 1, recipeScale: 1, mobCanvas: 256},
+    settings: {iconScale, recipeScale, mobCanvas: 256},
     counts: {items: 1, recipes: 0, categories: 1, mobs: 0, blockDrops: 0, failures: 0},
     diagnostics: {failureEvents: 0, failureEventsOmitted: 0},
     mods: {minecraft: 'Minecraft'},

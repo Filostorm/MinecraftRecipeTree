@@ -49,6 +49,12 @@ test('rejects inconsistent preview manifests', () => {
     packIndexFormat: 'mrt-recipe-preview-pack-index-v1',
     maxPackIndexBytes: 512 * 1024,
     imageFormat: 'lossless-webp',
+    settings: {
+      itemIconPixels: 48,
+      recipeScale: 2,
+      webpEffort: 4,
+      maxCategoryBytes: 256 * 1024,
+    },
     counts: {
       categories: 1,
       recipes: 2,
@@ -58,7 +64,7 @@ test('rejects inconsistent preview manifests', () => {
       duplicates: 0,
       packs: 1,
       inputBytes: 100,
-      hostedOmittedWebpBytes: 75,
+      hostedOmittedPngBytes: 75,
       encodedBytes: 50,
       storedBytes: 50,
       packIndexBytes: 28,
@@ -66,6 +72,23 @@ test('rejects inconsistent preview manifests', () => {
     packs: PACKS,
   };
   assert.equal(requireRecipePreviewManifest(manifest, DATASET).assetSetId, ASSET_SET);
+  const legacyCounts = {...manifest.counts, hostedOmittedWebpBytes: 70};
+  delete legacyCounts.hostedOmittedPngBytes;
+  assert.equal(
+    requireRecipePreviewManifest({...manifest, counts: legacyCounts}, DATASET).assetSetId,
+    ASSET_SET,
+  );
+  assert.throws(
+    () =>
+      requireRecipePreviewManifest(
+        {
+          ...manifest,
+          counts: {...manifest.counts, hostedOmittedWebpBytes: 70},
+        },
+        DATASET,
+      ),
+    /exactly one current PNG or legacy WebP omission byte count/,
+  );
   assert.throws(
     () => requireRecipePreviewManifest({...manifest, datasetPublicationId: 'd'.repeat(64)}, DATASET),
     /sidecar contract/,
@@ -73,6 +96,22 @@ test('rejects inconsistent preview manifests', () => {
   assert.throws(
     () => requireRecipePreviewManifest({...manifest, counts: {...manifest.counts, missing: 0}}, DATASET),
     /inconsistent/,
+  );
+  assert.throws(
+    () =>
+      requireRecipePreviewManifest(
+        {...manifest, settings: {...manifest.settings, itemIconPixels: 47}},
+        DATASET,
+      ),
+    /sidecar contract/,
+  );
+  assert.throws(
+    () =>
+      requireRecipePreviewManifest(
+        {...manifest, settings: {...manifest.settings, recipeScale: 0}},
+        DATASET,
+      ),
+    /sidecar contract/,
   );
 });
 
@@ -108,6 +147,70 @@ test('validates inline and sharded category mappings', () => {
     PACKS,
   );
   assert.equal(sharded.parts?.[0].start, 0);
+
+  const fourDigitSharded = requireRecipePreviewCategory(
+    {
+      format: PREVIEW_CATEGORY_FORMAT,
+      categoryIndex: 1000,
+      categoryId: 'example.large',
+      count: 1,
+      parts: [{path: 'categories/1000/part-000.json', start: 0, count: 1, bytes: 10}],
+    },
+    1000,
+    'example.large',
+    1,
+    'category 1000',
+    PACKS,
+  );
+  assert.equal(fourDigitSharded.parts?.[0].path, 'categories/1000/part-000.json');
+
+  const manyParts = Array.from({length: 1001}, (_, partIndex) => ({
+    path: `categories/1000/part-${String(partIndex).padStart(3, '0')}.json`,
+    start: partIndex,
+    count: 1,
+    bytes: 10,
+  }));
+  const fourDigitPart = requireRecipePreviewCategory(
+    {
+      format: PREVIEW_CATEGORY_FORMAT,
+      categoryIndex: 1000,
+      categoryId: 'example.many_parts',
+      count: manyParts.length,
+      parts: manyParts,
+    },
+    1000,
+    'example.many_parts',
+    manyParts.length,
+    'category 1000 with many parts',
+    PACKS,
+  );
+  assert.equal(fourDigitPart.parts?.[1000].path, 'categories/1000/part-1000.json');
+
+  for (const path of [
+    'categories/0000/part-000.json',
+    'categories/0123/part-000.json',
+    'categories/1000/part-0000.json',
+  ]) {
+    assert.throws(
+      () =>
+        requireRecipePreviewCategory(
+          {
+            format: PREVIEW_CATEGORY_FORMAT,
+            categoryIndex: 1000,
+            categoryId: 'example.large',
+            count: 1,
+            parts: [{path, start: 0, count: 1, bytes: 10}],
+          },
+          1000,
+          'example.large',
+          1,
+          'category 1000',
+          PACKS,
+        ),
+      /part 0 is invalid/,
+      path,
+    );
+  }
   assert.throws(
     () =>
       requireRecipePreviewCategory(

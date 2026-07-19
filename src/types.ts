@@ -34,6 +34,8 @@ export interface Manifest {
           reason: 'hosting-archive-budget';
           references: number;
           files: number;
+          /** New publications use png; absence identifies the legacy WebP-byte accounting contract. */
+          encoding?: 'png';
           bytes: number;
           inventory: {
             format: 'mrt-recipe-image-inventory-v1';

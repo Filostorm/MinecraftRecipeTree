@@ -23,6 +23,7 @@ import {
   MAX_CATEGORY_BYTES,
   MAX_PACK_BYTES,
   MAX_PACK_INDEX_BYTES,
+  MEATBALLCRAFT_CONTRACT,
   RECIPE_PREVIEW_CATEGORY_FORMAT,
   RECIPE_PREVIEW_PACK_INDEX_FORMAT,
   RECIPE_PREVIEW_SIDECAR_FORMAT,
@@ -53,6 +54,24 @@ const FIXTURE_CONTRACT = Object.freeze({
     blockDrops: 0,
     failures: 0,
   }),
+  diagnostics: Object.freeze({failureEvents: 0, failureEventsOmitted: 0}),
+  recipeImages: Object.freeze({previews: FIXTURE_RECIPE_COUNT - 1, missing: 1}),
+});
+const SCALED_FIXTURE_CONTRACT = Object.freeze({
+  ...FIXTURE_CONTRACT,
+  settings: Object.freeze({
+    iconScale: 3,
+    recipeScale: 2,
+    mobCanvas: 256,
+    worldStartupOptimization: Object.freeze({
+      enabled: true,
+      policy: 'dimension-0-plus-should-load-spawn',
+      applied: true,
+      originalDimensions: 93,
+      selectedDimensions: 4,
+      skippedDimensions: 89,
+    }),
+  }),
 });
 
 const quietLogger = Object.freeze({
@@ -61,12 +80,73 @@ const quietLogger = Object.freeze({
   error() {},
 });
 
+test('production contract pins the repaired complete MeatballCraft corpus', () => {
+  assert.deepEqual(MEATBALLCRAFT_CONTRACT, {
+    format: 1,
+    minecraft: '1.12.2',
+    settings: {
+      iconScale: 3,
+      recipeScale: 2,
+      mobCanvas: 256,
+      worldStartupOptimization: {
+        enabled: true,
+        policy: 'dimension-0-plus-should-load-spawn',
+        applied: true,
+        originalDimensions: 93,
+        selectedDimensions: 4,
+        skippedDimensions: 89,
+      },
+    },
+    counts: {
+      items: 196161,
+      recipes: 359215,
+      categories: 674,
+      mobs: 0,
+      blockDrops: 0,
+      failures: 130,
+    },
+    diagnostics: {failureEvents: 130, failureEventsOmitted: 0},
+    recipeImages: {previews: 359215, missing: 0},
+    hostedWeb: {
+      format: 2,
+      packedImages: 'coordinate-v1',
+      maxPackBytes: 1024 * 1024,
+      shardedJson: 'mrt-sharded-json-v1',
+      maxShardBytes: 8 * 1024 * 1024,
+    },
+    repairProvenance: {
+      format: 'mrt-recipe-preview-repair-overlay-v1',
+      method: 'canonical-deep-equality-sample-overlay',
+      repairedRecipePreviews: 27,
+      compatibilityDiagnostics: {
+        'zmaster587.AR.chemicalReactor': 25,
+        'buildcraft:category_heatable': 1,
+        'buildcraft:category_coolable': 1,
+      },
+      hashAlgorithm: 'sha256',
+      treeHashFormat: 'mrt-plain-content-tree-sha256-v1',
+      canonicalSha256: '11b9cbf2a8b7b1a65995612fa804dbeaf6c2d36ed1b16318783cd4d9064c4af4',
+    },
+  });
+});
+
 function json(value) {
   return `${JSON.stringify(value)}\n`;
 }
 
 function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
+}
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value)
+      .sort()
+      .map(key => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
 }
 
 function rgba(width, height, [red, green, blue, alpha]) {
@@ -80,13 +160,13 @@ function rgba(width, height, [red, green, blue, alpha]) {
   return pixels;
 }
 
-async function writePng(path, pixels, compressionLevel) {
-  await sharp(pixels, {raw: {width: 8, height: 8, channels: 4}})
+async function writePng(path, pixels, width, height, compressionLevel) {
+  await sharp(pixels, {raw: {width, height, channels: 4}})
     .png({compressionLevel, adaptiveFiltering: compressionLevel > 0})
     .toFile(path);
 }
 
-async function createFixture(root) {
+async function createFixture(root, contract = FIXTURE_CONTRACT, {repairProvenance} = {}) {
   const rawRoot = join(root, 'raw');
   const categoryRoot = join(rawRoot, 'recipes', 'fixture.category');
   const hostedRoot = join(root, 'hosted');
@@ -98,8 +178,12 @@ async function createFixture(root) {
     mkdir(hostedPartsRoot, {recursive: true}),
   ]);
 
-  const redPixels = rgba(8, 8, [210, 20, 30, 255]);
-  const bluePixels = rgba(8, 8, [15, 70, 220, 190]);
+  const logicalWidth = 8;
+  const logicalHeight = 8;
+  const physicalWidth = logicalWidth * contract.settings.recipeScale;
+  const physicalHeight = logicalHeight * contract.settings.recipeScale;
+  const redPixels = rgba(physicalWidth, physicalHeight, [210, 20, 30, 255]);
+  const bluePixels = rgba(physicalWidth, physicalHeight, [15, 70, 220, 190]);
   const recipes = [];
   let sourcePngBytes = 0;
   for (let index = 0; index < FIXTURE_RECIPE_COUNT; index += 1) {
@@ -109,13 +193,13 @@ async function createFixture(root) {
     }
     const path = join(categoryRoot, `r${index}.png`);
     const pixels = index === 3 || (index >= 4 && index % 2 === 1) ? bluePixels : redPixels;
-    await writePng(path, pixels, index % 10);
+    await writePng(path, pixels, physicalWidth, physicalHeight, index % 10);
     sourcePngBytes += (await stat(path)).size;
     recipes.push({
       id: `fixture:${index}`,
       img: `r${index}.png`,
-      w: 8,
-      h: 8,
+      w: logicalWidth,
+      h: logicalHeight,
       in: [],
       out: [],
     });
@@ -206,17 +290,17 @@ async function createFixture(root) {
   const hostedRecipeImageInventory = recipeImageInventory.finish();
 
   const commonManifest = {
-    format: FIXTURE_CONTRACT.format,
+    format: contract.format,
     generatedAt: '2026-07-18T12:04:02.055Z',
     durationMs: 12,
     aborted: false,
-    minecraft: FIXTURE_CONTRACT.minecraft,
-    settings: {...FIXTURE_CONTRACT.settings},
-    counts: {...FIXTURE_CONTRACT.counts},
-    diagnostics: {failureEvents: 0, failureEventsOmitted: 0},
+    minecraft: contract.minecraft,
+    settings: {...contract.settings},
+    counts: {...contract.counts},
+    diagnostics: {...contract.diagnostics},
     mods: {minecraft: 'Minecraft'},
+    ...(repairProvenance === undefined ? {} : {repairProvenance}),
   };
-  const hostedOmittedWebpBytes = Math.max(1, sourcePngBytes - 11);
   await writeFile(join(rawRoot, 'manifest.json'), json(commonManifest));
   const hostedManifest = {
     ...commonManifest,
@@ -226,7 +310,8 @@ async function createFixture(root) {
         reason: 'hosting-archive-budget',
         references: FIXTURE_RECIPE_COUNT - 1,
         files: FIXTURE_RECIPE_COUNT - 1,
-        bytes: hostedOmittedWebpBytes,
+        encoding: 'png',
+        bytes: sourcePngBytes,
         inventory: hostedRecipeImageInventory,
       },
     },
@@ -247,7 +332,10 @@ async function createFixture(root) {
     redPixels,
     bluePixels,
     sourcePngBytes,
-    hostedOmittedWebpBytes,
+    logicalWidth,
+    logicalHeight,
+    physicalWidth,
+    physicalHeight,
   };
 }
 
@@ -394,10 +482,7 @@ test('builder deduplicates decoded pixels, preserves nulls, bounds coordinates, 
     assert.equal(firstManifest.counts.packs, 1);
     assert.ok(firstManifest.counts.inputBytes > 0);
     assert.equal(firstManifest.counts.inputBytes, fixture.sourcePngBytes);
-    assert.equal(
-      firstManifest.counts.hostedOmittedWebpBytes,
-      fixture.hostedOmittedWebpBytes,
-    );
+    assert.equal(firstManifest.counts.hostedOmittedPngBytes, fixture.sourcePngBytes);
     assert.ok(firstManifest.counts.encodedBytes > firstManifest.counts.storedBytes);
     assert.equal(
       firstManifest.counts.storedBytes,
@@ -488,6 +573,84 @@ test('builder deduplicates decoded pixels, preserves nulls, bounds coordinates, 
         `output file must be deterministic: ${file}`,
       );
     }
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
+});
+
+test('builder decodes scaled physical pixels while retaining logical recipe coordinates', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'recipe-preview-sidecar-scaled-test-'));
+  try {
+    const fixture = await createFixture(root, SCALED_FIXTURE_CONTRACT);
+    const output = join(root, 'sidecar-scaled');
+    const manifest = await buildRecipePreviewSidecar({
+      source: fixture.rawRoot,
+      datasetManifest: fixture.hostedManifestPath,
+      output,
+      contract: SCALED_FIXTURE_CONTRACT,
+      logger: quietLogger,
+    });
+
+    assert.deepEqual(manifest.settings, {
+      itemIconPixels: 48,
+      recipeScale: 2,
+      webpEffort: 4,
+      maxCategoryBytes: MAX_CATEGORY_BYTES,
+    });
+    const {previews} = await readCategoryPreviews(output);
+    const [packNumber, offset, length, logicalWidth, logicalHeight] = previews[0];
+    assert.equal(logicalWidth, fixture.logicalWidth);
+    assert.equal(logicalHeight, fixture.logicalHeight);
+    const pack = await readFile(
+      join(output, ...manifest.packs[packNumber].path.split('/')),
+    );
+    const metadata = await sharp(pack.subarray(offset, offset + length)).metadata();
+    assert.equal(metadata.width, fixture.physicalWidth);
+    assert.equal(metadata.height, fixture.physicalHeight);
+
+    await writePng(
+      join(fixture.categoryRoot, 'r0.png'),
+      rgba(fixture.logicalWidth, fixture.logicalHeight, [210, 20, 30, 255]),
+      fixture.logicalWidth,
+      fixture.logicalHeight,
+      6,
+    );
+    await assert.rejects(
+      buildRecipePreviewSidecar({
+        source: fixture.rawRoot,
+        datasetManifest: fixture.hostedManifestPath,
+        output: join(root, 'sidecar-wrong-physical-size'),
+        contract: SCALED_FIXTURE_CONTRACT,
+        logger: quietLogger,
+      }),
+      /decoded as 8×8×4, but the recipe requires a 16×16 physical image/,
+    );
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
+});
+
+test('builder rejects world-startup optimization policy drift before reading recipe PNGs', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'recipe-preview-sidecar-world-policy-test-'));
+  try {
+    const fixture = await createFixture(root, SCALED_FIXTURE_CONTRACT);
+    const rawManifestPath = join(fixture.rawRoot, 'manifest.json');
+    const rawManifest = await readJson(rawManifestPath);
+    rawManifest.settings.worldStartupOptimization.selectedDimensions = 5;
+    await writeFile(rawManifestPath, json(rawManifest));
+    const output = join(root, 'sidecar');
+
+    await assert.rejects(
+      buildRecipePreviewSidecar({
+        source: fixture.rawRoot,
+        datasetManifest: fixture.hostedManifestPath,
+        output,
+        contract: SCALED_FIXTURE_CONTRACT,
+        logger: quietLogger,
+      }),
+      /worldStartupOptimization\.selectedDimensions must be 4/,
+    );
+    assert.equal(await pathIsMissing(output), true);
   } finally {
     await rm(root, {recursive: true, force: true});
   }
@@ -646,6 +809,118 @@ test('builder rejects recipe-image inventory counts that diverge from omission m
   }
 });
 
+test('builder fails closed when the audited contract requires zero missing previews', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'recipe-preview-sidecar-completeness-test-'));
+  try {
+    const fixture = await createFixture(root);
+    const output = join(root, 'sidecar');
+    const completeContract = Object.freeze({
+      ...FIXTURE_CONTRACT,
+      recipeImages: Object.freeze({previews: FIXTURE_RECIPE_COUNT, missing: 0}),
+    });
+
+    await assert.rejects(
+      buildRecipePreviewSidecar({
+        source: fixture.rawRoot,
+        datasetManifest: fixture.hostedManifestPath,
+        output,
+        contract: completeContract,
+        logger: quietLogger,
+      }),
+      /web\.recipeImages must match the audited preview contract/,
+    );
+    assert.equal(await pathIsMissing(output), true);
+    assert.deepEqual(
+      (await readdir(root)).filter(name => name.includes('.staging-')),
+      [],
+      'failed completeness validation must remove transaction staging',
+    );
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
+});
+
+test('builder pins the complete canonical repair provenance and rejects nested drift', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'recipe-preview-sidecar-repair-provenance-test-'));
+  try {
+    const repairProvenance = {
+      format: 'fixture-repair-overlay-v1',
+      method: 'fixture-canonical-overlay',
+      repairedRecipePreviews: 1,
+      compatibilityDiagnostics: {'fixture.category': 1},
+      hashAlgorithm: 'sha256',
+      treeHashFormat: 'fixture-tree-sha256-v1',
+      source: {treeSha256: 'a'.repeat(64), missingRecipeImages: 1},
+      sample: {treeSha256: 'b'.repeat(64), recipes: 1},
+      repaired: {missingRecipeImages: 0, previewPngs: [{sourceIndex: 2}]},
+    };
+    const repairedContract = Object.freeze({
+      ...FIXTURE_CONTRACT,
+      repairProvenance: Object.freeze({
+        format: repairProvenance.format,
+        method: repairProvenance.method,
+        repairedRecipePreviews: repairProvenance.repairedRecipePreviews,
+        compatibilityDiagnostics: Object.freeze({...repairProvenance.compatibilityDiagnostics}),
+        hashAlgorithm: repairProvenance.hashAlgorithm,
+        treeHashFormat: repairProvenance.treeHashFormat,
+        canonicalSha256: sha256(Buffer.from(canonicalJson(repairProvenance), 'utf8')),
+      }),
+    });
+    const fixture = await createFixture(root, repairedContract, {repairProvenance});
+    await buildRecipePreviewSidecar({
+      source: fixture.rawRoot,
+      datasetManifest: fixture.hostedManifestPath,
+      output: join(root, 'sidecar-valid'),
+      contract: repairedContract,
+      logger: quietLogger,
+    });
+
+    const rawManifestPath = join(fixture.rawRoot, 'manifest.json');
+    const rawManifest = await readJson(rawManifestPath);
+    rawManifest.repairProvenance.source.treeSha256 = 'c'.repeat(64);
+    await writeFile(rawManifestPath, json(rawManifest));
+    const rejectedOutput = join(root, 'sidecar-rejected');
+    await assert.rejects(
+      buildRecipePreviewSidecar({
+        source: fixture.rawRoot,
+        datasetManifest: fixture.hostedManifestPath,
+        output: rejectedOutput,
+        contract: repairedContract,
+        logger: quietLogger,
+      }),
+      /repairProvenance canonical SHA-256 is [a-f0-9]{64}; expected [a-f0-9]{64}/,
+    );
+    assert.equal(await pathIsMissing(rejectedOutput), true);
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
+});
+
+test('builder requires hosted omission bytes to equal the original raw PNG corpus', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'recipe-preview-sidecar-source-bytes-test-'));
+  try {
+    const fixture = await createFixture(root);
+    const hostedManifest = await readJson(fixture.hostedManifestPath);
+    hostedManifest.web.recipeImages.bytes += 1;
+    await writeFile(fixture.hostedManifestPath, json(hostedManifest));
+    hostedManifest.publicationId = await computePublicationId(fixture.hostedRoot);
+    await writeFile(fixture.hostedManifestPath, json(hostedManifest));
+
+    await assert.rejects(
+      buildRecipePreviewSidecar({
+        source: fixture.rawRoot,
+        datasetManifest: fixture.hostedManifestPath,
+        output: join(root, 'sidecar'),
+        contract: FIXTURE_CONTRACT,
+        logger: quietLogger,
+      }),
+      /Raw recipe PNG bytes do not match hosted manifest web\.recipeImages accounting/,
+    );
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
+});
+
 test('builder rechecks the hosted publication hash immediately before commit', async () => {
   const root = await mkdtemp(join(tmpdir(), 'recipe-preview-sidecar-toctou-test-'));
   try {
@@ -719,6 +994,8 @@ test('builder rejects same-dimension recipe preview pixel mutations', async () =
     await writePng(
       join(fixture.categoryRoot, 'r0.png'),
       rgba(8, 8, [25, 220, 80, 255]),
+      8,
+      8,
       4,
     );
 

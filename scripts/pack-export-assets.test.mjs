@@ -12,6 +12,7 @@ import {
   writeUniformVisibleImage,
 } from './test-export-fixture.mjs';
 import {validateExportData} from './validate-export-data.mjs';
+import {writePublicationId} from './publication-id.mjs';
 import {
   RECIPE_IMAGE_INVENTORY_FORMAT,
   RECIPE_IMAGE_INVENTORY_SHA256_PATTERN,
@@ -29,11 +30,12 @@ async function pathIsMissing(path) {
   }
 }
 
-async function optimizeFixture(exportRoot) {
-  await execFileAsync(process.execPath, [
+async function optimizeFixture(exportRoot, extraArguments = []) {
+  return execFileAsync(process.execPath, [
     join(import.meta.dirname, 'optimize-export-assets.mjs'),
     '--root',
     exportRoot,
+    ...extraArguments,
   ]);
 }
 
@@ -44,6 +46,35 @@ async function packFixture(exportRoot, extraArguments = []) {
     exportRoot,
     ...extraArguments,
   ]);
+}
+
+async function addSingleRecipePreview(exportRoot) {
+  const categoryRoot = join(exportRoot, 'recipes', 'minecraft_crafting');
+  await writeUniformVisibleImage(join(categoryRoot, 'r0.png'));
+  await writeFile(
+    join(categoryRoot, 'recipes.json'),
+    `${JSON.stringify([
+      {
+        id: 'minecraft:test',
+        img: 'r0.png',
+        w: 16,
+        h: 16,
+        in: [[['minecraft:stone', 1]]],
+        out: [[['minecraft:stone', 1]]],
+      },
+    ])}\n`,
+  );
+  const rawManifest = await readJson(join(exportRoot, 'manifest.json'));
+  rawManifest.counts.recipes = 1;
+  await writeFile(join(exportRoot, 'manifest.json'), `${JSON.stringify(rawManifest)}\n`);
+  const rawCategories = await readJson(join(exportRoot, 'categories.json'));
+  rawCategories.categories[0].count = 1;
+  await writeFile(join(exportRoot, 'categories.json'), `${JSON.stringify(rawCategories)}\n`);
+  await writeFile(
+    join(exportRoot, 'index.json'),
+    `${JSON.stringify({'minecraft:stone': {p: [[0, 0]], u: [[0, 0]]}})}\n`,
+  );
+  return categoryRoot;
 }
 
 test('exact duplicate WebP assets share one coordinate and are written once', async () => {
@@ -109,35 +140,31 @@ test('explicit structured-recipe policy omits only validated recipe screenshots'
   const root = await mkdtemp(join(tmpdir(), 'recipe-tree-packer-structured-test-'));
   try {
     const exportRoot = join(root, 'exports');
-    const categoryRoot = join(exportRoot, 'recipes', 'minecraft_crafting');
     await createRawExportFixture(exportRoot);
-    await writeUniformVisibleImage(join(categoryRoot, 'r0.png'));
-    await writeFile(
-      join(categoryRoot, 'recipes.json'),
-      `${JSON.stringify([
-        {
-          id: 'minecraft:test',
-          img: 'r0.png',
-          w: 16,
-          h: 16,
-          in: [[['minecraft:stone', 1]]],
-          out: [[['minecraft:stone', 1]]],
-        },
-      ])}\n`,
-    );
-    const rawManifest = await readJson(join(exportRoot, 'manifest.json'));
-    rawManifest.counts.recipes = 1;
-    await writeFile(join(exportRoot, 'manifest.json'), `${JSON.stringify(rawManifest)}\n`);
-    const rawCategories = await readJson(join(exportRoot, 'categories.json'));
-    rawCategories.categories[0].count = 1;
-    await writeFile(join(exportRoot, 'categories.json'), `${JSON.stringify(rawCategories)}\n`);
-    await writeFile(
-      join(exportRoot, 'index.json'),
-      `${JSON.stringify({'minecraft:stone': {p: [[0, 0]], u: [[0, 0]]}})}\n`,
-    );
-    await optimizeFixture(exportRoot);
+    const categoryRoot = await addSingleRecipePreview(exportRoot);
+    const originalRecipePngBytes = await readFile(join(categoryRoot, 'r0.png'));
+    const {stdout: optimizationLog} = await optimizeFixture(exportRoot, [
+      '--omit-recipe-images',
+    ]);
 
-    const omittedBytes = (await readFile(join(categoryRoot, 'r0.webp'))).length;
+    assert.deepEqual(await readFile(join(categoryRoot, 'r0.png')), originalRecipePngBytes);
+    assert.equal(await pathIsMissing(join(categoryRoot, 'r0.webp')), true);
+    assert.equal(await pathIsMissing(join(exportRoot, 'icons', 'stone.png')), true);
+    assert.equal(await pathIsMissing(join(exportRoot, 'icons', 'stone.webp')), false);
+    assert.equal(await pathIsMissing(join(categoryRoot, 'icon.png')), true);
+    assert.equal(await pathIsMissing(join(categoryRoot, 'icon.webp')), false);
+    assert.equal((await readJson(join(categoryRoot, 'recipes.json')))[0].img, 'r0.png');
+    assert.equal((await readJson(join(exportRoot, 'items.json'))).items[0].icon, 'icons/stone.webp');
+    assert.equal(
+      (await readJson(join(exportRoot, 'categories.json'))).categories[0].icon,
+      'recipes/minecraft_crafting/icon.webp',
+    );
+    assert.match(
+      optimizationLog,
+      /Preserved 1 declared original recipe PNG\(s\) without redundant WebP encoding/,
+    );
+
+    const omittedBytes = originalRecipePngBytes.length;
     const {stderr} = await packFixture(exportRoot, ['--omit-recipe-images']);
     const manifest = await readJson(join(exportRoot, 'manifest.json'));
     const recipe = (await readJson(join(categoryRoot, 'recipes.json')))[0];
@@ -150,6 +177,7 @@ test('explicit structured-recipe policy omits only validated recipe screenshots'
       reason: 'hosting-archive-budget',
       references: 1,
       files: 1,
+      encoding: 'png',
       bytes: omittedBytes,
       inventory: {
         format: RECIPE_IMAGE_INVENTORY_FORMAT,
@@ -169,8 +197,9 @@ test('explicit structured-recipe policy omits only validated recipe screenshots'
     assert.deepEqual(recipe.in, [[['minecraft:stone', 1]]]);
     assert.deepEqual(recipe.out, [[['minecraft:stone', 1]]]);
     assert.equal(categoryCoordinate, itemCoordinate, 'category and item icons must remain packed');
-    assert.equal(await pathIsMissing(join(categoryRoot, 'r0.webp')), true);
+    assert.equal(await pathIsMissing(join(categoryRoot, 'r0.png')), true);
     assert.match(stderr, /Publication policy omitted 1 composite recipe-image reference/);
+    assert.match(stderr, /without redundant WebP encoding/);
 
     const validation = await validateExportData(exportRoot, {
       assetMode: 'packed',
@@ -179,6 +208,139 @@ test('explicit structured-recipe policy omits only validated recipe screenshots'
     });
     assert.equal(validation.recipes, 1);
     assert.equal(validation.imageReferences, 1);
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
+});
+
+test('legacy omission accounting requires an explicit logged read-only validation mode', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'recipe-tree-packer-legacy-read-test-'));
+  try {
+    const exportRoot = join(root, 'exports');
+    await createRawExportFixture(exportRoot);
+    await addSingleRecipePreview(exportRoot);
+    await optimizeFixture(exportRoot, ['--omit-recipe-images']);
+    await packFixture(exportRoot, ['--omit-recipe-images']);
+
+    const manifestPath = join(exportRoot, 'manifest.json');
+    const legacyManifest = await readJson(manifestPath);
+    delete legacyManifest.web.recipeImages.encoding;
+    await writeFile(manifestPath, `${JSON.stringify(legacyManifest)}\n`);
+    await writePublicationId(exportRoot);
+
+    const validatorArguments = [
+      join(import.meta.dirname, 'validate-export-data.mjs'),
+      '--root',
+      exportRoot,
+      '--require-publication-id',
+      '--verify-publication-id',
+    ];
+    await assert.rejects(
+      execFileAsync(process.execPath, validatorArguments),
+      error => {
+        assert.match(error.stderr, /missing encoding field is accepted only by the explicit/i);
+        return true;
+      },
+    );
+
+    const {stderr} = await execFileAsync(process.execPath, [
+      ...validatorArguments,
+      '--allow-legacy-recipe-image-accounting',
+    ]);
+    assert.match(stderr, /\[legacy-read\] Explicit compatibility mode accepted/);
+
+    const invalidManifest = await readJson(manifestPath);
+    invalidManifest.web.recipeImages.encoding = 'webp';
+    await writeFile(manifestPath, `${JSON.stringify(invalidManifest)}\n`);
+    await writePublicationId(exportRoot);
+    await assert.rejects(
+      execFileAsync(process.execPath, [
+        ...validatorArguments,
+        '--allow-legacy-recipe-image-accounting',
+      ]),
+      error => {
+        assert.match(error.stderr, /missing encoding field is accepted only by the explicit/i);
+        assert.doesNotMatch(error.stderr, /\[legacy-read\] Explicit compatibility mode accepted/);
+        return true;
+      },
+    );
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
+});
+
+test('omission-aware optimizer fails before conversion when a declared recipe PNG is missing', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'recipe-tree-optimizer-missing-omission-test-'));
+  try {
+    const exportRoot = join(root, 'exports');
+    const categoryRoot = join(exportRoot, 'recipes', 'minecraft_crafting');
+    await createRawExportFixture(exportRoot);
+    await writeFile(
+      join(categoryRoot, 'recipes.json'),
+      `${JSON.stringify([{id: 'minecraft:test', img: 'missing.png', w: 16, h: 16}])}\n`,
+    );
+
+    await assert.rejects(
+      optimizeFixture(exportRoot, ['--omit-recipe-images']),
+      error => {
+        assert.match(error.stderr, /Missing declared recipe PNG omission target/);
+        assert.match(error.stderr, /recipes\/minecraft_crafting\/missing\.png/);
+        assert.match(error.stderr, /No optimized-image fallback|missing declared recipe PNG/i);
+        return true;
+      },
+    );
+    assert.equal(await pathIsMissing(join(exportRoot, 'icons', 'stone.png')), false);
+    assert.equal(await pathIsMissing(join(exportRoot, 'icons', 'stone.webp')), true);
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
+});
+
+test('omission-aware optimizer rejects duplicate references to one recipe PNG', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'recipe-tree-optimizer-duplicate-omission-test-'));
+  try {
+    const exportRoot = join(root, 'exports');
+    const categoryRoot = join(exportRoot, 'recipes', 'minecraft_crafting');
+    await createRawExportFixture(exportRoot);
+    await writeUniformVisibleImage(join(categoryRoot, 'r0.png'));
+    await writeFile(
+      join(categoryRoot, 'recipes.json'),
+      `${JSON.stringify([
+        {id: 'minecraft:first', img: 'r0.png', w: 16, h: 16},
+        {id: 'minecraft:second', img: 'r0.png', w: 16, h: 16},
+      ])}\n`,
+    );
+
+    await assert.rejects(
+      optimizeFixture(exportRoot, ['--omit-recipe-images']),
+      error => {
+        assert.match(error.stderr, /one-to-one reference\/file inventory/);
+        assert.match(error.stderr, /r0\.png is referenced more than once/);
+        return true;
+      },
+    );
+    assert.equal(await pathIsMissing(join(exportRoot, 'icons', 'stone.png')), false);
+    assert.equal(await pathIsMissing(join(exportRoot, 'icons', 'stone.webp')), true);
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
+});
+
+test('omission-aware packing rejects every unexpected retained PNG explicitly', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'recipe-tree-packer-unexpected-png-test-'));
+  try {
+    const exportRoot = join(root, 'exports');
+    await createRawExportFixture(exportRoot);
+
+    await assert.rejects(
+      packFixture(exportRoot, ['--omit-recipe-images']),
+      error => {
+        assert.match(error.stderr, /Unexpected PNG\(s\) outside the declared recipe omission set \(2\)/);
+        assert.match(error.stderr, /icons\/stone\.png/);
+        assert.match(error.stderr, /recipes\/minecraft_crafting\/icon\.png/);
+        return true;
+      },
+    );
   } finally {
     await rm(root, {recursive: true, force: true});
   }
@@ -248,6 +410,42 @@ test('packing rollback restores raw images and metadata after a mid-publication 
     );
     assert.equal((await readJson(join(exportRoot, 'items.json'))).items[0].icon, 'icons/stone.webp');
     assert.equal((await validateExportData(exportRoot, {assetMode: 'raw'})).imageReferences, 2);
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
+});
+
+test('omission publication rollback restores original recipe PNGs and img/w/h metadata', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'recipe-tree-packer-omission-rollback-test-'));
+  try {
+    const exportRoot = join(root, 'exports');
+    await createRawExportFixture(exportRoot);
+    const categoryRoot = await addSingleRecipePreview(exportRoot);
+    await optimizeFixture(exportRoot, ['--omit-recipe-images']);
+    const originalPng = await readFile(join(categoryRoot, 'r0.png'));
+
+    // This conflict fails only after the recipe tree has moved into the rollback backup.
+    await writeFile(join(exportRoot, 'data'), 'intentional transaction conflict\n');
+    await assert.rejects(
+      packFixture(exportRoot, ['--omit-recipe-images']),
+      error => {
+        assert.match(error.stderr, /restoring the raw export/);
+        assert.match(error.stderr, /sharded data is file; expected directory/);
+        return true;
+      },
+    );
+
+    assert.deepEqual(await readFile(join(categoryRoot, 'r0.png')), originalPng);
+    assert.equal(await pathIsMissing(join(categoryRoot, 'r0.webp')), true);
+    const recipe = (await readJson(join(categoryRoot, 'recipes.json')))[0];
+    assert.equal(recipe.img, 'r0.png');
+    assert.equal(recipe.w, 16);
+    assert.equal(recipe.h, 16);
+    const validation = await validateExportData(exportRoot, {
+      assetMode: 'raw',
+      computeRecipeImageInventory: true,
+    });
+    assert.equal(validation.recipeImageInventory.previews, 1);
   } finally {
     await rm(root, {recursive: true, force: true});
   }

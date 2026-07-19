@@ -146,9 +146,10 @@ async function request(fetchImpl, url, init, timeoutMs, label) {
     const token = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
     const rawDetail = error instanceof Error ? error.message : String(error);
     const detail = token ? rawDetail.split(token).join('[REDACTED]') : rawDetail;
-    throw new Error(`${label} request failed for ${url.origin}${url.pathname}: ${detail}`, {
-      cause: error,
-    });
+    // Do not retain the original exception as Error.cause. A transport implementation can
+    // include request headers in its diagnostic, so preserving the raw cause would bypass the
+    // bearer-token redaction above when structured telemetry serializes an exception chain.
+    throw new Error(`${label} request failed for ${url.origin}${url.pathname}: ${detail}`);
   }
 }
 

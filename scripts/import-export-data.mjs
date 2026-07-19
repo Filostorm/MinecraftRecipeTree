@@ -433,10 +433,15 @@ export async function importExportData({
     }
     await assertQualityMetadata(stagingReal, 'Staged raw export');
 
-    await runStage('lossless image optimization', 'optimize-export-assets.mjs', [
-      '--root',
-      stagingReal,
-    ]);
+    const optimizationArgs = ['--root', stagingReal];
+    if (omitRecipeImages) optimizationArgs.push('--omit-recipe-images');
+    await runStage(
+      omitRecipeImages
+        ? 'omission-aware retained-image optimization'
+        : 'lossless image optimization',
+      'optimize-export-assets.mjs',
+      optimizationArgs,
+    );
     const packingArgs = ['--root', stagingReal, '--profile', MEATBALLCRAFT_112_PROFILE];
     if (omitRecipeImages) packingArgs.push('--omit-recipe-images');
     await runStage(

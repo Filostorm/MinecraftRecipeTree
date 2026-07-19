@@ -1,1 +1,1 @@
-[{"in":[[["item|nuclearcraft:lithium:0",1]],[["item|nuclearcraft:lithium:2",1]],[["fluid|fluid:netrino_plasma",200]]],"out":[[["fluid|fluid:decomposed_matter",100]]]}]
+[{"in":[[["fluid|fluid:netrino_plasma",200]],[["item|nuclearcraft:lithium:0",1]],[["item|nuclearcraft:lithium:2",1]]],"out":[[["fluid|fluid:decomposed_matter",100]]]}]

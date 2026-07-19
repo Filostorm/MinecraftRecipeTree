@@ -286,6 +286,10 @@ test('the publication gate covers JSON, versioned manifests, and packed images',
   );
   assert.equal(image.status, 200);
   assert.equal(image.headers.get('content-type'), 'image/webp');
+  assert.equal(
+    image.headers.get('cache-control'),
+    'public, max-age=31536000, immutable, no-transform',
+  );
   assert.deepEqual([...new Uint8Array(await image.arrayBuffer())], [1, 2, 3, 4]);
   assert.equal(
     calls.some(call => call.pathname.startsWith('/coverage/exports/')),
@@ -461,6 +465,7 @@ test('the admin preview path dispatches to authenticated R2 ingestion before the
   const {env, calls} = createAssetEnvironment(PUBLICATION_A);
   const r2Calls = [];
   env.PREVIEW_ASSET_SET_ID = PREVIEW_SET_A;
+  env.PREVIEW_UPLOAD_ASSET_SET_ID = PREVIEW_SET_A;
   env.PREVIEW_UPLOAD_ENABLED = 'true';
   env.PREVIEW_UPLOAD_TOKEN = PREVIEW_UPLOAD_TOKEN;
   env.PREVIEW_ASSETS = {
@@ -522,6 +527,10 @@ test('preview metadata and images are gated by the matching dataset publication'
   const image = await requestWithEnv(
     `/dataset/previews/assets/s/000-2-4.webp?dataset=${PUBLICATION_A}&preview=${PREVIEW_SET_A}`,
     env,
+  );
+  assert.equal(
+    image.headers.get('cache-control'),
+    'public, max-age=31536000, immutable, no-transform',
   );
   assert.equal(image.status, 200);
   assert.equal(image.headers.get('content-type'), 'image/webp');

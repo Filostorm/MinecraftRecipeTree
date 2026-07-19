@@ -1,1 +1,1 @@
-[{"in":[[["item|contenttweaker:gem_of_aura",1]],[["custom_kport.modularmagic.common.integration.jei.ingredient.impetus_6d479728|impetus",40]],[["fluid|fluid:crystal_water",100]]],"out":[[["fluid|fluid:pristine_aura",10000]]]}]
+[{"in":[[["fluid|fluid:crystal_water",100]],[["custom_kport.modularmagic.common.integration.jei.ingredient.impetus_6d479728|impetus",40]],[["item|contenttweaker:gem_of_aura",1]]],"out":[[["fluid|fluid:pristine_aura",10000]]]}]

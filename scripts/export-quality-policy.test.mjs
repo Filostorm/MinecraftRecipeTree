@@ -10,7 +10,7 @@ const validManifest = {
   format: 1,
   minecraft: '1.12.2',
   aborted: false,
-  settings: {iconScale: 1, recipeScale: 1},
+  settings: {iconScale: 3, recipeScale: 2},
   diagnostics: {failureEvents: 2, failureEventsOmitted: 0},
 };
 
@@ -31,7 +31,7 @@ test('rejects version, abort, omitted, category, quantity, catalog, and semantic
         format: 2,
         minecraft: '1.20.1',
         aborted: true,
-        settings: {iconScale: 4, recipeScale: 2},
+        settings: {iconScale: 1, recipeScale: 1},
         diagnostics: {failureEvents: 5, failureEventsOmitted: 1},
       },
       failures: [
@@ -49,8 +49,8 @@ test('rejects version, abort, omitted, category, quantity, catalog, and semantic
   assert.match(issues.join('\n'), /format 1/);
   assert.match(issues.join('\n'), /1\.12\.2/);
   assert.match(issues.join('\n'), /aborted/);
-  assert.match(issues.join('\n'), /16×16 item renders/);
-  assert.match(issues.join('\n'), /native JEI layout resolution/);
+  assert.match(issues.join('\n'), /48×48 item canvases/);
+  assert.match(issues.join('\n'), /2× physical resolution/);
   assert.match(issues.join('\n'), /omitted 1/);
   assert.match(issues.join('\n'), /category failure/);
   assert.match(issues.join('\n'), /ingredient-quantity/);

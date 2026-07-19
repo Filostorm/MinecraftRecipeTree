@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import {mkdtemp, rm} from 'node:fs/promises';
+import {mkdtemp, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import test from 'node:test';
+import sharp from 'sharp';
 import {
   createRawExportFixture,
   readJson,
@@ -42,6 +43,23 @@ test('raw image validation accepts uniform visible assets and rejects fully tran
     await assert.rejects(
       validateExportData(root, {assetMode: 'raw'}),
       /Raw image icons\/stone\.png is fully transparent/,
+    );
+  });
+});
+
+test('raw image validation rejects content whose encoding does not match its extension', async () => {
+  await withFixture(async root => {
+    const iconPath = join(root, 'icons', 'stone.png');
+    const disguisedWebp = await sharp({
+      create: {width: 16, height: 16, channels: 4, background: '#446688ff'},
+    })
+      .webp({lossless: true})
+      .toBuffer();
+    await writeFile(iconPath, disguisedWebp);
+
+    await assert.rejects(
+      validateExportData(root, {assetMode: 'raw'}),
+      /icons\/stone\.png has webp content behind its png filename/,
     );
   });
 });

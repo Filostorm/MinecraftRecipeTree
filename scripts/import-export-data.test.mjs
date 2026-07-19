@@ -31,6 +31,7 @@ import {
 import {validateExportData} from './validate-export-data.mjs';
 
 const execFileAsync = promisify(execFile);
+const PRODUCTION_RENDER_SETTINGS = Object.freeze({iconScale: 3, recipeScale: 2});
 
 async function pathIsMissing(path) {
   try {
@@ -47,6 +48,34 @@ function isContained(parent, child) {
   return value === '' || (!value.startsWith(`..${sep}`) && value !== '..');
 }
 
+async function addSingleRecipePreview(source) {
+  const categoryRoot = join(source, 'recipes', 'minecraft_crafting');
+  const previewPath = join(categoryRoot, 'r0.png');
+  // Production recipeScale=2 requires a 32×32 physical preview for a 16×16 logical layout.
+  await writeNonUniformImage(previewPath, 32);
+  const physicalPreview = await readFile(previewPath);
+  await writeJson(join(categoryRoot, 'recipes.json'), [
+    {
+      id: 'minecraft:test',
+      img: 'r0.png',
+      w: 16,
+      h: 16,
+      in: [[['minecraft:stone', 1]]],
+      out: [[['minecraft:stone', 1]]],
+    },
+  ]);
+  const manifest = await readJson(join(source, 'manifest.json'));
+  manifest.counts.recipes = 1;
+  await writeJson(join(source, 'manifest.json'), manifest);
+  const categories = await readJson(join(source, 'categories.json'));
+  categories.categories[0].count = 1;
+  await writeJson(join(source, 'categories.json'), categories);
+  await writeJson(join(source, 'index.json'), {
+    'minecraft:stone': {p: [[0, 0]], u: [[0, 0]]},
+  });
+  return {categoryRoot, previewPath, physicalPreview};
+}
+
 test('dry run stages outside public and leaves the destination unchanged', async () => {
   const root = await mkdtemp(join(tmpdir(), 'recipe-tree-import-test-'));
   const originalLog = console.log;
@@ -55,7 +84,7 @@ test('dry run stages outside public and leaves the destination unchanged', async
     const source = join(root, 'raw-source');
     const destinationParent = join(root, 'public');
     const destination = join(destinationParent, 'exports');
-    await createRawExportFixture(source);
+    await createRawExportFixture(source, PRODUCTION_RENDER_SETTINGS);
     await mkdir(destination, {recursive: true});
     await writeFile(join(destination, 'sentinel.txt'), 'unchanged\n');
 
@@ -83,7 +112,7 @@ test('rejects a source-root symlink before creating import work data', async () 
     const source = join(root, 'raw-source');
     const sourceLink = join(root, 'raw-source-link');
     const destination = join(root, 'public', 'exports');
-    await createRawExportFixture(source);
+    await createRawExportFixture(source, PRODUCTION_RENDER_SETTINGS);
     await symlink(source, sourceLink, 'dir');
     await mkdir(dirname(destination), {recursive: true});
 
@@ -104,7 +133,7 @@ test('rejects a symlinked top-level image root before staging or optimization', 
     const source = join(root, 'raw-source');
     const externalIcons = join(root, 'external-icons');
     const destination = join(root, 'public', 'exports');
-    await createRawExportFixture(source);
+    await createRawExportFixture(source, PRODUCTION_RENDER_SETTINGS);
     await mkdir(externalIcons);
     await writeNonUniformImage(join(externalIcons, 'stone.png'));
     await rm(join(source, 'icons'), {recursive: true});
@@ -128,7 +157,7 @@ test('rejects a nested directory symlink before staging or optimization', async 
     const source = join(root, 'raw-source');
     const externalDirectory = join(root, 'external-recipes');
     const destination = join(root, 'public', 'exports');
-    await createRawExportFixture(source);
+    await createRawExportFixture(source, PRODUCTION_RENDER_SETTINGS);
     await mkdir(externalDirectory);
     await symlink(externalDirectory, join(source, 'recipes', 'linked-recipes'), 'dir');
     await mkdir(dirname(destination), {recursive: true});
@@ -150,7 +179,7 @@ test('rejects a special filesystem entry before staging or optimization', async 
     const source = join(root, 'raw-source');
     const destination = join(root, 'public', 'exports');
     const fifoPath = join(source, 'export-control.fifo');
-    await createRawExportFixture(source);
+    await createRawExportFixture(source, PRODUCTION_RENDER_SETTINGS);
     await execFileAsync('/usr/bin/mkfifo', [fifoPath]);
     await mkdir(dirname(destination), {recursive: true});
 
@@ -173,7 +202,7 @@ test('rejects a source that becomes unsafe while the clone traversal is starting
     const source = join(root, 'raw-source');
     const externalIcons = join(root, 'external-icons');
     const destination = join(root, 'public', 'exports');
-    await createRawExportFixture(source);
+    await createRawExportFixture(source, PRODUCTION_RENDER_SETTINGS);
     await mkdir(dirname(destination), {recursive: true});
 
     console.log = (...args) => {
@@ -204,7 +233,7 @@ test('publishes the packed dataset atomically and removes rollback work data', a
   try {
     const source = join(root, 'raw-source');
     const destination = join(root, 'public', 'exports');
-    await createRawExportFixture(source);
+    await createRawExportFixture(source, PRODUCTION_RENDER_SETTINGS);
     await mkdir(destination, {recursive: true});
     await writeFile(join(destination, 'sentinel.txt'), 'old dataset\n');
 
@@ -256,6 +285,66 @@ test('publishes the packed dataset atomically and removes rollback work data', a
     await writeJson(join(destination, 'categories.json'), categories);
     await assert.rejects(validateExportData(destination), /gap or overlap/);
     assert.equal(await pathIsMissing(importWorkspaceRootForDestination(destination)), true);
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
+});
+
+test('omit-recipe-images imports retain original PNGs only through validation and publish no recipe raster', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'recipe-tree-import-omission-test-'));
+  try {
+    const source = join(root, 'raw-source');
+    const destination = join(root, 'public', 'exports');
+    await createRawExportFixture(source, PRODUCTION_RENDER_SETTINGS);
+    const {previewPath, physicalPreview} = await addSingleRecipePreview(source);
+    await mkdir(dirname(destination), {recursive: true});
+
+    await importExportData({source, destination, omitRecipeImages: true});
+
+    assert.deepEqual(
+      await readFile(previewPath),
+      physicalPreview,
+      'copy-on-write staging must not mutate the raw sidecar source PNG',
+    );
+    const manifest = await readJson(join(destination, 'manifest.json'));
+    assert.deepEqual(
+      {
+        mode: manifest.web.recipeImages.mode,
+        references: manifest.web.recipeImages.references,
+        files: manifest.web.recipeImages.files,
+        encoding: manifest.web.recipeImages.encoding,
+        bytes: manifest.web.recipeImages.bytes,
+      },
+      {
+        mode: 'omitted',
+        references: 1,
+        files: 1,
+        encoding: 'png',
+        bytes: physicalPreview.length,
+      },
+    );
+    const recipe = (
+      await readJson(join(destination, 'recipes', 'minecraft_crafting', 'recipes.json'))
+    )[0];
+    assert.equal('img' in recipe, false);
+    assert.equal('w' in recipe, false);
+    assert.equal('h' in recipe, false);
+    assert.equal(
+      await pathIsMissing(
+        join(destination, 'recipes', 'minecraft_crafting', 'r0.png'),
+      ),
+      true,
+    );
+    assert.equal(
+      await pathIsMissing(
+        join(destination, 'recipes', 'minecraft_crafting', 'r0.webp'),
+      ),
+      true,
+    );
+    await validateExportData(destination, {
+      requirePublicationId: true,
+      verifyPublicationId: true,
+    });
   } finally {
     await rm(root, {recursive: true, force: true});
   }

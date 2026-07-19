@@ -795,7 +795,7 @@ async function servePackedAsset(
   return new Response(request.method === 'HEAD' ? null : image, {
     status: 200,
     headers: {
-      'Cache-Control': 'public, max-age=31536000, immutable',
+      'Cache-Control': 'public, max-age=31536000, immutable, no-transform',
       'Content-Length': String(length),
       'Content-Type': 'image/webp',
       'X-Content-Type-Options': 'nosniff',
@@ -1182,7 +1182,7 @@ async function servePreviewPackedAsset(
   const result = new Response(image, {
     status: 200,
     headers: {
-      'Cache-Control': 'public, max-age=31536000, immutable',
+      'Cache-Control': 'public, max-age=31536000, immutable, no-transform',
       'Content-Length': String(length),
       'Content-Type': 'image/webp',
       'X-MRT-Preview-Cache': 'MISS',

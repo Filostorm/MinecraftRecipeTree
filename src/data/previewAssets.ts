@@ -9,7 +9,10 @@ export const PREVIEW_MAX_PACK_INDEX_BYTES = 512 * 1024;
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const PREVIEW_IMAGE_ROUTE = /^recipe-assets\/s\/(\d+)-(\d+)-(\d+)\.webp$/;
-const PREVIEW_PART_PATH = /^categories\/\d{3}\/part-\d{3}\.json$/;
+const CANONICAL_PADDED_INDEX = String.raw`(?:\d{3}|[1-9]\d{3,})`;
+const PREVIEW_PART_PATH = new RegExp(
+  `^categories\/${CANONICAL_PADDED_INDEX}\/part-${CANONICAL_PADDED_INDEX}\\.json$`,
+);
 
 function isDatasetPublicationId(value: unknown): value is string {
   return typeof value === 'string' && SHA256_PATTERN.test(value);
@@ -64,6 +67,14 @@ export interface RecipePreviewManifest {
   packIndexFormat: typeof PREVIEW_PACK_INDEX_FORMAT;
   maxPackIndexBytes: typeof PREVIEW_MAX_PACK_INDEX_BYTES;
   imageFormat: 'lossless-webp';
+  settings: {
+    /** Physical item-render canvas width/height in pixels; logical item sprites remain 16×16. */
+    itemIconPixels: number;
+    /** Physical recipe pixels emitted per logical JEI layout pixel. */
+    recipeScale: number;
+    webpEffort: 4;
+    maxCategoryBytes: number;
+  };
   counts: {
     categories: number;
     recipes: number;
@@ -73,7 +84,10 @@ export interface RecipePreviewManifest {
     duplicates: number;
     packs: number;
     inputBytes: number;
-    hostedOmittedWebpBytes: number;
+    /** Exact original PNG bytes in the current omission contract. */
+    hostedOmittedPngBytes?: number;
+    /** Legacy encoded-WebP omission bytes, accepted only for zero-downtime reads. */
+    hostedOmittedWebpBytes?: number;
     encodedBytes: number;
     storedBytes: number;
     packIndexBytes: number;
@@ -162,6 +176,13 @@ export function requireRecipePreviewManifest(
     value.packIndexFormat !== PREVIEW_PACK_INDEX_FORMAT ||
     value.maxPackIndexBytes !== PREVIEW_MAX_PACK_INDEX_BYTES ||
     value.imageFormat !== 'lossless-webp' ||
+    !isRecord(value.settings) ||
+    !isPositiveInteger(value.settings.itemIconPixels) ||
+    value.settings.itemIconPixels % 16 !== 0 ||
+    !isPositiveInteger(value.settings.recipeScale) ||
+    value.settings.webpEffort !== 4 ||
+    !isPositiveInteger(value.settings.maxCategoryBytes) ||
+    value.settings.maxCategoryBytes > PREVIEW_MAX_CATEGORY_BYTES ||
     !isRecord(value.counts) ||
     !Array.isArray(value.packs)
   ) {
@@ -177,13 +198,19 @@ export function requireRecipePreviewManifest(
     'duplicates',
     'packs',
     'inputBytes',
-    'hostedOmittedWebpBytes',
     'encodedBytes',
     'storedBytes',
     'packIndexBytes',
   ];
   if (!countNames.every(name => isNonnegativeInteger(counts[name]))) {
     throw new Error('Recipe-preview manifest contains invalid aggregate counts.');
+  }
+  const hasCurrentOmissionBytes = isNonnegativeInteger(counts.hostedOmittedPngBytes);
+  const hasLegacyOmissionBytes = isNonnegativeInteger(counts.hostedOmittedWebpBytes);
+  if (hasCurrentOmissionBytes === hasLegacyOmissionBytes) {
+    throw new Error(
+      'Recipe-preview manifest must contain exactly one current PNG or legacy WebP omission byte count.',
+    );
   }
   if (
     (counts.previews as number) + (counts.missing as number) !== counts.recipes ||

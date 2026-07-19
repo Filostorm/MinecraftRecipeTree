@@ -196,6 +196,7 @@ function RefsList({refs}: {refs: RecipeRef[]}) {
   const [sortMode, setSortMode] = useState<'type' | 'source'>('type');
   const [showAutomatedShaped, setShowAutomatedShaped] = useState(false);
   const [recipesByRef, setRecipesByRef] = useState<Map<string, Recipe>>(() => new Map());
+  const [availableCardWidth, setAvailableCardWidth] = useState<number | null>(null);
 
   const categoryGroups = useMemo(() => {
     const counts = new Map<number, number>();
@@ -253,7 +254,18 @@ function RefsList({refs}: {refs: RecipeRef[]}) {
   }, [shown, recipesByRef, data]);
 
   return (
-    <View>
+    <View
+      style={styles.recipeList}
+      onLayout={event => {
+        const measuredWidth = Math.floor(event.nativeEvent.layout.width);
+        if (!Number.isFinite(measuredWidth) || measuredWidth <= 0) {
+          console.error('Recipe list reported an invalid available width.', {measuredWidth});
+          return;
+        }
+        setAvailableCardWidth(current =>
+          current === measuredWidth ? current : measuredWidth,
+        );
+      }}>
       {categoryGroups.length > 1 && (
         <View style={styles.recipeFilters}>
           <View style={styles.filterHeader}>
@@ -319,17 +331,20 @@ function RefsList({refs}: {refs: RecipeRef[]}) {
         if (!cat) return null;
         return (
           <View key={`${catIdx}-${recipeIdx}`}>
-            {recipe ? (
+            {recipe && availableCardWidth !== null ? (
               <RecipeCard
                 recipe={recipe}
                 dir={cat.dir}
                 catTitle={cat.title}
+                availableCardWidth={availableCardWidth}
                 onPress={
                   outputKey
                     ? () => openRecipeInGraph(outputKey, [catIdx, recipeIdx])
                     : undefined
                 }
               />
+            ) : recipe ? (
+              <Text style={styles.loadingText}>measuring {cat.title} layout…</Text>
             ) : (
               <Text style={styles.loadingText}>loading {cat.title}…</Text>
             )}
@@ -401,6 +416,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     gap: 9,
   },
+  recipeList: {width: '100%'},
   filterHeader: {
     flexDirection: 'row',
     alignItems: 'center',

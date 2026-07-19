@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  NATIVE_ITEM_ICON_SIZE,
+  LOGICAL_ITEM_ICON_GRID_SIZE,
   isPixelGridAlignedItemIconSize,
 } from './itemIconSizing.ts';
 
-test('accepts only positive integer multiples of the native JEI icon grid', () => {
-  assert.equal(NATIVE_ITEM_ICON_SIZE, 16);
+test('accepts only positive integer multiples of the logical JEI icon grid', () => {
+  assert.equal(LOGICAL_ITEM_ICON_GRID_SIZE, 16);
   assert.equal(isPixelGridAlignedItemIconSize(16), true);
   assert.equal(isPixelGridAlignedItemIconSize(32), true);
   assert.equal(isPixelGridAlignedItemIconSize(48), true);

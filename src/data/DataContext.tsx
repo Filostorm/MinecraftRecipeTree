@@ -20,6 +20,11 @@ import {
   versionExportUrl,
 } from './datasetIdentity';
 import {
+  BoundedAbsentItemIconCollector,
+  BoundedItemIconFailureReporter,
+  type ItemIconLoadFailure,
+} from './itemIconDiagnostics';
+import {
   PREVIEW_VIRTUAL_BASE,
   PREVIEW_MAX_CATEGORY_BYTES,
   RecipePreviewCategoryDocument,
@@ -580,6 +585,7 @@ function isManifestWeb(value: unknown, expectedRecipes: number): boolean {
       typeof recipeImages.files === 'number' &&
       Number.isSafeInteger(recipeImages.files) &&
       recipeImages.files >= 0 &&
+      (recipeImages.encoding === undefined || recipeImages.encoding === 'png') &&
       typeof recipeImages.bytes === 'number' &&
       Number.isSafeInteger(recipeImages.bytes) &&
       recipeImages.bytes >= 0 &&
@@ -695,6 +701,8 @@ export interface Data {
   /** Subset of secondaryCategories that are pure repairs (anvil) — last resort in the graph. */
   repairCategories: Set<number>;
   imageUrl(rel?: string): string | undefined;
+  /** Report an item asset transport/decoder failure through the dataset-scoped bounded logger. */
+  reportItemIconFailure(failure: ItemIconLoadFailure): void;
   /** Load exactly the recipe shards needed by the requested category/index references. */
   getRecipes(refs: readonly RecipeRef[]): Promise<Recipe[]>;
 }
@@ -744,6 +752,7 @@ export function DataProvider({children}: {children: React.ReactNode}) {
     ),
   );
   const missingPreviewDiagnostics = useRef(new Set<string>());
+  const absentItemIconSummaryDataset = useRef<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -788,6 +797,14 @@ export function DataProvider({children}: {children: React.ReactNode}) {
             `The compact publication stores ${manifest.web.recipeImages.references} JEI layout ` +
               'previews in its required external sidecar.',
           );
+          if (manifest.web.recipeImages.encoding !== 'png') {
+            console.warn(
+              'The active core dataset uses the legacy omitted-WebP byte accounting contract. ' +
+                'It remains readable only for zero-downtime migration; every new import must ' +
+                'publish encoding="png" and original PNG bytes.',
+              {datasetIdentity},
+            );
+          }
         }
         setState({status: 'loading', step: 'items, categories, mobs, index…'});
         const itemsUrl = versionExportUrl(`${base}/items.json`, datasetIdentity);
@@ -864,6 +881,13 @@ export function DataProvider({children}: {children: React.ReactNode}) {
               'a legacy object keyed by exported ingredient key or a sharded-object descriptor',
             );
         if (previewManifest) {
+          if (previewManifest.counts.hostedOmittedWebpBytes !== undefined) {
+            console.warn(
+              'The active recipe-preview sidecar uses legacy omitted-WebP byte accounting. ' +
+                'It remains readable only while the zero-downtime sidecar migration is staged.',
+              {datasetIdentity, assetSetId: previewManifest.assetSetId},
+            );
+          }
           if (
             previewManifest.counts.categories !== categoriesDoc.categories.length ||
             previewManifest.counts.recipes !== manifest.counts.recipes ||
@@ -871,6 +895,20 @@ export function DataProvider({children}: {children: React.ReactNode}) {
           ) {
             throw new Error(
               'Recipe-preview sidecar counts do not match the core dataset publication.',
+            );
+          }
+          const expectedItemIconPixels = 16 * manifest.settings.iconScale;
+          if (
+            !Number.isSafeInteger(expectedItemIconPixels) ||
+            previewManifest.settings.itemIconPixels !== expectedItemIconPixels ||
+            previewManifest.settings.recipeScale !== manifest.settings.recipeScale
+          ) {
+            throw new Error(
+              'Recipe-preview sidecar render scales do not match the core dataset publication: ' +
+                `expected itemIconPixels=${expectedItemIconPixels} and ` +
+                `recipeScale=${manifest.settings.recipeScale}, received ` +
+                `itemIconPixels=${previewManifest.settings.itemIconPixels} and ` +
+                `recipeScale=${previewManifest.settings.recipeScale}.`,
             );
           }
         }
@@ -897,9 +935,26 @@ export function DataProvider({children}: {children: React.ReactNode}) {
           );
         }
         const mobs = supplementCustomDeathDrops(mobsDoc.mobs);
-        const itemsByKey = new Map(items.map(i => [i.k, i] as const));
+        const itemsByKey = new Map<string, CatalogItem>();
         const counts = new Map<string, number>();
-        for (const i of items) counts.set(i.m, (counts.get(i.m) ?? 0) + 1);
+        const absentItemIcons = new BoundedAbsentItemIconCollector();
+        for (const i of items) {
+          itemsByKey.set(i.k, i);
+          counts.set(i.m, (counts.get(i.m) ?? 0) + 1);
+          absentItemIcons.observe(i);
+        }
+        const absentItemIconSummary = absentItemIcons.summary();
+        if (
+          absentItemIconSummary &&
+          absentItemIconSummaryDataset.current !== datasetIdentity
+        ) {
+          absentItemIconSummaryDataset.current = datasetIdentity;
+          console.warn(
+            'The loaded item catalog contains entries without icon URLs; named fallbacks will be rendered.',
+            {datasetIdentity, ...absentItemIconSummary},
+          );
+        }
+        const itemIconFailureReporter = new BoundedItemIconFailureReporter(datasetIdentity);
         const mods: ModInfo[] = [...counts.entries()]
           .map(([id, itemCount]) => ({id, name: manifest.mods?.[id] ?? id, itemCount}))
           .sort((a, b) => b.itemCount - a.itemCount);
@@ -1302,6 +1357,7 @@ export function DataProvider({children}: {children: React.ReactNode}) {
             }
             return versionExportUrl(`${base}/${rel}`, datasetIdentity);
           },
+          reportItemIconFailure: failure => itemIconFailureReporter.report(failure),
           getRecipes: refs =>
             loadRecipes(refs).catch(error => {
               console.error('Required recipe references could not be loaded.', {

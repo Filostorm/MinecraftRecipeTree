@@ -195,6 +195,23 @@ function loggerCapture() {
   };
 }
 
+function serializedErrorChain(error) {
+  const entries = [];
+  const seen = new Set();
+  let current = error;
+  while (current !== undefined && current !== null && !seen.has(current)) {
+    seen.add(current);
+    if (current instanceof Error) {
+      entries.push({name: current.name, message: current.message, stack: current.stack});
+      current = current.cause;
+    } else {
+      entries.push({value: String(current)});
+      break;
+    }
+  }
+  return JSON.stringify(entries);
+}
+
 async function runUpload(fixtureState, api, overrides = {}) {
   return uploadRecipePreviewSidecar({
     local: fixtureState.root,
@@ -333,13 +350,18 @@ test('status digest mismatch and insecure production URLs fail closed without lo
     );
     assert.equal(capture.entries.flat().join('\n').includes(TOKEN), false);
     const leakingFetch = async () => {
-      throw new Error(`transport accidentally included ${TOKEN}`);
+      throw new Error(`transport accidentally included ${TOKEN}`, {
+        cause: new Error(`nested socket diagnostic included ${TOKEN}`),
+      });
     };
     const networkError = await assert.rejects(
       runUpload(data, api, {logger: capture.logger, fetchImpl: leakingFetch}),
       /\[REDACTED\]/,
     );
     assert.equal(networkError?.message?.includes(TOKEN) ?? false, false);
+    assert.equal(networkError?.stack?.includes(TOKEN) ?? false, false);
+    assert.equal(networkError?.cause, undefined);
+    assert.equal(serializedErrorChain(networkError).includes(TOKEN), false);
     assert.equal(capture.entries.flat().join('\n').includes(TOKEN), false);
     await assert.rejects(
       uploadRecipePreviewSidecar({

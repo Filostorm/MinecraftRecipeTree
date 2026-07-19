@@ -1,14 +1,14 @@
-/** JEI item renderers produce one 16×16 logical icon. */
-export const NATIVE_ITEM_ICON_SIZE = 16;
+/** One Minecraft/JEI item occupies a 16×16 logical texel grid, independent of export canvas size. */
+export const LOGICAL_ITEM_ICON_GRID_SIZE = 16;
 
 /**
- * Pixel-art icons must occupy an integer multiple of their source grid on the web.
- * Fractional ratios such as 44 / 16 distribute texels unevenly and visibly warp renders.
+ * Pixel-art icons must occupy an integer multiple of their logical grid on the web.
+ * Fractional ratios such as 44 / 16 distribute logical texels unevenly and visibly warp renders.
  */
 export function isPixelGridAlignedItemIconSize(size: number): boolean {
   return (
     Number.isSafeInteger(size) &&
-    size >= NATIVE_ITEM_ICON_SIZE &&
-    size % NATIVE_ITEM_ICON_SIZE === 0
+    size >= LOGICAL_ITEM_ICON_GRID_SIZE &&
+    size % LOGICAL_ITEM_ICON_GRID_SIZE === 0
   );
 }

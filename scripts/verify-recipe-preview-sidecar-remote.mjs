@@ -372,13 +372,16 @@ function validateManifestShape(manifest) {
     'Local sidecar manifest.settings',
   );
   if (
-    manifest.settings.itemIconPixels !== 16 ||
-    manifest.settings.recipeScale !== 1 ||
+    !Number.isSafeInteger(manifest.settings.itemIconPixels) ||
+    manifest.settings.itemIconPixels < 16 ||
+    manifest.settings.itemIconPixels % 16 !== 0 ||
+    !Number.isSafeInteger(manifest.settings.recipeScale) ||
+    manifest.settings.recipeScale <= 0 ||
     manifest.settings.webpEffort !== 4
   ) {
     throw new Error(
-      'Local sidecar manifest.settings must preserve 16-pixel item icons, recipeScale 1, and ' +
-        'lossless-WebP effort 4.',
+      'Local sidecar manifest.settings must use a positive 16-pixel-grid-aligned item canvas, ' +
+        'a positive recipeScale, and lossless-WebP effort 4.',
     );
   }
   if (
@@ -400,7 +403,7 @@ function validateManifestShape(manifest) {
     'duplicates',
     'packs',
     'inputBytes',
-    'hostedOmittedWebpBytes',
+    'hostedOmittedPngBytes',
     'encodedBytes',
     'storedBytes',
     'packIndexBytes',

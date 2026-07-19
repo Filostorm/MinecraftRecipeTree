@@ -44,14 +44,48 @@ const PACK_INDEX_ENTRY_BYTES = 8;
 export const MEATBALLCRAFT_CONTRACT = Object.freeze({
   format: 1,
   minecraft: '1.12.2',
-  settings: Object.freeze({iconScale: 1, recipeScale: 1, mobCanvas: 256}),
+  settings: Object.freeze({
+    iconScale: 3,
+    recipeScale: 2,
+    mobCanvas: 256,
+    worldStartupOptimization: Object.freeze({
+      enabled: true,
+      policy: 'dimension-0-plus-should-load-spawn',
+      applied: true,
+      originalDimensions: 93,
+      selectedDimensions: 4,
+      skippedDimensions: 89,
+    }),
+  }),
   counts: Object.freeze({
-    items: 196163,
-    recipes: 359213,
+    items: 196161,
+    recipes: 359215,
     categories: 674,
     mobs: 0,
     blockDrops: 0,
-    failures: 158,
+    failures: 130,
+  }),
+  diagnostics: Object.freeze({failureEvents: 130, failureEventsOmitted: 0}),
+  recipeImages: Object.freeze({previews: 359215, missing: 0}),
+  hostedWeb: Object.freeze({
+    format: 2,
+    packedImages: 'coordinate-v1',
+    maxPackBytes: 1024 * 1024,
+    shardedJson: 'mrt-sharded-json-v1',
+    maxShardBytes: 8 * 1024 * 1024,
+  }),
+  repairProvenance: Object.freeze({
+    format: 'mrt-recipe-preview-repair-overlay-v1',
+    method: 'canonical-deep-equality-sample-overlay',
+    repairedRecipePreviews: 27,
+    compatibilityDiagnostics: Object.freeze({
+      'zmaster587.AR.chemicalReactor': 25,
+      'buildcraft:category_heatable': 1,
+      'buildcraft:category_coolable': 1,
+    }),
+    hashAlgorithm: 'sha256',
+    treeHashFormat: 'mrt-plain-content-tree-sha256-v1',
+    canonicalSha256: '11b9cbf2a8b7b1a65995612fa804dbeaf6c2d36ed1b16318783cd4d9064c4af4',
   }),
 });
 
@@ -86,12 +120,93 @@ function assertExactRecord(value, expected, label) {
     );
   }
   for (const [key, expectedValue] of Object.entries(expected)) {
-    if (value[key] !== expectedValue) {
+    if (isRecord(expectedValue)) {
+      assertExactRecord(value[key], expectedValue, `${label}.${key}`);
+    } else if (!isDeepStrictEqual(value[key], expectedValue)) {
       throw new Error(
         `${label}.${key} must be ${JSON.stringify(expectedValue)}; received ` +
           `${JSON.stringify(value[key])}.`,
       );
     }
+  }
+}
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (isRecord(value)) {
+    return `{${Object.keys(value)
+      .sort()
+      .map(key => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function canonicalJsonSha256(value) {
+  return sha256(Buffer.from(canonicalJson(value), 'utf8'));
+}
+
+function validateWorldStartupOptimization(value, label) {
+  if (!hasExactKeys(value, [
+    'enabled',
+    'policy',
+    'applied',
+    'originalDimensions',
+    'selectedDimensions',
+    'skippedDimensions',
+  ])) {
+    throw new Error(
+      `${label} must contain the exact audited dimension-selection fields.`,
+    );
+  }
+  if (value.enabled !== true || value.applied !== true) {
+    throw new Error(`${label}.enabled and ${label}.applied must both be true.`);
+  }
+  if (value.policy !== 'dimension-0-plus-should-load-spawn') {
+    throw new Error(
+      `${label}.policy must be "dimension-0-plus-should-load-spawn".`,
+    );
+  }
+  for (const name of ['originalDimensions', 'selectedDimensions', 'skippedDimensions']) {
+    if (!Number.isSafeInteger(value[name]) || value[name] < 0) {
+      throw new Error(`${label}.${name} must be a non-negative safe integer.`);
+    }
+  }
+  if (value.selectedDimensions + value.skippedDimensions !== value.originalDimensions) {
+    throw new Error(`${label} selected plus skipped dimensions must equal original dimensions.`);
+  }
+}
+
+function validateRepairProvenance(manifest, contract, label) {
+  const expected = contract.repairProvenance;
+  const present = Object.hasOwn(manifest, 'repairProvenance');
+  if (expected === undefined) {
+    if (present) {
+      throw new Error(`${label}.repairProvenance is present but the dataset contract forbids it.`);
+    }
+    return;
+  }
+  if (!present || !isRecord(manifest.repairProvenance)) {
+    throw new Error(`${label}.repairProvenance must be the audited repair record.`);
+  }
+  const provenance = manifest.repairProvenance;
+  const summary = {
+    format: provenance.format,
+    method: provenance.method,
+    repairedRecipePreviews: provenance.repairedRecipePreviews,
+    compatibilityDiagnostics: provenance.compatibilityDiagnostics,
+    hashAlgorithm: provenance.hashAlgorithm,
+    treeHashFormat: provenance.treeHashFormat,
+  };
+  const expectedSummary = {...expected};
+  delete expectedSummary.canonicalSha256;
+  assertExactRecord(summary, expectedSummary, `${label}.repairProvenance summary`);
+  const actualDigest = canonicalJsonSha256(provenance);
+  if (actualDigest !== expected.canonicalSha256) {
+    throw new Error(
+      `${label}.repairProvenance canonical SHA-256 is ${actualDigest}; expected ` +
+        `${expected.canonicalSha256}.`,
+    );
   }
 }
 
@@ -103,29 +218,102 @@ function validateContract(contract) {
   if (typeof contract.minecraft !== 'string' || contract.minecraft.length === 0) {
     throw new Error('Expected dataset contract minecraft version must be a non-empty string.');
   }
-  if (!isRecord(contract.settings) || !isRecord(contract.counts)) {
-    throw new Error('Expected dataset contract must contain settings and counts objects.');
+  if (
+    !isRecord(contract.settings) ||
+    !isRecord(contract.counts) ||
+    !hasExactKeys(contract.diagnostics, ['failureEvents', 'failureEventsOmitted']) ||
+    !hasExactKeys(contract.recipeImages, ['previews', 'missing'])
+  ) {
+    throw new Error(
+      'Expected dataset contract must contain settings/counts plus exact diagnostics and ' +
+        'recipeImages fields.',
+    );
   }
-  for (const [name, value] of Object.entries(contract.settings)) {
+  const worldStartupOptimization = contract.settings.worldStartupOptimization;
+  const expectedSettingKeys = ['iconScale', 'recipeScale', 'mobCanvas'];
+  if (worldStartupOptimization !== undefined) expectedSettingKeys.push('worldStartupOptimization');
+  if (!hasExactKeys(contract.settings, expectedSettingKeys)) {
+    throw new Error('Expected dataset settings contain unsupported or missing fields.');
+  }
+  for (const name of ['iconScale', 'recipeScale', 'mobCanvas']) {
+    const value = contract.settings[name];
     if (!Number.isSafeInteger(value) || value <= 0) {
       throw new Error(`Expected dataset setting ${name} must be a positive safe integer.`);
     }
+  }
+  if (worldStartupOptimization !== undefined) {
+    validateWorldStartupOptimization(
+      worldStartupOptimization,
+      'Expected dataset setting worldStartupOptimization',
+    );
   }
   for (const [name, value] of Object.entries(contract.counts)) {
     if (!Number.isSafeInteger(value) || value < 0) {
       throw new Error(`Expected dataset count ${name} must be a non-negative safe integer.`);
     }
   }
-  if (contract.settings.iconScale !== 1 || contract.settings.recipeScale !== 1) {
+  for (const [name, value] of Object.entries(contract.recipeImages)) {
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new Error(
+        `Expected recipe-image count ${name} must be a non-negative safe integer.`,
+      );
+    }
+  }
+  if (contract.recipeImages.previews + contract.recipeImages.missing !== contract.counts.recipes) {
     throw new Error(
-      'Recipe preview sidecars require settings.iconScale 1 (native 16×16 items) and ' +
-        'settings.recipeScale 1.',
+      'Expected recipe-image previews plus missing must equal the audited recipe count.',
     );
+  }
+  if (
+    contract.diagnostics.failureEvents !== contract.counts.failures ||
+    contract.diagnostics.failureEventsOmitted !== 0
+  ) {
+    throw new Error(
+      'Expected diagnostics must serialize every audited failure event without omission.',
+    );
+  }
+  if (contract.hostedWeb !== undefined && !isRecord(contract.hostedWeb)) {
+    throw new Error('Expected hostedWeb contract must be an object when provided.');
+  }
+  if (contract.repairProvenance !== undefined) {
+    if (
+      !hasExactKeys(contract.repairProvenance, [
+        'format',
+        'method',
+        'repairedRecipePreviews',
+        'compatibilityDiagnostics',
+        'hashAlgorithm',
+        'treeHashFormat',
+        'canonicalSha256',
+      ]) ||
+      !DATASET_PUBLICATION_ID_PATTERN.test(contract.repairProvenance.canonicalSha256)
+    ) {
+      throw new Error('Expected repairProvenance contract is malformed.');
+    }
   }
 }
 
 function validateDatasetManifest(manifest, contract, label, {hosted = false} = {}) {
   if (!isRecord(manifest)) throw new Error(`${label} must be a JSON object.`);
+  const expectedManifestKeys = [
+    'aborted',
+    'counts',
+    'diagnostics',
+    'durationMs',
+    'format',
+    'generatedAt',
+    'minecraft',
+    'mods',
+    'settings',
+  ];
+  if (contract.repairProvenance !== undefined) expectedManifestKeys.push('repairProvenance');
+  if (hosted) expectedManifestKeys.push('publicationId', 'web');
+  if (!hasExactKeys(manifest, expectedManifestKeys)) {
+    throw new Error(
+      `${label} must contain exactly the audited manifest fields: ` +
+        `${expectedManifestKeys.sort().join(', ')}.`,
+    );
+  }
   if (manifest.format !== contract.format) {
     throw new Error(
       `${label}.format must be ${contract.format}; received ${JSON.stringify(manifest.format)}.`,
@@ -140,6 +328,10 @@ function validateDatasetManifest(manifest, contract, label, {hosted = false} = {
   if (manifest.aborted !== false) {
     throw new Error(`${label}.aborted must be false; partial exports are not accepted.`);
   }
+  if (!Number.isSafeInteger(manifest.durationMs) || manifest.durationMs < 0) {
+    throw new Error(`${label}.durationMs must be a non-negative safe integer.`);
+  }
+  if (!isRecord(manifest.mods)) throw new Error(`${label}.mods must be an object.`);
   if (
     typeof manifest.generatedAt !== 'string' ||
     manifest.generatedAt.length === 0 ||
@@ -149,6 +341,8 @@ function validateDatasetManifest(manifest, contract, label, {hosted = false} = {
   }
   assertExactRecord(manifest.settings, contract.settings, `${label}.settings`);
   assertExactRecord(manifest.counts, contract.counts, `${label}.counts`);
+  assertExactRecord(manifest.diagnostics, contract.diagnostics, `${label}.diagnostics`);
+  validateRepairProvenance(manifest, contract, label);
 
   if (hosted) {
     if (!DATASET_PUBLICATION_ID_PATTERN.test(manifest.publicationId ?? '')) {
@@ -157,20 +351,46 @@ function validateDatasetManifest(manifest, contract, label, {hosted = false} = {
           `${JSON.stringify(manifest.publicationId)}.`,
       );
     }
-    const recipeImages = manifest.web?.recipeImages;
+    if (!isRecord(manifest.web)) throw new Error(`${label}.web must be an object.`);
+    const expectedWebKeys = ['recipeImages', ...Object.keys(contract.hostedWeb ?? {})];
+    if (!hasExactKeys(manifest.web, expectedWebKeys)) {
+      throw new Error(
+        `${label}.web must contain exactly ${expectedWebKeys.sort().join(', ')}.`,
+      );
+    }
+    for (const [name, expected] of Object.entries(contract.hostedWeb ?? {})) {
+      if (!isDeepStrictEqual(manifest.web[name], expected)) {
+        throw new Error(
+          `${label}.web.${name} must be ${JSON.stringify(expected)}; received ` +
+            `${JSON.stringify(manifest.web[name])}.`,
+        );
+      }
+    }
+    const recipeImages = manifest.web.recipeImages;
     if (
       !isRecord(recipeImages) ||
+      !hasExactKeys(recipeImages, [
+        'mode',
+        'reason',
+        'references',
+        'files',
+        'encoding',
+        'bytes',
+        'inventory',
+      ]) ||
       recipeImages.mode !== 'omitted' ||
+      recipeImages.reason !== 'hosting-archive-budget' ||
       !Number.isSafeInteger(recipeImages.references) ||
       recipeImages.references < 0 ||
       !Number.isSafeInteger(recipeImages.files) ||
       recipeImages.files < 0 ||
+      recipeImages.encoding !== 'png' ||
       !Number.isSafeInteger(recipeImages.bytes) ||
       recipeImages.bytes < 0
     ) {
       throw new Error(
         `${label}.web.recipeImages must describe the omitted recipe images with non-negative ` +
-        'references, files, and bytes.',
+        'references, files, and bytes plus encoding="png".',
       );
     }
     const inventory = requireRecipeImageInventory(
@@ -189,14 +409,31 @@ function validateDatasetManifest(manifest, contract, label, {hosted = false} = {
           `files=${recipeImages.files}, recipes=${contract.counts.recipes}.`,
       );
     }
+    if (
+      recipeImages.references !== contract.recipeImages.previews ||
+      recipeImages.files !== contract.recipeImages.previews ||
+      inventory.previews !== contract.recipeImages.previews ||
+      inventory.missing !== contract.recipeImages.missing
+    ) {
+      throw new Error(
+        `${label}.web.recipeImages must match the audited preview contract: ` +
+          `expected previews/files=${contract.recipeImages.previews}/${contract.recipeImages.previews} ` +
+          `and missing=${contract.recipeImages.missing}; received ` +
+          `references/files=${recipeImages.references}/${recipeImages.files}, ` +
+          `inventory previews/missing=${inventory.previews}/${inventory.missing}.`,
+      );
+    }
   }
 }
 
 function assertRawAndHostedIdentity(rawManifest, hostedManifest) {
-  if (rawManifest.generatedAt !== hostedManifest.generatedAt) {
+  const normalizedHostedManifest = {...hostedManifest};
+  delete normalizedHostedManifest.publicationId;
+  delete normalizedHostedManifest.web;
+  if (!isDeepStrictEqual(rawManifest, normalizedHostedManifest)) {
     throw new Error(
-      'Raw export and hosted manifest generatedAt values differ; refusing to attach previews ' +
-        'to a different dataset publication.',
+      'Raw export and hosted manifests differ outside the hosted-only publicationId/web fields; ' +
+        'refusing to attach previews to a different dataset publication.',
     );
   }
 }
@@ -653,7 +890,14 @@ function pixelDigest(width, height, pixels) {
     .digest('base64url');
 }
 
-async function decodePng(path, expectedWidth, expectedHeight, label) {
+async function decodePng({
+  path,
+  physicalWidth,
+  physicalHeight,
+  logicalWidth,
+  logicalHeight,
+  label,
+}) {
   await assertPlainFile(path, label);
   let source;
   try {
@@ -684,10 +928,12 @@ async function decodePng(path, expectedWidth, expectedHeight, label) {
   } catch (error) {
     throw new Error(`${label} could not be decoded as PNG: ${error.message}`, {cause: error});
   }
-  if (info.width !== expectedWidth || info.height !== expectedHeight || info.channels !== 4) {
+  if (info.width !== physicalWidth || info.height !== physicalHeight || info.channels !== 4) {
     throw new Error(
       `${label} decoded as ${info.width}×${info.height}×${info.channels}, but the recipe ` +
-        `declares ${expectedWidth}×${expectedHeight} and RGBA normalization requires 4 channels.`,
+        `requires a ${physicalWidth}×${physicalHeight} physical image for its ` +
+        `${logicalWidth}×${logicalHeight} logical layout and RGBA normalization requires ` +
+        '4 channels.',
     );
   }
 
@@ -697,6 +943,8 @@ async function decodePng(path, expectedWidth, expectedHeight, label) {
     sourceBytes: source.length,
     width: info.width,
     height: info.height,
+    logicalWidth,
+    logicalHeight,
     pixels,
     digest: pixelDigest(info.width, info.height, pixels),
     rgbaSha256: decodedRgbaSha256(info.width, info.height, pixels),
@@ -720,7 +968,7 @@ async function encodeLosslessWebp(decoded) {
   return webp;
 }
 
-function validateRecipeImage(recipe, category, recipeIndex, rawRoot) {
+function validateRecipeImage(recipe, category, recipeIndex, rawRoot, recipeScale) {
   const label = `Category ${JSON.stringify(category.id)} recipe ${recipeIndex}`;
   if (!isRecord(recipe)) throw new Error(`${label} must be an object.`);
   if (recipe.img === undefined) {
@@ -748,12 +996,28 @@ function validateRecipeImage(recipe, category, recipeIndex, rawRoot) {
       );
     }
   }
+  const physicalWidth = recipe.w * recipeScale;
+  const physicalHeight = recipe.h * recipeScale;
+  if (
+    !Number.isSafeInteger(physicalWidth) ||
+    !Number.isSafeInteger(physicalHeight) ||
+    physicalWidth > MAX_IMAGE_DIMENSION ||
+    physicalHeight > MAX_IMAGE_DIMENSION ||
+    physicalWidth * physicalHeight > MAX_IMAGE_PIXELS
+  ) {
+    throw new Error(
+      `${label} ${recipe.w}×${recipe.h} logical layout at recipeScale ${recipeScale} exceeds ` +
+        `the ${MAX_IMAGE_DIMENSION}×${MAX_IMAGE_DIMENSION} physical decode limit.`,
+    );
+  }
   const categoryRoot = resolveInside(rawRoot, category.dir, `Category ${category.id}.dir`);
   return {
     label,
     path: resolveInside(categoryRoot, recipe.img, `${label}.img`),
-    width: recipe.w,
-    height: recipe.h,
+    physicalWidth,
+    physicalHeight,
+    logicalWidth: recipe.w,
+    logicalHeight: recipe.h,
   };
 }
 
@@ -949,8 +1213,8 @@ class VisualCatalog {
       if (entry.unique) {
         coordinate = await this.packWriter.add(
           entry.webp,
-          entry.decoded.width,
-          entry.decoded.height,
+          entry.decoded.logicalWidth,
+          entry.decoded.logicalHeight,
         );
         this.writeCoordinate(entry.index, coordinate);
       } else {
@@ -1301,17 +1565,18 @@ export async function buildRecipePreviewSidecar({
         const batchEnd = Math.min(recipes.length, batchStart + concurrency);
         const jobs = [];
         for (let recipeIndex = batchStart; recipeIndex < batchEnd; recipeIndex += 1) {
-          const sourceImage = validateRecipeImage(recipes[recipeIndex], category, recipeIndex, rawRoot);
+          const sourceImage = validateRecipeImage(
+            recipes[recipeIndex],
+            category,
+            recipeIndex,
+            rawRoot,
+            contract.settings.recipeScale,
+          );
           if (sourceImage === null) {
             jobs.push(Promise.resolve(null));
           } else {
             jobs.push(
-              decodePng(
-                sourceImage.path,
-                sourceImage.width,
-                sourceImage.height,
-                sourceImage.label,
-              ),
+              decodePng(sourceImage),
             );
           }
         }
@@ -1389,13 +1654,16 @@ export async function buildRecipePreviewSidecar({
           `hosted=${omittedRecipeImages.references}/${omittedRecipeImages.files}.`,
       );
     }
+    if (omittedRecipeImages.bytes !== sourcePngBytes) {
+      throw new Error(
+        'Raw recipe PNG bytes do not match hosted manifest web.recipeImages accounting: ' +
+          `raw=${sourcePngBytes}, hosted=${omittedRecipeImages.bytes}.`,
+      );
+    }
     logger.info(
       `Validated recipe-image inventory ${computedRecipeImageInventory.sha256} across ` +
         `${recipeCount} ordered recipes and ${previewReferences} raw PNG references ` +
-        `(${sourcePngBytes} bytes). ` +
-        `The hosted omission inventory records ${omittedRecipeImages.bytes} bytes after its ` +
-        'separate lossless-WebP optimization stage; those differently encoded byte totals are ' +
-        'recorded independently and are not compared.',
+        `(${sourcePngBytes} bytes), exactly matching the hosted original-PNG omission accounting.`,
     );
 
     const packs = await packWriter.finish();
@@ -1417,6 +1685,16 @@ export async function buildRecipePreviewSidecar({
       0,
     );
     const missingPreviews = recipeCount - previewReferences;
+    if (
+      previewReferences !== contract.recipeImages.previews ||
+      missingPreviews !== contract.recipeImages.missing
+    ) {
+      throw new Error(
+        'Processed recipe previews do not match the audited contract: ' +
+          `expected previews/missing=${contract.recipeImages.previews}/${contract.recipeImages.missing}, ` +
+          `received ${previewReferences}/${missingPreviews}.`,
+      );
+    }
     const manifest = {
       format: RECIPE_PREVIEW_SIDECAR_FORMAT,
       assetSetId,
@@ -1427,8 +1705,8 @@ export async function buildRecipePreviewSidecar({
       imageFormat: IMAGE_FORMAT,
       categoryFormat: RECIPE_PREVIEW_CATEGORY_FORMAT,
       settings: {
-        itemIconPixels: 16,
-        recipeScale: 1,
+        itemIconPixels: 16 * contract.settings.iconScale,
+        recipeScale: contract.settings.recipeScale,
         webpEffort: WEBP_EFFORT,
         maxCategoryBytes,
       },
@@ -1441,7 +1719,7 @@ export async function buildRecipePreviewSidecar({
         duplicates: visualCatalog.deduplicatedPreviews,
         packs: packs.length,
         inputBytes: sourcePngBytes,
-        hostedOmittedWebpBytes: omittedRecipeImages.bytes,
+        hostedOmittedPngBytes: omittedRecipeImages.bytes,
         encodedBytes: encodedWebpBytes,
         storedBytes: packBytes,
         packIndexBytes: packIndexTotalBytes,

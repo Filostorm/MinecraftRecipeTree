@@ -63,6 +63,8 @@ function countValue(value) {
 export async function validateExportData(exportRoot = defaultExportRoot, options = {}) {
   const root = resolve(exportRoot);
   const forceRawAssets = options.assetMode === 'raw';
+  const allowLegacyRecipeImageAccounting =
+    options.allowLegacyRecipeImageAccounting === true;
   const qualityProfile = resolveQualityProfile(options.profile);
   let computedRecipeImageInventory = null;
   const errors = [];
@@ -156,17 +158,29 @@ export async function validateExportData(exportRoot = defaultExportRoot, options
           'manifest.web.recipeImages.inventory',
           manifest.counts?.recipes,
         );
+        const currentPngAccounting = recipeImages.encoding === 'png';
+        const explicitLegacyAccounting =
+          recipeImages.encoding === undefined && allowLegacyRecipeImageAccounting;
         if (
           countValue(recipeImages.references) === null ||
           countValue(recipeImages.files) === null ||
           countValue(recipeImages.bytes) === null ||
+          (!currentPngAccounting && !explicitLegacyAccounting) ||
           inventory.previews !== recipeImages.references ||
           inventory.missing !== manifest.counts.recipes - recipeImages.references ||
           recipeImages.files !== recipeImages.references
         ) {
           fail(
             'manifest.web.recipeImages inventory/counts must satisfy previews = references = ' +
-              'files and missing = manifest.counts.recipes - references.',
+              'files, encoding = png, and missing = manifest.counts.recipes - references. ' +
+              'A missing encoding field is accepted only by the explicit legacy-read validation mode.',
+          );
+        } else if (explicitLegacyAccounting) {
+          console.warn(
+            '[legacy-read] Explicit compatibility mode accepted the omitted-WebP byte ' +
+              'accounting contract. This mode is only for validating the existing production ' +
+              'dataset during zero-downtime migration; new imports and final publications must ' +
+              'use encoding="png" and original PNG bytes.',
           );
         }
       } catch (error) {
@@ -897,6 +911,14 @@ export async function validateExportData(exportRoot = defaultExportRoot, options
         try {
           const image = sharp(imagePath, {failOn: 'error'});
           const metadata = await image.metadata();
+          const expectedFormat = extname(imagePath).toLowerCase() === '.png' ? 'png' : 'webp';
+          if (metadata.format !== expectedFormat) {
+            fail(
+              `Raw image ${assetKey} has ${String(metadata.format)} content behind its ` +
+                `${expectedFormat} filename; original-encoding accounting requires an exact match.`,
+            );
+            continue;
+          }
           if ((metadata.pages ?? 1) !== 1) {
             fail(
               `Raw image ${assetKey} contains ${metadata.pages} animation/pages; ` +
@@ -1091,6 +1113,7 @@ if (invokedPath && fileURLToPath(import.meta.url) === invokedPath) {
   let showHelp = false;
   let requirePublicationId = false;
   let verifyPublicationId = false;
+  let allowLegacyRecipeImageAccounting = false;
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === '--help' || argument === '-h') {
@@ -1109,6 +1132,8 @@ if (invokedPath && fileURLToPath(import.meta.url) === invokedPath) {
     } else if (argument === '--verify-publication-id') {
       requirePublicationId = true;
       verifyPublicationId = true;
+    } else if (argument === '--allow-legacy-recipe-image-accounting') {
+      allowLegacyRecipeImageAccounting = true;
     } else if (!argument.startsWith('-') && !positionalRootSeen) {
       exportRoot = argument;
       positionalRootSeen = true;
@@ -1121,10 +1146,16 @@ if (invokedPath && fileURLToPath(import.meta.url) === invokedPath) {
     console.log(
       'Usage: node scripts/validate-export-data.mjs [--root <directory>] ' +
         `[--profile ${MEATBALLCRAFT_112_PROFILE}] ` +
-        '[--require-publication-id] [--verify-publication-id]',
+        '[--require-publication-id] [--verify-publication-id] ' +
+        '[--allow-legacy-recipe-image-accounting]',
     );
   } else {
-    validateExportData(exportRoot, {profile, requirePublicationId, verifyPublicationId}).catch(error => {
+    validateExportData(exportRoot, {
+      profile,
+      requirePublicationId,
+      verifyPublicationId,
+      allowLegacyRecipeImageAccounting,
+    }).catch(error => {
       console.error(error instanceof Error ? error.message : error);
       process.exitCode = 1;
     });

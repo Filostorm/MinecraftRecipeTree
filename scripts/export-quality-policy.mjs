@@ -79,16 +79,18 @@ export function exportQualityIssues({manifest, failures, semanticErrorRecipes = 
   if (manifest?.aborted !== false) {
     issues.push('MeatballCraft requires manifest.aborted to be false.');
   }
-  if (manifest?.settings?.iconScale !== 1) {
+  if (manifest?.settings?.iconScale !== 3) {
     issues.push(
-      `MeatballCraft requires native 16×16 item renders (settings.iconScale 1); received ${String(
+      `MeatballCraft requires 16×16 source textures rendered into 48×48 item canvases ` +
+        `(settings.iconScale 3); received ${String(
         manifest?.settings?.iconScale,
       )}.`,
     );
   }
-  if (manifest?.settings?.recipeScale !== 1) {
+  if (manifest?.settings?.recipeScale !== 2) {
     issues.push(
-      `MeatballCraft requires native JEI layout resolution (settings.recipeScale 1); received ${String(
+      `MeatballCraft requires JEI layouts rendered at 2× physical resolution ` +
+        `(settings.recipeScale 2); received ${String(
         manifest?.settings?.recipeScale,
       )}.`,
     );

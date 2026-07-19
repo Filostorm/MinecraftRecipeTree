@@ -1,4 +1,5 @@
 import {createHash} from 'node:crypto';
+import {availableParallelism} from 'node:os';
 import {
   mkdir,
   open,
@@ -30,6 +31,11 @@ import {
   PACKED_IMAGE_FORMAT,
   packedImagePath,
 } from './packed-assets.mjs';
+import {
+  collectDeclaredRecipePngOmissions,
+  compareExactRecipePngOmissionSet,
+  exactRecipePngOmissionError,
+} from './recipe-image-omission.mjs';
 
 const defaultExportRoot = join(process.cwd(), 'public', 'exports');
 
@@ -215,7 +221,25 @@ const filesByRoot = new Map();
 for (const root of imageRoots) filesByRoot.set(root, await collectFiles(root));
 const imageFiles = [...filesByRoot.values()].flat();
 const pngImages = imageFiles.filter(path => extname(path).toLowerCase() === '.png');
-if (pngImages.length > 0) {
+const recipeMetadata = filesByRoot
+  .get(recipesRoot)
+  .filter(path => extname(path).toLowerCase() === '.json')
+  .sort();
+const omission = omitRecipeImages
+  ? await collectDeclaredRecipePngOmissions(exportRoot, recipeMetadata)
+  : null;
+if (omitRecipeImages) {
+  const comparison = compareExactRecipePngOmissionSet(exportRoot, pngImages, omission.keys);
+  if (comparison.missing.length > 0 || comparison.unexpected.length > 0) {
+    const error = exactRecipePngOmissionError(comparison);
+    console.error('Asset packing rejected the omission-aware PNG inventory.', error);
+    throw error;
+  }
+  console.info(
+    `Asset packing matched all ${omission.references} declared recipe-image reference(s) to ` +
+      'an exact one-to-one set of original PNG files; retained assets are WebP.',
+  );
+} else if (pngImages.length > 0) {
   throw new Error(
     `Asset packing refused ${pngImages.length} unoptimized PNG image(s); run npm run optimize-data first.`,
   );
@@ -225,7 +249,10 @@ const unexpectedFiles = [];
 for (const [root, files] of filesByRoot) {
   for (const path of files) {
     const extension = extname(path).toLowerCase();
-    const allowed = extension === '.webp' || (root === recipesRoot && extension === '.json');
+    const allowed =
+      extension === '.webp' ||
+      (root === recipesRoot &&
+        (extension === '.json' || (omitRecipeImages && extension === '.png')));
     if (!allowed) unexpectedFiles.push(path);
   }
 }
@@ -243,52 +270,26 @@ if (allImages.length === 0) {
   throw new Error('Asset packing failed: no WebP export assets were found.');
 }
 
-const recipeMetadata = filesByRoot
-  .get(recipesRoot)
-  .filter(path => extname(path).toLowerCase() === '.json')
-  .sort();
-const omittedRecipeImageKeys = new Set();
-let omittedRecipeImageReferences = 0;
+const omittedRecipeImageKeys = omission?.keys ?? new Set();
+const omittedRecipeImageReferences = omission?.references ?? 0;
 let omittedRecipeImageBytes = 0;
 if (omitRecipeImages) {
-  for (const sourcePath of recipeMetadata) {
-    if (basename(sourcePath) !== 'recipes.json') continue;
-    const documentKey = relativeKey(exportRoot, sourcePath);
-    const document = await readJsonDocument(sourcePath, documentKey);
-    if (!Array.isArray(document)) {
-      throw new Error(`${documentKey} must contain a recipe array before image omission.`);
-    }
-    for (const [recipeIndex, recipe] of document.entries()) {
-      if (!recipe || typeof recipe !== 'object' || Array.isArray(recipe) || !('img' in recipe)) {
-        continue;
+  let nextOmittedIndex = 0;
+  const omittedPaths = pngImages;
+  async function accountNextOmittedPng() {
+    while (nextOmittedIndex < omittedPaths.length) {
+      const path = omittedPaths[nextOmittedIndex++];
+      const size = (await stat(path)).size;
+      if (!Number.isSafeInteger(size) || size <= 0) {
+        throw new Error(`Omitted original PNG has an invalid byte size (${size}): ${path}`);
       }
-      if (typeof recipe.img !== 'string' || recipe.img.length === 0) {
-        throw new Error(
-          `${documentKey}[${recipeIndex}].img must be a non-empty string before image omission.`,
-        );
-      }
-      const assetKey = posix.join(posix.dirname(documentKey), recipe.img);
-      omittedRecipeImageKeys.add(assetKey);
-      omittedRecipeImageReferences += 1;
+      omittedRecipeImageBytes += size;
     }
   }
-
-  const imagePathByKey = new Map(
-    allImages.map(imagePath => [relativeKey(exportRoot, imagePath), imagePath]),
-  );
-  for (const assetKey of omittedRecipeImageKeys) {
-    const imagePath = imagePathByKey.get(assetKey);
-    if (!imagePath) {
-      throw new Error(
-        `Recipe-image omission target is missing from the validated WebP asset set: ${assetKey}`,
-      );
-    }
-    omittedRecipeImageBytes += (await stat(imagePath)).size;
-  }
+  const accountingConcurrency = Math.max(1, Math.min(16, availableParallelism()));
+  await Promise.all(Array.from({length: accountingConcurrency}, accountNextOmittedPng));
 }
-const images = omitRecipeImages
-  ? allImages.filter(imagePath => !omittedRecipeImageKeys.has(relativeKey(exportRoot, imagePath)))
-  : allImages;
+const images = allImages;
 if (images.length === 0) {
   throw new Error('Asset packing failed: the publication policy omitted every WebP export asset.');
 }
@@ -401,6 +402,7 @@ try {
             reason: 'hosting-archive-budget',
             references: omittedRecipeImageReferences,
             files: omittedRecipeImageKeys.size,
+            encoding: 'png',
             bytes: omittedRecipeImageBytes,
             inventory: omittedRecipeImageInventory,
           }
@@ -659,7 +661,8 @@ console.log(
 if (omitRecipeImages) {
   console.warn(
     `Publication policy omitted ${omittedRecipeImageReferences} composite recipe-image ` +
-      `reference(s) across ${omittedRecipeImageKeys.size} validated WebP file(s) ` +
-      `(${omittedRecipeImageBytes} bytes); structured recipe data and item/category icons remain.`,
+      `reference(s) across ${omittedRecipeImageKeys.size} exhaustively validated original PNG ` +
+      `file(s) (${omittedRecipeImageBytes} PNG bytes) without redundant WebP encoding; ` +
+      'structured recipe data and packed item/category assets remain.',
   );
 }

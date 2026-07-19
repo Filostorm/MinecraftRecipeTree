@@ -9,19 +9,16 @@ import {
   shouldShowIngredientQuantity,
 } from '../data/ingredientQuantities';
 import {recipeDisplayTitle} from '../data/recipeTitles';
-import {pixelArtDisplaySize} from '../data/pixelArtSizing';
 import {theme} from '../theme';
 import {Recipe, SlotEntry} from '../types';
 import {useUi} from '../ui/UiContext';
 import {ItemIcon, pixelated} from './ItemIcon';
 import {RecipePreviewImage} from './RecipePreviewImage';
-
-/** Display scale for recipe PNGs (logical GUI px -> screen px). */
-export function recipeDisplaySize(recipe: Recipe, maxW = 360, maxH = 280): {w: number; h: number} {
-  const w = recipe.w ?? 160;
-  const h = recipe.h ?? 60;
-  return pixelArtDisplaySize(w, h, maxW, maxH);
-}
+import {
+  RECIPE_CARD_BORDER_WIDTH,
+  RECIPE_CARD_PADDING,
+  responsiveRecipePreviewSize,
+} from './recipePreviewSizing';
 
 export interface SlotSummary {
   key: string;
@@ -80,11 +77,14 @@ export function RecipeCard({
   dir,
   catTitle,
   onPress,
+  availableCardWidth,
 }: {
   recipe: Recipe;
   dir: string;
   catTitle?: string;
   onPress?: () => void;
+  /** Measured width of the full-width recipe-list container in CSS/layout pixels. */
+  availableCardWidth: number;
 }) {
   const data = useData();
   const presentation = recipePresentationKind(recipe);
@@ -95,7 +95,12 @@ export function RecipeCard({
       </View>
     );
   }
-  const {w, h} = recipeDisplaySize(recipe);
+  const previewSize = responsiveRecipePreviewSize(
+    recipe.w ?? 160,
+    recipe.h ?? 60,
+    data.manifest.settings.recipeScale,
+    availableCardWidth,
+  );
   const inputs = slotSummary(recipe.in);
   const outputs = slotSummary(recipe.out);
   const prerequisites = prerequisiteSummary(recipe.cat);
@@ -113,7 +118,11 @@ export function RecipeCard({
         <RecipePreviewImage
           uri={data.imageUrl(recipeImagePath(dir, recipe.img))!}
           context={recipe.id ?? `${catTitle ?? dir} recipe`}
-          style={[{width: w, height: h}, styles.recipeImage, pixelated as object]}
+          style={[
+            {width: previewSize.width, height: previewSize.height},
+            styles.recipeImage,
+            pixelated as object,
+          ]}
           resizeMode="contain"
         />
       ) : (
@@ -226,9 +235,9 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: theme.panelAlt,
     borderColor: theme.border,
-    borderWidth: 1,
+    borderWidth: RECIPE_CARD_BORDER_WIDTH,
     borderRadius: 10,
-    padding: 10,
+    padding: RECIPE_CARD_PADDING,
     marginBottom: 10,
     alignSelf: 'flex-start',
     maxWidth: '100%',

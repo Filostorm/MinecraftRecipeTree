@@ -57,7 +57,10 @@ function packIndexBytes(packNumber, packBytes, entries) {
   return bytes;
 }
 
-async function createSidecarFixture(root) {
+async function createSidecarFixture(
+  root,
+  {itemIconPixels = 16, recipeScale = 1} = {},
+) {
   const local = join(root, 'sidecar');
   await mkdir(join(local, 'assets'), {recursive: true});
   await mkdir(join(local, 'categories'), {recursive: true});
@@ -100,8 +103,8 @@ async function createSidecarFixture(root) {
     imageFormat: 'lossless-webp',
     categoryFormat: 'mrt-recipe-preview-category-v1',
     settings: {
-      itemIconPixels: 16,
-      recipeScale: 1,
+      itemIconPixels,
+      recipeScale,
       webpEffort: 4,
       maxCategoryBytes: 256 * 1024,
     },
@@ -114,7 +117,7 @@ async function createSidecarFixture(root) {
       duplicates: 0,
       packs: 1,
       inputBytes: 64,
-      hostedOmittedWebpBytes: 64,
+      hostedOmittedPngBytes: 64,
       encodedBytes: 64,
       storedBytes: 64,
       packIndexBytes: indexBytes.length,
@@ -222,10 +225,10 @@ async function startBucketServer(fixture, options = {}) {
   };
 }
 
-async function withFixture(operation) {
+async function withFixture(operation, settings) {
   const root = await mkdtemp(join(tmpdir(), 'remote-preview-verifier-test-'));
   try {
-    await operation(await createSidecarFixture(root), root);
+    await operation(await createSidecarFixture(root, settings), root);
   } finally {
     await rm(root, {recursive: true, force: true});
   }
@@ -291,6 +294,25 @@ test('precommit verifies immutable objects and exact non-whole ranges while mani
       await bucket.close();
     }
   });
+});
+
+test('verifier accepts grid-aligned high-resolution render settings', async () => {
+  await withFixture(async fixture => {
+    const bucket = await startBucketServer(fixture, {manifestPresent: false});
+    try {
+      const result = await verify(fixture, bucket, 'precommit');
+      assert.equal(result.assetSetId, fixture.manifest.assetSetId);
+      assert.deepEqual(
+        {
+          itemIconPixels: fixture.manifest.settings.itemIconPixels,
+          recipeScale: fixture.manifest.settings.recipeScale,
+        },
+        {itemIconPixels: 48, recipeScale: 2},
+      );
+    } finally {
+      await bucket.close();
+    }
+  }, {itemIconPixels: 48, recipeScale: 2});
 });
 
 test('committed mode requires an exact remote manifest and repeats object verification', async () => {
