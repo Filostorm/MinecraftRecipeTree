@@ -4,7 +4,7 @@ const STORAGE_KEY = 'minecraft-recipe-tree.preferred-sources.v2';
 const LEGACY_RECIPE_STORAGE_KEY = 'minecraft-recipe-tree.favorite-recipes.v1';
 
 export type PreferredSource =
-  | {t: 'recipe'; ref: RecipeRef}
+  | {t: 'recipe'; ref: RecipeRef; allowFluidTransfer?: true}
   | {t: 'mob'; mobId: string}
   | {t: 'block'; blockKey: string};
 
@@ -22,7 +22,9 @@ function isPreferredSource(value: unknown): value is PreferredSource {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const source = value as Partial<PreferredSource>;
   return (
-    (source.t === 'recipe' && isRecipeRef(source.ref)) ||
+    (source.t === 'recipe' &&
+      isRecipeRef(source.ref) &&
+      (source.allowFluidTransfer === undefined || source.allowFluidTransfer === true)) ||
     (source.t === 'mob' && typeof source.mobId === 'string' && source.mobId.length > 0) ||
     (source.t === 'block' &&
       typeof source.blockKey === 'string' &&

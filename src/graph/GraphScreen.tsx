@@ -22,6 +22,7 @@ import {
 } from '../data/ingredientQuantities';
 import {displayIngredientName} from '../data/ingredientTags';
 import {isDefaultDisabledRecipeCategory} from '../data/recipeCategories';
+import {isFluidContainerTransferRecipe} from '../data/recipeVisibility';
 import {recipeDisplayTitle} from '../data/recipeTitles';
 import {theme} from '../theme';
 import {DropStat, Mob, RecipeRef} from '../types';
@@ -64,20 +65,31 @@ interface Transform {
 
 /** One way to obtain an item: craft it, kill for it, or mine for it. */
 type SourceChoice =
-  | {t: 'recipe'; ref: RecipeRef}
+  | {t: 'recipe'; ref: RecipeRef; allowFluidTransfer?: true}
   | {t: 'mob'; mob: Mob; stat: DropStat}
   | {t: 'block'; blockKey: string; stat: DropStat};
 
+interface PickerEntry {
+  option: PickerOption;
+  choice: SourceChoice;
+}
+
 interface PickerState {
   title: string;
-  options: PickerOption[];
-  choices: SourceChoice[];
+  standardEntries: PickerEntry[];
+  fluidTransferEntries: PickerEntry[];
+  showFluidTransfers: boolean;
+  identifiedFluidTransferCount: number;
   target: ItemTreeNode;
   rememberSource: boolean;
 }
 
 function preferredSourceFromChoice(choice: SourceChoice): PreferredSource {
-  if (choice.t === 'recipe') return {t: 'recipe', ref: choice.ref};
+  if (choice.t === 'recipe') {
+    return choice.allowFluidTransfer
+      ? {t: 'recipe', ref: choice.ref, allowFluidTransfer: true}
+      : {t: 'recipe', ref: choice.ref};
+  }
   if (choice.t === 'mob') return {t: 'mob', mobId: choice.mob.id};
   return {t: 'block', blockKey: choice.blockKey};
 }
@@ -96,6 +108,8 @@ const noSelect = Platform.OS === 'web' ? ({userSelect: 'none'} as unknown as obj
 const COMPACT_MODE_KEY = 'graphCompactMode';
 const USE_BYPRODUCTS_KEY = 'graphUseByproducts';
 const MAX_RECIPE_PICKER_CHOICES = 40;
+const RECIPE_PICKER_SCAN_BATCH = 40;
+const MAX_RECIPE_PICKER_SCAN = 400;
 const GRAPH_EXPORT_PADDING = 48;
 const GRAPH_EXPORT_PIXEL_RATIO = 3;
 const GRAPH_EXPORT_MAX_DIMENSION = 16_384;
@@ -103,33 +117,6 @@ const GRAPH_EXPORT_MAX_PIXELS = 64_000_000;
 
 function recipeRefKey([categoryIndex, recipeIndex]: RecipeRef): string {
   return `${categoryIndex}:${recipeIndex}`;
-}
-
-/**
- * Keep physical sources visible even when an item has many machine recipes.
- * Recipe cards are capped because each one can require category data and an
- * image; mob and block choices are lightweight and must never be truncated.
- */
-function choicesForPicker(
-  choices: SourceChoice[],
-  preferred: PreferredSource | undefined,
-): SourceChoice[] {
-  const mobChoices = choices.filter(choice => choice.t === 'mob');
-  const blockChoices = choices.filter(choice => choice.t === 'block');
-  const recipeChoices = choices.filter(choice => choice.t === 'recipe');
-  const visibleRecipes = recipeChoices.slice(0, MAX_RECIPE_PICKER_CHOICES);
-
-  if (preferred?.t === 'recipe') {
-    const preferredChoice = recipeChoices.find(choice => choiceMatchesPreference(choice, preferred));
-    if (
-      preferredChoice &&
-      !visibleRecipes.some(choice => choiceMatchesPreference(choice, preferred))
-    ) {
-      visibleRecipes[Math.max(0, visibleRecipes.length - 1)] = preferredChoice;
-    }
-  }
-
-  return [...mobChoices, ...blockChoices, ...visibleRecipes];
 }
 
 function loadCompactMode(): boolean {
@@ -226,7 +213,13 @@ export function GraphScreen() {
             ref[0] === preferred.ref[0] &&
             ref[1] === preferred.ref[1],
         );
-        return exists ? {t: 'recipe', ref: preferred.ref} : null;
+        return exists
+          ? {
+              t: 'recipe',
+              ref: preferred.ref,
+              ...(preferred.allowFluidTransfer ? {allowFluidTransfer: true as const} : {}),
+            }
+          : null;
       }
       return choicesFor(key).find(choice => choiceMatchesPreference(choice, preferred)) ?? null;
     },
@@ -245,13 +238,35 @@ export function GraphScreen() {
   const applyChoiceRef = useRef<((node: ItemTreeNode, choice: SourceChoice) => void) | null>(null);
 
   const expandRecipe = useCallback(
-    async (node: ItemTreeNode, ref: RecipeRef) => {
+    async (node: ItemTreeNode, ref: RecipeRef, allowFluidTransfer = false) => {
       node.loading = true;
       bump();
       try {
         const [recipe] = await data.getRecipes([ref]);
         const cat = data.categories[ref[0]];
         if (!recipe || !cat || recipe.err) {
+          return;
+        }
+        if (
+          !allowFluidTransfer &&
+          isFluidContainerTransferRecipe(recipe, data.itemsByKey)
+        ) {
+          console.info('A fluid container-transfer recipe was suppressed by the default filter.', {
+            itemKey: node.key,
+            recipeRef: ref,
+          });
+          const stored = preferredSourcesRef.current[node.key];
+          if (
+            stored?.t === 'recipe' &&
+            stored.ref[0] === ref[0] &&
+            stored.ref[1] === ref[1]
+          ) {
+            const next = {...preferredSourcesRef.current};
+            delete next[node.key];
+            preferredSourcesRef.current = next;
+            persistPreferredSources(next);
+            setPreferredSources(next);
+          }
           return;
         }
         const sourceId = `${node.id}.s`;
@@ -323,7 +338,7 @@ export function GraphScreen() {
   const applyChoice = useCallback(
     (node: ItemTreeNode, choice: SourceChoice) => {
       if (choice.t === 'recipe') {
-        void expandRecipe(node, choice.ref);
+        void expandRecipe(node, choice.ref, choice.allowFluidTransfer === true);
         return;
       }
       const sourceId = `${node.id}.s`;
@@ -340,16 +355,84 @@ export function GraphScreen() {
   const openPicker = useCallback(
     async (target: ItemTreeNode) => {
       const currentPreferred = preferredSourcesRef.current[target.key];
-      const choices = choicesForPicker(choicesFor(target.key), currentPreferred);
-      const recipeRefs = choices
-        .filter((choice): choice is Extract<SourceChoice, {t: 'recipe'}> => choice.t === 'recipe')
-        .map(choice => choice.ref);
-      const loadedRecipes = await data.getRecipes(recipeRefs);
-      const recipesByRef = new Map(
-        recipeRefs.map((ref, index) => [recipeRefKey(ref), loadedRecipes[index]] as const),
+      const allChoices = choicesFor(target.key);
+      const physicalChoices = allChoices.filter(choice => choice.t !== 'recipe');
+      const recipeChoices = allChoices.filter(
+        (choice): choice is Extract<SourceChoice, {t: 'recipe'}> => choice.t === 'recipe',
       );
+      const recipesByRef = new Map<string, Awaited<ReturnType<typeof data.getRecipes>>[number]>();
+      const standardRecipeChoices: Extract<SourceChoice, {t: 'recipe'}>[] = [];
+      const fluidTransferChoices: Extract<SourceChoice, {t: 'recipe'}>[] = [];
+      let identifiedFluidTransferCount = 0;
+      let scannedRecipeCount = 0;
+      const scanMaximum = Math.min(recipeChoices.length, MAX_RECIPE_PICKER_SCAN);
+
+      // Scan bounded batches until the picker has a full page of real recipes.
+      // This avoids eagerly fetching every category shard for extremely broad items.
+      while (
+        scannedRecipeCount < scanMaximum &&
+        standardRecipeChoices.length < MAX_RECIPE_PICKER_CHOICES
+      ) {
+        const batch = recipeChoices.slice(
+          scannedRecipeCount,
+          Math.min(scanMaximum, scannedRecipeCount + RECIPE_PICKER_SCAN_BATCH),
+        );
+        const refs = batch.map(choice => choice.ref);
+        const loaded = await data.getRecipes(refs);
+        batch.forEach((choice, index) => {
+          const recipe = loaded[index];
+          recipesByRef.set(recipeRefKey(choice.ref), recipe);
+          if (isFluidContainerTransferRecipe(recipe, data.itemsByKey)) {
+            identifiedFluidTransferCount += 1;
+            if (fluidTransferChoices.length < MAX_RECIPE_PICKER_CHOICES) {
+              fluidTransferChoices.push({...choice, allowFluidTransfer: true});
+            }
+          } else if (standardRecipeChoices.length < MAX_RECIPE_PICKER_CHOICES) {
+            standardRecipeChoices.push(choice);
+          }
+        });
+        scannedRecipeCount += batch.length;
+      }
+
+      if (
+        scannedRecipeCount >= MAX_RECIPE_PICKER_SCAN &&
+        scannedRecipeCount < recipeChoices.length &&
+        standardRecipeChoices.length < MAX_RECIPE_PICKER_CHOICES
+      ) {
+        console.warn('Recipe-source filtering reached its bounded scan limit.', {
+          itemKey: target.key,
+          scannedRecipeCount,
+          totalRecipeChoices: recipeChoices.length,
+          visibleRecipeChoices: standardRecipeChoices.length,
+        });
+      }
+
+      // Preserve a saved source in the picker even when it lies beyond the scan window.
+      if (currentPreferred?.t === 'recipe') {
+        const preferredChoice = recipeChoices.find(choice =>
+          choiceMatchesPreference(choice, currentPreferred),
+        );
+        if (preferredChoice && !recipesByRef.has(recipeRefKey(preferredChoice.ref))) {
+          const [recipe] = await data.getRecipes([preferredChoice.ref]);
+          recipesByRef.set(recipeRefKey(preferredChoice.ref), recipe);
+          if (isFluidContainerTransferRecipe(recipe, data.itemsByKey)) {
+            identifiedFluidTransferCount += 1;
+            const explicitChoice = {...preferredChoice, allowFluidTransfer: true as const};
+            if (fluidTransferChoices.length >= MAX_RECIPE_PICKER_CHOICES) {
+              fluidTransferChoices[fluidTransferChoices.length - 1] = explicitChoice;
+            } else {
+              fluidTransferChoices.push(explicitChoice);
+            }
+          } else if (standardRecipeChoices.length >= MAX_RECIPE_PICKER_CHOICES) {
+            standardRecipeChoices[standardRecipeChoices.length - 1] = preferredChoice;
+          } else {
+            standardRecipeChoices.push(preferredChoice);
+          }
+        }
+      }
+
       const itemName = (key: string) => data.itemsByKey.get(key)?.n ?? key;
-      const options: PickerOption[] = choices.map(choice => {
+      const entryFor = (choice: SourceChoice): PickerEntry => {
         const favoritePrefix =
           currentPreferred && choiceMatchesPreference(choice, currentPreferred) ? '★ ' : '';
         if (choice.t === 'recipe') {
@@ -358,35 +441,47 @@ export function GraphScreen() {
           const recipe = recipesByRef.get(recipeRefKey(choice.ref));
           const title = recipe && cat ? recipeDisplayTitle(cat.title, recipe) : cat?.title;
           return {
-            label: `${favoritePrefix}${title ?? `category ${c}`}`,
-            sublabel: [
-              recipe?.id,
-              recipe && !recipe.img ? 'JEI layout preview unavailable' : undefined,
-            ]
-              .filter((value): value is string => !!value)
-              .join(' · ') || undefined,
-            imageUri: recipe?.img
-              ? data.imageUrl(recipeImagePath(cat.dir, recipe.img))
-              : undefined,
-            imageW: recipe?.w,
-            imageH: recipe?.h,
+            choice,
+            option: {
+              label: `${favoritePrefix}${title ?? `category ${c}`}`,
+              sublabel: [
+                recipe?.id,
+                recipe && !recipe.img ? 'JEI layout preview unavailable' : undefined,
+              ]
+                .filter((value): value is string => !!value)
+                .join(' · ') || undefined,
+              imageUri:
+                recipe?.img && cat
+                  ? data.imageUrl(recipeImagePath(cat.dir, recipe.img))
+                  : undefined,
+              imageW: recipe?.w,
+              imageH: recipe?.h,
+            },
           };
         }
         if (choice.t === 'block') {
           return {
-            label: `${favoritePrefix}Mining · ${itemName(choice.blockKey)}`,
-            sublabel: formatDropStat(choice.stat),
+            choice,
+            option: {
+              label: `${favoritePrefix}Mining · ${itemName(choice.blockKey)}`,
+              sublabel: formatDropStat(choice.stat),
+            },
           };
         }
         return {
-          label: `${favoritePrefix}Mob drop · ${choice.mob.n}`,
-          sublabel: formatDropStat(choice.stat),
+          choice,
+          option: {
+            label: `${favoritePrefix}Mob drop · ${choice.mob.n}`,
+            sublabel: formatDropStat(choice.stat),
+          },
         };
-      });
+      };
       setPicker({
         title: `Obtain ${itemName(target.key)}`,
-        options,
-        choices,
+        standardEntries: [...physicalChoices, ...standardRecipeChoices].map(entryFor),
+        fluidTransferEntries: fluidTransferChoices.map(entryFor),
+        showFluidTransfers: false,
+        identifiedFluidTransferCount,
         target,
         rememberSource: true,
       });
@@ -403,6 +498,30 @@ export function GraphScreen() {
     [openPicker],
   );
 
+  const applyOnlyChoice = useCallback(
+    async (node: ItemTreeNode, choice: SourceChoice) => {
+      if (choice.t === 'recipe') {
+        const [recipe] = await data.getRecipes([choice.ref]);
+        if (isFluidContainerTransferRecipe(recipe, data.itemsByKey)) {
+          await openPicker(node);
+          return;
+        }
+      }
+      setPreferredSource(node.key, choice);
+      applyPreferredSourceAcrossTree(node, choice);
+    },
+    [data, openPicker, setPreferredSource, applyPreferredSourceAcrossTree],
+  );
+
+  const applyOnlyChoiceWithErrorHandling = useCallback(
+    (node: ItemTreeNode, choice: SourceChoice) => {
+      void applyOnlyChoice(node, choice).catch(error => {
+        console.error('The only recipe source could not be classified and applied.', error);
+      });
+    },
+    [applyOnlyChoice],
+  );
+
   const onItemTap = useCallback(
     (node: ItemTreeNode) => {
       if (node.loading) return;
@@ -417,9 +536,7 @@ export function GraphScreen() {
       if (preferred) {
         applyChoice(node, preferred);
       } else if (choices.length === 1) {
-        const onlyChoice = choices[0];
-        setPreferredSource(node.key, onlyChoice);
-        applyPreferredSourceAcrossTree(node, onlyChoice);
+        applyOnlyChoiceWithErrorHandling(node, choices[0]);
       } else {
         openPickerWithErrorHandling(node);
       }
@@ -430,8 +547,7 @@ export function GraphScreen() {
       openPickerWithErrorHandling,
       choicesFor,
       preferredSourceFor,
-      setPreferredSource,
-      applyPreferredSourceAcrossTree,
+      applyOnlyChoiceWithErrorHandling,
     ],
   );
 
@@ -445,7 +561,11 @@ export function GraphScreen() {
     setRoot(newRoot);
     needsFitRef.current = true;
     if (graphRecipeRef) {
-      const requestedChoice: SourceChoice = {t: 'recipe', ref: graphRecipeRef};
+      const requestedChoice: SourceChoice = {
+        t: 'recipe',
+        ref: graphRecipeRef,
+        allowFluidTransfer: true,
+      };
       setPreferredSource(graphRootKey, requestedChoice);
       applyChoice(newRoot, requestedChoice);
       return;
@@ -456,8 +576,7 @@ export function GraphScreen() {
       applyChoice(newRoot, preferred);
     } else if (choices.length === 1) {
       const onlyChoice = choices[0];
-      setPreferredSource(newRoot.key, onlyChoice);
-      applyPreferredSourceAcrossTree(newRoot, onlyChoice);
+      applyOnlyChoiceWithErrorHandling(newRoot, onlyChoice);
     }
   }, [
     graphRootKey,
@@ -467,7 +586,7 @@ export function GraphScreen() {
     choicesFor,
     preferredSourceFor,
     setPreferredSource,
-    applyPreferredSourceAcrossTree,
+    applyOnlyChoiceWithErrorHandling,
   ]);
 
   const graph = useMemo(
@@ -905,15 +1024,34 @@ export function GraphScreen() {
         <PickerModal
           visible
           title={picker.title}
-          options={picker.options}
+          options={(picker.showFluidTransfers
+            ? [...picker.standardEntries, ...picker.fluidTransferEntries]
+            : picker.standardEntries
+          ).map(entry => entry.option)}
           rememberSource={picker.rememberSource}
           onRememberSourceChange={rememberSource =>
             setPicker(current => (current ? {...current, rememberSource} : current))
           }
+          filterLabel="Fluid container transfers"
+          filterHint={`Hidden by default · ${picker.identifiedFluidTransferCount} identified option${picker.identifiedFluidTransferCount === 1 ? '' : 's'}`}
+          filterValue={picker.showFluidTransfers}
+          onFilterValueChange={showFluidTransfers =>
+            setPicker(current => (current ? {...current, showFluidTransfers} : current))
+          }
           onClose={() => setPicker(null)}
           onSelect={i => {
             const p = picker;
-            const choice = p.choices[i];
+            const entries = p.showFluidTransfers
+              ? [...p.standardEntries, ...p.fluidTransferEntries]
+              : p.standardEntries;
+            const choice = entries[i]?.choice;
+            if (!choice) {
+              console.error('The selected source index was not present in the picker.', {
+                selectedIndex: i,
+                optionCount: entries.length,
+              });
+              return;
+            }
             setPicker(null);
             p.target.source = undefined;
             setPreferredSource(p.target.key, p.rememberSource ? choice : null);

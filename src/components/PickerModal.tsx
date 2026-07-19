@@ -29,6 +29,10 @@ export function PickerModal({
   options,
   rememberSource,
   onRememberSourceChange,
+  filterLabel,
+  filterHint,
+  filterValue,
+  onFilterValueChange,
   onSelect,
   onClose,
 }: {
@@ -37,6 +41,10 @@ export function PickerModal({
   options: PickerOption[];
   rememberSource?: boolean;
   onRememberSourceChange?: (remember: boolean) => void;
+  filterLabel?: string;
+  filterHint?: string;
+  filterValue?: boolean;
+  onFilterValueChange?: (show: boolean) => void;
   onSelect: (index: number) => void;
   onClose: () => void;
 }) {
@@ -62,7 +70,25 @@ export function PickerModal({
               />
             </View>
           )}
+          {filterLabel && onFilterValueChange && (
+            <View style={styles.rememberRow}>
+              <View style={styles.rememberCopy}>
+                <Text style={styles.filterTitle}>{filterLabel}</Text>
+                {filterHint ? <Text style={styles.rememberHint}>{filterHint}</Text> : null}
+              </View>
+              <Switch
+                accessibilityLabel={filterLabel}
+                value={filterValue ?? false}
+                onValueChange={onFilterValueChange}
+                trackColor={{false: theme.border, true: theme.accent}}
+                thumbColor={theme.text}
+              />
+            </View>
+          )}
           <ScrollView style={{maxHeight: 480}}>
+            {options.length === 0 ? (
+              <Text style={styles.emptyText}>No standard sources are available.</Text>
+            ) : null}
             {options.map((opt, i) => {
               const imageSize = opt.imageUri
                 ? pixelArtImageStyle(opt.imageW ?? 160, opt.imageH ?? 60, 280, 128)
@@ -120,7 +146,9 @@ const styles = StyleSheet.create({
   },
   rememberCopy: {flex: 1},
   rememberTitle: {color: theme.accent, fontSize: 12, fontWeight: '700'},
+  filterTitle: {color: theme.text, fontSize: 12, fontWeight: '700'},
   rememberHint: {color: theme.textDim, fontSize: 10, marginTop: 2, lineHeight: 14},
+  emptyText: {color: theme.textDim, fontSize: 12, paddingVertical: 14, textAlign: 'center'},
   option: {
     borderColor: theme.border,
     borderWidth: 1,

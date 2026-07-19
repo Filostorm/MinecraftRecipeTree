@@ -15,6 +15,7 @@ import {
   compareRecipeCategories,
   isDefaultDisabledRecipeCategory,
 } from '../data/recipeCategories';
+import {isFluidContainerTransferRecipe} from '../data/recipeVisibility';
 import {slotSummary} from '../data/slotSummary';
 import {theme} from '../theme';
 import {Recipe, RecipeRef} from '../types';
@@ -25,6 +26,7 @@ import {MobSprite} from './MobSprite';
 import {ItemChip, RecipeCard} from './RecipeCard';
 
 const PAGE = 15;
+const MAX_DEFAULT_FILTER_SCAN = 400;
 
 function recipeRefKey([categoryIndex, recipeIndex]: RecipeRef): string {
   return `${categoryIndex}:${recipeIndex}`;
@@ -192,10 +194,12 @@ function SideTab({label, active, onPress}: {label: string; active: boolean; onPr
 function RefsList({refs}: {refs: RecipeRef[]}) {
   const data = useData();
   const {openRecipeInGraph} = useUi();
-  const [visible, setVisible] = useState(PAGE);
+  const [visibleTarget, setVisibleTarget] = useState(PAGE);
+  const [scanLimit, setScanLimit] = useState(PAGE);
   const [categoryFilter, setCategoryFilter] = useState<number | null>(null);
   const [sortMode, setSortMode] = useState<'type' | 'source'>('type');
   const [showAutomatedShaped, setShowAutomatedShaped] = useState(false);
+  const [showFluidTransfers, setShowFluidTransfers] = useState(false);
   const [recipesByRef, setRecipesByRef] = useState<Map<string, Recipe>>(() => new Map());
   const [availableCardWidth, setAvailableCardWidth] = useState<number | null>(null);
 
@@ -226,14 +230,82 @@ function RefsList({refs}: {refs: RecipeRef[]}) {
       return compareRecipeCategories(a, b) || aRecipe - bRecipe;
     });
   }, [refs, data.categories, categoryFilter, showAutomatedShaped, sortMode]);
-  const shown = useMemo(() => filteredRefs.slice(0, visible), [filteredRefs, visible]);
+  const refsToLoad = useMemo(
+    () =>
+      filteredRefs.slice(
+        0,
+        showFluidTransfers
+          ? visibleTarget
+          : Math.min(scanLimit, MAX_DEFAULT_FILTER_SCAN),
+      ),
+    [filteredRefs, showFluidTransfers, visibleTarget, scanLimit],
+  );
+  const loadedScan = refsToLoad.every(ref => recipesByRef.has(recipeRefKey(ref)));
+  const visibleCandidates = useMemo(
+    () =>
+      refsToLoad.filter(ref => {
+        const recipe = recipesByRef.get(recipeRefKey(ref));
+        return (
+          recipe !== undefined &&
+          (showFluidTransfers || !isFluidContainerTransferRecipe(recipe, data.itemsByKey))
+        );
+      }),
+    [refsToLoad, recipesByRef, showFluidTransfers, data.itemsByKey],
+  );
+  const shown = visibleCandidates.slice(0, visibleTarget);
+  const hiddenFluidTransferCount = refsToLoad.reduce((count, ref) => {
+    const recipe = recipesByRef.get(recipeRefKey(ref));
+    return count +
+      (recipe && isFluidContainerTransferRecipe(recipe, data.itemsByKey) ? 1 : 0);
+  }, 0);
+  const defaultScanMaximum = Math.min(filteredRefs.length, MAX_DEFAULT_FILTER_SCAN);
+  const scannedAll = scanLimit >= defaultScanMaximum;
+  const scanCapped =
+    !showFluidTransfers &&
+    filteredRefs.length > MAX_DEFAULT_FILTER_SCAN &&
+    scanLimit >= MAX_DEFAULT_FILTER_SCAN;
+  const fillingVisiblePage =
+    !showFluidTransfers && !scannedAll && visibleCandidates.length < visibleTarget;
+  const loadingVisiblePage =
+    (refsToLoad.length > 0 && !loadedScan) || fillingVisiblePage;
 
-  useEffect(() => setVisible(PAGE), [categoryFilter, showAutomatedShaped, sortMode]);
+  useEffect(() => {
+    setVisibleTarget(PAGE);
+    setScanLimit(PAGE);
+  }, [categoryFilter, showAutomatedShaped, showFluidTransfers, sortMode]);
+
+  useEffect(() => {
+    if (
+      showFluidTransfers ||
+      !loadedScan ||
+      visibleCandidates.length >= visibleTarget ||
+      scanLimit >= defaultScanMaximum
+    ) {
+      return;
+    }
+    setScanLimit(limit => Math.min(defaultScanMaximum, limit + PAGE));
+  }, [
+    defaultScanMaximum,
+    loadedScan,
+    scanLimit,
+    showFluidTransfers,
+    visibleCandidates.length,
+    visibleTarget,
+  ]);
+
+  useEffect(() => {
+    if (!scanCapped || !loadedScan) return;
+    console.warn('Item recipe filtering reached its bounded scan limit.', {
+      scannedRecipeCount: MAX_DEFAULT_FILTER_SCAN,
+      totalRecipeReferences: filteredRefs.length,
+      categoryFilter,
+    });
+  }, [categoryFilter, filteredRefs.length, loadedScan, scanCapped]);
 
   // Retain resolved cards across pagination/filter changes, while the data layer keeps the
   // underlying parsed-shard cache bounded.
   useEffect(() => {
-    const missing = shown.filter(ref => !recipesByRef.has(recipeRefKey(ref)));
+    const missing = refsToLoad.filter(ref => !recipesByRef.has(recipeRefKey(ref)));
     if (missing.length === 0) return;
     let alive = true;
     (async () => {
@@ -252,7 +324,7 @@ function RefsList({refs}: {refs: RecipeRef[]}) {
     return () => {
       alive = false;
     };
-  }, [shown, recipesByRef, data]);
+  }, [refsToLoad, recipesByRef, data]);
 
   return (
     <View
@@ -267,8 +339,9 @@ function RefsList({refs}: {refs: RecipeRef[]}) {
           current === measuredWidth ? current : measuredWidth,
         );
       }}>
-      {categoryGroups.length > 1 && (
-        <View style={styles.recipeFilters}>
+      <View style={styles.recipeFilters}>
+        {categoryGroups.length > 1 && (
+          <>
           <View style={styles.filterHeader}>
             <Text style={styles.filterTitle}>Crafting type</Text>
             <View style={styles.sortControls}>
@@ -300,30 +373,63 @@ function RefsList({refs}: {refs: RecipeRef[]}) {
               />
             ))}
           </View>
-          {automatedShapedCount > 0 && (
-            <View style={styles.disabledTypeRow}>
-              <View style={styles.disabledTypeCopy}>
-                <Text style={styles.disabledTypeTitle}>Automated Shaped Crafting</Text>
-                <Text style={styles.disabledTypeHint}>
-                  Hidden by default · {automatedShapedCount} duplicate recipes
-                </Text>
-              </View>
-              <Switch
-                accessibilityLabel="Show Automated Shaped Crafting recipes"
-                value={showAutomatedShaped}
-                onValueChange={show => {
-                  setShowAutomatedShaped(show);
-                  if (!show) setCategoryFilter(null);
-                }}
-                trackColor={{false: theme.border, true: theme.accent}}
-                thumbColor={theme.text}
-              />
+          </>
+        )}
+        {automatedShapedCount > 0 && (
+          <View style={styles.disabledTypeRow}>
+            <View style={styles.disabledTypeCopy}>
+              <Text style={styles.disabledTypeTitle}>Automated Shaped Crafting</Text>
+              <Text style={styles.disabledTypeHint}>
+                Hidden by default · {automatedShapedCount} duplicate recipes
+              </Text>
             </View>
-          )}
+            <Switch
+              accessibilityLabel="Show Automated Shaped Crafting recipes"
+              value={showAutomatedShaped}
+              onValueChange={show => {
+                setShowAutomatedShaped(show);
+                if (!show) setCategoryFilter(null);
+              }}
+              trackColor={{false: theme.border, true: theme.accent}}
+              thumbColor={theme.text}
+            />
+          </View>
+        )}
+        <View style={styles.disabledTypeRow}>
+          <View style={styles.disabledTypeCopy}>
+            <Text style={styles.disabledTypeTitle}>Fluid container transfers</Text>
+            <Text style={styles.disabledTypeHint}>
+              Hidden by default
+              {hiddenFluidTransferCount > 0
+                ? ` · ${hiddenFluidTransferCount} identified in loaded recipes`
+                : ''}
+            </Text>
+          </View>
+          <Switch
+            accessibilityLabel="Show fluid container-transfer recipes"
+            value={showFluidTransfers}
+            onValueChange={setShowFluidTransfers}
+            trackColor={{false: theme.border, true: theme.accent}}
+            thumbColor={theme.text}
+          />
         </View>
-      )}
+      </View>
       {filteredRefs.length === 0 ? (
         <Text style={styles.emptyText}>No recipes match this crafting type.</Text>
+      ) : null}
+      {loadingVisiblePage ? (
+        <Text style={styles.loadingText}>classifying recipe variants…</Text>
+      ) : null}
+      {!loadingVisiblePage && shown.length === 0 && filteredRefs.length > 0 ? (
+        <Text style={styles.emptyText}>
+          No standard recipes match. Enable fluid container transfers to view hidden conversions.
+        </Text>
+      ) : null}
+      {scanCapped ? (
+        <Text style={styles.loadingText}>
+          Filter scan stopped after {MAX_DEFAULT_FILTER_SCAN} candidates. Refine the crafting type
+          or enable container transfers to browse directly.
+        </Text>
       ) : null}
       {shown.map(([catIdx, recipeIdx]) => {
         const cat = data.categories[catIdx];
@@ -352,9 +458,16 @@ function RefsList({refs}: {refs: RecipeRef[]}) {
           </View>
         );
       })}
-      {filteredRefs.length > visible && (
-        <TouchableOpacity style={styles.moreBtn} onPress={() => setVisible(v => v + PAGE)}>
-          <Text style={styles.moreBtnText}>Show {Math.min(PAGE, filteredRefs.length - visible)} more of {filteredRefs.length - visible}</Text>
+      {(showFluidTransfers
+        ? filteredRefs.length > visibleTarget
+        : !scannedAll || visibleCandidates.length > visibleTarget) && (
+        <TouchableOpacity
+          style={styles.moreBtn}
+          onPress={() => {
+            setVisibleTarget(value => value + PAGE);
+            setScanLimit(limit => Math.min(filteredRefs.length, limit + PAGE));
+          }}>
+          <Text style={styles.moreBtnText}>Show more recipes</Text>
         </TouchableOpacity>
       )}
     </View>
