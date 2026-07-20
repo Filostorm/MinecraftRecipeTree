@@ -244,6 +244,7 @@ export async function handleDatasetChannelActivation(
   if (request.method !== 'POST') return methodNotAllowed('POST');
   const authorizationFailure = await authorizeDatasetAdmin(
     request,
+    runtime.DATASET_ADMIN_ENABLED,
     runtime.CORE_DATASET_UPLOAD_TOKEN,
   );
   if (authorizationFailure) return authorizationFailure;
@@ -428,6 +429,7 @@ export async function handleDatasetChannelDeletion(
   if (request.method !== 'DELETE') return methodNotAllowed('DELETE');
   const authorizationFailure = await authorizeDatasetAdmin(
     request,
+    runtime.DATASET_ADMIN_ENABLED,
     runtime.CORE_DATASET_UPLOAD_TOKEN,
   );
   if (authorizationFailure) return authorizationFailure;

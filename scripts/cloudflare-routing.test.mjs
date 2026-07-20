@@ -92,11 +92,13 @@ test('the environment template exposes only the current server-side operator con
   const entries = [...environmentExample.matchAll(/^([A-Z][A-Z0-9_]*)=(.*)$/gm)];
   const values = Object.fromEntries(entries.map(([, name, value]) => [name, value]));
   assert.deepEqual(Object.keys(values), [
+    'DATASET_ADMIN_ENABLED',
     'CORE_DATASET_UPLOAD_TOKEN',
     'PREVIEW_UPLOAD_ENABLED',
     'PREVIEW_UPLOAD_ASSET_SET_ID',
     'PREVIEW_UPLOAD_TOKEN',
   ]);
+  assert.equal(values.DATASET_ADMIN_ENABLED, 'false');
   assert.equal(values.PREVIEW_UPLOAD_ENABLED, 'false');
   assert.ok(values.CORE_DATASET_UPLOAD_TOKEN.length >= 32);
   assert.doesNotMatch(values.CORE_DATASET_UPLOAD_TOKEN, /[\s\u0000-\u001f\u007f]/);

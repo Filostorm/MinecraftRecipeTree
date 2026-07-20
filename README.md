@@ -273,6 +273,9 @@ version from integrity-bound exporter metadata rather than asking the operator t
 Build and upload the core publication after the packed export passes validation. The detailed
 R2 object, MRPI authorization-index, and manifest-last protocol is documented in
 [`docs/core-dataset-r2-publication.md`](docs/core-dataset-r2-publication.md).
+Before deploying the temporary operator session, set `DATASET_ADMIN_ENABLED=true` together with a
+fresh `CORE_DATASET_UPLOAD_TOKEN`. Remove both after channel activation; a missing gate returns a
+logged HTTP 503 before authentication, R2 access, or D1 access.
 
 ```bash
 npm run build:core-publication -- \

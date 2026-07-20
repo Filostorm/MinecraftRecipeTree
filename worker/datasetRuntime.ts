@@ -45,6 +45,7 @@ export interface DatasetRuntime {
   DB?: D1Database;
   /** Existing Sites binding; core publications use the isolated `core/` prefix. */
   PREVIEW_ASSETS?: DatasetR2Bucket;
+  DATASET_ADMIN_ENABLED?: string;
   CORE_DATASET_UPLOAD_TOKEN?: string;
   PREVIEW_UPLOAD_ASSET_SET_ID?: string;
   PREVIEW_UPLOAD_ENABLED?: string;
@@ -86,8 +87,13 @@ async function tokensEqual(left: string, right: string): Promise<boolean> {
 
 export async function authorizeDatasetAdmin(
   request: Request,
+  adminEnabled: string | undefined,
   configuredToken: string | undefined,
 ): Promise<Response | null> {
+  if (adminEnabled !== 'true') {
+    console.error('Dataset administration is disabled because DATASET_ADMIN_ENABLED is not true.');
+    return noStoreJson({error: 'Dataset administration is disabled.'}, 503);
+  }
   if (!configuredToken) {
     console.error('Dataset administration is disabled because CORE_DATASET_UPLOAD_TOKEN is unset.');
     return noStoreJson({error: 'Dataset administration is disabled.'}, 503);

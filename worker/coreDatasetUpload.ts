@@ -572,6 +572,7 @@ export async function handleCoreDatasetUpload(
 ): Promise<Response> {
   const authorizationFailure = await authorizeDatasetAdmin(
     request,
+    runtime.DATASET_ADMIN_ENABLED,
     runtime.CORE_DATASET_UPLOAD_TOKEN,
   );
   if (authorizationFailure) return authorizationFailure;

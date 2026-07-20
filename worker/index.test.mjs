@@ -470,6 +470,7 @@ function environment() {
   return {
     DB: new MemoryD1(),
     PREVIEW_ASSETS: new MemoryR2(),
+    DATASET_ADMIN_ENABLED: 'true',
     CORE_DATASET_UPLOAD_TOKEN: TOKEN,
     ASSETS: {async fetch() { return new Response('app not found', {status: 404}); }},
   };
@@ -569,6 +570,14 @@ async function publishCore(env, fixture = coreFixture()) {
 test('core ingestion authenticates, stages exact publication.json, commits its marker last, and registers D1', async () => {
   const env = environment();
   const fixture = coreFixture();
+  const disabledEnv = environment();
+  disabledEnv.DATASET_ADMIN_ENABLED = undefined;
+  const disabled = await send(disabledEnv, '/api/admin/core-datasets/status', {
+    method: 'HEAD',
+    headers: adminHeaders(),
+  });
+  assert.equal(disabled.status, 503);
+
   const missingToken = await send(env, '/api/admin/core-datasets/status', {
     method: 'HEAD',
     headers: {'X-MRT-Dataset-Publication-ID': PUBLICATION},
@@ -751,6 +760,27 @@ test('activation verifies the committed core/preview pair and publishes the exac
   assert.equal(catalog.status, 200);
   assert.deepEqual(await catalog.json(), {datasets: [{slug: 'multiblock-madness', ...descriptor}]});
   assert.equal(catalog.headers.get('cache-control'), 'no-store');
+});
+
+test('the dataset-administration feature gate disables channel mutations before authentication', async () => {
+  const env = environment();
+  env.DATASET_ADMIN_ENABLED = undefined;
+  const activation = await activateChannel(env, 'gated-pack', {
+    displayName: 'Gated Pack',
+    minecraftVersion: '1.12.2',
+    packVersion: '1.0.0',
+    publicationId: PUBLICATION,
+    previewAssetSetId: 'c'.repeat(64),
+    isDefault: false,
+    expectedPreviousPublicationId: null,
+  });
+  assert.equal(activation.status, 503);
+  const deletion = await send(env, '/api/admin/dataset-channels/gated-pack', {
+    method: 'DELETE',
+    headers: channelDeletionHeaders(PUBLICATION, 'c'.repeat(64)),
+  });
+  assert.equal(deletion.status, 503);
+  assert.equal(env.DB.channels.size, 0);
 });
 
 test('activation rejects invisible identity controls before publication verification', async () => {

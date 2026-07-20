@@ -319,10 +319,11 @@ for exactly its `previewAssetSetId`:
 PREVIEW_UPLOAD_ENABLED=true
 PREVIEW_UPLOAD_ASSET_SET_ID=<previewAssetSetId from publication-plan.json>
 PREVIEW_UPLOAD_TOKEN=<fresh secret, at least 32 characters>
+DATASET_ADMIN_ENABLED=true
 CORE_DATASET_UPLOAD_TOKEN=<fresh operator secret, 32..8192 bytes>
 ```
 
-Apply those four values to the existing Sites project's server-side environment/secrets, then
+Apply those five values to the existing Sites project's server-side environment/secrets, then
 deploy that configuration before starting the upload. Do not place any value in client-visible
 configuration and do not change the canonical hostname or the
 `craftsmann-app-subdomain-router`. Verify that the canonical site is serving the newly configured
@@ -330,6 +331,8 @@ Sites deployment before continuing.
 
 Store tokens either in the operator environment or plain mode-`0600` files. Never put them in a
 URL, shell history argument, `EXPO_PUBLIC_*` variable, archive, chat, or contributor machine.
+After activation, remove both feature gates, both tokens, and the scoped preview asset-set ID, then
+deploy that disabled environment and require both administrative route families to return HTTP 503.
 
 Then run one command:
 
@@ -357,9 +360,9 @@ activation fail closed instead of overwriting the newer publication. Display nam
 version, and pack version come from the integrity-bound exporter manifest; the operator does not
 retype them.
 
-After success, remove the preview gate, target ID, preview token, and temporary core token from the
-Sites server environment, deploy that disabled configuration, and confirm both authenticated
-ingestion routes reject further writes. The command prints the share URL:
+After success, remove the dataset-administration gate, preview gate, target ID, preview token, and
+temporary core token from the Sites server environment, deploy that disabled configuration, and
+confirm both administrative route families return HTTP 503. The command prints the share URL:
 
 ```text
 https://minecraftrecipetree.craftsmannsoftware.com/?pack=<slug>

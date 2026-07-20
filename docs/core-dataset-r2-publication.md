@@ -110,10 +110,12 @@ one MRPI entry. Membership is checked before R2 pack bytes are read.
 
 Use a dedicated least-privilege operator token. The CLI accepts it from
 `CORE_DATASET_UPLOAD_TOKEN`, or from a plain mode-`0600` token file. It rejects credentials in
-URLs and redacts the token from transport exceptions and logs.
+URLs and redacts the token from transport exceptions and logs. The Worker additionally requires
+the temporary server-side `DATASET_ADMIN_ENABLED=true` feature gate; a missing gate disables core
+ingestion and dataset-channel mutations before bearer-token authentication.
 
 ```bash
-CORE_DATASET_UPLOAD_TOKEN='<operator-secret>' npm run upload:core-publication -- \
+DATASET_ADMIN_ENABLED=true CORE_DATASET_UPLOAD_TOKEN='<operator-secret>' npm run upload:core-publication -- \
   --root /path/to/packed/exports \
   --publication /path/to/core-publication-bundle/publication.json \
   --ingest-base-url https://<app-origin>/api/admin/core-datasets \
