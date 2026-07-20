@@ -280,7 +280,8 @@ async function loadStagedManifest(
     cache.set(assetSetId, cached);
     return cached;
   }
-  const operation = (async () => {
+  let operation: Promise<LoadedManifest | null>;
+  operation = (async () => {
     const object = await bucket.get(stagingManifestKey(assetSetId));
     if (!object) return null;
     const expectedDigest = object.customMetadata?.['mrt-sha256'];
@@ -301,10 +302,20 @@ async function loadStagedManifest(
       throw new Error('The staged preview manifest has invalid immutable R2 metadata.');
     }
     return loaded;
-  })().catch(error => {
-    cache.delete(assetSetId);
-    throw error;
-  });
+  })().then(
+    manifest => {
+      // Never retain a preflight miss in isolate-local state: another Worker isolate can stage
+      // the immutable manifest immediately afterward. Positive manifests remain safe to cache.
+      if (manifest === null && cache.get(assetSetId) === operation) {
+        cache.delete(assetSetId);
+      }
+      return manifest;
+    },
+    error => {
+      if (cache.get(assetSetId) === operation) cache.delete(assetSetId);
+      throw error;
+    },
+  );
   cache.set(assetSetId, operation);
   while (cache.size > MAX_STAGED_MANIFEST_CACHE_ENTRIES) {
     const oldest = cache.keys().next().value as string | undefined;

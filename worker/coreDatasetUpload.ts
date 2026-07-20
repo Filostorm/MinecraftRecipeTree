@@ -199,9 +199,19 @@ async function loadStaged(
     cache.set(publicationId, cached);
     return cached;
   }
-  const operation = loadManifestAt(bucket, stagingManifestKey(publicationId), publicationId).catch(
+  let operation: Promise<LoadedCorePublication | null>;
+  operation = loadManifestAt(bucket, stagingManifestKey(publicationId), publicationId).then(
+    publication => {
+      // R2 reads are strongly consistent, but this process-global map is isolate-local. Caching
+      // absence would let an isolate retain a preflight 404 after another isolate stages the
+      // manifest. Keep positive immutable manifests hot while treating absence as live state.
+      if (publication === null && cache.get(publicationId) === operation) {
+        cache.delete(publicationId);
+      }
+      return publication;
+    },
     error => {
-      cache.delete(publicationId);
+      if (cache.get(publicationId) === operation) cache.delete(publicationId);
       throw error;
     },
   );

@@ -605,6 +605,31 @@ test('core ingestion authenticates, stages exact publication.json, commits its m
   assert.equal((await commitCore(env, fixture)).status, 200, 'commit is idempotent and rechecks D1');
 });
 
+test('core ingestion does not cache an absent staged manifest across Worker bindings', async () => {
+  const fixture = coreFixture();
+  const firstBinding = new MemoryR2();
+  const stagingBinding = new MemoryR2();
+  stagingBinding.objects = firstBinding.objects;
+  const firstEnv = environment();
+  firstEnv.PREVIEW_ASSETS = firstBinding;
+  const stagingEnv = environment();
+  stagingEnv.PREVIEW_ASSETS = stagingBinding;
+
+  const beforeBegin = await send(firstEnv, '/api/admin/core-datasets/status', {
+    method: 'HEAD',
+    headers: adminHeaders(),
+  });
+  assert.equal(beforeBegin.status, 404);
+  assert.equal((await beginCore(stagingEnv, fixture)).status, 201);
+
+  const afterBegin = await send(firstEnv, '/api/admin/core-datasets/status', {
+    method: 'HEAD',
+    headers: adminHeaders(),
+  });
+  assert.equal(afterBegin.status, 200);
+  assert.equal(afterBegin.headers.get('x-mrt-publication-state'), 'staged');
+});
+
 test('core ingestion refuses undeclared objects, false digests, incomplete inventory, and control-path preemption', async () => {
   const env = environment();
   const fixture = coreFixture();

@@ -394,6 +394,29 @@ test('preview ingestion stages, verifies, and commits the manifest last', async 
   assert.equal(repeated.status, 200);
 });
 
+test('preview ingestion does not cache an absent staged manifest across Worker bindings', async () => {
+  const data = fixture();
+  const firstBinding = new MemoryR2();
+  const stagingBinding = new MemoryR2();
+  stagingBinding.objects = firstBinding.objects;
+  const firstEnv = runtime(firstBinding);
+  const stagingEnv = runtime(stagingBinding);
+
+  const beforeBegin = await handlePreviewAssetUpload(
+    new Request(endpoint('status'), {method: 'HEAD', headers: authorizedHeaders()}),
+    firstEnv,
+  );
+  assert.equal(beforeBegin.status, 404);
+  assert.equal((await beginUpload(stagingEnv, data.manifestBytes)).status, 201);
+
+  const afterBegin = await handlePreviewAssetUpload(
+    new Request(endpoint('status'), {method: 'HEAD', headers: authorizedHeaders()}),
+    firstEnv,
+  );
+  assert.equal(afterBegin.status, 200);
+  assert.equal(afterBegin.headers.get('x-mrt-publication-state'), 'staged');
+});
+
 test('preview ingestion rejects body-like commits and bounds pathological R2 pagination', async () => {
   const data = fixture();
   const bucket = new PathologicalPaginationR2();
