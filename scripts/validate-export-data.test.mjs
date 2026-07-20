@@ -5,6 +5,7 @@ import {join} from 'node:path';
 import test from 'node:test';
 import sharp from 'sharp';
 import {
+  configureMultiblockExportFixture,
   createRawExportFixture,
   readJson,
   writeJson,
@@ -12,6 +13,7 @@ import {
   writeUniformVisibleImage,
 } from './test-export-fixture.mjs';
 import {validateExportData} from './validate-export-data.mjs';
+import {MULTIBLOCK_MADNESS_112_PROFILE} from './export-quality-policy.mjs';
 
 async function withFixture(run) {
   const root = await mkdtemp(join(tmpdir(), 'recipe-tree-validator-test-'));
@@ -31,6 +33,50 @@ test('strict manifest metadata accepts the complete exporter contract', async ()
     assert.equal(summary.recipes, 0);
     assert.equal(summary.mobs, 0);
   });
+});
+
+test('MM1 validation requires and reconciles the complete warnings.json audit', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'recipe-tree-mm1-warnings-test-'));
+  try {
+    await createRawExportFixture(root, {iconScale: 1, recipeScale: 2});
+    const manifest = await configureMultiblockExportFixture(
+      root,
+      MULTIBLOCK_MADNESS_112_PROFILE,
+    );
+    const warning =
+      'ZERO_ABSENT_ALTERNATIVE recipe output nuclearcraft_centrifuge #0 slot 3';
+    manifest.diagnostics.warningEvents = 1;
+    await writeJson(join(root, 'manifest.json'), manifest);
+    await writeJson(join(root, 'warnings.json'), [warning]);
+
+    const summary = await validateExportData(root, {
+      assetMode: 'raw',
+      profile: MULTIBLOCK_MADNESS_112_PROFILE,
+    });
+    assert.equal(summary.warnings, 1);
+
+    await writeJson(join(root, 'warnings.json'), [
+      'UNREVIEWED_WARNING future exporter behavior',
+    ]);
+    await assert.rejects(
+      validateExportData(root, {
+        assetMode: 'raw',
+        profile: MULTIBLOCK_MADNESS_112_PROFILE,
+      }),
+      /unrecognized warning class/,
+    );
+
+    await rm(join(root, 'warnings.json'));
+    await assert.rejects(
+      validateExportData(root, {
+        assetMode: 'raw',
+        profile: MULTIBLOCK_MADNESS_112_PROFILE,
+      }),
+      /requires warnings\.json to contain an array/,
+    );
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
 });
 
 test('recipe slots accept one shared 1.12 OreDictionary identity on every alternative', async () => {

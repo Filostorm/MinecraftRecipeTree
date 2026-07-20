@@ -20,6 +20,7 @@ import {
 import {
   EXPORT_QUALITY_PROFILE_IDS,
   exportQualityIssues,
+  MULTIBLOCK_MADNESS_112_PROFILE,
   qualityProfileRequirementsFor,
   resolveQualityProfile,
 } from './export-quality-policy.mjs';
@@ -153,8 +154,15 @@ async function assertQualityMetadata(exportRoot, label, profile) {
     join(exportRoot, 'failures.json'),
     `${label}/failures.json`,
   );
+  const warnings =
+    profile === MULTIBLOCK_MADNESS_112_PROFILE
+      ? await readJsonDocument(
+          join(exportRoot, 'warnings.json'),
+          `${label}/warnings.json`,
+        )
+      : undefined;
   const issues = exportQualityIssues(
-    {manifest, failures, semanticErrorRecipes: 0},
+    {manifest, failures, warnings, semanticErrorRecipes: 0},
     profile,
   );
   if (issues.length > 0) {
@@ -458,6 +466,7 @@ export async function importExportData({
   dryRun = false,
   omitRecipeImages = false,
   stagingMode = null,
+  verifyStagedSource = null,
 }) {
   if (typeof source !== 'string' || !source) {
     throw new Error('A raw export source directory is required.');
@@ -472,6 +481,9 @@ export async function importExportData({
       `An explicit export quality profile is required. Supported profiles: ` +
         EXPORT_QUALITY_PROFILE_IDS.join(', '),
     );
+  }
+  if (verifyStagedSource !== null && typeof verifyStagedSource !== 'function') {
+    throw new Error('verifyStagedSource must be a function when a staged-source gate is requested.');
   }
   const resolvedSource = resolve(source);
   const resolvedDestination = resolve(destination);
@@ -600,6 +612,11 @@ export async function importExportData({
       throw error;
     }
     await assertQualityMetadata(stagingReal, 'Staged raw export', resolvedProfile);
+    if (verifyStagedSource !== null) {
+      console.log('[import-data] Starting the caller-required staged-source integrity gate.');
+      await verifyStagedSource(stagingReal);
+      console.log('[import-data] Completed the caller-required staged-source integrity gate.');
+    }
 
     const optimizationArgs = ['--root', stagingReal];
     if (omitRecipeImages) optimizationArgs.push('--omit-recipe-images');

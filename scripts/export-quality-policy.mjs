@@ -7,17 +7,158 @@ export const MULTIBLOCK_MADNESS_112_PROFILE = 'multiblock-madness-1.12.2';
 export const MULTIBLOCK_MADNESS_2_118_PROFILE = 'multiblock-madness-2-1.18.2';
 export const GTNH_1710_PROFILE = 'gtnh-1.7.10';
 
+export const MULTIBLOCK_MADNESS_112_WARNING_PREFIXES = Object.freeze([
+  'ZERO_PREREQUISITE',
+  'ZERO_ABSENT_OUTPUT',
+  'ZERO_ABSENT_ALTERNATIVE',
+  'UPSTREAM_BLANK_DISPLAY_NAME',
+  'NATIVE_ICON_OVERSCAN_RECOVERY_APPLIED',
+  'UPSTREAM_NATIVE_ICON_UNAVAILABLE',
+]);
+
 export const GTNH_NEI_DIAGNOSTIC_KEYS = Object.freeze([
   'itemListLoaded',
   'registeredCraftingHandlers',
+  'exportableCraftingHandlers',
+  'adaptedHandlerCategories',
+  'excludedNonRecipeHandlers',
   'loadedCategories',
   'recipesEnumerated',
   'recipeWidgetsRendered',
   'itemIconsRendered',
+  'informationalEmptyOutputRecipes',
+  'knowledgeIndependentAspectNames',
   'unloadedHandlerCategories',
   'ambiguousHandlerCategories',
   'duplicateHandlerCategories',
 ]);
+
+export const GTNH_HANDLER_POLICIES = Object.freeze([
+  Object.freeze({
+    handlerClass: 'appeng.integration.modules.NEIHelpers.NEIWorldCraftingHandler',
+    handlerId: 'appeng.integration.modules.NEIHelpers.NEIWorldCraftingHandler',
+    action: 'adapted-informational-category',
+    contract: 'adapter:ae2-in-world-crafting-wildcard-query-closure-v1',
+  }),
+  Object.freeze({
+    handlerClass: 'bq_standard.integration.nei.QuestRecipeHandler',
+    handlerId: 'bq_standard.integration.nei.QuestRecipeHandler',
+    action: 'adapted-informational-category',
+    contract: 'adapter:betterquesting-complete-item-reference-pages-v1',
+  }),
+  Object.freeze({
+    handlerClass: 'com.rwtema.extrautils.nei.InfoHandler',
+    handlerId: 'com.rwtema.extrautils.nei.InfoHandler',
+    action: 'excluded-non-recipe-query',
+    contract: 'query-only:extrautilities-item-documentation-v1',
+  }),
+  Object.freeze({
+    handlerClass: 'com.rwtema.extrautils.nei.SoulHandler',
+    handlerId: 'com.rwtema.extrautils.nei.SoulHandler',
+    action: 'adapted-complete-category',
+    contract: 'adapter:extrautilities-soul-crafting-item-query-v1',
+  }),
+  Object.freeze({
+    handlerClass: 'hellfirepvp.beebetteratbees.client.gui.BBABGuiRecipeTreeHandler',
+    handlerId: 'hellfirepvp.beebetteratbees.client.gui.BBABGuiRecipeTreeHandler',
+    action: 'excluded-non-recipe-query',
+    contract: 'query-only:bee-breeding-recursive-lineage-visualization-v1',
+  }),
+  Object.freeze({
+    handlerClass: 'ic2.neiIntegration.core.recipehandler.LatheRecipeHandler',
+    handlerId: 'ic2.neiIntegration.core.recipehandler.LatheRecipeHandler',
+    action: 'excluded-non-recipe-query',
+    contract: 'query-only:ic2-lathe-interactive-workpiece-state-v1',
+  }),
+  Object.freeze({
+    handlerClass:
+      'micdoodle8.mods.galacticraft.core.nei.ElectricIngotCompressorRecipeHandler',
+    handlerId:
+      'micdoodle8.mods.galacticraft.core.nei.ElectricIngotCompressorRecipeHandler',
+    action: 'adapted-complete-category',
+    contract: 'public-recipe-id:galacticraft.electricingotcompressor-v1',
+  }),
+  Object.freeze({
+    handlerClass: 'micdoodle8.mods.galacticraft.core.nei.IngotCompressorRecipeHandler',
+    handlerId: 'micdoodle8.mods.galacticraft.core.nei.IngotCompressorRecipeHandler',
+    action: 'adapted-complete-category',
+    contract: 'public-recipe-id:galacticraft.ingotcompressor-v1',
+  }),
+  Object.freeze({
+    handlerClass:
+      'micdoodle8.mods.galacticraft.planets.mars.nei.GasLiquefierRecipeHandler',
+    handlerId:
+      'micdoodle8.mods.galacticraft.planets.mars.nei.GasLiquefierRecipeHandler',
+    action: 'adapted-complete-category',
+    contract: 'public-recipe-id:galacticraft.liquefier-v1',
+  }),
+  Object.freeze({
+    handlerClass:
+      'micdoodle8.mods.galacticraft.planets.mars.nei.MethaneSynthesizerRecipeHandler',
+    handlerId:
+      'micdoodle8.mods.galacticraft.planets.mars.nei.MethaneSynthesizerRecipeHandler',
+    action: 'adapted-complete-category',
+    contract: 'public-recipe-id:galacticraft.synthesizer-v1',
+  }),
+  Object.freeze({
+    handlerClass: 'ru.timeconqueror.tcneiadditions.nei.AspectCombinationHandler',
+    handlerId: 'ru.timeconqueror.tcneiadditions.nei.AspectCombinationHandler',
+    action: 'excluded-non-recipe-query',
+    contract: 'query-only:player-discovered-aspect-combination-view-v1',
+  }),
+  Object.freeze({
+    handlerClass: 'ru.timeconqueror.tcneiadditions.nei.AspectFromItemStackHandler',
+    handlerId: 'ru.timeconqueror.tcneiadditions.nei.AspectFromItemStackHandler',
+    action: 'excluded-non-recipe-query',
+    contract: 'query-only:player-scanned-item-aspect-view-v1',
+  }),
+  Object.freeze({
+    handlerClass: 'speiger.src.crops.prediction.NEIPlugin',
+    handlerId: 'speiger.src.crops.prediction.NEIPlugin',
+    action: 'adapted-complete-category',
+    contract: 'adapter:ic2-crop-deterministic-query-bucket-closure-v1',
+  }),
+  Object.freeze({
+    handlerClass: 'tconstruct.plugins.nei.RecipeHandlerToolMaterials',
+    handlerId: 'tconstruct.plugins.nei.RecipeHandlerToolMaterials',
+    action: 'excluded-non-recipe-presentation',
+    contract: 'presentation-only:tconstruct-tool-material-statistics-v1',
+  }),
+  Object.freeze({
+    handlerClass: 'tonius.neiintegration.mods.mcforge.RecipeHandlerFluidRegistry',
+    handlerId: 'tonius.neiintegration.mods.mcforge.RecipeHandlerFluidRegistry',
+    action: 'excluded-non-recipe-presentation',
+    contract: 'presentation-only:forge-fluid-registry-browser-v1',
+  }),
+  Object.freeze({
+    handlerClass: 'tonius.neiintegration.mods.mcforge.RecipeHandlerOreDictionary',
+    handlerId: 'tonius.neiintegration.mods.mcforge.RecipeHandlerOreDictionary',
+    action: 'excluded-non-recipe-presentation',
+    contract: 'presentation-only:forge-ore-dictionary-equivalence-browser-v1',
+  }),
+  Object.freeze({
+    handlerClass:
+      'vazkii.botania.client.integration.nei.recipe.RecipeHandlerLexicaBotania',
+    handlerId:
+      'vazkii.botania.client.integration.nei.recipe.RecipeHandlerLexicaBotania',
+    action: 'excluded-non-recipe-presentation',
+    contract: 'presentation-only:botania-lexica-cross-reference-v1',
+  }),
+]);
+
+export const GTNH_KNOWLEDGE_POLICY = Object.freeze({
+  playerResearchMutated: false,
+  thaumcraftLockedRecipes: 'required-by-pinned-config',
+  itemAspectDisplayNames: 'nbt-aspect-registry-v1',
+});
+
+export const GTNH_DATA_ATTRIBUTION = Object.freeze({
+  sourceUrl:
+    'https://github.com/GTNewHorizons/GT-New-Horizons-Modpack/tree/2.8.4',
+  projectUrl: 'https://www.gtnewhorizons.com/',
+  licenseIdentifier: 'CC BY-NC-SA 4.0',
+  licenseUrl: 'https://creativecommons.org/licenses/by-nc-sa/4.0/',
+});
 
 const STANDARD_COUNT_KEYS = Object.freeze([
   'items',
@@ -72,6 +213,19 @@ const profileRequirements = new Map([
       recipeScale: 2,
       recipeViewer: 'HEI',
       corpus: 'dynamic-complete',
+      requiresExporterBuildIdentity: true,
+      requiresZeroFailures: true,
+      diagnosticKeys: Object.freeze([
+        'failureEvents',
+        'failureEventsOmitted',
+        'warningEvents',
+        'warningEventsOmitted',
+      ]),
+      packIdentity: Object.freeze({
+        name: 'Multiblock Madness',
+        version: '3.2.3',
+        identitySource: 'explicit-request',
+      }),
     }),
   ],
   [
@@ -85,6 +239,19 @@ const profileRequirements = new Map([
       recipeScale: 2,
       recipeViewer: 'REI',
       corpus: 'dynamic-complete',
+      requiresExporterBuildIdentity: true,
+      requiresZeroFailures: true,
+      diagnosticKeys: Object.freeze([
+        'failureEvents',
+        'failureEventsOmitted',
+        'nativeIconCorrections',
+        'transparentIcons',
+      ]),
+      packIdentity: Object.freeze({
+        name: 'Multiblock Madness 2',
+        version: '1.0.0',
+        identitySource: 'explicit-request',
+      }),
     }),
   ],
   [
@@ -98,6 +265,7 @@ const profileRequirements = new Map([
       recipeScale: 2,
       recipeViewer: 'NEI',
       corpus: 'dynamic-complete',
+      requiresExporterBuildIdentity: true,
       provenance: Object.freeze({
         profile: GTNH_1710_PROFILE,
         forge: '10.13.4.1614',
@@ -108,6 +276,7 @@ const profileRequirements = new Map([
         version: '2.8.4',
         identitySource: 'explicit-request',
       }),
+      attribution: GTNH_DATA_ATTRIBUTION,
     }),
   ],
 ]);
@@ -193,6 +362,62 @@ function isNonNegativeSafeInteger(value) {
   return Number.isSafeInteger(value) && value >= 0;
 }
 
+function exactRecordIssues(value, expected, label) {
+  if (!hasExactKeys(value, Object.keys(expected))) {
+    return [
+      `${label} must contain exactly ${Object.keys(expected).join(', ')}.`,
+    ];
+  }
+  const issues = [];
+  for (const [name, expectedValue] of Object.entries(expected)) {
+    if (value[name] !== expectedValue) {
+      issues.push(
+        `${label}.${name} must be ${JSON.stringify(expectedValue)}; received ` +
+          `${JSON.stringify(value[name])}.`,
+      );
+    }
+  }
+  return issues;
+}
+
+function gtnhPolicyIssues(manifest, label) {
+  const issues = [];
+  if (!Array.isArray(manifest?.handlerPolicies)) {
+    issues.push(`${label} manifest.handlerPolicies must be an array.`);
+  } else if (manifest.handlerPolicies.length !== GTNH_HANDLER_POLICIES.length) {
+    issues.push(
+      `${label} manifest.handlerPolicies must contain exactly ` +
+        `${GTNH_HANDLER_POLICIES.length} pinned handler policies; received ` +
+        `${manifest.handlerPolicies.length}.`,
+    );
+  } else {
+    for (let index = 0; index < GTNH_HANDLER_POLICIES.length; index += 1) {
+      issues.push(
+        ...exactRecordIssues(
+          manifest.handlerPolicies[index],
+          GTNH_HANDLER_POLICIES[index],
+          `${label} manifest.handlerPolicies[${index}]`,
+        ),
+      );
+    }
+  }
+  issues.push(
+    ...exactRecordIssues(
+      manifest?.knowledgePolicy,
+      GTNH_KNOWLEDGE_POLICY,
+      `${label} manifest.knowledgePolicy`,
+    ),
+  );
+  issues.push(
+    ...exactRecordIssues(
+      manifest?.attribution,
+      GTNH_DATA_ATTRIBUTION,
+      `${label} manifest.attribution`,
+    ),
+  );
+  return issues;
+}
+
 function genericJeiManifestQualityIssues(manifest, label) {
   const issues = [];
   const counts = manifest?.counts;
@@ -245,6 +470,7 @@ function genericJeiManifestQualityIssues(manifest, label) {
  */
 export function gtnhManifestQualityIssues(manifest, label = 'GT New Horizons') {
   const issues = [];
+  issues.push(...gtnhPolicyIssues(manifest, label));
   const counts = manifest?.counts;
   if (!hasExactKeys(counts, STANDARD_COUNT_KEYS)) {
     issues.push(
@@ -335,6 +561,11 @@ export function gtnhManifestQualityIssues(manifest, label = 'GT New Horizons') {
   };
   compareTelemetry(
     'registeredCraftingHandlers',
+    isNonNegativeSafeInteger(counts?.categories) ? counts.categories + 9 : undefined,
+    'manifest.counts.categories + 9 excluded non-recipe handlers',
+  );
+  compareTelemetry(
+    'exportableCraftingHandlers',
     counts?.categories,
     'manifest.counts.categories',
   );
@@ -342,6 +573,26 @@ export function gtnhManifestQualityIssues(manifest, label = 'GT New Horizons') {
   compareTelemetry('recipesEnumerated', counts?.recipes, 'manifest.counts.recipes');
   compareTelemetry('recipeWidgetsRendered', counts?.recipes, 'manifest.counts.recipes');
   compareTelemetry('itemIconsRendered', counts?.items, 'manifest.counts.items');
+
+  for (const [name, expected] of [
+    ['adaptedHandlerCategories', 8],
+    ['excludedNonRecipeHandlers', 9],
+    ['informationalEmptyOutputRecipes', 488],
+  ]) {
+    if (isNonNegativeSafeInteger(nei?.[name]) && nei[name] !== expected) {
+      issues.push(
+        `${label} requires diagnostics.nei.${name} to be ${expected}; received ${nei[name]}.`,
+      );
+    }
+  }
+  if (
+    isNonNegativeSafeInteger(nei?.knowledgeIndependentAspectNames) &&
+    nei.knowledgeIndependentAspectNames === 0
+  ) {
+    issues.push(
+      `${label} requires diagnostics.nei.knowledgeIndependentAspectNames to be positive.`,
+    );
+  }
 
   return issues;
 }
@@ -351,7 +602,10 @@ export function gtnhManifestQualityIssues(manifest, label = 'GT New Horizons') {
  * integrity is enforced by validate-export-data; this policy covers the
  * explicit pack exporter contracts that generic datasets do not share.
  */
-export function exportQualityIssues({manifest, failures, semanticErrorRecipes = 0}, profile) {
+export function exportQualityIssues(
+  {manifest, failures, warnings, semanticErrorRecipes = 0},
+  profile,
+) {
   const resolvedProfile = resolveQualityProfile(profile);
   if (resolvedProfile === null) return [];
   const requirements = profileRequirements.get(resolvedProfile);
@@ -422,6 +676,15 @@ export function exportQualityIssues({manifest, failures, semanticErrorRecipes = 
   if (!isRecord(diagnostics)) {
     issues.push(`${label} requires manifest.diagnostics from its exporter.`);
   } else {
+    if (
+      Array.isArray(requirements.diagnosticKeys) &&
+      !hasExactKeys(diagnostics, requirements.diagnosticKeys)
+    ) {
+      issues.push(
+        `${label} requires manifest.diagnostics to contain exactly ` +
+          `${requirements.diagnosticKeys.join(', ')}.`,
+      );
+    }
     if (!Number.isSafeInteger(diagnostics.failureEvents) || diagnostics.failureEvents < 0) {
       issues.push(`${label} requires a non-negative diagnostics.failureEvents count.`);
     }
@@ -436,6 +699,47 @@ export function exportQualityIssues({manifest, failures, semanticErrorRecipes = 
           'publication requires the complete diagnostics set.',
       );
     }
+    if (requirements.requiresZeroFailures && diagnostics.failureEvents !== 0) {
+      issues.push(
+        `${label} requires diagnostics.failureEvents to be 0; received ` +
+          `${String(diagnostics.failureEvents)}.`,
+      );
+    }
+    if (resolvedProfile === MULTIBLOCK_MADNESS_112_PROFILE) {
+      if (!isNonNegativeSafeInteger(diagnostics.warningEvents)) {
+        issues.push(`${label} requires a non-negative diagnostics.warningEvents count.`);
+      }
+      if (!isNonNegativeSafeInteger(diagnostics.warningEventsOmitted)) {
+        issues.push(`${label} requires a non-negative diagnostics.warningEventsOmitted count.`);
+      } else if (diagnostics.warningEventsOmitted !== 0) {
+        issues.push(
+          `${label} export omitted ${diagnostics.warningEventsOmitted} warning event(s); ` +
+            'publication requires the complete audited warning set.',
+        );
+      }
+    }
+    if (
+      resolvedProfile === MULTIBLOCK_MADNESS_2_118_PROFILE &&
+      diagnostics.transparentIcons !== 0
+    ) {
+      issues.push(
+        `${label} requires diagnostics.transparentIcons to be 0; received ` +
+          `${String(diagnostics.transparentIcons)}.`,
+      );
+    }
+    if (
+      resolvedProfile === MULTIBLOCK_MADNESS_2_118_PROFILE &&
+      !isNonNegativeSafeInteger(diagnostics.nativeIconCorrections)
+    ) {
+      issues.push(`${label} requires a non-negative diagnostics.nativeIconCorrections count.`);
+    }
+  }
+
+  if (requirements.requiresZeroFailures && manifest?.counts?.failures !== 0) {
+    issues.push(
+      `${label} requires manifest.counts.failures to be 0; received ` +
+        `${String(manifest?.counts?.failures)}.`,
+    );
   }
 
   if (resolvedProfile === GTNH_1710_PROFILE) {
@@ -444,9 +748,54 @@ export function exportQualityIssues({manifest, failures, semanticErrorRecipes = 
     issues.push(...genericJeiManifestQualityIssues(manifest, label));
   }
 
+  if (resolvedProfile === MULTIBLOCK_MADNESS_112_PROFILE) {
+    if (!Array.isArray(warnings)) {
+      issues.push(`${label} requires warnings.json to contain an array.`);
+    } else {
+      const malformedWarningIndex = warnings.findIndex(
+        warning => typeof warning !== 'string' || warning.trim().length === 0,
+      );
+      if (malformedWarningIndex >= 0) {
+        issues.push(
+          `${label} warnings.json[${malformedWarningIndex}] must be a non-empty string.`,
+        );
+      }
+      if (
+        isNonNegativeSafeInteger(manifest?.diagnostics?.warningEvents) &&
+        warnings.length !== manifest.diagnostics.warningEvents
+      ) {
+        issues.push(
+          `${label} diagnostics.warningEvents (${manifest.diagnostics.warningEvents}) must ` +
+            `equal warnings.json length (${warnings.length}).`,
+        );
+      }
+      const unknownWarningIndex = warnings.findIndex(
+        warning =>
+          typeof warning === 'string' &&
+          !MULTIBLOCK_MADNESS_112_WARNING_PREFIXES.some(
+            prefix => warning === prefix || warning.startsWith(`${prefix} `),
+          ),
+      );
+      if (unknownWarningIndex >= 0) {
+        issues.push(
+          `${label} warnings.json[${unknownWarningIndex}] has an unrecognized warning class: ` +
+            `${JSON.stringify(warnings[unknownWarningIndex])}. Allowed prefixes: ` +
+            `${MULTIBLOCK_MADNESS_112_WARNING_PREFIXES.join(', ')}.`,
+        );
+      }
+    }
+  }
+
   if (!Array.isArray(failures)) {
     issues.push(`${label} requires failures.json to contain an array.`);
     return issues;
+  }
+
+  if (requirements.requiresZeroFailures && failures.length !== 0) {
+    issues.push(
+      `${label} requires failures.json to be empty; received ${failures.length} ` +
+        `failure event(s); first: ${String(failures[0])}`,
+    );
   }
 
   if (resolvedProfile === GTNH_1710_PROFILE && failures.length !== 0) {

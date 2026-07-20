@@ -85,6 +85,7 @@ export function RecipeCard({
               key={`input-${item.key}`}
               itemKey={item.key}
               amount={item.amount}
+              variableAmount={item.variableAmount}
               variants={item.variants}
               tag={item.tag}
               interactive={!onPress}
@@ -96,6 +97,7 @@ export function RecipeCard({
               key={`output-${item.key}`}
               itemKey={item.key}
               amount={item.amount}
+              variableAmount={item.variableAmount}
               variants={item.variants}
               tag={item.tag}
               highlight
@@ -113,6 +115,7 @@ export function RecipeCard({
                 key={`prerequisite-${item.key}`}
                 itemKey={item.key}
                 amount={item.amount}
+                variableAmount={item.variableAmount}
                 variants={item.variants}
                 tag={item.tag}
                 interactive={!onPress}
@@ -133,6 +136,7 @@ export function RecipeCard({
 export function ItemChip({
   itemKey,
   amount,
+  variableAmount,
   variants,
   tag,
   highlight,
@@ -140,6 +144,7 @@ export function ItemChip({
 }: {
   itemKey: string;
   amount?: number | null;
+  variableAmount?: boolean;
   variants?: number;
   tag?: string;
   highlight?: boolean;
@@ -158,7 +163,11 @@ export function ItemChip({
           ? `${formatIngredientQuantityPrefix(itemKey, amount)} `
           : ''}
         {displayName}
-        {!tag && variants != null && variants > 1 ? ` (+${variants - 1} alternatives)` : ''}
+        {!tag && variants != null && variants > 1
+          ? ` (+${variants - 1} alternatives${variableAmount ? '; quantities vary' : ''})`
+          : variableAmount
+            ? ' (alternative quantities vary)'
+            : ''}
       </Text>
     </>
   );

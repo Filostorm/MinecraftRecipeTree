@@ -22,15 +22,20 @@ import {
   publishTransactional,
 } from './import-export-data.mjs';
 import {
+  GTNH_DATA_ATTRIBUTION,
+  GTNH_HANDLER_POLICIES,
   GTNH_1710_PROFILE,
+  GTNH_KNOWLEDGE_POLICY,
   MEATBALLCRAFT_112_PROFILE,
   MULTIBLOCK_MADNESS_112_PROFILE,
   MULTIBLOCK_MADNESS_2_118_PROFILE,
 } from './export-quality-policy.mjs';
 import {PUBLICATION_ID_PATTERN} from './publication-id.mjs';
 import {
+  configureMultiblockExportFixture,
   createRawExportFixture,
   readJson,
+  writeSyntheticExporterBuildIdentity,
   writeJson,
   writeNonUniformImage,
 } from './test-export-fixture.mjs';
@@ -103,10 +108,8 @@ test('imports both Multiblock Madness versions with dynamic counts and productio
       const source = join(root, 'raw-source');
       const destination = join(root, 'public', 'exports');
       await createRawExportFixture(source, {iconScale: 1, recipeScale: 2});
-      const manifestPath = join(source, 'manifest.json');
-      const manifest = await readJson(manifestPath);
-      manifest.minecraft = minecraft;
-      await writeJson(manifestPath, manifest);
+      const manifest = await configureMultiblockExportFixture(source, profile);
+      assert.equal(manifest.minecraft, minecraft);
       await mkdir(dirname(destination), {recursive: true});
 
       await importExportDataImplementation({source, destination, profile, dryRun: true});
@@ -131,18 +134,27 @@ async function configureGtnhFixture(source) {
     version: '2.8.4',
     identitySource: 'explicit-request',
   };
+  manifest.handlerPolicies = structuredClone(GTNH_HANDLER_POLICIES);
+  manifest.knowledgePolicy = {...GTNH_KNOWLEDGE_POLICY};
+  manifest.attribution = {...GTNH_DATA_ATTRIBUTION};
   manifest.diagnostics.nei = {
     itemListLoaded: true,
-    registeredCraftingHandlers: 1,
+    registeredCraftingHandlers: 10,
+    exportableCraftingHandlers: 1,
+    adaptedHandlerCategories: 8,
+    excludedNonRecipeHandlers: 9,
     loadedCategories: 1,
     recipesEnumerated: 1,
     recipeWidgetsRendered: 1,
     itemIconsRendered: 1,
+    informationalEmptyOutputRecipes: 488,
+    knowledgeIndependentAspectNames: 1,
     unloadedHandlerCategories: 0,
     ambiguousHandlerCategories: 0,
     duplicateHandlerCategories: 0,
   };
   await writeJson(manifestPath, manifest);
+  await writeSyntheticExporterBuildIdentity(source, GTNH_1710_PROFILE);
   return manifest;
 }
 
@@ -195,6 +207,61 @@ test('GTNH import rejects unloaded NEI categories before creating staging data',
   }
 });
 
+test('GTNH import rejects policy drift before creating staging data', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'recipe-tree-import-gtnh-policy-test-'));
+  try {
+    const source = join(root, 'raw-source');
+    const destination = join(root, 'public', 'exports');
+    await createRawExportFixture(source, {iconScale: 1, recipeScale: 2});
+    const manifest = await configureGtnhFixture(source);
+    manifest.knowledgePolicy.playerResearchMutated = true;
+    await writeJson(join(source, 'manifest.json'), manifest);
+    await mkdir(dirname(destination), {recursive: true});
+
+    await assert.rejects(
+      importExportDataImplementation({
+        source,
+        destination,
+        profile: GTNH_1710_PROFILE,
+        dryRun: true,
+      }),
+      /knowledgePolicy\.playerResearchMutated/,
+    );
+    assert.equal(await pathIsMissing(destination), true);
+    assert.equal(await pathIsMissing(importWorkspaceRootForDestination(destination)), true);
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
+});
+
+test('GTNH import rejects attribution drift before creating staging data', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'recipe-tree-import-gtnh-attribution-test-'));
+  try {
+    const source = join(root, 'raw-source');
+    const destination = join(root, 'public', 'exports');
+    await createRawExportFixture(source, {iconScale: 1, recipeScale: 2});
+    const manifest = await configureGtnhFixture(source);
+    manifest.attribution.sourceUrl =
+      'https://github.com/GTNewHorizons/GT-New-Horizons-Modpack/tree/2.8.3';
+    await writeJson(join(source, 'manifest.json'), manifest);
+    await mkdir(dirname(destination), {recursive: true});
+
+    await assert.rejects(
+      importExportDataImplementation({
+        source,
+        destination,
+        profile: GTNH_1710_PROFILE,
+        dryRun: true,
+      }),
+      /attribution\.sourceUrl/,
+    );
+    assert.equal(await pathIsMissing(destination), true);
+    assert.equal(await pathIsMissing(importWorkspaceRootForDestination(destination)), true);
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
+});
+
 test('GTNH import rejects a recipe record without its rendered NEI preview', async () => {
   const root = await mkdtemp(join(tmpdir(), 'recipe-tree-import-gtnh-preview-test-'));
   try {
@@ -233,6 +300,7 @@ test('Multiblock import rejects a dynamically counted corpus with a missing reci
     const source = join(root, 'raw-source');
     const destination = join(root, 'public', 'exports');
     await createRawExportFixture(source, {iconScale: 1, recipeScale: 2});
+    await configureMultiblockExportFixture(source, MULTIBLOCK_MADNESS_112_PROFILE);
     await writeJson(join(source, 'recipes', 'minecraft_crafting', 'recipes.json'), [
       {
         id: 'minecraft:missing_preview',

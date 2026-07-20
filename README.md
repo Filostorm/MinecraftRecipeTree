@@ -11,6 +11,75 @@ npm run publish:modpack -- --help
 The deployed [/publish](https://minecraftrecipetree.craftsmannsoftware.com/publish) guide exposes
 the version-matched release JARs and their generated SHA-256 checksums to external contributors.
 
+### Package one validated exporter release
+
+Public exporter URLs are immutable release artifacts. If a rebuilt JAR changes bytes, increment
+both its `version` and `filename` in `scripts/package-exporter-releases.mjs`; never replace an
+already published filename. First run the acceptance action against that exact JAR's completed
+full export. It performs the exhaustive profile validator once and writes a local receipt binding
+the release ID/version/filename, JAR SHA-256 and byte length, the release-defined acceptance
+profile, and the validated export manifest's SHA-256 and byte length. It also binds the exact release
+definition, complete local validator source set, and pinned Sharp/libvips lock entries, so tightening
+a gate or changing the image-validation runtime invalidates older receipts:
+
+```bash
+npm run accept:exporter -- \
+  --release forge-hei-1.12.2 \
+  --profile multiblock-madness-1.12.2 \
+  --export-root "/absolute/path/to/completed-full-export"
+
+npm run package:exporter:1.12.2
+npm run package:exporter:1.18.2
+npm run package:exporter:1.7.10
+
+# Any configured release ID can use the same fail-closed targeted path:
+npm run package:exporter -- forge-hei-1.12.2
+```
+
+Receipts live under ignored `.release-acceptance/`, contain no local paths or credentials, and are
+operator attestations rather than remote signatures. Every release declares one exact acceptance
+profile even when it advertises additional compatible profiles. Packaging rejects a missing,
+malformed, symlinked, wrong-profile, policy-stale, definition-stale, or stale-JAR receipt. A
+diagnostic `qualitySample` export cannot produce a receipt. If the JAR or validation policy changes
+by one byte, run the full acceptance export again.
+
+The 1.12.2 and 1.18.2 exporters additionally embed a canonical
+`META-INF/mrt-exporter-build.json` record and emit those exact bytes as root
+`exporter-build.json`. Acceptance recomputes the canonical digest of every non-directory JAR entry
+except that self-identity record, verifies its explicit exporter ID and Minecraft version, then
+requires the completed export to carry the byte-identical identity. It also computes exhaustive
+pre/post digests of every export file and rejects symlinks, hard links, or any concurrent mutation.
+This intentionally adds two bounded streaming reads of the export tree; it avoids an equally large
+immutable snapshot and does not retain file bodies in memory. Multiblock Madness releases remain
+fail-closed while their configured `acceptanceCorpus` is `null`; after each authoritative full run,
+copy its exact item/recipe/category/mob/block-drop counts into that release definition before
+issuing its independent receipt.
+
+Targeted packaging verifies the existing exact manifest and its currently referenced JAR before
+mutation, creates the new versioned JAR without deleting the older file, and updates only that
+release's manifest entry. Unrelated entries and JARs are not opened, rewritten, or silently
+refreshed. Repeating the command with identical bytes is a no-op, including the manifest timestamp.
+Every packaging command takes an exclusive manifest transaction lock. A concurrent or leftover
+lock aborts visibly and is never auto-removed; verify that no packager is active before inspecting
+and manually removing a stale lock. Receipt authorization is rechecked after acquiring that lock,
+immediately before any public mutation. Receipt creation/replacement takes the same lock, so a
+receipt cannot change concurrently with a release transaction.
+
+Publication preparation also requires an explicit version-specific `--release`. It securely
+revalidates that release's current receipt and JAR, then compares the receipt's exhaustive export
+tree SHA-256 with the importer's exact staged raw snapshot before optimization. The normalized
+receipt and its canonical SHA-256 are committed into `publication-plan.json` v3. Upload revalidates
+that same immutable receipt/JAR identity and the packed `exporter-build.json` before reading the
+catalog or credentials, so 1.12.2 and 1.18.2 workspaces cannot be cross-packaged. This adds one
+bounded streaming read of the staged export but no additional full-size copy and no silent weaker
+fallback.
+
+`npm run package:exporters` remains the explicit all-release operation. Use it only after every
+configured build has independently passed acceptance. It preflights every source and public target
+before writing and rejects changed bytes under an existing versioned URL instead of overwriting or
+falling back to a partial release. Direct CLI use must specify `--all` or `--release`; no-argument
+execution fails closed.
+
 Expo (React Native Web) app for browsing a `jei-exports` dataset produced by
 [recipe-export-mod](../recipe-export-mod): searchable item grid, JEI-style recipe/usage
 views, a mob gallery, and a pan/zoom crafting flowchart built from the exported recipe images.
@@ -62,11 +131,32 @@ one preview per recipe still fail closed.
 The GTNH profile pins the latest stable pack release, 2.8.4, plus Forge `10.13.4.1614`
 and NotEnoughItems `2.8.44-GTNH`. Its raw manifest must identify the pack as
 `{name: "GT New Horizons", version: "2.8.4", identitySource: "explicit-request"}` and include
-the exact NEI telemetry schema. Publication requires the item list to load, every registered
-crafting handler to produce exactly one loaded category, every enumerated recipe widget and
-item icon to render, all handler-anomaly counters to remain zero, and `failures.json` to be
-empty. Missing or unknown telemetry fields are schema drift and abort the import; they are not
-treated as compatibility fallbacks.
+the exact NEI telemetry schema. It must also preserve an exact `attribution` object for the
+normalized GTNH 2.8.4 recipe data: the pinned source and project URLs, `CC BY-NC-SA 4.0`
+identifier, and Creative Commons license URL. This data attribution does not claim that every
+third-party mod texture or other artwork is licensed by GTNH; those assets retain their respective
+licenses. Publication requires the item list to load, every registered handler admitted to category
+export to produce exactly one loaded category, every enumerated recipe widget and item icon to
+render, all handler-anomaly counters to remain zero, and `failures.json` to be empty. The exact
+17-entry special-handler ledger admits eight version-pinned adapters and excludes
+nine non-recipe handlers (five query-only views and four presentation-only browsers). Missing or
+unknown telemetry fields are schema drift and abort the import; they are not treated as
+compatibility fallbacks.
+
+AE2 in-world crafting's complete wildcard-query closure and BetterQuesting's item-reference index
+are retained as informational categories, not executable recipe categories. BetterQuesting choice
+rewards remain one logical slot with their exact alternatives, but quest task `AND`/`OR` logic,
+optional tasks, possession-versus-consumption rules, and the player's selected reward cannot be
+expressed by the recipe format. The app therefore exposes both categories under an **Info** tab
+while excluding them from crafting graphs and material totals.
+
+IC2 Crop Plugin data comes from a deterministic repair of the pinned plugin's nondeterministic
+identity-hash cache. The adapter evaluates all 159 `ALL_CROPS` entries and 12,561 canonical parent
+pairs, then independently preserves the first winner in each craft and parent-usage query bucket.
+That produces 290,789 graph pages: 4,595 craft winners plus 286,194 usage-only winners. The raw
+plugin cache remains structural diagnostic telemetry and is never authoritative. Clean
+`BreedResult` display stacks define graph identity; breeding-points/chance lore exists only in the
+NEI preview, so presentation-only NBT cannot fragment crop dependencies.
 
 In omission mode, the importer losslessly converts and packs retained item, category, and mob
 assets, but deliberately leaves declared recipe PNGs in their original encoding until the raw

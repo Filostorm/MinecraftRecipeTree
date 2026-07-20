@@ -13,7 +13,9 @@ import {
   requirePublicationPlan,
   uploadPreparedModpackPublication,
 } from './publish-modpack.mjs';
+import {buildPublicationExporterAcceptance} from './publication-exporter-acceptance.mjs';
 import {
+  configureMultiblockExportFixture,
   createRawExportFixture,
   readJson,
   writeJson,
@@ -25,8 +27,52 @@ const ID_B = 'b'.repeat(64);
 const ID_C = 'c'.repeat(64);
 const ID_D = 'd'.repeat(64);
 
+function exporterAcceptance(publicationPlan) {
+  const releaseId = publicationPlan.minecraftVersion === '1.18.2'
+    ? 'forge-rei-1.18.2'
+    : 'forge-hei-1.12.2';
+  return buildPublicationExporterAcceptance({
+    format: 'mrt-exporter-acceptance-v1',
+    acceptedAt: '2026-07-19T11:00:00.000Z',
+    release: {
+      id: releaseId,
+      version: '1.0.1',
+      filename: `recipe-tree-exporter-${releaseId}-1.0.1.jar`,
+      sha256: ID_C,
+      bytes: 1024,
+    },
+    qualityProfile: publicationPlan.profile,
+    exporterBuild: {
+      format: 'mrt-exporter-build-v1',
+      exporterId: releaseId,
+      minecraftVersion: publicationPlan.minecraftVersion,
+      algorithm: 'sha256',
+      payloadSha256: ID_D,
+    },
+    exportTree: {
+      format: 'mrt-export-tree-v1',
+      algorithm: 'sha256',
+      sha256: ID_A,
+      files: 10,
+      bytes: 2048,
+    },
+    validationPolicy: {
+      format: 'mrt-exporter-acceptance-policy-v1',
+      sha256: ID_B,
+    },
+    exportManifest: {
+      sha256: ID_C,
+      bytes: 512,
+      generatedAt: '2026-07-19T10:00:00.000Z',
+      minecraft: publicationPlan.minecraftVersion,
+      counts: {items: 1, recipes: 1, categories: 1, mobs: 0, blockDrops: 0},
+      pack: publicationPlan.pack,
+    },
+  });
+}
+
 function plan(overrides = {}) {
-  return {
+  const candidate = {
     format: PUBLICATION_PLAN_FORMAT,
     createdAt: '2026-07-19T12:00:00.000Z',
     profile: 'multiblock-madness-1.12.2',
@@ -41,6 +87,12 @@ function plan(overrides = {}) {
       previewSidecar: 'preview-sidecar',
     },
     ...overrides,
+  };
+  return {
+    ...candidate,
+    exporterAcceptance: Object.prototype.hasOwnProperty.call(overrides, 'exporterAcceptance')
+      ? overrides.exporterAcceptance
+      : exporterAcceptance(candidate),
   };
 }
 
@@ -92,15 +144,10 @@ async function rawPublicationFixture(t, publicationPlan, {qualitySample} = {}) {
   const categories = await readJson(join(source, 'categories.json'));
   categories.categories[0].count = 1;
   await writeJson(join(source, 'categories.json'), categories);
-  const manifest = await readJson(join(source, 'manifest.json'));
-  manifest.minecraft = publicationPlan.minecraftVersion;
-  manifest.pack = publicationPlan.pack;
+  const manifest = await configureMultiblockExportFixture(source, publicationPlan.profile);
+  assert.equal(manifest.minecraft, publicationPlan.minecraftVersion);
+  assert.deepEqual(manifest.pack, publicationPlan.pack);
   manifest.counts.recipes = 1;
-  if (publicationPlan.profile === 'multiblock-madness-2-1.18.2') {
-    manifest.counts.nativeIconCorrections = 0;
-    manifest.diagnostics.nativeIconCorrections = 0;
-    manifest.diagnostics.transparentIcons = 0;
-  }
   if (qualitySample !== undefined) manifest.qualitySample = qualitySample;
   await writeJson(join(source, 'manifest.json'), manifest);
   return {root, source, workspace};
@@ -112,18 +159,36 @@ const quietLogger = Object.freeze({
   error() {},
 });
 
+function preparationAcceptanceDependencies(publicationPlan) {
+  const binding = publicationPlan.exporterAcceptance;
+  return {
+    async loadCurrentPublicationExporterAcceptance({expectedBinding}) {
+      assert.deepEqual(expectedBinding ?? binding, binding);
+      return {binding};
+    },
+    async verifyPublicationExporterBuildFile({binding: received}) {
+      assert.deepEqual(received, binding);
+    },
+    async verifyAcceptedRawPublicationExport({binding: received}) {
+      assert.deepEqual(received, binding);
+    },
+  };
+}
+
 test('parses concise prepare and upload commands without accepting token values', () => {
   assert.deepEqual(parsePublishModpackArguments([
     'prepare',
     '--source', '/exports',
     '--workspace', '/work/new',
     '--profile', 'multiblock-madness-1.12.2',
+    '--release', 'forge-hei-1.12.2',
     '--staging-mode', 'copy',
   ]), {
     command: 'prepare',
     source: '/exports',
     workspace: '/work/new',
     profile: 'multiblock-madness-1.12.2',
+    releaseId: 'forge-hei-1.12.2',
     stagingMode: 'copy',
   });
   assert.deepEqual(parsePublishModpackArguments([
@@ -139,7 +204,8 @@ test('parses concise prepare and upload commands without accepting token values'
   assert.throws(
     () => parsePublishModpackArguments([
       'prepare', '--source', '/exports', '--workspace', '/work/new',
-      '--profile', 'multiblock-madness-1.12.2', '--default', 'true',
+      '--profile', 'multiblock-madness-1.12.2', '--release', 'forge-hei-1.12.2',
+      '--default', 'true',
     ]),
     /Unsupported prepare argument: --default/,
   );
@@ -166,9 +232,25 @@ test('publication plan validation binds pack metadata and exact artifact paths',
     })),
     /fixed canonical path core-publication\/publication\.json/,
   );
+  const validPlan = plan();
   assert.throws(
-    () => requirePublicationPlan(plan({pack: {name: 'Pack', identitySource: 'curseforge'}})),
+    () => requirePublicationPlan({
+      ...validPlan,
+      pack: {name: 'Pack', identitySource: 'curseforge'},
+    }),
     /version is required/,
+  );
+  assert.throws(
+    () => requirePublicationPlan(plan({
+      profile: 'multiblock-madness-2-1.18.2',
+      minecraftVersion: '1.18.2',
+      exporterAcceptance: validPlan.exporterAcceptance,
+    })),
+    /crosses an incompatible quality profile, Minecraft version boundary/,
+  );
+  assert.throws(
+    () => requirePublicationPlan(mm2Plan({slug: 'multiblock-madness'})),
+    /requires isolated channel slug multiblock-madness-2/,
   );
 });
 
@@ -194,6 +276,7 @@ test('preparation rejects MM1 and MM2 mini exports before creating a workspace',
         source: fixture.source,
         workspace: fixture.workspace,
         profile: publicationPlan.profile,
+        releaseId: publicationPlan.exporterAcceptance.receipt.release.id,
         slug: publicationPlan.slug,
         stagingMode: 'copy',
         concurrency: 1,
@@ -212,10 +295,12 @@ test('preparation admits full MM1 and MM2 exports and commits production plans',
       source: fixture.source,
       workspace: fixture.workspace,
       profile: publicationPlan.profile,
+      releaseId: publicationPlan.exporterAcceptance.receipt.release.id,
       slug: publicationPlan.slug,
       stagingMode: 'copy',
       concurrency: 1,
       logger: quietLogger,
+      dependencies: preparationAcceptanceDependencies(publicationPlan),
     });
     assert.equal(prepared.profile, publicationPlan.profile);
     assert.equal(prepared.slug, publicationPlan.slug);
@@ -334,6 +419,7 @@ function orchestrationDependencies(events, {preflightFailure = null} = {}) {
     return undefined;
   };
   return {
+    verifyPreparedPublicationAcceptance: record('acceptance'),
     fetchPublishingCatalog: async options => {
       events.push({name: 'catalog', options});
       return [currentDescriptor()];
@@ -372,6 +458,7 @@ test('upload orchestration preflights both targets and CAS-activates only after 
     dependencies: orchestrationDependencies(events),
   });
   assert.deepEqual(events.map(event => event.name), [
+    'acceptance',
     'catalog',
     'core-token',
     'preview-token',
@@ -407,6 +494,29 @@ test('upload rejects prepared MM1 and MM2 mini exports before catalog or credent
     );
     assert.deepEqual(events, []);
   }
+});
+
+test('upload rejects a stale exporter receipt before catalog or credential access', async t => {
+  const root = await preparedWorkspace(t);
+  await writeValidPackedManifest(root);
+  const events = [];
+  const dependencies = orchestrationDependencies(events);
+  dependencies.verifyPreparedPublicationAcceptance = async options => {
+    events.push({name: 'acceptance', options});
+    throw new Error('exporter receipt changed after preparation');
+  };
+  await assert.rejects(
+    uploadPreparedModpackPublication({
+      workspace: root,
+      channelAction: 'update',
+      isDefault: false,
+      appOrigin: 'https://viewer.test',
+      logger: quietLogger,
+      dependencies,
+    }),
+    /exporter receipt changed after preparation/,
+  );
+  assert.deepEqual(events.map(event => event.name), ['acceptance']);
 });
 
 test('authenticated endpoint-preflight failure starts no bulk upload', async t => {

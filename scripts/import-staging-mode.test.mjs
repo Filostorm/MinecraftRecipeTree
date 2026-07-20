@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {access, mkdir, mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
+import {access, mkdir, mkdtemp, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {dirname, join} from 'node:path';
 import test from 'node:test';
@@ -8,7 +8,10 @@ import {
   importExportData,
   importWorkspaceRootForDestination,
 } from './import-export-data.mjs';
-import {createRawExportFixture} from './test-export-fixture.mjs';
+import {
+  configureMultiblockExportFixture,
+  createRawExportFixture,
+} from './test-export-fixture.mjs';
 
 async function missing(path) {
   try {
@@ -26,10 +29,7 @@ test('explicit full-copy staging validates without selecting clone fallback', as
     const source = join(root, 'raw');
     const destination = join(root, 'published', 'exports');
     await createRawExportFixture(source, {iconScale: 1, recipeScale: 2});
-    const manifestPath = join(source, 'manifest.json');
-    const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
-    manifest.minecraft = '1.12.2';
-    await writeFile(manifestPath, `${JSON.stringify(manifest)}\n`);
+    await configureMultiblockExportFixture(source, MULTIBLOCK_MADNESS_112_PROFILE);
     await mkdir(dirname(destination), {recursive: true});
 
     await importExportData({

@@ -1,6 +1,24 @@
 import {mkdir, readFile, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import sharp from 'sharp';
+import {
+  GTNH_1710_PROFILE,
+  MULTIBLOCK_MADNESS_112_PROFILE,
+  MULTIBLOCK_MADNESS_2_118_PROFILE,
+  qualityProfileRequirementsFor,
+} from './export-quality-policy.mjs';
+import {
+  EXPORTER_BUILD_ALGORITHM,
+  EXPORTER_BUILD_EXPORT_PATH,
+  EXPORTER_BUILD_FORMAT,
+  canonicalExporterBuildIdentityBytes,
+} from './exporter-artifact-provenance.mjs';
+
+const SYNTHETIC_EXPORTER_ID_BY_PROFILE = new Map([
+  [GTNH_1710_PROFILE, 'forge-nei-gtnh-1.7.10'],
+  [MULTIBLOCK_MADNESS_112_PROFILE, 'forge-hei-1.12.2'],
+  [MULTIBLOCK_MADNESS_2_118_PROFILE, 'forge-rei-1.18.2'],
+]);
 
 export async function writeJson(path, value) {
   await writeFile(path, `${JSON.stringify(value)}\n`);
@@ -81,6 +99,54 @@ export async function createRawExportFixture(
   await writeJson(join(root, 'blockdrops.json'), {blocks: {}});
   await writeJson(join(root, 'failures.json'), []);
   return root;
+}
+
+export async function writeSyntheticExporterBuildIdentity(root, profile) {
+  const requirements = qualityProfileRequirementsFor(profile);
+  const exporterId = SYNTHETIC_EXPORTER_ID_BY_PROFILE.get(profile);
+  if (!requirements?.requiresExporterBuildIdentity || exporterId === undefined) {
+    throw new Error(
+      `No synthetic exporter build identity is pinned for quality profile ${String(profile)}.`,
+    );
+  }
+  const identity = {
+    format: EXPORTER_BUILD_FORMAT,
+    exporterId,
+    minecraftVersion: requirements.minecraft,
+    algorithm: EXPORTER_BUILD_ALGORITHM,
+    payloadSha256: '0'.repeat(64),
+  };
+  await writeFile(
+    join(root, EXPORTER_BUILD_EXPORT_PATH),
+    canonicalExporterBuildIdentityBytes(identity),
+  );
+  return identity;
+}
+
+export async function configureMultiblockExportFixture(root, profile) {
+  if (
+    profile !== MULTIBLOCK_MADNESS_112_PROFILE &&
+    profile !== MULTIBLOCK_MADNESS_2_118_PROFILE
+  ) {
+    throw new Error(`Unsupported Multiblock Madness fixture profile: ${String(profile)}.`);
+  }
+  const requirements = qualityProfileRequirementsFor(profile);
+  const manifestPath = join(root, 'manifest.json');
+  const manifest = await readJson(manifestPath);
+  manifest.minecraft = requirements.minecraft;
+  manifest.pack = {...requirements.packIdentity};
+  if (profile === MULTIBLOCK_MADNESS_112_PROFILE) {
+    manifest.diagnostics.warningEvents = 0;
+    manifest.diagnostics.warningEventsOmitted = 0;
+    await writeJson(join(root, 'warnings.json'), []);
+  } else if (profile === MULTIBLOCK_MADNESS_2_118_PROFILE) {
+    manifest.counts.nativeIconCorrections = 0;
+    manifest.diagnostics.nativeIconCorrections = 0;
+    manifest.diagnostics.transparentIcons = 0;
+  }
+  await writeJson(manifestPath, manifest);
+  await writeSyntheticExporterBuildIdentity(root, profile);
+  return manifest;
 }
 
 export async function readJson(path) {

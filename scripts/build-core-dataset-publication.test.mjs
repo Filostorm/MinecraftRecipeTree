@@ -30,7 +30,7 @@ async function writeJson(path, value) {
   await writeFile(path, `${JSON.stringify(value)}\n`);
 }
 
-async function fixture(parent) {
+async function fixture(parent, {warnings} = {}) {
   const exportRoot = join(parent, 'exports');
   await mkdir(join(exportRoot, 'assets'), {recursive: true});
   const first = fakeWebp('first');
@@ -60,6 +60,9 @@ async function fixture(parent) {
   await writeJson(join(exportRoot, 'recipes', 'fixture', 'recipes.json'), [
     {id: 'fixture:duplicate', output: coordinates.first},
   ]);
+  if (warnings !== undefined) {
+    await writeJson(join(exportRoot, 'warnings.json'), warnings);
+  }
   const publicationId = await writePublicationId(exportRoot);
   return {exportRoot, publicationId, coordinates, payloads: {first, second, third}};
 }
@@ -145,6 +148,38 @@ test('builder emits canonical inventory-complete publication.json and exact MRPI
     assert.deepEqual(
       await readFile(join(secondOutput, 'indexes', 'pack-000.bin')),
       await readFile(join(output, 'indexes', 'pack-000.bin')),
+    );
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
+});
+
+test('builder preserves warnings.json as an immutable core publication document', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'core-publication-warnings-test-'));
+  try {
+    const warnings = [
+      'ZERO_PREREQUISITE recipe input thermalexpansion.extruder #0',
+      'UPSTREAM_NATIVE_ICON_UNAVAILABLE ingredient item|fixture:hidden',
+    ];
+    const data = await fixture(root, {warnings});
+    const output = join(root, 'publication');
+    const state = await buildCoreDatasetPublication({
+      exportRoot: data.exportRoot,
+      output,
+      logger: silentLogger(),
+    });
+    const record = state.manifest.documents.find(document => document.path === 'warnings.json');
+    assert.ok(record, 'warnings.json must be inventoried for immutable upload');
+    const verified = await validateLocalCoreDatasetPublication({
+      exportRoot: data.exportRoot,
+      publication: join(output, 'publication.json'),
+      logger: silentLogger(),
+    });
+    const uploadRecord = verified.records.find(candidate => candidate.path === 'warnings.json');
+    assert.ok(uploadRecord, 'warnings.json must be present in the validated upload records');
+    assert.deepEqual(
+      await readFile(uploadRecord.localPath),
+      await readFile(join(data.exportRoot, 'warnings.json')),
     );
   } finally {
     await rm(root, {recursive: true, force: true});

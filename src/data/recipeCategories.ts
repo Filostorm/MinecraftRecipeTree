@@ -2,6 +2,10 @@ import type {Category} from '../types';
 
 export const AUTOMATED_SHAPED_CATEGORY_ID = 'create:automatic_shaped';
 export const STANDARD_CRAFTING_CATEGORY_ID = 'minecraft:crafting';
+export const GTNH_AE2_WORLD_CRAFTING_INFORMATION_CATEGORY_ID =
+  'appeng.integration.modules.NEIHelpers.NEIWorldCraftingHandler';
+export const GTNH_BETTERQUESTING_INFORMATION_CATEGORY_ID =
+  'bq_standard.integration.nei.QuestRecipeHandler';
 
 /**
  * HEI 4 on Minecraft 1.12 uses dotted UIDs; modern JEI uses namespaced UIDs.
@@ -17,6 +21,8 @@ export function isStandardCraftingCategory(category: Category | undefined): bool
 export function isMetaRecipeCategory(category: Category | undefined): boolean {
   const id = category?.id ?? '';
   return (
+    id === GTNH_AE2_WORLD_CRAFTING_INFORMATION_CATEGORY_ID ||
+    id === GTNH_BETTERQUESTING_INFORMATION_CATEGORY_ID ||
     /(^|[.:])tag_recipes(?:[/.]|$)/i.test(id) ||
     /^jei[.:](?:information|description)(?:[/.]|$)/i.test(id)
   );

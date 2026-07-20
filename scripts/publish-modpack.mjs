@@ -9,6 +9,18 @@ import {readJsonDocument} from './export-data-utils.mjs';
 import {EXPORT_QUALITY_PROFILE_IDS, resolveQualityProfile} from './export-quality-policy.mjs';
 import {importExportData} from './import-export-data.mjs';
 import {
+  requirePublicationAcceptanceContext,
+  requirePublicationExporterAcceptance,
+  loadCurrentPublicationExporterAcceptance,
+  verifyAcceptedRawPublicationExport,
+  verifyPublicationExporterBuildFile,
+} from './publication-exporter-acceptance.mjs';
+import {EXPORTER_RELEASE_DEFINITIONS} from './package-exporter-releases.mjs';
+import {
+  DEFAULT_EXPORTER_ACCEPTANCE_ROOT,
+  DEFAULT_EXPORTER_WORKSPACE_ROOT,
+} from './exporter-release-acceptance.mjs';
+import {
   requirePublishablePackIdentity,
   slugForPackName,
 } from './pack-identity.mjs';
@@ -28,11 +40,15 @@ import {
 import {verifyPublicCoreDatasetPublication} from './verify-core-dataset-publication-remote.mjs';
 import {verifyRemoteRecipePreviewSidecar} from './verify-recipe-preview-sidecar-remote.mjs';
 
-export const PUBLICATION_PLAN_FORMAT = 'mrt-modpack-publication-plan-v2';
+export const PUBLICATION_PLAN_FORMAT = 'mrt-modpack-publication-plan-v3';
 export const MAX_PUBLICATION_PLAN_BYTES = 64 * 1024;
 export const DEFAULT_APP_ORIGIN = 'https://minecraftrecipetree.craftsmannsoftware.com';
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const CONTENT_ID_PATTERN = /^[a-f0-9]{64}$/;
+const VERSION_ISOLATED_PROFILE_SLUGS = Object.freeze({
+  'multiblock-madness-1.12.2': 'multiblock-madness',
+  'multiblock-madness-2-1.18.2': 'multiblock-madness-2',
+});
 const REQUIRED_ARTIFACT_PATHS = Object.freeze({
   packedExport: 'packed-export',
   corePublication: 'core-publication/publication.json',
@@ -43,7 +59,7 @@ function usage() {
   return [
     'Prepare a new immutable publication:',
     '  npm run publish:modpack -- prepare --source <jei-exports> --workspace <new-directory>',
-    `    --profile <${EXPORT_QUALITY_PROFILE_IDS.join('|')}>`,
+    `    --profile <${EXPORT_QUALITY_PROFILE_IDS.join('|')}> --release <exporter-release-id>`,
     '    [--slug <stable-pack-slug>] [--staging-mode <clone|copy>]',
     '',
     'Upload, verify, and activate an already prepared publication:',
@@ -93,6 +109,7 @@ export function parsePublishModpackArguments(argv) {
         ['--source', 'source'],
         ['--workspace', 'workspace'],
         ['--profile', 'profile'],
+        ['--release', 'releaseId'],
         ['--slug', 'slug'],
         ['--staging-mode', 'stagingMode'],
         ['--concurrency', 'concurrency'],
@@ -121,7 +138,7 @@ export function parsePublishModpackArguments(argv) {
     index += 1;
   }
   const required = command === 'prepare'
-    ? ['source', 'workspace', 'profile']
+    ? ['source', 'workspace', 'profile', 'releaseId']
     : ['workspace', 'channelAction', 'isDefault'];
   const missing = required.filter(name => options[name] === undefined);
   if (missing.length > 0) {
@@ -165,6 +182,7 @@ function exactKeys(value, expected) {
 export function requirePublicationPlan(value) {
   if (!exactKeys(value, [
     'createdAt',
+    'exporterAcceptance',
     'format',
     'minecraftVersion',
     'pack',
@@ -193,6 +211,18 @@ export function requirePublicationPlan(value) {
   }
   const profile = resolveQualityProfile(value.profile);
   const pack = requirePublishablePackIdentity(value.pack, 'publication-plan.json pack');
+  const exporterAcceptance = requirePublicationExporterAcceptance(value.exporterAcceptance);
+  requirePublicationAcceptanceContext(exporterAcceptance, {
+    profile,
+    minecraftVersion: value.minecraftVersion,
+    pack,
+  });
+  const requiredSlug = VERSION_ISOLATED_PROFILE_SLUGS[profile];
+  if (requiredSlug !== undefined && value.slug !== requiredSlug) {
+    throw new Error(
+      `publication-plan.json profile ${profile} requires isolated channel slug ${requiredSlug}.`,
+    );
+  }
   if (!exactKeys(value.paths, ['corePublication', 'packedExport', 'previewSidecar'])) {
     throw new Error('publication-plan.json paths must contain exactly the three prepared artifacts.');
   }
@@ -204,7 +234,7 @@ export function requirePublicationPlan(value) {
     }
   }
   const paths = REQUIRED_ARTIFACT_PATHS;
-  return Object.freeze({...value, pack, profile, paths});
+  return Object.freeze({...value, exporterAcceptance, pack, profile, paths});
 }
 
 async function requireMissingWorkspace(path) {
@@ -235,39 +265,95 @@ function planPaths(workspace) {
   };
 }
 
+const DEFAULT_PREPARE_DEPENDENCIES = Object.freeze({
+  importExportData,
+  loadCurrentPublicationExporterAcceptance,
+  verifyAcceptedRawPublicationExport,
+  verifyPublicationExporterBuildFile,
+});
+
+function requirePrepareDependencies(overrides) {
+  const dependencies = {...DEFAULT_PREPARE_DEPENDENCIES, ...overrides};
+  for (const [name, dependency] of Object.entries(dependencies)) {
+    if (typeof dependency !== 'function') {
+      throw new Error(`Preparation dependency ${name} must be a function.`);
+    }
+  }
+  return dependencies;
+}
+
 export async function prepareModpackPublication({
   source,
   workspace,
   profile,
+  releaseId,
   slug,
   stagingMode = null,
   concurrency,
   logger = console,
+  releaseDefinitions = EXPORTER_RELEASE_DEFINITIONS,
+  exporterWorkspaceRoot = DEFAULT_EXPORTER_WORKSPACE_ROOT,
+  acceptanceRoot = DEFAULT_EXPORTER_ACCEPTANCE_ROOT,
+  dependencies: dependencyOverrides = {},
 }) {
-  const sourceRoot = await realpath(resolve(source));
+  const dependencies = requirePrepareDependencies(dependencyOverrides);
+  const requestedSourceRoot = resolve(source);
+  const requestedSourceInfo = await lstat(requestedSourceRoot);
+  if (requestedSourceInfo.isSymbolicLink() || !requestedSourceInfo.isDirectory()) {
+    throw new Error(
+      `Raw publication source must be a no-follow plain directory: ${requestedSourceRoot}.`,
+    );
+  }
+  const sourceRoot = await realpath(requestedSourceRoot);
   const workspaceRoot = resolve(workspace);
   await requireMissingWorkspace(workspaceRoot);
   const rawManifest = requireFullPublicationManifest(
     await readJsonDocument(join(sourceRoot, 'manifest.json'), 'Raw manifest.json'),
     'Raw manifest.json',
   );
+  const pack = requirePublishablePackIdentity(rawManifest?.pack);
+  if (typeof rawManifest.minecraft !== 'string' || rawManifest.minecraft.length === 0) {
+    throw new Error('Raw manifest.minecraft must be a non-empty string.');
+  }
+  const initialAcceptance = await dependencies.loadCurrentPublicationExporterAcceptance({
+    releaseId,
+    profile,
+    minecraftVersion: rawManifest.minecraft,
+    pack,
+    definitions: releaseDefinitions,
+    workspaceRoot: exporterWorkspaceRoot,
+    acceptanceRoot,
+    logger,
+  });
+  await dependencies.verifyPublicationExporterBuildFile({
+    exportRoot: sourceRoot,
+    binding: initialAcceptance.binding,
+    label: 'Raw source export',
+  });
   await mkdir(workspaceRoot);
   const paths = planPaths(workspaceRoot);
   try {
-    const pack = requirePublishablePackIdentity(rawManifest?.pack);
-    if (typeof rawManifest.minecraft !== 'string' || rawManifest.minecraft.length === 0) {
-      throw new Error('Raw manifest.minecraft must be a non-empty string.');
-    }
     const channelSlug = slug ?? slugForPackName(pack.name);
+    const requiredSlug = VERSION_ISOLATED_PROFILE_SLUGS[profile];
+    if (requiredSlug !== undefined && channelSlug !== requiredSlug) {
+      throw new Error(
+        `Profile ${profile} requires isolated channel slug ${requiredSlug}; received ${channelSlug}.`,
+      );
+    }
     logger.info(
       `[publish-modpack] Preparing ${pack.name} ${pack.version} as channel ${channelSlug}.`,
     );
-    await importExportData({
+    await dependencies.importExportData({
       source: sourceRoot,
       destination: paths.packedExport,
       profile,
       omitRecipeImages: true,
       stagingMode,
+      verifyStagedSource: stagedRoot => dependencies.verifyAcceptedRawPublicationExport({
+        exportRoot: stagedRoot,
+        binding: initialAcceptance.binding,
+        logger,
+      }),
     });
     const preview = await buildRecipePreviewSidecar({
       source: sourceRoot,
@@ -296,10 +382,27 @@ export async function prepareModpackPublication({
     if (JSON.stringify(packedPack) !== JSON.stringify(pack)) {
       throw new Error('Pack identity changed while the export was optimized and packed.');
     }
+    await dependencies.verifyPublicationExporterBuildFile({
+      exportRoot: paths.packedExport,
+      binding: initialAcceptance.binding,
+      label: 'Packed export',
+    });
+    const committedAcceptance = await dependencies.loadCurrentPublicationExporterAcceptance({
+      releaseId,
+      profile,
+      minecraftVersion: rawManifest.minecraft,
+      pack,
+      definitions: releaseDefinitions,
+      workspaceRoot: exporterWorkspaceRoot,
+      acceptanceRoot,
+      expectedBinding: initialAcceptance.binding,
+      logger,
+    });
     const plan = requirePublicationPlan({
       format: PUBLICATION_PLAN_FORMAT,
       createdAt: new Date().toISOString(),
       profile,
+      exporterAcceptance: committedAcceptance.binding,
       pack,
       minecraftVersion: rawManifest.minecraft,
       slug: channelSlug,
@@ -557,6 +660,23 @@ const DEFAULT_UPLOAD_DEPENDENCIES = Object.freeze({
   verifyPublicCoreDatasetPublication,
   verifyRemoteRecipePreviewSidecar,
   administerDatasetChannel,
+  async verifyPreparedPublicationAcceptance({plan, packedExport, logger}) {
+    const releaseId = plan.exporterAcceptance.receipt.release.id;
+    await loadCurrentPublicationExporterAcceptance({
+      releaseId,
+      profile: plan.profile,
+      minecraftVersion: plan.minecraftVersion,
+      pack: plan.pack,
+      definitions: EXPORTER_RELEASE_DEFINITIONS,
+      expectedBinding: plan.exporterAcceptance,
+      logger,
+    });
+    await verifyPublicationExporterBuildFile({
+      exportRoot: packedExport,
+      binding: plan.exporterAcceptance,
+      label: 'Prepared packed export',
+    });
+  },
 });
 
 function requireUploadDependencies(overrides) {
@@ -605,6 +725,15 @@ export async function uploadPreparedModpackPublication({
   ) {
     throw new Error('Prepared publication plan no longer matches its packed manifest.');
   }
+  await dependencies.verifyPreparedPublicationAcceptance({
+    plan,
+    packedExport,
+    logger,
+  });
+  logger.info(
+    `[publish-modpack] Revalidated exporter receipt sha256=${plan.exporterAcceptance.receiptSha256} ` +
+      `for release ${plan.exporterAcceptance.receipt.release.id} before catalog or credential access.`,
+  );
 
   const datasets = await dependencies.fetchPublishingCatalog({appOrigin: origin});
   const {expectedPreviousPublicationId} = resolveChannelExpectation({

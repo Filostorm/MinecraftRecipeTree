@@ -1,5 +1,5 @@
 import {availableParallelism} from 'node:os';
-import {stat} from 'node:fs/promises';
+import {readFile, stat} from 'node:fs/promises';
 import {extname, join, posix, relative, resolve, sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import sharp from 'sharp';
@@ -7,8 +7,14 @@ import {collectFiles, isRecord, pathKind, readJsonDocument} from './export-data-
 import {
   EXPORT_QUALITY_PROFILE_IDS,
   exportQualityIssues,
+  MULTIBLOCK_MADNESS_112_PROFILE,
+  qualityProfileRequirementsFor,
   resolveQualityProfile,
 } from './export-quality-policy.mjs';
+import {
+  EXPORTER_BUILD_EXPORT_PATH,
+  parseExporterBuildIdentityBytes,
+} from './exporter-artifact-provenance.mjs';
 import {computePublicationId, PUBLICATION_ID_PATTERN} from './publication-id.mjs';
 import {requirePackIdentity} from './pack-identity.mjs';
 import {
@@ -67,6 +73,7 @@ export async function validateExportData(exportRoot = defaultExportRoot, options
   const allowLegacyRecipeImageAccounting =
     options.allowLegacyRecipeImageAccounting === true;
   const qualityProfile = resolveQualityProfile(options.profile);
+  const qualityRequirements = qualityProfileRequirementsFor(qualityProfile);
   let computedRecipeImageInventory = null;
   const errors = [];
   let suppressedErrors = 0;
@@ -81,6 +88,24 @@ export async function validateExportData(exportRoot = defaultExportRoot, options
 
   const allFiles = await collectFiles(root);
   const fileKeys = new Set(allFiles.map(path => relativeKey(root, path)));
+  if (fileKeys.has(EXPORTER_BUILD_EXPORT_PATH)) {
+    try {
+      parseExporterBuildIdentityBytes(
+        await readFile(join(root, EXPORTER_BUILD_EXPORT_PATH)),
+        EXPORTER_BUILD_EXPORT_PATH,
+      );
+    } catch (error) {
+      fail(
+        `${EXPORTER_BUILD_EXPORT_PATH} failed its canonical identity contract: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  } else if (qualityRequirements?.requiresExporterBuildIdentity) {
+    fail(
+      `Export quality profile ${qualityProfile} requires root ${EXPORTER_BUILD_EXPORT_PATH} from its exact exporter JAR.`,
+    );
+  }
   const manifest = await readJsonDocument(join(root, 'manifest.json'), 'manifest.json');
   const itemsDoc = await readJsonDocument(join(root, 'items.json'), 'items.json');
   const categoriesDoc = await readJsonDocument(join(root, 'categories.json'), 'categories.json');
@@ -607,8 +632,17 @@ export async function validateExportData(exportRoot = defaultExportRoot, options
     }
   }
 
+  let warnings;
+  if (qualityProfile === MULTIBLOCK_MADNESS_112_PROFILE) {
+    if (fileKeys.has('warnings.json')) {
+      warnings = await readJsonDocument(join(root, 'warnings.json'), 'warnings.json');
+    } else {
+      warnings = null;
+    }
+  }
+
   for (const issue of exportQualityIssues(
-    {manifest, failures, semanticErrorRecipes},
+    {manifest, failures, warnings, semanticErrorRecipes},
     qualityProfile,
   )) {
     fail(issue);
@@ -1122,6 +1156,9 @@ export async function validateExportData(exportRoot = defaultExportRoot, options
     mobs: mobs.length,
     blockDrops: blockDropCount,
     failures: failureCount,
+    ...(qualityProfile === MULTIBLOCK_MADNESS_112_PROFILE && Array.isArray(warnings)
+      ? {warnings: warnings.length}
+      : {}),
     semanticErrorRecipes,
     imageReferences: assetReferences.size,
     packedAssets: coordinatePacked ? assetReferences.size : 0,

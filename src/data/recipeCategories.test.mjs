@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   compareRecipeCategories,
+  GTNH_AE2_WORLD_CRAFTING_INFORMATION_CATEGORY_ID,
+  GTNH_BETTERQUESTING_INFORMATION_CATEGORY_ID,
   isMetaRecipeCategory,
   isRepairRecipeCategory,
   isSecondaryRecipeCategory,
@@ -88,5 +90,15 @@ test('excludes both JEI and HEI information and description meta-categories', ()
     'custommod:description',
   ]) {
     assert.equal(isMetaRecipeCategory(category(id)), false, id);
+  }
+});
+
+test('classifies exact GTNH AE2 and BetterQuesting item-reference pages as informational', () => {
+  for (const id of [
+    GTNH_AE2_WORLD_CRAFTING_INFORMATION_CATEGORY_ID,
+    GTNH_BETTERQUESTING_INFORMATION_CATEGORY_ID,
+  ]) {
+    assert.equal(isMetaRecipeCategory(category(id)), true, id);
+    assert.equal(isMetaRecipeCategory(category(`${id}.execution`)), false, `${id}.execution`);
   }
 });

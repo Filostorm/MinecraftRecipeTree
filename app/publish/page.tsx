@@ -219,6 +219,10 @@ export default function PublishPage() {
                           <dt>Quality profile</dt>
                           <dd>{release.qualityProfiles.join(', ')}</dd>
                         </div>
+                        <div>
+                          <dt>Release ID</dt>
+                          <dd><code>{release.id}</code></dd>
+                        </div>
                       </dl>
                       <a
                         className={styles.downloadButton}
@@ -288,6 +292,19 @@ export default function PublishPage() {
                   <li><code>neiexport-request.json</code> for the pinned GTNH 1.7.10 release</li>
                 </ul>
                 <p>
+                  The Multiblock Madness profiles require native <code>iconScale: 1</code> item
+                  canvases and complete <code>recipeScale: 2</code> layouts. The 1.18.2 request also
+                  requires the exact <code>multiblock-madness-2-1.18.2</code> profile,
+                  {' '}<code>failOnError: true</code>, and a bounded <code>pngQueueCapacity</code> from
+                  8 through 128. The 1.12.2 request has no <code>profile</code> field; select its
+                  listed profile during validation and publication preparation.
+                </p>
+                <p>
+                  Omit <code>qualitySample</code> from a full request. That field identifies a
+                  diagnostic mini export, and the production publisher rejects it rather than
+                  exposing an incomplete recipe corpus.
+                </p>
+                <p>
                   Wait for the success message or completion marker. Never copy an export while
                   Minecraft is still writing it.
                 </p>
@@ -314,21 +331,24 @@ export default function PublishPage() {
             <li>
               <span className={styles.number}>5</span>
               <div>
-                <h3>Prepare an immutable publication workspace</h3>
+                <h3>Have the operator prepare an immutable publication workspace</h3>
                 <p>
-                  From a local checkout of the Recipe Tree viewer, use the quality profile listed
-                  on your exporter card. Pick a stable lowercase slug that future pack updates will
-                  reuse.
+                  The current fail-closed preparer requires the operator&apos;s local acceptance receipt
+                  and configured source JAR. Use the quality profile and release ID shown on the
+                  exporter card, and pick the stable isolated slug assigned to this pack.
                 </p>
                 <pre><code>{`npm install
 npm run publish:modpack -- prepare \\
   --source "/absolute/path/to/export" \\
   --workspace "/absolute/path/to/new-workspace" \\
   --profile "<quality-profile-from-download-card>" \\
+  --release "<release-id-from-download-card>" \\
   --slug "stable-pack-slug"`}</code></pre>
                 <p>
-                  Preparation rejects malformed paths and data, validates cross-references,
-                  computes immutable content IDs, and writes <code>publication-plan.json</code> last.
+                  Preparation requires the operator&apos;s exact accepted release receipt, hashes the
+                  staged raw snapshot against it, validates cross-references, computes immutable
+                  content IDs, and writes the receipt identity into <code>publication-plan.json</code>
+                  last. It never substitutes a different profile, release, or receipt.
                   If it fails, keep the workspace for diagnosis and prepare a new one after fixing
                   the exporter or source data.
                 </p>
@@ -337,11 +357,12 @@ npm run publish:modpack -- prepare \\
             <li>
               <span className={styles.number}>6</span>
               <div>
-                <h3>Submit to the site operator</h3>
+                <h3>Submit the completed raw export to the site operator</h3>
                 <p>
-                  Transfer the complete prepared workspace through the operator&apos;s approved
-                  channel. Include the requested stable slug and whether this is a new pack or an
-                  update. Do not request, store, or transmit production upload tokens.
+                  Transfer the completed raw export and its completion evidence through the
+                  operator&apos;s approved channel. The operator creates the acceptance-bound prepared
+                  workspace. Do not request, store, or transmit production upload tokens or provide
+                  an untrusted replacement acceptance receipt.
                 </p>
                 <p>
                   The operator authenticates both exact ingestion targets, resumes immutable

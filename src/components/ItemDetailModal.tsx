@@ -13,6 +13,7 @@ import {useData} from '../data/DataContext';
 import {
   AUTOMATED_SHAPED_CATEGORY_ID,
   compareRecipeCategories,
+  GTNH_BETTERQUESTING_INFORMATION_CATEGORY_ID,
   isDefaultDisabledRecipeCategory,
 } from '../data/recipeCategories';
 import {isFluidContainerTransferRecipe} from '../data/recipeVisibility';
@@ -40,8 +41,8 @@ export function ItemDetailModal() {
   const data = useData();
   const {itemStack, popItem, closeItems} = useUi();
   const key = itemStack[itemStack.length - 1];
-  /** 'p' | 'u' | 'd' | a secondary category index */
-  const [side, setSide] = useState<'p' | 'u' | 'd' | number>('p');
+  /** 'p' | 'u' | 'i' | 'd' | a secondary category index */
+  const [side, setSide] = useState<'p' | 'u' | 'i' | 'd' | number>('p');
 
   useEffect(() => setSide('p'), [key]);
 
@@ -52,6 +53,11 @@ export function ItemDetailModal() {
     (refs ?? []).filter(r => !data.metaCategories.has(r[0]));
   const produced = visible(entry?.p).filter(r => !data.secondaryCategories.has(r[0]));
   const used = visible(entry?.u).filter(r => !data.secondaryCategories.has(r[0]));
+  const informationalByKey = new Map<string, RecipeRef>();
+  for (const ref of [...(entry?.p ?? []), ...(entry?.u ?? [])]) {
+    if (data.metaCategories.has(ref[0])) informationalByKey.set(recipeRefKey(ref), ref);
+  }
+  const informational = [...informationalByKey.values()];
   // Secondary categories (anvil, smithing, trading): a repair/trade both "produces"
   // and "uses" the item — merge produced+used per category and dedupe.
   const secondarySeen = new Set<string>();
@@ -77,9 +83,11 @@ export function ItemDetailModal() {
       ? produced
       : side === 'u'
         ? used
-        : typeof side === 'number'
-          ? secondaryGroups.find(g => g.catIdx === side)?.refs ?? []
-          : [];
+        : side === 'i'
+          ? informational
+          : typeof side === 'number'
+            ? secondaryGroups.find(g => g.catIdx === side)?.refs ?? []
+            : [];
 
   const blockDrop = data.blockDrops[key];
   const droppedBy = data.droppedByMobs.get(key) ?? [];
@@ -117,6 +125,13 @@ export function ItemDetailModal() {
           <View style={styles.tabsRow}>
             <SideTab label={`Recipes (${produced.length})`} active={side === 'p'} onPress={() => setSide('p')} />
             <SideTab label={`Usages (${used.length})`} active={side === 'u'} onPress={() => setSide('u')} />
+            {informational.length > 0 && (
+              <SideTab
+                label={`Info (${informational.length})`}
+                active={side === 'i'}
+                onPress={() => setSide('i')}
+              />
+            )}
             {secondaryGroups.map(g => (
               <SideTab
                 key={g.catIdx}
@@ -173,7 +188,11 @@ export function ItemDetailModal() {
                 {side === 'p' ? 'Nothing crafts this item.' : side === 'u' ? 'Not used in any recipe.' : 'Nothing here.'}
               </Text>
             ) : (
-              <RefsList key={`${key}:${side}`} refs={refs} />
+              <RefsList
+                key={`${key}:${side}`}
+                refs={refs}
+                informational={side === 'i'}
+              />
             )}
           </ScrollView>
         </Pressable>
@@ -191,7 +210,7 @@ function SideTab({label, active, onPress}: {label: string; active: boolean; onPr
 }
 
 /** Loads only the bounded recipe shards containing the currently visible references. */
-function RefsList({refs}: {refs: RecipeRef[]}) {
+function RefsList({refs, informational = false}: {refs: RecipeRef[]; informational?: boolean}) {
   const data = useData();
   const {openRecipeInGraph} = useUi();
   const [visibleTarget, setVisibleTarget] = useState(PAGE);
@@ -213,6 +232,9 @@ function RefsList({refs}: {refs: RecipeRef[]}) {
   }, [refs, data.categories]);
   const automatedShapedCount =
     categoryGroups.find(group => group.category?.id === AUTOMATED_SHAPED_CATEGORY_ID)?.count ?? 0;
+  const hasBetterQuestingPages = categoryGroups.some(
+    group => group.category?.id === GTNH_BETTERQUESTING_INFORMATION_CATEGORY_ID,
+  );
   const visibleCategoryGroups = categoryGroups.filter(
     group => showAutomatedShaped || !isDefaultDisabledRecipeCategory(group.category),
   );
@@ -234,11 +256,11 @@ function RefsList({refs}: {refs: RecipeRef[]}) {
     () =>
       filteredRefs.slice(
         0,
-        showFluidTransfers
+        informational || showFluidTransfers
           ? visibleTarget
           : Math.min(scanLimit, MAX_DEFAULT_FILTER_SCAN),
       ),
-    [filteredRefs, showFluidTransfers, visibleTarget, scanLimit],
+    [filteredRefs, informational, showFluidTransfers, visibleTarget, scanLimit],
   );
   const loadedScan = refsToLoad.every(ref => recipesByRef.has(recipeRefKey(ref)));
   const visibleCandidates = useMemo(
@@ -247,25 +269,31 @@ function RefsList({refs}: {refs: RecipeRef[]}) {
         const recipe = recipesByRef.get(recipeRefKey(ref));
         return (
           recipe !== undefined &&
-          (showFluidTransfers || !isFluidContainerTransferRecipe(recipe, data.itemsByKey))
+          (informational ||
+            showFluidTransfers ||
+            !isFluidContainerTransferRecipe(recipe, data.itemsByKey))
         );
       }),
-    [refsToLoad, recipesByRef, showFluidTransfers, data.itemsByKey],
+    [refsToLoad, recipesByRef, informational, showFluidTransfers, data.itemsByKey],
   );
   const shown = visibleCandidates.slice(0, visibleTarget);
   const hiddenFluidTransferCount = refsToLoad.reduce((count, ref) => {
     const recipe = recipesByRef.get(recipeRefKey(ref));
     return count +
-      (recipe && isFluidContainerTransferRecipe(recipe, data.itemsByKey) ? 1 : 0);
+      (!informational && recipe && isFluidContainerTransferRecipe(recipe, data.itemsByKey) ? 1 : 0);
   }, 0);
   const defaultScanMaximum = Math.min(filteredRefs.length, MAX_DEFAULT_FILTER_SCAN);
   const scannedAll = scanLimit >= defaultScanMaximum;
   const scanCapped =
+    !informational &&
     !showFluidTransfers &&
     filteredRefs.length > MAX_DEFAULT_FILTER_SCAN &&
     scanLimit >= MAX_DEFAULT_FILTER_SCAN;
   const fillingVisiblePage =
-    !showFluidTransfers && !scannedAll && visibleCandidates.length < visibleTarget;
+    !informational &&
+    !showFluidTransfers &&
+    !scannedAll &&
+    visibleCandidates.length < visibleTarget;
   const loadingVisiblePage =
     (refsToLoad.length > 0 && !loadedScan) || fillingVisiblePage;
 
@@ -277,6 +305,7 @@ function RefsList({refs}: {refs: RecipeRef[]}) {
   useEffect(() => {
     if (
       showFluidTransfers ||
+      informational ||
       !loadedScan ||
       visibleCandidates.length >= visibleTarget ||
       scanLimit >= defaultScanMaximum
@@ -289,6 +318,7 @@ function RefsList({refs}: {refs: RecipeRef[]}) {
     loadedScan,
     scanLimit,
     showFluidTransfers,
+    informational,
     visibleCandidates.length,
     visibleTarget,
   ]);
@@ -340,10 +370,19 @@ function RefsList({refs}: {refs: RecipeRef[]}) {
         );
       }}>
       <View style={styles.recipeFilters}>
+        {informational && (
+          <Text style={styles.informationNotice}>
+            {hasBetterQuestingPages
+              ? 'Quest pages preserve flattened item associations for browsing. They do not model task AND/OR logic, optional tasks, possession-versus-consumption rules, or which choice reward a player selects. They are excluded from crafting graphs and material totals.'
+              : 'Informational item associations are excluded from crafting graphs and material totals.'}
+          </Text>
+        )}
         {categoryGroups.length > 1 && (
           <>
           <View style={styles.filterHeader}>
-            <Text style={styles.filterTitle}>Crafting type</Text>
+            <Text style={styles.filterTitle}>
+              {informational ? 'Information type' : 'Crafting type'}
+            </Text>
             <View style={styles.sortControls}>
               <Text style={styles.sortLabel}>Sort</Text>
               <FilterChip
@@ -395,34 +434,44 @@ function RefsList({refs}: {refs: RecipeRef[]}) {
             />
           </View>
         )}
-        <View style={styles.disabledTypeRow}>
-          <View style={styles.disabledTypeCopy}>
-            <Text style={styles.disabledTypeTitle}>Fluid container transfers</Text>
-            <Text style={styles.disabledTypeHint}>
-              Hidden by default
-              {hiddenFluidTransferCount > 0
-                ? ` · ${hiddenFluidTransferCount} identified in loaded recipes`
-                : ''}
-            </Text>
+        {!informational && (
+          <View style={styles.disabledTypeRow}>
+            <View style={styles.disabledTypeCopy}>
+              <Text style={styles.disabledTypeTitle}>Fluid container transfers</Text>
+              <Text style={styles.disabledTypeHint}>
+                Hidden by default
+                {hiddenFluidTransferCount > 0
+                  ? ` · ${hiddenFluidTransferCount} identified in loaded recipes`
+                  : ''}
+              </Text>
+            </View>
+            <Switch
+              accessibilityLabel="Show fluid container-transfer recipes"
+              value={showFluidTransfers}
+              onValueChange={setShowFluidTransfers}
+              trackColor={{false: theme.border, true: theme.accent}}
+              thumbColor={theme.text}
+            />
           </View>
-          <Switch
-            accessibilityLabel="Show fluid container-transfer recipes"
-            value={showFluidTransfers}
-            onValueChange={setShowFluidTransfers}
-            trackColor={{false: theme.border, true: theme.accent}}
-            thumbColor={theme.text}
-          />
-        </View>
+        )}
       </View>
       {filteredRefs.length === 0 ? (
-        <Text style={styles.emptyText}>No recipes match this crafting type.</Text>
+        <Text style={styles.emptyText}>
+          {informational
+            ? 'No informational pages match this type.'
+            : 'No recipes match this crafting type.'}
+        </Text>
       ) : null}
       {loadingVisiblePage ? (
-        <Text style={styles.loadingText}>classifying recipe variants…</Text>
+        <Text style={styles.loadingText}>
+          {informational ? 'loading informational pages…' : 'classifying recipe variants…'}
+        </Text>
       ) : null}
       {!loadingVisiblePage && shown.length === 0 && filteredRefs.length > 0 ? (
         <Text style={styles.emptyText}>
-          No standard recipes match. Enable fluid container transfers to view hidden conversions.
+          {informational
+            ? 'No informational pages could be displayed.'
+            : 'No standard recipes match. Enable fluid container transfers to view hidden conversions.'}
         </Text>
       ) : null}
       {scanCapped ? (
@@ -445,7 +494,7 @@ function RefsList({refs}: {refs: RecipeRef[]}) {
                 catTitle={cat.title}
                 availableCardWidth={availableCardWidth}
                 onPress={
-                  outputKey
+                  outputKey && !informational
                     ? () => openRecipeInGraph(outputKey, [catIdx, recipeIdx])
                     : undefined
                 }
@@ -458,16 +507,20 @@ function RefsList({refs}: {refs: RecipeRef[]}) {
           </View>
         );
       })}
-      {(showFluidTransfers
+      {(informational
         ? filteredRefs.length > visibleTarget
-        : !scannedAll || visibleCandidates.length > visibleTarget) && (
+        : showFluidTransfers
+          ? filteredRefs.length > visibleTarget
+          : !scannedAll || visibleCandidates.length > visibleTarget) && (
         <TouchableOpacity
           style={styles.moreBtn}
           onPress={() => {
             setVisibleTarget(value => value + PAGE);
             setScanLimit(limit => Math.min(filteredRefs.length, limit + PAGE));
           }}>
-          <Text style={styles.moreBtnText}>Show more recipes</Text>
+          <Text style={styles.moreBtnText}>
+            {informational ? 'Show more information' : 'Show more recipes'}
+          </Text>
         </TouchableOpacity>
       )}
     </View>
@@ -531,6 +584,7 @@ const styles = StyleSheet.create({
     gap: 9,
   },
   recipeList: {width: '100%'},
+  informationNotice: {color: theme.textDim, fontSize: 12, lineHeight: 17},
   filterHeader: {
     flexDirection: 'row',
     alignItems: 'center',

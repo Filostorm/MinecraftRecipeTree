@@ -17,7 +17,10 @@ import {
   EXPORT_QUALITY_PROFILE_IDS,
   exportQualityIssues,
   GENERIC_JEI_120_PROFILE,
+  GTNH_DATA_ATTRIBUTION,
+  GTNH_HANDLER_POLICIES,
   GTNH_1710_PROFILE,
+  GTNH_KNOWLEDGE_POLICY,
   gtnhManifestQualityIssues,
   MEATBALLCRAFT_112_PROFILE,
   MULTIBLOCK_MADNESS_112_PROFILE,
@@ -64,6 +67,11 @@ const DATASET_COUNT_KEYS = Object.freeze([
 const DATASET_DIAGNOSTIC_KEYS = Object.freeze([
   'failureEvents',
   'failureEventsOmitted',
+]);
+const MM1_DATASET_DIAGNOSTIC_KEYS = Object.freeze([
+  ...DATASET_DIAGNOSTIC_KEYS,
+  'warningEvents',
+  'warningEventsOmitted',
 ]);
 const MM2_DATASET_COUNT_KEYS = Object.freeze([
   ...DATASET_COUNT_KEYS,
@@ -149,6 +157,7 @@ function manifestCountKeysForProfile(profile) {
 }
 
 function manifestDiagnosticKeysForProfile(profile) {
+  if (profile === MULTIBLOCK_MADNESS_112_PROFILE) return MM1_DATASET_DIAGNOSTIC_KEYS;
   if (profile === MULTIBLOCK_MADNESS_2_118_PROFILE) return MM2_DATASET_DIAGNOSTIC_KEYS;
   if (profile === GTNH_1710_PROFILE) return GTNH_DATASET_DIAGNOSTIC_KEYS;
   return DATASET_DIAGNOSTIC_KEYS;
@@ -308,6 +317,22 @@ function validateProfileManifestExtensions(manifest, profile, label) {
       );
     }
   }
+  if (profile === MULTIBLOCK_MADNESS_112_PROFILE) {
+    requireNonNegativeSafeInteger(
+      manifest.diagnostics.warningEvents,
+      `${label}.diagnostics.warningEvents`,
+    );
+    const warningEventsOmitted = requireNonNegativeSafeInteger(
+      manifest.diagnostics.warningEventsOmitted,
+      `${label}.diagnostics.warningEventsOmitted`,
+    );
+    if (warningEventsOmitted !== 0) {
+      throw new Error(
+        `${label}.diagnostics.warningEventsOmitted must be 0 for publication; received ` +
+          `${warningEventsOmitted}.`,
+      );
+    }
+  }
   if (profile === GENERIC_JEI_120_PROFILE) {
     requirePackIdentity(manifest.pack, `${label}.pack`);
   }
@@ -352,7 +377,7 @@ function assertProfileQuality(input, profile, label) {
  * derive counts from the validated raw manifest, but require every declared
  * recipe to have a preview and retain exact hosted/raw identity checks.
  */
-export function recipePreviewContractForProfile(profile, rawManifest) {
+export function recipePreviewContractForProfile(profile, rawManifest, warnings) {
   const resolvedProfile = resolveQualityProfile(profile);
   if (resolvedProfile === null) {
     throw new Error(
@@ -370,7 +395,7 @@ export function recipePreviewContractForProfile(profile, rawManifest) {
 
   const requirements = qualityProfileRequirementsFor(resolvedProfile);
   assertProfileQuality(
-    {manifest: rawManifest, failures: [], semanticErrorRecipes: 0},
+    {manifest: rawManifest, failures: [], warnings, semanticErrorRecipes: 0},
     resolvedProfile,
     'Raw export manifest',
   );
@@ -415,6 +440,13 @@ export function recipePreviewContractForProfile(profile, rawManifest) {
     format: requirements.format,
     minecraft: requirements.minecraft,
     ...(requirements.provenance ?? {}),
+    ...(resolvedProfile === GTNH_1710_PROFILE
+      ? {
+          handlerPolicies: GTNH_HANDLER_POLICIES,
+          knowledgePolicy: GTNH_KNOWLEDGE_POLICY,
+          attribution: GTNH_DATA_ATTRIBUTION,
+        }
+      : {}),
     ...(rawManifest.pack === undefined
       ? {}
       : {pack: requirePackIdentity(rawManifest.pack, `${requirements.label} manifest.pack`)}),
@@ -666,6 +698,9 @@ function validateDatasetManifest(manifest, contract, label, {hosted = false} = {
   ];
   if (contract.repairProvenance !== undefined) expectedManifestKeys.push('repairProvenance');
   if (contract.qualitySample !== undefined) expectedManifestKeys.push('qualitySample');
+  if (contract.handlerPolicies !== undefined) expectedManifestKeys.push('handlerPolicies');
+  if (contract.knowledgePolicy !== undefined) expectedManifestKeys.push('knowledgePolicy');
+  if (contract.attribution !== undefined) expectedManifestKeys.push('attribution');
   for (const name of GTNH_PROVENANCE_KEYS) {
     if (contract[name] !== undefined) expectedManifestKeys.push(name);
   }
@@ -716,6 +751,23 @@ function validateDatasetManifest(manifest, contract, label, {hosted = false} = {
   }
   if (contract.qualitySample !== undefined) {
     assertExactRecord(manifest.qualitySample, contract.qualitySample, `${label}.qualitySample`);
+  }
+  if (contract.handlerPolicies !== undefined) {
+    if (!isDeepStrictEqual(manifest.handlerPolicies, contract.handlerPolicies)) {
+      throw new Error(
+        `${label}.handlerPolicies must equal the exact pinned GTNH handler-policy array.`,
+      );
+    }
+  }
+  if (contract.knowledgePolicy !== undefined) {
+    assertExactRecord(
+      manifest.knowledgePolicy,
+      contract.knowledgePolicy,
+      `${label}.knowledgePolicy`,
+    );
+  }
+  if (contract.attribution !== undefined) {
+    assertExactRecord(manifest.attribution, contract.attribution, `${label}.attribution`);
   }
   assertExactRecord(manifest.counts, contract.counts, `${label}.counts`);
   assertExactRecord(manifest.diagnostics, contract.diagnostics, `${label}.diagnostics`);
@@ -1887,16 +1939,20 @@ export async function buildRecipePreviewSidecar({
   logger.info(`Writing transaction staging directory ${stagingRoot}.`);
 
   try {
-    const [rawManifest, hostedPublication, categoriesDocument, failures] = await Promise.all([
-      readJsonFile(join(rawRoot, 'manifest.json'), 'Raw export manifest'),
-      readHostedPublication(datasetManifest),
-      readJsonFile(join(rawRoot, 'categories.json'), 'Raw export categories'),
-      resolvedProfile === null
-        ? Promise.resolve(null)
-        : readJsonFile(join(rawRoot, 'failures.json'), 'Raw export failures'),
-    ]);
+    const [rawManifest, hostedPublication, categoriesDocument, failures, warnings] =
+      await Promise.all([
+        readJsonFile(join(rawRoot, 'manifest.json'), 'Raw export manifest'),
+        readHostedPublication(datasetManifest),
+        readJsonFile(join(rawRoot, 'categories.json'), 'Raw export categories'),
+        resolvedProfile === null
+          ? Promise.resolve(null)
+          : readJsonFile(join(rawRoot, 'failures.json'), 'Raw export failures'),
+        resolvedProfile === MULTIBLOCK_MADNESS_112_PROFILE
+          ? readJsonFile(join(rawRoot, 'warnings.json'), 'Raw export warnings')
+          : Promise.resolve(undefined),
+      ]);
     const datasetContract =
-      contract ?? recipePreviewContractForProfile(resolvedProfile, rawManifest);
+      contract ?? recipePreviewContractForProfile(resolvedProfile, rawManifest, warnings);
     validateContract(datasetContract, resolvedProfile);
     if (resolvedProfile !== null) {
       if (!Array.isArray(failures)) {
@@ -1917,7 +1973,7 @@ export async function buildRecipePreviewSidecar({
         );
       }
       assertProfileQuality(
-        {manifest: rawManifest, failures, semanticErrorRecipes: 0},
+        {manifest: rawManifest, failures, warnings, semanticErrorRecipes: 0},
         resolvedProfile,
         'Raw export metadata',
       );
@@ -1929,6 +1985,21 @@ export async function buildRecipePreviewSidecar({
     });
     assertRawAndHostedIdentity(rawManifest, hostedManifest);
     await verifyHostedPublicationId(hostedPublication, logger);
+    if (resolvedProfile === MULTIBLOCK_MADNESS_112_PROFILE) {
+      const hostedWarnings = (
+        await hostedPublication.readDocument('warnings.json', 'Hosted warnings.json')
+      ).value;
+      if (!isDeepStrictEqual(warnings, hostedWarnings)) {
+        throw new Error(
+          'Raw export warnings.json does not exactly match the hosted dataset publication; ' +
+            'refusing to build a preview sidecar for unaudited warning metadata.',
+        );
+      }
+      logger.info(
+        `Validated ${warnings.length} audited Multiblock Madness warning event(s) against ` +
+          'the hosted warnings.json document.',
+      );
+    }
     const categories = validateCategories(
       categoriesDocument,
       datasetContract.counts.categories,
@@ -2067,7 +2138,7 @@ export async function buildRecipePreviewSidecar({
     }
     if (resolvedProfile !== null) {
       assertProfileQuality(
-        {manifest: rawManifest, failures, semanticErrorRecipes},
+        {manifest: rawManifest, failures, warnings, semanticErrorRecipes},
         resolvedProfile,
         'Raw export corpus',
       );
