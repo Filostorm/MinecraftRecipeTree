@@ -24,6 +24,7 @@ import {
 export const CORE_DATASET_UPLOAD_BASE_PATH = '/api/admin/core-datasets/';
 const DATASET_ID_HEADER = 'x-mrt-dataset-publication-id';
 const DIGEST_HEADER = 'x-mrt-content-sha256';
+const CONTENT_BYTES_HEADER = 'x-mrt-content-bytes';
 const IMMUTABLE_CACHE_CONTROL = 'public, max-age=31536000, immutable, no-transform';
 const MAX_STAGED_MANIFEST_CACHE_ENTRIES = 8;
 
@@ -142,6 +143,7 @@ function storedHeaders(
   const headers = new Headers({
     'Cache-Control': type ? IMMUTABLE_CACHE_CONTROL : 'no-store',
     'Content-Length': String(object.size),
+    [CONTENT_BYTES_HEADER]: String(object.size),
     [DATASET_ID_HEADER]: publicationId,
     [DIGEST_HEADER]: digest,
   });

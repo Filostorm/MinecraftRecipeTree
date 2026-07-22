@@ -14,6 +14,7 @@ const OBJECT_HEAD_RETRY_DELAYS_MS = Object.freeze([250, 500, 1_000, 2_000]);
 const MAX_TOKEN_BYTES = 8 * 1024;
 const IMMUTABLE_CACHE_CONTROL = 'public, max-age=31536000, immutable, no-transform';
 const SHA256_HEADER = 'x-mrt-content-sha256';
+const CONTENT_BYTES_HEADER = 'x-mrt-content-bytes';
 const DATASET_HEADER = 'x-mrt-dataset-publication-id';
 const PUBLICATION_STATE_HEADER = 'x-mrt-publication-state';
 const MANIFEST_BYTES_HEADER = 'x-mrt-manifest-bytes';
@@ -175,6 +176,22 @@ function exactHeader(response, name, expected, label) {
   }
 }
 
+function exactObjectBytes(response, expected, label) {
+  const proxyStableBytes = response.headers.get(CONTENT_BYTES_HEADER);
+  const contentLength = response.headers.get('content-length');
+  if (proxyStableBytes === null && contentLength === null) {
+    throw new Error(
+      `${label} returned neither ${CONTENT_BYTES_HEADER} nor content-length; expected ${JSON.stringify(expected)}.`,
+    );
+  }
+  if (proxyStableBytes !== null) {
+    exactHeader(response, CONTENT_BYTES_HEADER, expected, label);
+  }
+  if (contentLength !== null) {
+    exactHeader(response, 'content-length', expected, label);
+  }
+}
+
 function statusError(response, label) {
   if (response.status === 401 || response.status === 403) {
     return new Error(`${label} rejected the preview-ingestion bearer token (HTTP ${response.status}).`);
@@ -284,7 +301,7 @@ async function headObject({
       label,
     );
     if (response.status === 200) {
-      exactHeader(response, 'content-length', String(record.bytes), label);
+      exactObjectBytes(response, String(record.bytes), label);
       exactHeader(response, SHA256_HEADER, record.sha256, label);
       exactHeader(response, DATASET_HEADER, datasetPublicationId, label);
       await cancelResponse(response, logger, label);
