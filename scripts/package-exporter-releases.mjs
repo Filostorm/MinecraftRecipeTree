@@ -57,7 +57,7 @@ export const EXPORTER_RELEASE_DEFINITIONS = Object.freeze([
     }),
     acceptanceCorpora: Object.freeze({
       'multiblock-madness-2-1.18.2': Object.freeze({
-        items: Object.freeze({min: 68520, max: 68540}),
+        items: 68524,
         recipes: 99908,
         categories: 333,
         mobs: 0,

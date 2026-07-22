@@ -5,7 +5,6 @@ import {
   DEFAULT_EXPORTER_ACCEPTANCE_ROOT,
   DEFAULT_EXPORTER_WORKSPACE_ROOT,
   MAX_EXPORTER_MANIFEST_BYTES,
-  acceptanceCorpusMatchesCounts,
   buildExporterAcceptanceReceipt,
   exporterAcceptanceCorpusForProfile,
   exporterAcceptancePolicySha256,
@@ -208,7 +207,7 @@ export async function acceptExporterRelease({
   };
   if (
     acceptanceCorpus !== null &&
-    !acceptanceCorpusMatchesCounts(corpus, acceptanceCorpus)
+    !isDeepStrictEqual(corpus, acceptanceCorpus)
   ) {
     throw new Error(
       `Acceptance export corpus does not match release ${releaseId}/${qualityProfile}: expected ` +

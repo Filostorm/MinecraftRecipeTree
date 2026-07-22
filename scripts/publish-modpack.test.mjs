@@ -21,6 +21,7 @@ import {
   loadPreparedPlan,
   parsePublishModpackArguments,
   prepareModpackPublication,
+  requireApprovedPreparedAcceptanceMigration,
   requireFullPublicationManifest,
   requirePublicationPolicyBinding,
   requirePublicationPlan,
@@ -39,6 +40,38 @@ const ID_A = 'a'.repeat(64);
 const ID_B = 'b'.repeat(64);
 const ID_C = 'c'.repeat(64);
 const ID_D = 'd'.repeat(64);
+
+test('prepared acceptance migration is restricted to exact historical publication evidence', () => {
+  const candidate = {
+    profile: 'meatballcraft-1.12.2',
+    publicationId: '04c674ab74eeeaea151c9b985191f09e2be42156a879bb0493e2e29f94f3d46a',
+    exporterAcceptance: {
+      receiptSha256: '16d87871afd88f1f2dd06733871e845a73c0b8352ff67a82a2a07b0a9da11342',
+      receipt: {
+        validationPolicy: {
+          sha256: '93573e17f1007453531d49b41377be69f84cc3d5e86c924d112977af4ab65008',
+        },
+        release: {
+          sha256: '563536a2f5f034bf55c5e89e61fd3bbc91440243a8d0aad65919c4c8bed00f23',
+        },
+        exportTree: {
+          sha256: 'e3e8627ceaf3c4426e5a2084ae415005fc32d9292c7f19a40d9d6e51db4b4d2a',
+        },
+      },
+    },
+  };
+  assert.equal(
+    requireApprovedPreparedAcceptanceMigration(candidate).publicationId,
+    candidate.publicationId,
+  );
+  assert.throws(
+    () => requireApprovedPreparedAcceptanceMigration({
+      ...candidate,
+      exporterAcceptance: {...candidate.exporterAcceptance, receiptSha256: ID_A},
+    }),
+    /not covered by an exact approved/,
+  );
+});
 
 function exporterAcceptance(publicationPlan) {
   const releaseId = publicationPlan.minecraftVersion === '1.18.2'

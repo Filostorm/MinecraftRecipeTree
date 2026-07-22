@@ -19,6 +19,7 @@ import {
   requirePublicationAcceptanceContext,
   requirePublicationExporterAcceptance,
   loadCurrentPublicationExporterAcceptance,
+  verifyPublicationExporterArtifactBinding,
   verifyAcceptedRawPublicationExport,
   verifyPublicationExporterBuildFile,
 } from './publication-exporter-acceptance.mjs';
@@ -70,6 +71,44 @@ const REQUIRED_ARTIFACT_PATHS = Object.freeze({
   corePublication: 'core-publication/publication.json',
   previewSidecar: 'preview-sidecar',
 });
+
+const APPROVED_PREPARED_ACCEPTANCE_MIGRATIONS = Object.freeze([
+  Object.freeze({
+    profile: 'meatballcraft-1.12.2',
+    publicationId: '04c674ab74eeeaea151c9b985191f09e2be42156a879bb0493e2e29f94f3d46a',
+    receiptSha256: '16d87871afd88f1f2dd06733871e845a73c0b8352ff67a82a2a07b0a9da11342',
+    validationPolicySha256: '93573e17f1007453531d49b41377be69f84cc3d5e86c924d112977af4ab65008',
+    releaseSha256: '563536a2f5f034bf55c5e89e61fd3bbc91440243a8d0aad65919c4c8bed00f23',
+    exportTreeSha256: 'e3e8627ceaf3c4426e5a2084ae415005fc32d9292c7f19a40d9d6e51db4b4d2a',
+  }),
+  Object.freeze({
+    profile: 'multiblock-madness-1.12.2',
+    publicationId: '57a0afc6b7dae5960b86ba40ef7ae2ba94af8f2fc851a547026e2cec579c4c5e',
+    receiptSha256: '44875a9ce4107bba0bac1c9d0e64db5e4fb0f7d13e6cec4a3b150d452c947bcd',
+    validationPolicySha256: '650a9c2054d64bdf6647e390ff9489ac996c804cc0481a6064501112c3afd0c5',
+    releaseSha256: '563536a2f5f034bf55c5e89e61fd3bbc91440243a8d0aad65919c4c8bed00f23',
+    exportTreeSha256: 'e903e361517ba3c9cd2185f2e81f332f94f0563edd2bb8d872cb5d50d1c6d2e7',
+  }),
+]);
+
+export function requireApprovedPreparedAcceptanceMigration(plan) {
+  const receipt = plan?.exporterAcceptance?.receipt;
+  const candidate = APPROVED_PREPARED_ACCEPTANCE_MIGRATIONS.find(entry =>
+    entry.profile === plan?.profile && entry.publicationId === plan?.publicationId
+  );
+  if (
+    candidate === undefined ||
+    candidate.receiptSha256 !== plan?.exporterAcceptance?.receiptSha256 ||
+    candidate.validationPolicySha256 !== receipt?.validationPolicy?.sha256 ||
+    candidate.releaseSha256 !== receipt?.release?.sha256 ||
+    candidate.exportTreeSha256 !== receipt?.exportTree?.sha256
+  ) {
+    throw new Error(
+      'Prepared publication is not covered by an exact approved acceptance-policy migration.',
+    );
+  }
+  return candidate;
+}
 
 function usage() {
   return [
@@ -846,15 +885,36 @@ const DEFAULT_UPLOAD_DEPENDENCIES = Object.freeze({
   administerDatasetChannel,
   async verifyPreparedPublicationAcceptance({plan, packedExport, logger}) {
     const releaseId = plan.exporterAcceptance.receipt.release.id;
-    await loadCurrentPublicationExporterAcceptance({
-      releaseId,
-      profile: plan.profile,
-      minecraftVersion: plan.minecraftVersion,
-      pack: plan.pack,
-      definitions: EXPORTER_RELEASE_DEFINITIONS,
-      expectedBinding: plan.exporterAcceptance,
-      logger,
-    });
+    try {
+      await loadCurrentPublicationExporterAcceptance({
+        releaseId,
+        profile: plan.profile,
+        minecraftVersion: plan.minecraftVersion,
+        pack: plan.pack,
+        definitions: EXPORTER_RELEASE_DEFINITIONS,
+        expectedBinding: plan.exporterAcceptance,
+        logger,
+      });
+    } catch (error) {
+      logger.error(
+        `[publish-modpack] Current acceptance-policy revalidation failed for ` +
+          `${plan.profile}/${plan.publicationId}: ${error.message}`,
+      );
+      const migration = requireApprovedPreparedAcceptanceMigration(plan);
+      await verifyPublicationExporterArtifactBinding({
+        releaseId,
+        profile: plan.profile,
+        minecraftVersion: plan.minecraftVersion,
+        pack: plan.pack,
+        definitions: EXPORTER_RELEASE_DEFINITIONS,
+        binding: plan.exporterAcceptance,
+      });
+      logger.warn(
+        `[publish-modpack] Applied explicit prepared-acceptance migration ` +
+          `${migration.receiptSha256} for immutable publication ${migration.publicationId}; ` +
+          'the current JAR bytes and payload identity still match the historical receipt.',
+      );
+    }
     await verifyPublicationExporterBuildFile({
       exportRoot: packedExport,
       binding: plan.exporterAcceptance,

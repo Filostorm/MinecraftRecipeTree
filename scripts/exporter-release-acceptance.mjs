@@ -269,45 +269,12 @@ function updateDigestPart(hash, label, bytes) {
   hash.update(';');
 }
 
-function isAcceptanceCountConstraint(value) {
-  return (
-    (Number.isSafeInteger(value) && value >= 0) ||
-    (hasExactKeys(value, ['max', 'min']) &&
-      Number.isSafeInteger(value.min) &&
-      value.min >= 0 &&
-      Number.isSafeInteger(value.max) &&
-      value.max >= value.min)
-  );
-}
-
-function cloneAcceptanceCorpus(corpus) {
-  return Object.fromEntries(
-    Object.entries(corpus).map(([name, constraint]) => [
-      name,
-      typeof constraint === 'number' ? constraint : {...constraint},
-    ]),
-  );
-}
-
 function isAcceptanceCorpus(value) {
   return (
     value === null ||
     (hasExactKeys(value, ['blockDrops', 'categories', 'items', 'mobs', 'recipes']) &&
-      Object.values(value).every(isAcceptanceCountConstraint))
+      Object.values(value).every(count => Number.isSafeInteger(count) && count >= 0))
   );
-}
-
-export function acceptanceCorpusMatchesCounts(actualCounts, corpus) {
-  if (corpus === null || !isAcceptanceCorpus(corpus)) return corpus === null;
-  if (!hasExactKeys(actualCounts, ['blockDrops', 'categories', 'items', 'mobs', 'recipes'])) {
-    return false;
-  }
-  return Object.entries(corpus).every(([name, constraint]) => {
-    const actual = actualCounts[name];
-    if (!Number.isSafeInteger(actual) || actual < 0) return false;
-    if (typeof constraint === 'number') return actual === constraint;
-    return actual >= constraint.min && actual <= constraint.max;
-  });
 }
 
 function canonicalAcceptanceDefinition(definition, qualityProfile) {
@@ -359,7 +326,7 @@ function canonicalAcceptanceDefinition(definition, qualityProfile) {
     artifactProvenance,
     acceptance: {
       qualityProfile,
-      corpus: selectedCorpus === null ? null : cloneAcceptanceCorpus(selectedCorpus),
+      corpus: selectedCorpus === null ? null : {...selectedCorpus},
     },
     compatibility: definition.compatibility,
   };
@@ -924,9 +891,9 @@ export async function requireAcceptedExporterRelease({
   }
   if (
     acceptanceCorpus !== null &&
-    !acceptanceCorpusMatchesCounts(receipt.exportManifest.counts, acceptanceCorpus)
+    !isDeepStrictEqual(receipt.exportManifest.counts, acceptanceCorpus)
   ) {
-    mismatches.push('validated bounded full-export corpus counts');
+    mismatches.push('validated exact full-export corpus counts');
   }
   if (mismatches.length > 0) {
     throw new Error(

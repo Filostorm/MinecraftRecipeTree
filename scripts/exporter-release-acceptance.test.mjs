@@ -6,7 +6,6 @@ import test from 'node:test';
 import {strToU8, zipSync} from 'fflate';
 import {
   EXPORTER_ACCEPTANCE_RECEIPT_FORMAT,
-  acceptanceCorpusMatchesCounts,
   buildExporterAcceptanceReceipt,
   exporterAcceptancePolicySha256,
   exporterAcceptanceReceiptPath,
@@ -32,44 +31,6 @@ import {
 import {digestExportTree} from './export-tree-digest.mjs';
 
 const quietLogger = Object.freeze({info() {}, warn() {}, error() {}});
-
-test('bounded corpus constraints accept only inclusive safe-integer counts', () => {
-  const corpus = {
-    items: {min: 68520, max: 68540},
-    recipes: 99908,
-    categories: 333,
-    mobs: 0,
-    blockDrops: 0,
-  };
-  assert.equal(
-    acceptanceCorpusMatchesCounts(
-      {items: 68520, recipes: 99908, categories: 333, mobs: 0, blockDrops: 0},
-      corpus,
-    ),
-    true,
-  );
-  assert.equal(
-    acceptanceCorpusMatchesCounts(
-      {items: 68540, recipes: 99908, categories: 333, mobs: 0, blockDrops: 0},
-      corpus,
-    ),
-    true,
-  );
-  assert.equal(
-    acceptanceCorpusMatchesCounts(
-      {items: 68541, recipes: 99908, categories: 333, mobs: 0, blockDrops: 0},
-      corpus,
-    ),
-    false,
-  );
-  assert.equal(
-    acceptanceCorpusMatchesCounts(
-      {items: 68524, recipes: 99907, categories: 333, mobs: 0, blockDrops: 0},
-      corpus,
-    ),
-    false,
-  );
-});
 
 async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), 'mrt-exporter-acceptance-test-'));

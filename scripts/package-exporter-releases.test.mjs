@@ -94,7 +94,7 @@ test('Multiblock Madness exporter releases remain isolated across independent ve
     blockDrops: 0,
   });
   assert.deepEqual(mm2.acceptanceCorpora['multiblock-madness-2-1.18.2'], {
-    items: {min: 68520, max: 68540},
+    items: 68524,
     recipes: 99908,
     categories: 333,
     mobs: 0,
