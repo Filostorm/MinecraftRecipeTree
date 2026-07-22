@@ -116,11 +116,11 @@ export default function PublishPage() {
         </p>
 
         <section className={styles.hero} aria-labelledby="publish-title">
-          <p className={styles.eyebrow}>PUBLIC EXPORT WORKFLOW</p>
-          <h1 id="publish-title">Export your modpack. View it anywhere.</h1>
+          <p className={styles.eyebrow}>MODPACK IMPORT WORKFLOW</p>
+          <h1 id="publish-title">Import a modpack into Recipe Tree.</h1>
           <p className={styles.heroCopy}>
-            Install the exporter that exactly matches your Minecraft and recipe-viewer versions,
-            create an integrity-checked snapshot, then submit the prepared publication for a
+            Create an integrity-checked snapshot with the exporter that exactly matches your
+            Minecraft and recipe-viewer versions, then submit it for validated import and a
             durable Recipe Tree link.
           </p>
           <div className={styles.heroActions}>
@@ -134,12 +134,12 @@ export default function PublishPage() {
         </section>
 
         <aside className={styles.operatorNotice} aria-labelledby="operator-notice-title">
-          <div className={styles.noticeMarker} aria-hidden="true">CURRENT PUBLICATION MODEL</div>
+          <div className={styles.noticeMarker} aria-hidden="true">CURRENT IMPORT MODEL</div>
           <div>
-            <h2 id="operator-notice-title">Durable external publication is operator-mediated</h2>
+            <h2 id="operator-notice-title">Durable imports are operator-mediated</h2>
             <p>
               Contributors can download, export, validate, and prepare a pack themselves. A site
-              operator performs the final authenticated upload; production tokens never belong on
+              operator performs the final authenticated import; production tokens never belong on
               contributor machines. Fully self-service publishing requires authenticated,
               quota-bound, short-lived submission sessions and is not available yet.
             </p>
@@ -257,7 +257,7 @@ export default function PublishPage() {
           <div className={styles.sectionHeading}>
             <div>
               <p className={styles.stepLabel}>STEPS 2–6</p>
-              <h2 id="workflow-title">Install, export, validate, and submit</h2>
+              <h2 id="workflow-title">Install, export, validate, and import</h2>
               <p>Keep the raw export unchanged; publication preparation works from a staged copy.</p>
             </div>
           </div>
@@ -361,7 +361,7 @@ npm run publish:modpack -- prepare \\
             <li>
               <span className={styles.number}>6</span>
               <div>
-                <h3>Submit the completed raw export to the site operator</h3>
+                <h3>Submit the completed raw export for import</h3>
                 <p>
                   Transfer the completed raw export and its completion evidence through the
                   operator&apos;s approved channel. The operator creates the acceptance-bound prepared
@@ -398,7 +398,7 @@ npm run publish:modpack -- prepare \\
 
         <footer className={styles.footer}>
           <a href="/">← Return to Recipe Tree</a>
-          <span>Export data stays immutable; stable pack channels make updates easy to share.</span>
+          <span>Imported data stays immutable; stable pack channels make updates easy to share.</span>
         </footer>
       </div>
     </main>

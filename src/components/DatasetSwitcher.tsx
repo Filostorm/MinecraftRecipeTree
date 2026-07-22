@@ -14,10 +14,10 @@ function openAttributionLink(url: string, profile: string, label: string) {
   });
 }
 
-function openPublishGuide() {
+function openImportGuide() {
   const url = '/publish';
   void Linking.openURL(url).catch(error => {
-    console.error('Could not open the exporter download and publishing guide.', {url, error});
+    console.error('Could not open the validated modpack import guide.', {url, error});
   });
 }
 
@@ -136,13 +136,13 @@ export function DatasetSwitcher({
       </View>
 
       <TouchableOpacity
-        style={styles.publishLink}
-        onPress={openPublishGuide}
+        style={styles.importLink}
+        onPress={openImportGuide}
         accessibilityRole="link"
-        accessibilityLabel="Export and publish a modpack"
-        accessibilityHint="Opens the exporter download and publishing guide in a new tab"
+        accessibilityLabel="Import a modpack"
+        accessibilityHint="Opens the validated modpack import guide in a new tab"
         focusable>
-        <Text style={styles.publishLinkText}>Export &amp; publish ↗</Text>
+        <Text style={styles.importLinkText}>Import ↗</Text>
       </TouchableOpacity>
 
       <Text style={styles.minecraftDisclaimer} accessibilityRole="text">
@@ -241,7 +241,7 @@ const styles = StyleSheet.create({
   datasetButtonLabel: {color: theme.textDim, fontSize: 9, fontWeight: '800'},
   datasetButtonText: {color: theme.accent, fontSize: 13, fontWeight: '800', marginTop: 1},
   datasetButtonMeta: {color: theme.textDim, fontSize: 9, marginTop: 1},
-  publishLink: {
+  importLink: {
     minHeight: 44,
     paddingHorizontal: 12,
     alignItems: 'center',
@@ -251,7 +251,7 @@ const styles = StyleSheet.create({
     borderColor: theme.borderLight,
     backgroundColor: theme.panelAlt,
   },
-  publishLinkText: {
+  importLinkText: {
     color: theme.text,
     fontSize: 11,
     fontWeight: '800',
