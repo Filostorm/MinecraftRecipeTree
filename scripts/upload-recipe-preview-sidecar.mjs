@@ -15,6 +15,7 @@ const MAX_TOKEN_BYTES = 8 * 1024;
 const IMMUTABLE_CACHE_CONTROL = 'public, max-age=31536000, immutable, no-transform';
 const SHA256_HEADER = 'x-mrt-content-sha256';
 const CONTENT_BYTES_HEADER = 'x-mrt-content-bytes';
+const TRANSPORT_RETRY_DELAYS_MS = Object.freeze([250, 1_000, 3_000]);
 const DATASET_HEADER = 'x-mrt-dataset-publication-id';
 const PUBLICATION_STATE_HEADER = 'x-mrt-publication-state';
 const MANIFEST_BYTES_HEADER = 'x-mrt-manifest-bytes';
@@ -157,6 +158,32 @@ async function request(fetchImpl, url, init, timeoutMs, label) {
     // bearer-token redaction above when structured telemetry serializes an exception chain.
     throw new Error(`${label} request failed for ${url.origin}${url.pathname}: ${detail}`);
   }
+}
+
+async function requestWithTransportRetry(
+  fetchImpl,
+  url,
+  init,
+  timeoutMs,
+  label,
+  logger,
+  sleepImpl,
+) {
+  const attempts = TRANSPORT_RETRY_DELAYS_MS.length + 1;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await request(fetchImpl, url, init, timeoutMs, label);
+    } catch (error) {
+      if (attempt >= TRANSPORT_RETRY_DELAYS_MS.length) throw error;
+      const delayMs = TRANSPORT_RETRY_DELAYS_MS[attempt];
+      logger.warn(
+        `${label} hit a redacted transport failure; retrying the immutable conditional request ` +
+          `in ${delayMs} ms (attempt ${attempt + 2}/${attempts}).`,
+      );
+      await sleepImpl(delayMs);
+    }
+  }
+  throw new Error(`${label} exhausted its bounded transport retry window.`);
 }
 
 function authorizationHeaders(token) {
@@ -362,10 +389,10 @@ async function readVerifiedRecord(root, record) {
 
 async function ensureObject(options) {
   if (await headObject(options)) return 'reused';
-  const {record, root, token, datasetPublicationId, timeoutMs, fetchImpl, logger} = options;
+  const {record, root, token, datasetPublicationId, timeoutMs, fetchImpl, logger, sleepImpl} = options;
   const bytes = await readVerifiedRecord(root, record);
   const label = `Preview object PUT ${record.path}`;
-  const response = await request(
+  const response = await requestWithTransportRetry(
     fetchImpl,
     objectUrl(options.baseUrl, options.assetSetId, record.path),
     {
@@ -383,6 +410,8 @@ async function ensureObject(options) {
     },
     timeoutMs,
     label,
+    logger,
+    sleepImpl,
   );
   if (![200, 201, 204, 409, 412].includes(response.status)) {
     const error = statusError(response, label);

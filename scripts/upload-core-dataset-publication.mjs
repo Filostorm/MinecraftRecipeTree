@@ -20,6 +20,7 @@ const OBJECT_HEAD_RETRY_DELAYS_MS = Object.freeze([250, 500, 1_000, 2_000]);
 const IMMUTABLE_CACHE_CONTROL = 'public, max-age=31536000, immutable, no-transform';
 const SHA256_HEADER = 'x-mrt-content-sha256';
 const CONTENT_BYTES_HEADER = 'x-mrt-content-bytes';
+const TRANSPORT_RETRY_DELAYS_MS = Object.freeze([250, 1_000, 3_000]);
 const PUBLICATION_HEADER = 'x-mrt-dataset-publication-id';
 const PUBLICATION_STATE_HEADER = 'x-mrt-publication-state';
 const MANIFEST_BYTES_HEADER = 'x-mrt-manifest-bytes';
@@ -156,6 +157,32 @@ async function request(fetchImpl, url, init, timeoutMs, label) {
     // serialize request headers into it and thereby bypass bearer-token redaction.
     throw new Error(`${label} request failed for ${redactedTarget}: ${redacted}`);
   }
+}
+
+async function requestWithTransportRetry(
+  fetchImpl,
+  url,
+  init,
+  timeoutMs,
+  label,
+  logger,
+  sleepImpl,
+) {
+  const attempts = TRANSPORT_RETRY_DELAYS_MS.length + 1;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await request(fetchImpl, url, init, timeoutMs, label);
+    } catch (error) {
+      if (attempt >= TRANSPORT_RETRY_DELAYS_MS.length) throw error;
+      const delayMs = TRANSPORT_RETRY_DELAYS_MS[attempt];
+      logger.warn(
+        `${label} hit a redacted transport failure; retrying the immutable conditional request ` +
+          `in ${delayMs} ms (attempt ${attempt + 2}/${attempts}).`,
+      );
+      await sleepImpl(delayMs);
+    }
+  }
+  throw new Error(`${label} exhausted its bounded transport retry window.`);
 }
 
 function authorizationHeaders(token, publicationId) {
@@ -358,7 +385,7 @@ async function ensureObject(options) {
   const {record, token, publicationId, timeoutMs, fetchImpl, logger} = options;
   const bytes = await readVerifiedRecord(record);
   const label = `Core dataset object PUT ${record.path}`;
-  const response = await request(
+  const response = await requestWithTransportRetry(
     fetchImpl,
     objectUrl(options.baseUrl, record.path),
     {
@@ -375,6 +402,8 @@ async function ensureObject(options) {
     },
     timeoutMs,
     label,
+    logger,
+    options.sleepImpl,
   );
   if (![200, 201, 204, 409, 412].includes(response.status)) {
     const error = statusError(response, label);
