@@ -22,7 +22,7 @@ import {
 
 export {withExporterReleaseManifestLock} from './exporter-release-lock.mjs';
 
-export const EXPORTER_RELEASE_MANIFEST_FORMAT = 'mrt-exporter-releases-v1';
+export const EXPORTER_RELEASE_MANIFEST_FORMAT = 'mrt-exporter-releases-v2';
 const DEFAULT_WORKSPACE_ROOT = DEFAULT_EXPORTER_WORKSPACE_ROOT;
 const DEFAULT_PUBLIC_ROOT = DEFAULT_EXPORTER_PUBLIC_ROOT;
 const RELEASE_ID_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
@@ -265,7 +265,6 @@ function releaseForBytes(definition, bytes) {
   } = definition;
   return Object.freeze({
     ...publicDefinition,
-    downloadUrl: `/exporters/${definition.filename}`,
     sha256: createHash('sha256').update(bytes).digest('hex'),
     bytes: bytes.length,
   });
@@ -604,17 +603,9 @@ export function parsePackageExporterArguments(argv) {
 
 const invokedPath = process.argv[1] ? resolve(process.argv[1]) : null;
 if (invokedPath === fileURLToPath(import.meta.url)) {
-  try {
-    const options = parsePackageExporterArguments(process.argv.slice(2));
-    if (options.command === 'help') {
-      console.log(usage());
-    } else if (options.command === 'release') {
-      await packageExporterRelease({releaseId: options.releaseId});
-    } else {
-      await packageExporterReleases();
-    }
-  } catch (error) {
-    console.error(`[exporter-release] ${error instanceof Error ? error.message : String(error)}`);
-    process.exitCode = 1;
-  }
+  console.error(
+    '[exporter-release] On-site JAR packaging is disabled by distribution policy. ' +
+      'Build artifacts remain in their version-specific build/libs directories for external hosting.',
+  );
+  process.exitCode = 1;
 }

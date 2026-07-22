@@ -16,7 +16,6 @@ function release(overrides = {}) {
     loader: 'Forge 47',
     version: '1.0.0',
     filename: 'recipe-tree-exporter-forge-1.20.1-1.0.0.jar',
-    downloadUrl: '/exporters/recipe-tree-exporter-forge-1.20.1-1.0.0.jar',
     sha256: SHA_A,
     bytes: 123456,
     qualityProfiles: ['generic-jei-1.20.1'],
@@ -37,7 +36,7 @@ function manifest(releases = [release()], overrides = {}) {
 test('accepts and freezes the exact public exporter release contract', () => {
   const result = requireExporterReleaseManifest(manifest());
   assert.equal(result.releases[0].minecraftVersion, '1.20.1');
-  assert.equal(result.releases[0].downloadUrl, `/exporters/${result.releases[0].filename}`);
+  assert.equal('downloadUrl' in result.releases[0], false);
   assert.equal(Object.isFrozen(result), true);
   assert.equal(Object.isFrozen(result.releases), true);
   assert.equal(Object.isFrozen(result.releases[0].qualityProfiles), true);
@@ -58,18 +57,11 @@ test('rejects top-level or release contract drift and noncanonical timestamps', 
   );
 });
 
-test('allows only the exact same-origin exporter path for its safe release filename', () => {
-  for (const downloadUrl of [
-    'https://example.test/exporters/recipe-tree-exporter-forge-1.20.1-1.0.0.jar',
-    '/other/recipe-tree-exporter-forge-1.20.1-1.0.0.jar',
-    '/exporters/../private.jar',
-    '/exporters/recipe-tree-exporter-forge-1.20.1-1.0.0.jar?download=1',
-  ]) {
-    assert.throws(
-      () => requireExporterReleaseManifest(manifest([release({downloadUrl})])),
-      /same-origin path/,
-    );
-  }
+test('forbids hosted download URLs and requires a safe release filename', () => {
+  assert.throws(
+    () => requireExporterReleaseManifest(manifest([release({downloadUrl: '/exporters/exporter.jar'})])),
+    /exact release contract/,
+  );
   assert.throws(
     () => requireExporterReleaseManifest(manifest([release({filename: 'exporter-sources.jar'})])),
     /unsafe release JAR filename/,

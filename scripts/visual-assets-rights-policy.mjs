@@ -1,6 +1,4 @@
 import {isDeepStrictEqual} from 'node:util';
-import {GTNH_1710_PROFILE} from './export-quality-policy.mjs';
-
 export const GTNH_STRUCTURED_DATA_ONLY_POLICY_ID = 'gtnh-structured-data-only-v1';
 export const VISUAL_ASSETS_POLICY_FORMAT = 'mrt-visual-assets-policy-v1';
 export const GTNH_RECIPE_IMAGE_OMISSION_REASON =
@@ -17,8 +15,12 @@ export const GTNH_STRUCTURED_DATA_ONLY_VISUAL_ASSETS = Object.freeze({
   packedImageFiles: 0,
 });
 
-export function requiresGtnhStructuredDataOnlyPolicy(profile) {
-  return profile === GTNH_1710_PROFILE;
+export function usesStructuredDataOnlyPublication(profile) {
+  // Legacy structured-data-only GTNH publications remain readable, but every
+  // newly prepared dataset follows the ordinary runtime-rendered visual path.
+  // The exporter JAR contains rendering code, never copied pack artwork.
+  void profile;
+  return false;
 }
 
 export function hasExactGtnhStructuredDataOnlyVisualAssets(value) {

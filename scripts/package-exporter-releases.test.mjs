@@ -358,7 +358,7 @@ test('packaging refuses to replace bytes under an existing release version and f
   assert.deepEqual(await readFile(join(publicRoot, release.filename)), publicJarBefore);
 });
 
-test('post-commit rollback restores the catalog but permanently retains the referenced JAR URL', async t => {
+test('post-commit rollback restores the catalog but permanently retains the external artifact', async t => {
   const {root, publicRoot} = await fixture(t);
   const releaseV100 = definition();
   await packageExporterReleases({

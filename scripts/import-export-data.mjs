@@ -27,7 +27,7 @@ import {
 import {readArrayDocument} from './sharded-documents.mjs';
 import {
   GTNH_STRUCTURED_DATA_ONLY_POLICY_ID,
-  requiresGtnhStructuredDataOnlyPolicy,
+  usesStructuredDataOnlyPublication,
 } from './visual-assets-rights-policy.mjs';
 
 const scriptRoot = dirname(fileURLToPath(import.meta.url));
@@ -476,7 +476,7 @@ export async function importExportData({
     throw new Error('A raw export source directory is required.');
   }
   const resolvedProfile = resolveQualityProfile(profile);
-  const structuredDataOnly = requiresGtnhStructuredDataOnlyPolicy(resolvedProfile);
+  const structuredDataOnly = usesStructuredDataOnlyPublication(resolvedProfile);
   const resolvedStagingMode = resolveStagingMode(stagingMode);
   if (resolvedStagingMode !== 'clone' && resolvedStagingMode !== 'copy') {
     throw new Error('stagingMode must be exactly clone or copy.');

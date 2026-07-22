@@ -258,7 +258,10 @@ export function requireExactGtnhActivationBinding(
   if (
     identity.profile !== GTNH_PROFILE ||
     identity.minecraft !== GTNH_MINECRAFT_VERSION ||
-    identity.publicationPolicy !== GTNH_STRUCTURED_DATA_ONLY_POLICY ||
+    !(
+      identity.publicationPolicy === undefined ||
+      identity.publicationPolicy === GTNH_STRUCTURED_DATA_ONLY_POLICY
+    ) ||
     !exactPack ||
     !hasExactKeys(exactPack as unknown as Record<string, unknown>, [
       'name',
@@ -271,8 +274,8 @@ export function requireExactGtnhActivationBinding(
     !exactGtnhAttribution(identity.attribution)
   ) {
     throw new Error(
-      'GTNH activation requires its exact immutable profile, pack, Minecraft, ' +
-        'structured-data-only publication policy, and attribution contract.',
+      'GTNH activation requires its exact immutable profile, pack, Minecraft, attribution, ' +
+        'and either runtime-rendered visuals or the legacy structured-data-only policy.',
     );
   }
   if (

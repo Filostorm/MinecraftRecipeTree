@@ -40,11 +40,6 @@ import {
   writeNonUniformImage,
 } from './test-export-fixture.mjs';
 import {validateExportData} from './validate-export-data.mjs';
-import {
-  GTNH_RECIPE_IMAGE_OMISSION_REASON,
-  GTNH_STRUCTURED_DATA_ONLY_POLICY_ID,
-  GTNH_STRUCTURED_DATA_ONLY_VISUAL_ASSETS,
-} from './visual-assets-rights-policy.mjs';
 
 const execFileAsync = promisify(execFile);
 const PRODUCTION_RENDER_SETTINGS = Object.freeze({iconScale: 3, recipeScale: 2});
@@ -253,7 +248,7 @@ async function configureGtnhFixture(source) {
   return manifest;
 }
 
-test('imports GTNH 2.8.4 as an exhaustively validated structured-data-only publication', async () => {
+test('imports GTNH 2.8.4 with runtime-rendered visuals and no bundled source artwork', async () => {
   const root = await mkdtemp(join(tmpdir(), 'recipe-tree-import-gtnh-profile-test-'));
   try {
     const source = join(root, 'raw-source');
@@ -271,57 +266,35 @@ test('imports GTNH 2.8.4 as an exhaustively validated structured-data-only publi
       profile: GTNH_1710_PROFILE,
     });
     const manifest = await readJson(join(destination, 'manifest.json'));
-    assert.equal(manifest.publicationPolicy, GTNH_STRUCTURED_DATA_ONLY_POLICY_ID);
-    assert.deepEqual(
-      manifest.web.visualAssets,
-      GTNH_STRUCTURED_DATA_ONLY_VISUAL_ASSETS,
-    );
-    assert.deepEqual(
-      {
-        mode: manifest.web.recipeImages.mode,
-        reason: manifest.web.recipeImages.reason,
-        policy: manifest.web.recipeImages.policy,
-        references: manifest.web.recipeImages.references,
-        files: manifest.web.recipeImages.files,
-        encoding: manifest.web.recipeImages.encoding,
-        bytes: manifest.web.recipeImages.bytes,
-      },
-      {
-        mode: 'omitted',
-        reason: GTNH_RECIPE_IMAGE_OMISSION_REASON,
-        policy: GTNH_STRUCTURED_DATA_ONLY_POLICY_ID,
-        references: 1,
-        files: 1,
-        encoding: 'png',
-        bytes: rawRecipePreview.length,
-      },
-    );
+    assert.equal(manifest.publicationPolicy, undefined);
+    assert.equal(manifest.web.visualAssets, undefined);
+    assert.equal(manifest.web.recipeImages.mode, 'included');
     const item = (await readJson(join(destination, 'items.json'))).items[0];
     const category = (await readJson(join(destination, 'categories.json'))).categories[0];
     const recipe = (
       await readJson(join(destination, 'recipes', 'minecraft_crafting', 'recipes.json'))
     )[0];
-    assert.equal('icon' in item, false);
-    assert.equal('icon' in category, false);
-    assert.equal('img' in recipe, false);
-    assert.equal('w' in recipe, false);
-    assert.equal('h' in recipe, false);
+    assert.match(item.icon, /^assets\/s\/000-\d+-\d+\.webp$/);
+    assert.match(category.icon, /^assets\/s\/000-\d+-\d+\.webp$/);
+    assert.match(recipe.img, /^assets\/s\/000-\d+-\d+\.webp$/);
+    assert.equal(recipe.w, 16);
+    assert.equal(recipe.h, 16);
     assert.deepEqual(recipe.in, [[['minecraft:stone', 1, null, 0.5]]]);
     assert.deepEqual(recipe.out, [[['minecraft:stone', 1, null, 0.25]]]);
     assert.deepEqual(recipe.cat, [[['minecraft:stone', 1]]]);
     assert.equal(await pathIsMissing(join(destination, 'icons')), true);
     assert.equal(await pathIsMissing(join(destination, 'mobs')), true);
-    assert.equal(await pathIsMissing(join(destination, 'assets')), true);
+    assert.equal(await pathIsMissing(join(destination, 'assets', 'pack-000.bin')), false);
     const validation = await validateExportData(destination, {
       profile: GTNH_1710_PROFILE,
       requirePublicationId: true,
       verifyPublicationId: true,
     });
-    assert.equal(validation.imageReferences, 0);
+    assert.equal(validation.imageReferences, 2);
     assert.deepEqual(
       await readFile(join(source, 'recipes', 'minecraft_crafting', 'r0.png')),
       rawRecipePreview,
-      'the rights transform must never mutate the raw source',
+      'the runtime-rendered visual pipeline must never mutate the raw source',
     );
     assert.equal(await pathIsMissing(importWorkspaceRootForDestination(destination)), true);
   } finally {

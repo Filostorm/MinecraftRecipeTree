@@ -10,7 +10,7 @@ viewer URL. A publication has two identities:
 The viewer's pack switcher reads those channel records. Switching packs changes `?pack=<slug>` in
 the URL, so a selected pack can be bookmarked or shared.
 
-## 1. Choose the matching exporter
+## 1. Identify the matching externally distributed exporter
 
 Do not install an exporter for a different Minecraft/recipe-viewer API. The current source tree
 contains these client-only builds:
@@ -24,8 +24,10 @@ contains these client-only builds:
 
 Download the version-matched release from the public
 [export and publishing guide](https://minecraftrecipetree.craftsmannsoftware.com/publish). The
-guide obtains each JAR URL, byte length, compatibility statement, and SHA-256 from a bounded exact
-release manifest. Verify the checksum before installation. Development and `sources` JARs are
+guide obtains each JAR filename, byte length, compatibility statement, and SHA-256 from a bounded
+exact release manifest. Recipe Tree intentionally exposes no JAR URL and hosts no exporter binary;
+obtain the file through the operator's external distribution channel, then verify its checksum
+before installation. Development and `sources` JARs are
 explicitly excluded from that manifest.
 
 ## 2. Install the exporter
@@ -308,11 +310,13 @@ npm run accept:exporter -- \
   --profile multiblock-madness-1.12.2 \
   --export-root "/absolute/path/to/completed-mm1-full-export"
 
-npm run package:exporter:1.12.2
+# Build the accepted version-specific project, then distribute its build/libs
+# release artifact through an external channel.
 ```
 
-The pinned GTNH release uses `npm run package:exporter:1.7.10` after its own full
-`gtnh-1.7.10` acceptance export.
+The pinned GTNH release is built in `recipe-export-mod-1.7.10` after its own full
+`gtnh-1.7.10` acceptance export. Recipe Tree records its filename, length, and SHA-256 in the
+metadata catalog but does not host the JAR.
 
 Each ignored local receipt binds the configured release identity, exact source-JAR SHA-256/length,
 one explicitly selected advertised profile, the exact profile-specific corpus definition and validation-policy source

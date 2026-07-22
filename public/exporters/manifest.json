@@ -1,5 +1,5 @@
 {
-  "format": "mrt-exporter-releases-v1",
+  "format": "mrt-exporter-releases-v2",
   "generatedAt": "2026-07-22T14:05:58.380Z",
   "releases": [
     {
@@ -9,7 +9,6 @@
       "loader": "Forge 47",
       "version": "1.0.0",
       "filename": "recipe-tree-exporter-forge-1.20.1-1.0.0.jar",
-      "downloadUrl": "/exporters/recipe-tree-exporter-forge-1.20.1-1.0.0.jar",
       "sha256": "8e526ae9d751a569cd3a8392f5af27c08663ba7a0d11ab13b01f3611374b944b",
       "bytes": 90336,
       "qualityProfiles": [
@@ -24,7 +23,6 @@
       "loader": "Forge 40",
       "version": "1.0.44",
       "filename": "recipe-tree-exporter-forge-1.18.2-1.0.44.jar",
-      "downloadUrl": "/exporters/recipe-tree-exporter-forge-1.18.2-1.0.44.jar",
       "sha256": "70c7d275bcd337bb9654ed3e367a4f2d78073dfdfa1b1471cc1a57393b1a2d70",
       "bytes": 574182,
       "qualityProfiles": [
@@ -39,7 +37,6 @@
       "loader": "Forge 14.23.5",
       "version": "1.0.3",
       "filename": "recipe-tree-exporter-forge-1.12.2-1.0.3.jar",
-      "downloadUrl": "/exporters/recipe-tree-exporter-forge-1.12.2-1.0.3.jar",
       "sha256": "563536a2f5f034bf55c5e89e61fd3bbc91440243a8d0aad65919c4c8bed00f23",
       "bytes": 252053,
       "qualityProfiles": [
@@ -55,7 +52,6 @@
       "loader": "Forge 10.13.4.1614",
       "version": "1.0.148",
       "filename": "recipe-tree-exporter-gtnh-1.7.10-1.0.148.jar",
-      "downloadUrl": "/exporters/recipe-tree-exporter-gtnh-1.7.10-1.0.148.jar",
       "sha256": "6f9b5eaaa44d934772ff8ac1294adfb18e86b10d603260492b8f73a577dcbf3d",
       "bytes": 1009908,
       "qualityProfiles": [

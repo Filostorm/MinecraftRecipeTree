@@ -919,8 +919,26 @@ test('GTNH activation rejects immutable attribution drift and never mutates D1',
   assert.equal(env.DB.channels.size, 0);
 });
 
-test('GTNH activation rejects missing or drifted structured-data-only policy before D1 mutation', async () => {
-  for (const publicationPolicy of [undefined, 'gtnh-structured-data-only-v2']) {
+test('GTNH activation accepts runtime visuals but rejects drifted publication policy before D1 mutation', async () => {
+  {
+    const env = environment();
+    const core = gtnhCoreFixture({publicationPolicy: undefined});
+    await publishCore(env, core);
+    const preview = await previewFixture();
+    seedPreview(env.PREVIEW_ASSETS, preview);
+    const response = await activateChannel(env, 'gt-new-horizons', {
+      displayName: 'GT New Horizons',
+      minecraftVersion: '1.7.10',
+      packVersion: '2.8.4',
+      publicationId: PUBLICATION,
+      previewAssetSetId: preview.assetSetId,
+      isDefault: true,
+      expectedPreviousPublicationId: null,
+    });
+    assert.equal(response.status, 200);
+    assert.equal(env.DB.channels.size, 1);
+  }
+  for (const publicationPolicy of ['gtnh-structured-data-only-v2']) {
     const env = environment();
     await publishCore(env, gtnhCoreFixture({publicationPolicy}));
     const preview = await previewFixture();

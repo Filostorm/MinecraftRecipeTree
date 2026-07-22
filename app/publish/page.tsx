@@ -125,7 +125,7 @@ export default function PublishPage() {
           </p>
           <div className={styles.heroActions}>
             <a className={styles.primaryAction} href="#downloads">
-              Choose an exporter
+              Identify an exporter
             </a>
             <a className={styles.secondaryAction} href="#workflow">
               Read the full workflow
@@ -150,7 +150,7 @@ export default function PublishPage() {
           <div className={styles.sectionHeading}>
             <div>
               <p className={styles.stepLabel}>STEP 1</p>
-              <h2 id="downloads-title">Download the exact exporter</h2>
+              <h2 id="downloads-title">Identify the exact externally distributed exporter</h2>
               <p>
                 Minecraft, mod loader, and JEI/REI/HEI/NEI APIs are version-specific. A near match
                 is not compatible.
@@ -184,7 +184,7 @@ export default function PublishPage() {
           {manifestState.status === 'error' && (
             <div className={styles.errorPanel} role="alert">
               <div>
-                <strong>Exporter downloads are unavailable.</strong>
+                <strong>Exporter release metadata is unavailable.</strong>
                 <p>{manifestState.message}</p>
                 <p>No unverified fallback download has been substituted.</p>
               </div>
@@ -229,12 +229,9 @@ export default function PublishPage() {
                           <dd><code>{release.id}</code></dd>
                         </div>
                       </dl>
-                      <a
-                        className={styles.downloadButton}
-                        href={release.downloadUrl}
-                        download={release.filename}>
-                        Download version-matched JAR
-                      </a>
+                      <div className={styles.downloadButton} aria-label="Exporter distributed off-site">
+                        External distribution only · {release.filename}
+                      </div>
                       <div className={styles.checksum}>
                         <span>SHA-256</span>
                         <code>{release.sha256}</code>
@@ -248,8 +245,8 @@ export default function PublishPage() {
                 <time dateTime={manifestState.manifest.generatedAt}>
                   {new Date(manifestState.manifest.generatedAt).toLocaleString()}
                 </time>
-                . Every download URL and checksum above passed the viewer&apos;s exact manifest
-                contract.
+                . Every filename and checksum above passed the viewer&apos;s exact release contract.
+                Exporter JARs are intentionally not hosted by Recipe Tree.
               </p>
             </>
           )}
@@ -270,7 +267,8 @@ export default function PublishPage() {
               <div>
                 <h3>Verify and install the JAR</h3>
                 <p>
-                  Compare the downloaded file against its SHA-256 above, close Minecraft, and put
+                  Obtain the JAR from the operator&apos;s external distribution channel, compare it
+                  against the SHA-256 above, close Minecraft, and put
                   the JAR in the target instance&apos;s <code>mods</code> directory—not the
                   launcher&apos;s global directory. Confirm the matching recipe viewer is already
                   installed.

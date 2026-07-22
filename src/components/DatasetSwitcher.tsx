@@ -151,8 +151,8 @@ export function DatasetSwitcher({
 
       {loadedAttribution && (
         <Text style={styles.attribution}>
-          {loadedAttribution.packName} {loadedAttribution.packVersion} structured recipe data
-          (profile {loadedAttribution.profile}; policy {loadedAttribution.publicationPolicy}) by the{' '}
+          {loadedAttribution.packName} {loadedAttribution.packVersion} recipe data
+          (profile {loadedAttribution.profile}; visuals {loadedAttribution.visualMode}) by the{' '}
           <Text
             style={styles.attributionLink}
             accessibilityRole="link"
@@ -166,8 +166,9 @@ export function DatasetSwitcher({
             GT New Horizons contributors
           </Text>
           . Modification notice: Recipe Tree normalized, deduplicated, indexed, and converted the
-          source records into a structured-data-only web database; exported game/mod artwork and
-          recipe screenshots are omitted. This adapted GTNH-derived database is licensed under{' '}
+          source records into a web database. Runtime-rendered icons and recipe layouts were captured
+          from the operator&apos;s installed pack by an exporter that does not bundle source textures.
+          The adapted GTNH-derived data is licensed under{' '}
           <Text
             style={styles.attributionLink}
             accessibilityRole="link"
@@ -180,8 +181,8 @@ export function DatasetSwitcher({
             }>
             {loadedAttribution.attribution.licenseIdentifier}
           </Text>{' '}
-          and provided noncommercially as-is, without warranty. Recipe Tree is not affiliated with
-          or endorsed by GT New Horizons.
+          and provided noncommercially as-is, without warranty. Third-party artwork remains subject
+          to its original terms. Recipe Tree is not affiliated with or endorsed by GT New Horizons.
         </Text>
       )}
     </View>

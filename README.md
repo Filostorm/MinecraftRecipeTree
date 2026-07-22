@@ -9,11 +9,14 @@ npm run publish:modpack -- --help
 ```
 
 The deployed [/publish](https://minecraftrecipetree.craftsmannsoftware.com/publish) guide exposes
-the version-matched release JARs and their generated SHA-256 checksums to external contributors.
+version-matched exporter metadata and generated SHA-256 checksums. Exporter JARs remain in their
+version-specific local `build/libs` directories for external distribution and are never copied
+into the site.
 
 ### Package one validated exporter release
 
-Public exporter URLs are immutable release artifacts. If a rebuilt JAR changes bytes, increment
+Externally distributed exporter files are immutable release artifacts. Recipe Tree hosts only the
+checksummed metadata catalog, not the JARs. If a rebuilt JAR changes bytes, increment
 both its `version` and `filename` in `scripts/package-exporter-releases.mjs`; never replace an
 already published filename. First run the acceptance action against that exact JAR's completed
 full export. It performs the exhaustive profile validator once and writes a local receipt binding
@@ -33,12 +36,8 @@ npm run accept:exporter -- \
   --profile multiblock-madness-1.12.2 \
   --export-root "/absolute/path/to/completed-mm1-full-export"
 
-npm run package:exporter:1.12.2
-npm run package:exporter:1.18.2
-npm run package:exporter:1.7.10
-
-# Any configured release ID can use the same fail-closed targeted path:
-npm run package:exporter -- forge-hei-1.12.2
+# Build each accepted exporter in its version-specific Gradle project, then
+# distribute the checksummed build/libs artifact outside Recipe Tree.
 ```
 
 Receipts live under ignored `.release-acceptance/`, contain no local paths or credentials, and are
@@ -64,15 +63,10 @@ its exact item/recipe/category/mob/block-drop counts into that profile's release
 issuing its independent receipt. A corpus change for one profile does not rewrite another profile's
 receipt identity, while shared artifact or validator changes still invalidate every affected receipt.
 
-Targeted packaging verifies the existing exact manifest and its currently referenced JAR before
-mutation, creates the new versioned JAR without deleting the older file, and updates only that
-release's manifest entry. Unrelated entries and JARs are not opened, rewritten, or silently
-refreshed. Repeating the command with identical bytes is a no-op, including the manifest timestamp.
-Every packaging command takes an exclusive manifest transaction lock. A concurrent or leftover
-lock aborts visibly and is never auto-removed; verify that no packager is active before inspecting
-and manually removing a stale lock. Receipt authorization is rechecked after acquiring that lock,
-immediately before any public mutation. Receipt creation/replacement takes the same lock, so a
-receipt cannot change concurrently with a release transaction.
+The former on-site JAR packaging CLI is disabled by distribution policy. Its transaction code
+remains covered by tests for offline external-release assembly, but production site builds contain
+only `public/exporters/manifest.json`; invoking the CLI fails explicitly instead of restoring a
+same-origin binary or silently substituting another location.
 
 Publication preparation also requires an explicit version-specific `--release`. It securely
 revalidates that release's current receipt and JAR, then compares the receipt's exhaustive export
@@ -83,18 +77,15 @@ catalog or credentials, so GTNH 1.7.10, 1.12.2, and 1.18.2 workspaces cannot be 
 This adds one bounded streaming read of the staged export but no additional full-size copy and no
 silent weaker fallback.
 
-`npm run package:exporters` remains the explicit all-release operation. Use it only after every
-configured build has independently passed acceptance. It preflights every source and public target
-before writing and rejects changed bytes under an existing versioned URL instead of overwriting or
-falling back to a partial release. Direct CLI use must specify `--all` or `--release`; no-argument
-execution fails closed.
+`npm run package:exporters` and targeted package commands now fail closed. Build, checksum, and
+externally distribute each JAR from its version-specific project instead.
 
 Expo (React Native Web) app for browsing a `jei-exports` dataset produced by
 [recipe-export-mod](../recipe-export-mod): searchable item grid, JEI-style recipe/usage
 views, a mob gallery, and a pan/zoom crafting flowchart built from the exported recipe images.
 
-The web publication is content-addressed. Except for the GTNH rights-restricted channel,
-item/block source textures retain Minecraft's native 16×16 pixel-art grid. Multiblock Madness and
+The web publication is content-addressed. Runtime-rendered item/block captures retain each
+profile's audited pixel grid. Multiblock Madness and
 Multiblock Madness 2 preserve those renderer outputs as 16×16 canvases; the already-audited
 MeatballCraft corpus remains
 pinned to its historical 48×48 canvases. Composite NEI/HEI/REI layouts are rasterized at 2×

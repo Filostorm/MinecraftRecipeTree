@@ -1,5 +1,5 @@
 export const EXPORTER_RELEASE_MANIFEST_PATH = '/exporters/manifest.json';
-export const EXPORTER_RELEASE_MANIFEST_FORMAT = 'mrt-exporter-releases-v1';
+export const EXPORTER_RELEASE_MANIFEST_FORMAT = 'mrt-exporter-releases-v2';
 
 const TOP_LEVEL_KEYS = ['format', 'generatedAt', 'releases'] as const;
 const RELEASE_KEYS = [
@@ -9,7 +9,6 @@ const RELEASE_KEYS = [
   'loader',
   'version',
   'filename',
-  'downloadUrl',
   'sha256',
   'bytes',
   'qualityProfiles',
@@ -28,7 +27,6 @@ export interface ExporterRelease {
   readonly loader: string;
   readonly version: string;
   readonly filename: string;
-  readonly downloadUrl: string;
   readonly sha256: string;
   readonly bytes: number;
   readonly qualityProfiles: readonly string[];
@@ -93,12 +91,6 @@ function requireRelease(value: unknown, index: number): ExporterRelease {
   ) {
     throw new Error(`Exporter release ${index} has an unsafe release JAR filename.`);
   }
-  const expectedDownloadUrl = `/exporters/${value.filename}`;
-  if (value.downloadUrl !== expectedDownloadUrl) {
-    throw new Error(
-      `Exporter release ${index} downloadUrl must be the same-origin path ${JSON.stringify(expectedDownloadUrl)}.`,
-    );
-  }
   if (typeof value.sha256 !== 'string' || !SHA256_PATTERN.test(value.sha256)) {
     throw new Error(`Exporter release ${index} sha256 must be lowercase 64-hex SHA-256.`);
   }
@@ -134,7 +126,6 @@ function requireRelease(value: unknown, index: number): ExporterRelease {
     loader: value.loader,
     version: value.version,
     filename: value.filename,
-    downloadUrl: value.downloadUrl as string,
     sha256: value.sha256,
     bytes: value.bytes as number,
     qualityProfiles: Object.freeze(qualityProfiles),
@@ -167,7 +158,6 @@ export function requireExporterReleaseManifest(value: unknown): ExporterReleaseM
   const uniqueFields = [
     ['id', releases.map(release => release.id)],
     ['filename', releases.map(release => release.filename)],
-    ['downloadUrl', releases.map(release => release.downloadUrl)],
   ] as const;
   for (const [field, values] of uniqueFields) {
     if (new Set(values).size !== values.length) {

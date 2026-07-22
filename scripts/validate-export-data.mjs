@@ -41,7 +41,7 @@ import {
   GTNH_RECIPE_IMAGE_OMISSION_REASON,
   GTNH_STRUCTURED_DATA_ONLY_POLICY_ID,
   hasExactGtnhStructuredDataOnlyVisualAssets,
-  requiresGtnhStructuredDataOnlyPolicy,
+  usesStructuredDataOnlyPublication,
 } from './visual-assets-rights-policy.mjs';
 
 const defaultExportRoot = join(process.cwd(), 'public', 'exports');
@@ -81,7 +81,7 @@ export async function validateExportData(exportRoot = defaultExportRoot, options
   const qualityProfile = resolveQualityProfile(options.profile);
   const qualityRequirements = qualityProfileRequirementsFor(qualityProfile);
   const profileRequiresStructuredDataOnly =
-    requiresGtnhStructuredDataOnlyPolicy(qualityProfile);
+    usesStructuredDataOnlyPublication(qualityProfile);
   let computedRecipeImageInventory = null;
   const errors = [];
   let suppressedErrors = 0;

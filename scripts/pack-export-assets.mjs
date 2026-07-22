@@ -43,7 +43,7 @@ import {
   GTNH_RECIPE_IMAGE_OMISSION_REASON,
   GTNH_STRUCTURED_DATA_ONLY_POLICY_ID,
   GTNH_STRUCTURED_DATA_ONLY_VISUAL_ASSETS,
-  requiresGtnhStructuredDataOnlyPolicy,
+  usesStructuredDataOnlyPublication,
 } from './visual-assets-rights-policy.mjs';
 
 const defaultExportRoot = join(process.cwd(), 'public', 'exports');
@@ -192,7 +192,7 @@ if (showHelp) {
 }
 
 const validationOptions = profile ? {profile} : {};
-const structuredDataOnly = requiresGtnhStructuredDataOnlyPolicy(profile);
+const structuredDataOnly = usesStructuredDataOnlyPublication(profile);
 const exportParent = dirname(exportRoot);
 const iconsRoot = join(exportRoot, 'icons');
 const recipesRoot = join(exportRoot, 'recipes');

@@ -459,15 +459,19 @@ test('publication plan validation binds pack metadata and exact artifact paths',
   );
 });
 
-test('GTNH publication plans require the exact structured-data-only policy while other profiles reject it', () => {
+test('GTNH publication plans admit runtime-rendered visuals and the exact legacy data-only policy', () => {
   assert.equal(
     requirePublicationPlan(gtnhPlan()).publicationPolicy,
     GTNH_STRUCTURED_DATA_ONLY_POLICY,
   );
-  for (const publicationPolicy of [undefined, 'gtnh-structured-data-only-v2', '', null]) {
+  assert.equal(
+    requirePublicationPlan(gtnhPlan({publicationPolicy: undefined})).publicationPolicy,
+    undefined,
+  );
+  for (const publicationPolicy of ['gtnh-structured-data-only-v2', '', null]) {
     assert.throws(
       () => requirePublicationPlan(gtnhPlan({publicationPolicy})),
-      new RegExp(`must be exactly ${GTNH_STRUCTURED_DATA_ONLY_POLICY}`),
+      new RegExp(`must be absent.*or exactly ${GTNH_STRUCTURED_DATA_ONLY_POLICY}`),
     );
   }
   assert.throws(
@@ -478,6 +482,7 @@ test('GTNH publication plans require the exact structured-data-only policy while
     requirePublicationPolicyBinding('gtnh-1.7.10', GTNH_STRUCTURED_DATA_ONLY_POLICY),
     GTNH_STRUCTURED_DATA_ONLY_POLICY,
   );
+  assert.equal(requirePublicationPolicyBinding('gtnh-1.7.10', undefined), undefined);
 });
 
 test('production manifest gate rejects own qualitySample fields and admits full manifests', () => {

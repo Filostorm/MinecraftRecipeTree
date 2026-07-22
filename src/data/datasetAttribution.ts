@@ -55,7 +55,8 @@ export interface LoadedDatasetAttribution {
   readonly profile: typeof GTNH_1710_DATASET_PROFILE;
   readonly packName: string;
   readonly packVersion: string;
-  readonly publicationPolicy: typeof GTNH_STRUCTURED_DATA_ONLY_POLICY;
+  readonly publicationPolicy: typeof GTNH_STRUCTURED_DATA_ONLY_POLICY | null;
+  readonly visualMode: 'runtime-rendered-export' | 'structured-data-only';
   readonly attribution: DatasetAttribution;
 }
 
@@ -71,20 +72,27 @@ export function loadedDatasetAttribution(
     manifest.pack?.name !== GTNH_PACK_NAME ||
     manifest.pack.version !== GTNH_PACK_VERSION ||
     manifest.pack.identitySource !== 'explicit-request' ||
-    manifest.publicationPolicy !== GTNH_STRUCTURED_DATA_ONLY_POLICY ||
-    !isExactGtnhVisualAssetsPolicy(manifest.web?.visualAssets) ||
+    !(
+      (manifest.publicationPolicy === GTNH_STRUCTURED_DATA_ONLY_POLICY &&
+        isExactGtnhVisualAssetsPolicy(manifest.web?.visualAssets)) ||
+      (manifest.publicationPolicy === undefined && manifest.web?.visualAssets === undefined)
+    ) ||
     !isExactGtnhDatasetAttribution(manifest.attribution)
   ) {
     throw new Error(
       `Loaded ${GTNH_1710_DATASET_PROFILE} manifest does not match its exact pack, ` +
-        'structured-data-only, and attribution contract.',
+        'visual-publication, and attribution contract.',
     );
   }
   return Object.freeze({
     profile: GTNH_1710_DATASET_PROFILE,
     packName: manifest.pack.name,
     packVersion: manifest.pack.version,
-    publicationPolicy: GTNH_STRUCTURED_DATA_ONLY_POLICY,
+    publicationPolicy: manifest.publicationPolicy ?? null,
+    visualMode:
+      manifest.publicationPolicy === GTNH_STRUCTURED_DATA_ONLY_POLICY
+        ? 'structured-data-only'
+        : 'runtime-rendered-export',
     attribution: manifest.attribution,
   });
 }

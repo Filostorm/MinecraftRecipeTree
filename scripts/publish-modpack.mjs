@@ -245,21 +245,21 @@ function exactKeys(value, expected) {
 }
 
 function profilePublicationPolicy(profile) {
-  return profile === 'gtnh-1.7.10' ? GTNH_STRUCTURED_DATA_ONLY_POLICY : undefined;
+  return undefined;
 }
 
 export function requirePublicationPolicyBinding(profile, value, label = 'publication policy') {
-  const expected = profilePublicationPolicy(profile);
-  if (expected === undefined) {
-    if (value !== undefined) {
-      throw new Error(`${label} is reserved for gtnh-1.7.10 and must be absent for ${profile}.`);
-    }
-    return undefined;
+  if (profile === 'gtnh-1.7.10') {
+    if (value === undefined || value === GTNH_STRUCTURED_DATA_ONLY_POLICY) return value;
+    throw new Error(
+      `${label} must be absent for runtime-rendered GTNH visuals or exactly ` +
+        `${GTNH_STRUCTURED_DATA_ONLY_POLICY} for a legacy data-only publication.`,
+    );
   }
-  if (value !== expected) {
-    throw new Error(`${label} must be exactly ${expected} for ${profile}.`);
+  if (value !== undefined) {
+    throw new Error(`${label} is reserved for gtnh-1.7.10 and must be absent for ${profile}.`);
   }
-  return expected;
+  return undefined;
 }
 
 function requirePackedPublicationPolicy(manifest, profile, label) {
@@ -438,6 +438,13 @@ export async function prepareModpackPublication({
   }
   const channelSlug = requiredSlug ?? slug ?? slugForPackName(pack.name);
   const publicationPolicy = profilePublicationPolicy(profile);
+  if (profile === 'gtnh-1.7.10') {
+    logger.warn(
+      '[publish-modpack][rights-policy] Publishing runtime-rendered GTNH icons and recipe layouts ' +
+        'under the dataset noncommercial attribution notice. Exporter JARs contain extraction code, ' +
+        'not bundled game or mod textures; third-party artwork remains subject to its original terms.',
+    );
+  }
   if (publicationPolicy !== undefined) {
     logger.info(
       `[publish-modpack] Enforcing ${publicationPolicy}: the public GTNH dataset will contain ` +

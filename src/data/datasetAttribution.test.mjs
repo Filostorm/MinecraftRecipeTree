@@ -31,6 +31,27 @@ test('GTNH licensing is resolved from the loaded manifest profile and attributio
     packName: 'GT New Horizons',
     packVersion: '2.8.4',
     publicationPolicy: GTNH_STRUCTURED_DATA_ONLY_POLICY,
+    visualMode: 'structured-data-only',
+    attribution,
+  });
+});
+
+test('GTNH licensing identifies runtime-rendered export visuals without a legacy policy', () => {
+  const resolved = loadedDatasetAttribution({
+    profile: GTNH_1710_DATASET_PROFILE,
+    pack: {
+      name: GTNH_PACK_NAME,
+      version: GTNH_PACK_VERSION,
+      identitySource: 'explicit-request',
+    },
+    attribution,
+  });
+  assert.deepEqual(resolved, {
+    profile: GTNH_1710_DATASET_PROFILE,
+    packName: 'GT New Horizons',
+    packVersion: '2.8.4',
+    publicationPolicy: null,
+    visualMode: 'runtime-rendered-export',
     attribution,
   });
 });
@@ -43,7 +64,7 @@ test('mutable catalog identity cannot independently enable a licensing notice', 
 test('a GTNH manifest without its integrity-bound licensing fields fails visibly', () => {
   assert.throws(
     () => loadedDatasetAttribution({profile: GTNH_1710_DATASET_PROFILE}),
-    /does not match its exact pack, structured-data-only, and attribution contract/,
+    /does not match its exact pack, visual-publication, and attribution contract/,
   );
 });
 
@@ -66,7 +87,7 @@ test('GTNH attribution is an exact immutable contract, not merely an HTTPS-shape
         web: {visualAssets: GTNH_VISUAL_ASSETS_POLICY},
         attribution: {...attribution, licenseIdentifier: 'Unreviewed license'},
       }),
-    /does not match its exact pack, structured-data-only, and attribution contract/,
+    /does not match its exact pack, visual-publication, and attribution contract/,
   );
 });
 
@@ -95,7 +116,7 @@ test('GTNH attribution notice rejects missing or drifted data-only policy', () =
   };
   assert.throws(
     () => loadedDatasetAttribution(base),
-    /structured-data-only/,
+    /visual-publication/,
   );
   assert.throws(
     () => loadedDatasetAttribution({
@@ -103,6 +124,6 @@ test('GTNH attribution notice rejects missing or drifted data-only policy', () =
       publicationPolicy: GTNH_STRUCTURED_DATA_ONLY_POLICY,
       web: {visualAssets: {...GTNH_VISUAL_ASSETS_POLICY, itemIcons: 1}},
     }),
-    /structured-data-only/,
+    /visual-publication/,
   );
 });

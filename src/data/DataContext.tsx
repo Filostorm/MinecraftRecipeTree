@@ -714,8 +714,9 @@ function isExactManifestPublicationPolicy(value: Record<string, unknown>): boole
   const visualAssets = isRecord(value.web) ? value.web.visualAssets : undefined;
   if (!gtnh) return value.publicationPolicy === undefined && visualAssets === undefined;
   return (
-    value.publicationPolicy === GTNH_STRUCTURED_DATA_ONLY_POLICY &&
-    isExactGtnhVisualAssetsPolicy(visualAssets)
+    (value.publicationPolicy === GTNH_STRUCTURED_DATA_ONLY_POLICY &&
+      isExactGtnhVisualAssetsPolicy(visualAssets)) ||
+    (value.publicationPolicy === undefined && visualAssets === undefined)
   );
 }
 
