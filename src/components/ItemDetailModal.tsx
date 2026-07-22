@@ -1,4 +1,4 @@
-import React, {useEffect, useMemo, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -17,6 +17,11 @@ import {
   GTNH_BETTERQUESTING_INFORMATION_CATEGORY_ID,
   isDefaultDisabledRecipeCategory,
 } from '../data/recipeCategories';
+import {
+  loadCollapsedRecipeCategories,
+  persistCollapsedRecipeCategories,
+  toggleCollapsedRecipeCategory,
+} from '../data/recipeCategoryPreferences';
 import {isFluidContainerTransferRecipe} from '../data/recipeVisibility';
 import {slotSummary} from '../data/slotSummary';
 import {theme} from '../theme';
@@ -258,14 +263,27 @@ function RefsList({
   const [sortMode, setSortMode] = useState<'type' | 'source'>('type');
   const [showAutomatedShaped, setShowAutomatedShaped] = useState(false);
   const [showFluidTransfers, setShowFluidTransfers] = useState(false);
+  const [collapsedCategoryIds, setCollapsedCategoryIds] = useState(
+    loadCollapsedRecipeCategories,
+  );
   const [recipesByRef, setRecipesByRef] = useState<Map<string, Recipe>>(() => new Map());
   const [availableCardWidth, setAvailableCardWidth] = useState<number | null>(null);
 
   const categoryGroups = useMemo(() => {
-    const counts = new Map<number, number>();
-    for (const [catIdx] of refs) counts.set(catIdx, (counts.get(catIdx) ?? 0) + 1);
+    const counts = new Map<number, {count: number; firstIndex: number}>();
+    refs.forEach(([catIdx], refIndex) => {
+      const current = counts.get(catIdx);
+      counts.set(catIdx, {
+        count: (current?.count ?? 0) + 1,
+        firstIndex: current?.firstIndex ?? refIndex,
+      });
+    });
     return [...counts.entries()]
-      .map(([catIdx, count]) => ({catIdx, count, category: data.categories[catIdx]}))
+      .map(([catIdx, details]) => ({
+        catIdx,
+        ...details,
+        category: data.categories[catIdx],
+      }))
       .filter(group => Boolean(group.category))
       .sort((a, b) => compareRecipeCategories(a.category!, b.category!));
   }, [refs, data.categories]);
@@ -277,20 +295,36 @@ function RefsList({
   const visibleCategoryGroups = categoryGroups.filter(
     group => showAutomatedShaped || !isDefaultDisabledRecipeCategory(group.category),
   );
+  const matchingRefs = useMemo(
+    () =>
+      refs.filter(([catIdx]) => {
+        const category = data.categories[catIdx];
+        if (!showAutomatedShaped && isDefaultDisabledRecipeCategory(category)) return false;
+        return categoryFilter == null || catIdx === categoryFilter;
+      }),
+    [refs, data.categories, categoryFilter, showAutomatedShaped],
+  );
   const filteredRefs = useMemo(() => {
-    const filtered = refs.filter(([catIdx]) => {
+    const expanded = matchingRefs.filter(([catIdx]) => {
       const category = data.categories[catIdx];
-      if (!showAutomatedShaped && isDefaultDisabledRecipeCategory(category)) return false;
-      return categoryFilter == null || catIdx === categoryFilter;
+      return category ? !collapsedCategoryIds.has(category.id) : false;
     });
-    if (sortMode === 'source') return filtered;
-    return [...filtered].sort(([aCat, aRecipe], [bCat, bRecipe]) => {
+    if (sortMode === 'source') return expanded;
+    return [...expanded].sort(([aCat, aRecipe], [bCat, bRecipe]) => {
       const a = data.categories[aCat];
       const b = data.categories[bCat];
       if (!a || !b) return aCat - bCat || aRecipe - bRecipe;
       return compareRecipeCategories(a, b) || aRecipe - bRecipe;
     });
-  }, [refs, data.categories, categoryFilter, showAutomatedShaped, sortMode]);
+  }, [matchingRefs, data.categories, collapsedCategoryIds, sortMode]);
+  const sectionGroups = useMemo(() => {
+    const visible = visibleCategoryGroups.filter(
+      group => categoryFilter == null || group.catIdx === categoryFilter,
+    );
+    return sortMode === 'source'
+      ? [...visible].sort((a, b) => a.firstIndex - b.firstIndex)
+      : visible;
+  }, [visibleCategoryGroups, categoryFilter, sortMode]);
   const refsToLoad = useMemo(
     () =>
       filteredRefs.slice(
@@ -316,6 +350,15 @@ function RefsList({
     [refsToLoad, recipesByRef, informational, showFluidTransfers, data.itemsByKey],
   );
   const shown = visibleCandidates.slice(0, visibleTarget);
+  const shownByCategory = useMemo(() => {
+    const grouped = new Map<number, RecipeRef[]>();
+    for (const ref of shown) {
+      const categoryRefs = grouped.get(ref[0]) ?? [];
+      categoryRefs.push(ref);
+      grouped.set(ref[0], categoryRefs);
+    }
+    return grouped;
+  }, [shown]);
   const hiddenFluidTransferCount = refsToLoad.reduce((count, ref) => {
     const recipe = recipesByRef.get(recipeRefKey(ref));
     return count +
@@ -339,7 +382,15 @@ function RefsList({
   useEffect(() => {
     setVisibleTarget(PAGE);
     setScanLimit(PAGE);
-  }, [categoryFilter, showAutomatedShaped, showFluidTransfers, sortMode]);
+  }, [categoryFilter, showAutomatedShaped, showFluidTransfers, sortMode, collapsedCategoryIds]);
+
+  const toggleCategory = useCallback((categoryId: string) => {
+    setCollapsedCategoryIds(current => {
+      const next = toggleCollapsedRecipeCategory(current, categoryId);
+      persistCollapsedRecipeCategories(next);
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     if (
@@ -494,7 +545,7 @@ function RefsList({
           </View>
         )}
       </View>
-      {filteredRefs.length === 0 ? (
+      {matchingRefs.length === 0 ? (
         <Text style={styles.emptyText}>
           {informational
             ? 'No informational pages match this type.'
@@ -519,36 +570,63 @@ function RefsList({
           or enable container transfers to browse directly.
         </Text>
       ) : null}
-      {shown.map(([catIdx, recipeIdx]) => {
-        const cat = data.categories[catIdx];
-        const recipe = recipesByRef.get(recipeRefKey([catIdx, recipeIdx]));
-        const selectedOutput = recipe
-          ? slotSummary(recipe.out).find(
-              output =>
-                output.key === itemKey || output.alternatives.includes(itemKey),
-            )
-          : undefined;
-        const outputKey = selectedOutput ? itemKey : undefined;
-        if (!cat) return null;
+      {sectionGroups.map(group => {
+        const category = group.category!;
+        const collapsed = collapsedCategoryIds.has(category.id);
+        const categoryRefs = shownByCategory.get(group.catIdx) ?? [];
         return (
-          <View key={`${catIdx}-${recipeIdx}`}>
-            {recipe && availableCardWidth !== null ? (
-              <RecipeCard
-                recipe={recipe}
-                dir={cat.dir}
-                catTitle={cat.title}
-                availableCardWidth={availableCardWidth}
-                onPress={
-                  outputKey && !informational
-                    ? () => openRecipeInGraph(outputKey, [catIdx, recipeIdx])
-                    : undefined
-                }
-              />
-            ) : recipe ? (
-              <Text style={styles.loadingText}>measuring {cat.title} layout…</Text>
-            ) : (
-              <Text style={styles.loadingText}>loading {cat.title}…</Text>
-            )}
+          <View key={category.id} style={styles.categorySection}>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={`${collapsed ? 'Expand' : 'Collapse'} ${category.title} recipes`}
+              accessibilityState={{expanded: !collapsed}}
+              style={[styles.categoryHeader, collapsed && styles.categoryHeaderCollapsed]}
+              onPress={() => toggleCategory(category.id)}>
+              <Text style={styles.categoryChevron}>{collapsed ? '▸' : '▾'}</Text>
+              <Text style={styles.categoryTitle} numberOfLines={1}>
+                {category.title}
+              </Text>
+              <Text style={styles.categoryCount}>
+                {group.count} {group.count === 1 ? 'recipe' : 'recipes'}
+              </Text>
+            </TouchableOpacity>
+            {!collapsed && categoryRefs.length > 0 ? (
+              <View style={styles.categoryRecipes}>
+                {categoryRefs.map(([catIdx, recipeIdx]) => {
+                  const recipe = recipesByRef.get(recipeRefKey([catIdx, recipeIdx]));
+                  const selectedOutput = recipe
+                    ? slotSummary(recipe.out).find(
+                        output =>
+                          output.key === itemKey || output.alternatives.includes(itemKey),
+                      )
+                    : undefined;
+                  const outputKey = selectedOutput ? itemKey : undefined;
+                  return (
+                    <View key={`${catIdx}-${recipeIdx}`}>
+                      {recipe && availableCardWidth !== null ? (
+                        <RecipeCard
+                          recipe={recipe}
+                          dir={category.dir}
+                          catTitle={category.title}
+                          availableCardWidth={availableCardWidth}
+                          onPress={
+                            outputKey && !informational
+                              ? () => openRecipeInGraph(outputKey, [catIdx, recipeIdx])
+                              : undefined
+                          }
+                        />
+                      ) : recipe ? (
+                        <Text style={styles.loadingText}>
+                          measuring {category.title} layout…
+                        </Text>
+                      ) : (
+                        <Text style={styles.loadingText}>loading {category.title}…</Text>
+                      )}
+                    </View>
+                  );
+                })}
+              </View>
+            ) : null}
           </View>
         );
       })}
@@ -629,6 +707,24 @@ const styles = StyleSheet.create({
     gap: 9,
   },
   recipeList: {width: '100%'},
+  categorySection: {marginBottom: 10},
+  categoryHeader: {
+    minHeight: 38,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: theme.panelAlt,
+    borderColor: theme.borderLight,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  categoryHeaderCollapsed: {borderColor: theme.border},
+  categoryChevron: {color: theme.accent, fontSize: 13, width: 12},
+  categoryTitle: {color: theme.text, fontSize: 12, fontWeight: '700', flex: 1},
+  categoryCount: {color: theme.textDim, fontSize: 9},
+  categoryRecipes: {paddingTop: 9},
   informationNotice: {color: theme.textDim, fontSize: 12, lineHeight: 17},
   filterHeader: {
     flexDirection: 'row',
