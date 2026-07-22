@@ -14,7 +14,6 @@ import {DatasetPicker} from './src/components/DatasetPicker';
 import {DatasetSwitcher} from './src/components/DatasetSwitcher';
 import {ItemsScreen} from './src/components/ItemsScreen';
 import {MobsScreen} from './src/components/MobsScreen';
-import {ModpackManager} from './src/components/ModpackManager';
 import {RecipeHistoryModal} from './src/components/RecipeHistoryModal';
 import {DataProvider, useData, useLoadState} from './src/data/DataContext';
 import {DatasetReadinessMarker} from './src/data/DatasetReadinessMarker';
@@ -188,7 +187,6 @@ function Root() {
 function Shell() {
   const data = useData();
   const {tab} = useUi();
-  const [showSnapshots, setShowSnapshots] = useState(false);
   const [showRecipeHistory, setShowRecipeHistory] = useState(false);
   useEffect(() => {
     if (tab !== 'graph' || data.indexStatus === 'ready' || data.indexStatus === 'loading') return;
@@ -209,13 +207,6 @@ function Shell() {
             ? ' · JEI layout previews available'
             : ' · JEI layout previews unavailable'}
         </Text>
-        <TouchableOpacity
-          style={styles.modpackBtn}
-          onPress={() => setShowSnapshots(true)}
-          accessibilityRole="button"
-          accessibilityLabel="Open saved export snapshots">
-          <Text style={styles.modpackBtnText}>▣ Saved snapshots</Text>
-        </TouchableOpacity>
         <TouchableOpacity
           style={styles.historyBtn}
           onPress={() => setShowRecipeHistory(true)}
@@ -259,7 +250,6 @@ function Shell() {
         </View>
       )}
       <ItemDetailModal />
-      <ModpackManager visible={showSnapshots} onClose={() => setShowSnapshots(false)} />
       <RecipeHistoryModal
         visible={showRecipeHistory}
         onClose={() => setShowRecipeHistory(false)}
@@ -324,16 +314,6 @@ const styles = StyleSheet.create({
   tabBtnActive: {backgroundColor: theme.panelAlt, borderColor: theme.border},
   tabBtnText: {color: theme.textDim, fontSize: 13},
   tabBtnTextActive: {color: theme.accent, fontWeight: '700'},
-  modpackBtn: {
-    minHeight: 44,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: theme.accent,
-    justifyContent: 'center',
-  },
-  modpackBtnText: {color: theme.accent, fontSize: 12, fontWeight: '700'},
   historyBtn: {
     minHeight: 44,
     paddingHorizontal: 12,
