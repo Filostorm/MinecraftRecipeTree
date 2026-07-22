@@ -10,6 +10,7 @@ import {
 export const PREVIEW_UPLOAD_BASE_PATH = '/api/admin/preview-assets/';
 
 const CONTENT_DIGEST_HEADER = 'x-mrt-content-sha256';
+const CONTENT_BYTES_HEADER = 'x-mrt-content-bytes';
 const DATASET_ID_HEADER = 'x-mrt-dataset-publication-id';
 const IMMUTABLE_CACHE_CONTROL = 'public, max-age=31536000, immutable, no-transform';
 const MAX_STAGED_MANIFEST_CACHE_ENTRIES = 8;
@@ -225,6 +226,7 @@ function objectHeaders(
   const headers = new Headers({
     'Cache-Control': contentType ? IMMUTABLE_CACHE_CONTROL : 'no-store',
     'Content-Length': String(object.size),
+    [CONTENT_BYTES_HEADER]: String(object.size),
     [CONTENT_DIGEST_HEADER]: digest,
     [DATASET_ID_HEADER]: datasetPublicationId,
   });

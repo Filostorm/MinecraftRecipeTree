@@ -14,6 +14,8 @@ const OBJECT_HEAD_RETRY_DELAYS_MS = Object.freeze([250, 500, 1_000, 2_000]);
 const MAX_TOKEN_BYTES = 8 * 1024;
 const IMMUTABLE_CACHE_CONTROL = 'public, max-age=31536000, immutable, no-transform';
 const SHA256_HEADER = 'x-mrt-content-sha256';
+const CONTENT_BYTES_HEADER = 'x-mrt-content-bytes';
+const TRANSPORT_RETRY_DELAYS_MS = Object.freeze([250, 1_000, 3_000]);
 const DATASET_HEADER = 'x-mrt-dataset-publication-id';
 const PUBLICATION_STATE_HEADER = 'x-mrt-publication-state';
 const MANIFEST_BYTES_HEADER = 'x-mrt-manifest-bytes';
@@ -158,6 +160,32 @@ async function request(fetchImpl, url, init, timeoutMs, label) {
   }
 }
 
+async function requestWithTransportRetry(
+  fetchImpl,
+  url,
+  init,
+  timeoutMs,
+  label,
+  logger,
+  sleepImpl,
+) {
+  const attempts = TRANSPORT_RETRY_DELAYS_MS.length + 1;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await request(fetchImpl, url, init, timeoutMs, label);
+    } catch (error) {
+      if (attempt >= TRANSPORT_RETRY_DELAYS_MS.length) throw error;
+      const delayMs = TRANSPORT_RETRY_DELAYS_MS[attempt];
+      logger.warn(
+        `${label} hit a redacted transport failure; retrying the immutable conditional request ` +
+          `in ${delayMs} ms (attempt ${attempt + 2}/${attempts}).`,
+      );
+      await sleepImpl(delayMs);
+    }
+  }
+  throw new Error(`${label} exhausted its bounded transport retry window.`);
+}
+
 function authorizationHeaders(token) {
   return {authorization: `Bearer ${token}`};
 }
@@ -172,6 +200,22 @@ function exactHeader(response, name, expected, label) {
     throw new Error(
       `${label} returned ${name}=${JSON.stringify(actual)}; expected ${JSON.stringify(expected)}.`,
     );
+  }
+}
+
+function exactObjectBytes(response, expected, label) {
+  const proxyStableBytes = response.headers.get(CONTENT_BYTES_HEADER);
+  const contentLength = response.headers.get('content-length');
+  if (proxyStableBytes === null && contentLength === null) {
+    throw new Error(
+      `${label} returned neither ${CONTENT_BYTES_HEADER} nor content-length; expected ${JSON.stringify(expected)}.`,
+    );
+  }
+  if (proxyStableBytes !== null) {
+    exactHeader(response, CONTENT_BYTES_HEADER, expected, label);
+  }
+  if (contentLength !== null) {
+    exactHeader(response, 'content-length', expected, label);
   }
 }
 
@@ -284,7 +328,7 @@ async function headObject({
       label,
     );
     if (response.status === 200) {
-      exactHeader(response, 'content-length', String(record.bytes), label);
+      exactObjectBytes(response, String(record.bytes), label);
       exactHeader(response, SHA256_HEADER, record.sha256, label);
       exactHeader(response, DATASET_HEADER, datasetPublicationId, label);
       await cancelResponse(response, logger, label);
@@ -345,10 +389,10 @@ async function readVerifiedRecord(root, record) {
 
 async function ensureObject(options) {
   if (await headObject(options)) return 'reused';
-  const {record, root, token, datasetPublicationId, timeoutMs, fetchImpl, logger} = options;
+  const {record, root, token, datasetPublicationId, timeoutMs, fetchImpl, logger, sleepImpl} = options;
   const bytes = await readVerifiedRecord(root, record);
   const label = `Preview object PUT ${record.path}`;
-  const response = await request(
+  const response = await requestWithTransportRetry(
     fetchImpl,
     objectUrl(options.baseUrl, options.assetSetId, record.path),
     {
@@ -366,6 +410,8 @@ async function ensureObject(options) {
     },
     timeoutMs,
     label,
+    logger,
+    sleepImpl,
   );
   if (![200, 201, 204, 409, 412].includes(response.status)) {
     const error = statusError(response, label);
