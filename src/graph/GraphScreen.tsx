@@ -385,9 +385,7 @@ export function GraphScreen() {
           recipesByRef.set(recipeRefKey(choice.ref), recipe);
           if (isFluidContainerTransferRecipe(recipe, data.itemsByKey)) {
             identifiedFluidTransferCount += 1;
-            if (fluidTransferChoices.length < MAX_RECIPE_PICKER_CHOICES) {
-              fluidTransferChoices.push({...choice, allowFluidTransfer: true});
-            }
+            fluidTransferChoices.push({...choice, allowFluidTransfer: true});
           } else if (standardRecipeChoices.length < MAX_RECIPE_PICKER_CHOICES) {
             standardRecipeChoices.push(choice);
           }
@@ -419,11 +417,7 @@ export function GraphScreen() {
           if (isFluidContainerTransferRecipe(recipe, data.itemsByKey)) {
             identifiedFluidTransferCount += 1;
             const explicitChoice = {...preferredChoice, allowFluidTransfer: true as const};
-            if (fluidTransferChoices.length >= MAX_RECIPE_PICKER_CHOICES) {
-              fluidTransferChoices[fluidTransferChoices.length - 1] = explicitChoice;
-            } else {
-              fluidTransferChoices.push(explicitChoice);
-            }
+            fluidTransferChoices.push(explicitChoice);
           } else if (standardRecipeChoices.length >= MAX_RECIPE_PICKER_CHOICES) {
             standardRecipeChoices[standardRecipeChoices.length - 1] = preferredChoice;
           } else {
@@ -457,6 +451,8 @@ export function GraphScreen() {
                   : undefined,
               imageW: recipe?.w,
               imageH: recipe?.h,
+              inputs: recipe ? slotSummary(recipe.in) : undefined,
+              prerequisites: recipe ? prerequisiteSummary(recipe.cat) : undefined,
             },
           };
         }
@@ -1033,11 +1029,22 @@ export function GraphScreen() {
           onRememberSourceChange={rememberSource =>
             setPicker(current => (current ? {...current, rememberSource} : current))
           }
-          filterLabel="Fluid container transfers"
-          filterHint={`Hidden by default · ${picker.identifiedFluidTransferCount} identified option${picker.identifiedFluidTransferCount === 1 ? '' : 's'}`}
+          filterLabel={
+            picker.identifiedFluidTransferCount > 0
+              ? 'Fluid container transfers'
+              : undefined
+          }
+          filterHint={
+            picker.identifiedFluidTransferCount > 0
+              ? `Hidden by default · ${picker.identifiedFluidTransferCount} identified option${picker.identifiedFluidTransferCount === 1 ? '' : 's'}`
+              : undefined
+          }
           filterValue={picker.showFluidTransfers}
-          onFilterValueChange={showFluidTransfers =>
-            setPicker(current => (current ? {...current, showFluidTransfers} : current))
+          onFilterValueChange={
+            picker.identifiedFluidTransferCount > 0
+              ? showFluidTransfers =>
+                  setPicker(current => (current ? {...current, showFluidTransfers} : current))
+              : undefined
           }
           onClose={() => setPicker(null)}
           onSelect={i => {

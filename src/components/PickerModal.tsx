@@ -10,8 +10,10 @@ import {
   View,
 } from 'react-native';
 import {pixelArtImageStyle} from '../data/pixelArtSizing';
+import type {SlotSummary} from '../data/slotSummary';
 import {theme} from '../theme';
 import {pixelated} from './ItemIcon';
+import {ItemChip} from './RecipeCard';
 import {RecipePreviewImage} from './RecipePreviewImage';
 
 export interface PickerOption {
@@ -20,6 +22,8 @@ export interface PickerOption {
   imageUri?: string;
   imageW?: number;
   imageH?: number;
+  inputs?: SlotSummary[];
+  prerequisites?: SlotSummary[];
 }
 
 /** Generic chooser used to pick between recipes and drop sources for an item. */
@@ -85,13 +89,15 @@ export function PickerModal({
               />
             </View>
           )}
-          <ScrollView style={{maxHeight: 480}}>
+          <ScrollView
+            style={styles.optionsScroll}
+            contentContainerStyle={styles.optionGrid}>
             {options.length === 0 ? (
               <Text style={styles.emptyText}>No standard sources are available.</Text>
             ) : null}
             {options.map((opt, i) => {
               const imageSize = opt.imageUri
-                ? pixelArtImageStyle(opt.imageW ?? 160, opt.imageH ?? 60, 280, 128)
+                ? pixelArtImageStyle(opt.imageW ?? 160, opt.imageH ?? 60, 250, 128)
                 : null;
               return (
                 <TouchableOpacity key={i} style={styles.option} onPress={() => onSelect(i)}>
@@ -104,6 +110,44 @@ export function PickerModal({
                       style={[imageSize, styles.optionImage, pixelated as object]}
                       resizeMode="contain"
                     />
+                  ) : null}
+                  {opt.inputs && opt.inputs.length > 0 ? (
+                    <View style={styles.ingredientGroup}>
+                      <Text style={styles.ingredientLabel}>Inputs</Text>
+                      <View style={styles.ingredientChips}>
+                        {opt.inputs.map(input => (
+                          <ItemChip
+                            key={`input-${input.tag ?? input.key}`}
+                            itemKey={input.key}
+                            amount={input.amount}
+                            variableAmount={input.variableAmount}
+                            variants={input.variants}
+                            tag={input.tag}
+                            probability={input.probability}
+                            probabilityRole="consume"
+                            interactive={false}
+                          />
+                        ))}
+                      </View>
+                    </View>
+                  ) : null}
+                  {opt.prerequisites && opt.prerequisites.length > 0 ? (
+                    <View style={styles.ingredientGroup}>
+                      <Text style={styles.ingredientLabel}>Required · not consumed</Text>
+                      <View style={styles.ingredientChips}>
+                        {opt.prerequisites.map(input => (
+                          <ItemChip
+                            key={`prerequisite-${input.tag ?? input.key}`}
+                            itemKey={input.key}
+                            amount={input.amount}
+                            variableAmount={input.variableAmount}
+                            variants={input.variants}
+                            tag={input.tag}
+                            interactive={false}
+                          />
+                        ))}
+                      </View>
+                    </View>
                   ) : null}
                 </TouchableOpacity>
               );
@@ -129,7 +173,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 12,
     width: '100%',
-    maxWidth: 460,
+    maxWidth: 920,
+    maxHeight: '92%' as never,
     padding: 14,
   },
   title: {color: theme.text, fontSize: 15, fontWeight: '700', marginBottom: 10},
@@ -148,16 +193,34 @@ const styles = StyleSheet.create({
   rememberTitle: {color: theme.accent, fontSize: 12, fontWeight: '700'},
   filterTitle: {color: theme.text, fontSize: 12, fontWeight: '700'},
   rememberHint: {color: theme.textDim, fontSize: 10, marginTop: 2, lineHeight: 14},
-  emptyText: {color: theme.textDim, fontSize: 12, paddingVertical: 14, textAlign: 'center'},
+  optionsScroll: {maxHeight: 560, flexShrink: 1},
+  optionGrid: {flexDirection: 'row', flexWrap: 'wrap', alignItems: 'stretch', gap: 8},
+  emptyText: {
+    color: theme.textDim,
+    fontSize: 12,
+    paddingVertical: 14,
+    textAlign: 'center',
+    width: '100%',
+  },
   option: {
     borderColor: theme.border,
     borderWidth: 1,
     borderRadius: 8,
     backgroundColor: theme.panelAlt,
     padding: 10,
-    marginBottom: 8,
+    flexBasis: 280,
+    flexGrow: 1,
+    maxWidth: 420,
   },
   optionLabel: {color: theme.text, fontSize: 13, fontWeight: '600'},
   optionSub: {color: theme.textDim, fontSize: 11, marginTop: 2},
   optionImage: {marginTop: 8, borderRadius: 4},
+  ingredientGroup: {marginTop: 9, gap: 5},
+  ingredientLabel: {
+    color: theme.textDim,
+    fontSize: 10,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+  },
+  ingredientChips: {flexDirection: 'row', flexWrap: 'wrap', gap: 5},
 });

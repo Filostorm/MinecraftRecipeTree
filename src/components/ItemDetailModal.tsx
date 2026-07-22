@@ -473,7 +473,7 @@ function RefsList({
             />
           </View>
         )}
-        {!informational && (
+        {!informational && (showFluidTransfers || hiddenFluidTransferCount > 0) && (
           <View style={styles.disabledTypeRow}>
             <View style={styles.disabledTypeCopy}>
               <Text style={styles.disabledTypeTitle}>Fluid container transfers</Text>
