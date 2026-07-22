@@ -10,7 +10,7 @@ viewer URL. A publication has two identities:
 The viewer's pack switcher reads those channel records. Switching packs changes `?pack=<slug>` in
 the URL, so a selected pack can be bookmarked or shared.
 
-## 1. Choose the matching exporter
+## 1. Identify the matching externally distributed exporter
 
 Do not install an exporter for a different Minecraft/recipe-viewer API. The current source tree
 contains these client-only builds:
@@ -24,8 +24,10 @@ contains these client-only builds:
 
 Download the version-matched release from the public
 [export and publishing guide](https://minecraftrecipetree.craftsmannsoftware.com/publish). The
-guide obtains each JAR URL, byte length, compatibility statement, and SHA-256 from a bounded exact
-release manifest. Verify the checksum before installation. Development and `sources` JARs are
+guide obtains each JAR filename, byte length, compatibility statement, and SHA-256 from a bounded
+exact release manifest. Recipe Tree intentionally exposes no JAR URL and hosts no exporter binary;
+obtain the file through the operator's external distribution channel, then verify its checksum
+before installation. Development and `sources` JARs are
 explicitly excluded from that manifest.
 
 ## 2. Install the exporter
@@ -124,6 +126,16 @@ The importer and preview-sidecar builder require exact raw/hosted preservation o
 Its license fields describe the normalized GTNH modpack data source; they do not relicense or
 claim coverage over third-party mod artwork and textures.
 
+Because the GTNH repository license does not establish publication rights for every bundled
+Minecraft/mod texture or rendered screenshot, the public GTNH representation is fixed to
+`publicationPolicy: "gtnh-structured-data-only-v1"`. Only after exhaustive raw validation, the
+packer removes every item/category icon, mob sprite, recipe image/dimension reference, and raster
+file. It emits the exact `web.visualAssets` zero-count ledger and a zero-raster preview-sidecar
+control manifest. The browser verifies those immutable declarations, refuses any residual visual
+reference, never requests GTNH preview objects, and renders deterministic generated placeholders.
+This is a rights boundary, not a missing-asset compatibility fallback; every activation stage logs
+the policy explicitly and fails closed on drift.
+
 The pinned GTNH adapters classify AE2 in-world crafting's complete wildcard-query closure and
 BetterQuesting pages as informational associations. BetterQuesting preserves all item references
 and groups each choice reward as one logical slot, but it intentionally does not translate task
@@ -131,10 +143,116 @@ and groups each choice reward as one logical slot, but it intentionally does not
 selected reward into material edges. The viewer keeps both categories browsable under **Info** and
 excludes them from graphs and totals.
 
-Publication also requires the exact, lexicographically ordered 17-entry special-handler ledger:
-eight version-pinned adapters and nine explicitly excluded non-recipe handlers (five query-only
-views plus four presentation-only browsers). The registered-handler count therefore equals the
-exported category count plus nine; unknown, missing, or reordered policies fail closed.
+Publication also requires the exact, lexicographically ordered 46-entry special-handler ledger:
+25 version-pinned adapters, 20 explicitly excluded non-recipe/debug handlers, and one separately
+classified unbound template category. The
+final GTNH partition is exactly 330 registered handlers: 287 exported categories plus
+`excludedNonRecipeHandlers: 20`, `excludedEmptyRecipeHandlers: 22`, and
+`excludedUnboundTemplateRecipeHandlers: 1`. The empty-handler partition contains 20 exact
+source-backed zero-row handlers and the two empty GregTech maps `gt.recipe.entropic-processing`
+(category `gtnh:f3a25a72c53a1f1c494b208f5e99ffd0`) and `gt.recipe.spaceResearch` (category
+`gtnh:bbc9b803242009c80d39be2aaad5786d`). Each omission is revalidated against immutable promoted
+source/cache evidence; none may become a zero-recipe exported category.
+The separately accounted unbound-template entry is
+`com.rwtema.extrautils.nei.MicroBlocksHandler`. Its four authoritative `RecipeMicroBlocks` rows are
+material-parameterized templates: complete-category enumeration has no concrete ForgeMultipart
+material and emits NBT-less carrier outputs, whereas item-specific queries bind the required `mat`
+identity. A source, prototype, cache, or material-binding drift rejects this exclusion.
+Unknown, missing, or reordered policies fail closed. The GTNH manifest must also carry the exact
+87-field `diagnostics.nei` record; missing fields and noncanonical exclusion counts are rejected as
+schema drift.
+
+NEI's furnace-fuel discovery also exposes five bare owner-internal world blocks as synthetic fuel
+pages: the Botania Cacophonium placed block, Carpenter's Bed and Door placed blocks, and
+TConstruct's Held Item and Battle Sign equipped-tool blocks. The exporter scans all 3,744 fuel
+rows before export and after handler reload, then excludes only source rows 1264, 1292, 1295,
+2795, and 2796 under
+`nei-furnace-fuel-owner-internal-world-state-row-exclusion-v1`.
+`excludedOwnerInternalFurnaceFuelRows` must be exactly five; any additional, missing, reordered,
+or stack-shape-drifted row fails publication.
+
+That record also requires `adaptedModernMarkingsCrossingItemIcons: 6`: the exact six pinned
+four-corner ModernMarkings floor-crossing variants rendered through the audited owner-atlas
+face-on adapter. Any missing, duplicate, or broadened adaptation blocks publication.
+
+It also requires `adaptedThaumcraftRunedStoneItemIcons: 1` for the exact Gadomancy Runed Stone
+output (`Thaumcraft:blockEldritch`, metadata 10). The adapter projects Thaumcraft's pinned
+`thaumcraft:es_5` owner atlas sprite because the owner's inventory renderer emits no geometry for
+that valid metadata. The inherited metadata-zero `ItemBlock` stack icon must independently remain
+the distinct stitched `thaumcraft:obsidiantile` sprite. Any identity, renderer, resource, atlas,
+or cardinality drift blocks publication.
+
+The same record requires `adaptedProjectBlueControlPanelItemIcons: 3` and
+`adaptedProjectBlueControlPanelRecipeWidgetRenderInvocations: 3`. They identify the exact three
+pinned ProjectBlue control-panel material variants rendered through the exporter-side exact
+owner-renderer lease. Missing, broadened, or drifted lease telemetry blocks publication.
+
+The exact `knowledgePolicy.itemAspectRecipeSemantics` value is
+`thaumcraft-nei-aspect-cost-meta1-to-meta0-semantic-proxy-v1`. The exporter may normalize only the
+pinned metadata-1 TCNA aspect-cost input proxy to the owner-supported metadata-0 semantic item key;
+the NBT aspect identity and recipe quantity remain authoritative. The corresponding telemetry must
+contain positive `normalizedTcnaAspectCostInputOccurrences` and
+`normalizedTcnaAspectCostDistinctKeys` values and exactly
+`normalizedTcnaAspectCostHandlerCategories: 4`. The occurrence and distinct-key totals remain
+dynamic until the authoritative export supplies them, while the handler-category cardinality is a
+pinned topology constraint. No missing, empty, or broader case is silently accepted.
+
+GTNH pins two independent Forestry custom-name adapters. The Scanned Sapling adapter uses
+`knowledgePolicy.forestryScannedSaplingDisplayName` =
+`gregtech-forestry-scanned-sapling-explicit-custom-name-v1` and
+`knowledgePolicy.forestryScannedSaplingSourceBinding` =
+`gregtech-forestry-scanned-sapling-source-bound-display-name-v1`. The exporter verifies all 298
+Scanner rows, the exact synthetic row 3 recipe, its 132 genetic sapling alternatives and corpus
+digest, then grants one one-use name capability only to output slot 0/alternative 0.
+
+The Scanned Pollen adapter separately pins `knowledgePolicy.forestryScannedPollenDisplayName` =
+`gregtech-forestry-scanned-pollen-explicit-custom-name-v1` and
+`knowledgePolicy.forestryScannedPollenSourceBinding` =
+`gregtech-forestry-scanned-pollen-source-bound-display-name-v1`. It applies the same fail-closed
+model to the exact GregTech Scanner recipe and `Forestry:pollenFertile` output: the preflight must
+authorize that precise source occurrence before the display-name resolver may consume the
+capability. An item key or NBT match by itself is insufficient, so neither adapter becomes a
+global display-name fallback.
+
+Publication requires `adaptedForestryScannedSaplingDisplayNames: 1`,
+`gregTechForestryScannedSaplingRecipeOccurrences: 1`,
+`adaptedForestryScannedPollenDisplayNames: 1`, and
+`gregTechForestryScannedPollenRecipeOccurrences: 1`. A missing, duplicate, unclaimed, or
+out-of-locus capability is an explicit failure.
+
+The exact `knowledgePolicy.gregTechOutputlessRecipeSemantics` value is
+`gregtech-outputless-semantic-preflight-v2`. Before generic zero-output validation, exporter 1.0.78
+requires the measured GTNH 2.8.4 snapshot: 289 GregTech fuel-sink recipes across 14 categories, 49
+Large Boiler fuel-sink recipes in one category, 104 Radio Hatch information recipes, 27 Quantum
+Component information recipes, and two Space Project information recipes. The aggregate must be
+exactly 471 semantic recipes across 18 categories, and
+`excludedGregTechLargeBoilerPresentationRows` must be exactly one. The preflight scanned 148
+GregTech categories and 162,842 recipes and recorded 472 classified rows. Its order-independent
+sorted-multiset fingerprint is
+`7950c0741cb841a857428e327f407d0c8303954b0d6aa7a36a9189e30ea350f9`: canonical semantic-row
+entries are sorted before hashing while duplicate entries retain their multiplicity, so handler
+traversal order cannot perturb the identity. The aggregate `gregTechOutputlessSemanticRecipes`
+counter must also equal the sum of the five family counters. Schema drift or inconsistent exact
+telemetry fails publication explicitly.
+
+The exact `knowledgePolicy.gregTechStaleDoorRecyclingExclusion` value is
+`gregtech-unregistered-itemdoor-recycling-exclusion-v1`.
+`excludedGregTechUnregisteredDoorRecyclingRows` must be exactly five: two Macerator rows, two Arc
+Furnace rows, and one Fluid Extractor row whose inputs retain stale, unregistered vanilla
+`ItemDoor` object identities after MalisisDoors installs its registered replacements. The exporter
+must prove the replacement relationship and the stale inputs' non-matchability against the live
+GregTech runtime, then exclude each complete row. Removing only the input would fabricate a
+free-output recipe, and normalizing it to the registered replacement would fabricate an
+unsupported graph edge. Missing, broadened, or differently normalized exclusions fail closed.
+
+That exclusion telemetry includes two exact bare MalisisDoors placeholders:
+`excludedMalisisDoorsUnconfiguredCustomDoorItemListPlaceholders: 1` for the bare
+`malisisdoors:item.custom_door` carrier (metadata `0`, absent NBT), and
+`excludedMalisisDoorsUnconfiguredMixedBlockItemListPlaceholders: 1` for the unconfigured mixed-block
+carrier. Each exclusion applies only to its exact bare stack; configured or NBT-bearing variants are
+retained. Both corresponding recipe-reference counters and both quest-reference counters must
+remain zero; missing telemetry, an exclusion count other than one, or any bare graph reference
+fails closed.
 
 Crop Plugin authority comes from the deterministic, canonical replay of all 159 `ALL_CROPS`
 entries and 12,561 two-parent pairs, not from the plugin's identity-hash-dependent raw cache. The
@@ -184,23 +302,37 @@ once:
 ```bash
 npm run accept:exporter -- \
   --release forge-hei-1.12.2 \
-  --profile multiblock-madness-1.12.2 \
-  --export-root "/absolute/path/to/completed-full-export"
+  --profile meatballcraft-1.12.2 \
+  --export-root "/absolute/path/to/completed-meatballcraft-full-export"
 
-npm run package:exporter:1.12.2
+npm run accept:exporter -- \
+  --release forge-hei-1.12.2 \
+  --profile multiblock-madness-1.12.2 \
+  --export-root "/absolute/path/to/completed-mm1-full-export"
+
+# Build the accepted version-specific project, then distribute its build/libs
+# release artifact through an external channel.
 ```
 
-The pinned GTNH release uses `npm run package:exporter:1.7.10` after its own full
-`gtnh-1.7.10` acceptance export.
+The pinned GTNH release is built in `recipe-export-mod-1.7.10` after its own full
+`gtnh-1.7.10` acceptance export. Recipe Tree records its filename, length, and SHA-256 in the
+metadata catalog but does not host the JAR.
 
-The ignored local receipt binds the configured release identity, exact source-JAR SHA-256/length,
-the release-defined acceptance profile, the exact release-definition/validation-policy source
+Each ignored local receipt binds the configured release identity, exact source-JAR SHA-256/length,
+one explicitly selected advertised profile, the exact profile-specific corpus definition and validation-policy source
 digest, the pinned Sharp/libvips lock entries, and the validated full export manifest's
 SHA-256/length. It contains no local path or
 credential. Packaging refuses diagnostic `qualitySample` output and any missing, malformed,
 symlinked, profile-mismatched, policy-stale, definition-stale, or stale-JAR receipt. Receipts are
 local operator attestations, not third-party signatures; create one only from the full export
 produced while testing that exact installed JAR.
+
+Receipt filenames are keyed by `release--profile`. A release that advertises multiple profiles,
+such as the shared 1.12.2 HEI exporter, is packageable only after every advertised profile has its
+own current receipt. This makes incomplete acceptance explicit and prevents one pack's corpus from
+authorizing another. A legacy release-only receipt is read only when its embedded profile exactly
+matches the requested profile, and the migration path is logged; no cross-profile fallback exists.
+Writing a replacement creates the profile-keyed path and leaves legacy-file removal to the operator.
 
 For the version-isolated 1.7.10, 1.12.2, and 1.18.2 releases, the JAR carries a canonical
 `META-INF/mrt-exporter-build.json` identity containing its exporter ID, Minecraft version, and a
@@ -209,8 +341,8 @@ SHA-256 digest over the rest of its canonical payload. The exporter writes the s
 It also streams every file twice to compare exhaustive pre/post tree digests, rejecting symlinks,
 hard links, and mutation during validation. This extra I/O is the security cost of avoiding a
 second full-size immutable snapshot. The digest workers are bounded and never buffer whole export
-files. Before the first release of GTNH or either Multiblock Madness pack, populate that release's
-exact `acceptanceCorpus` counts from its completed full export; the initial `null` value
+files. Before the first release of GTNH or either Multiblock Madness pack, populate that release
+profile's exact `acceptanceCorpora[profile]` counts from its completed full export; the initial `null` value
 deliberately prevents packaging a diagnostic or partial corpus.
 
 Exporter release packaging is serialized with an exclusive manifest lock. Concurrent packaging
@@ -232,6 +364,16 @@ Custom ingredient types, item/fluid/gas quantities, tag/OreDictionary alternativ
 non-consumed catalysts, byproducts, staged/hidden recipes, custom-death mob drops, and transparent
 icons are validated as structured data. Unsupported or ambiguous semantics block the matching
 strict quality profile instead of silently being converted to quantity `1` or an arbitrary item.
+
+Manifest format 2 represents a stochastic input or output occurrence as
+`[catalogKey, amount, logicalIngredientIdOrNull, probability]`, where `probability` is finite and
+strictly between zero and one. Every resolved alternative in one logical slot must carry the same
+probability. The fourth field is valid only in `recipe.in` and `recipe.out`; `recipe.cat` remains a
+deterministic retained requirement. A consumable that is destroyed probabilistically should appear
+once in `recipe.in` with its consumption probability and once in `recipe.cat` with the minimum
+retained reservoir. The UI exposes these as distinct “consume chance” and “required, not consumed”
+semantics. Tree material totals deliberately report stochastic consumption as unknown rather than
+substituting an expected value, while retaining the catalyst amount as the minimum prerequisite.
 
 ## 5. Prepare a publication
 
@@ -257,10 +399,17 @@ Multiblock Madness 2 uses its independently accepted 1.18.2 release:
 --profile multiblock-madness-2-1.18.2 --release forge-rei-1.18.2
 ```
 
+GTNH uses `--profile gtnh-1.7.10 --release forge-nei-gtnh-1.7.10` and is permanently bound to
+the `gt-new-horizons` channel. The preparer selects that slug when `--slug` is omitted and rejects
+any different explicit slug before acceptance-receipt access or workspace creation. Its
+`publication-plan.json` persists the exact `gtnh-structured-data-only-v1` decision; upload
+revalidates both that value and the zero-count visual-assets ledger before catalog access or
+credential loading.
+
 Use `npm run publish:modpack -- --help` for the live list of supported strict profiles. A profile
 is not just a label: it selects version-specific completeness, image scale, diagnostics, and recipe
 semantics gates. `--release` is also mandatory: it selects exactly one configured exporter artifact
-and its local acceptance receipt. There is no generic profile, release, or receipt fallback. A
+and its profile-keyed local acceptance receipt. There is no generic profile, release, or receipt fallback. A
 release without canonical `exporter-build.json` provenance or a completed exact-corpus receipt is
 not publication-eligible yet.
 
@@ -273,7 +422,9 @@ Preparation performs this transaction:
 4. streams a SHA-256 digest over that exact staged snapshot and requires it to equal the receipt's
    exhaustive accepted-tree digest before any optimizer runs;
 5. validates every document, cross-reference, quantity, and referenced image;
-6. losslessly optimizes retained assets and records exact omitted-preview accounting;
+6. losslessly optimizes retained assets and records exact omitted-preview accounting; for GTNH,
+   performs the post-validation structured-data-only rights transform and proves the raster set is
+   empty;
 7. computes the content-derived core `publicationId` and builds the preview sidecar;
 8. revalidates that the receipt/JAR did not change, then writes `publication-plan.json` last with
    the full normalized receipt plus its canonical SHA-256 identity.
@@ -341,6 +492,8 @@ npm run publish:modpack -- upload \
   --workspace "/absolute/path/to/prepared-publication-workspace" \
   --channel-action create \
   --default false \
+  --benchmark-report "/absolute/path/to/cold-browser-report.json" \
+  --dist "/absolute/path/to/the-verified-production-dist" \
   --app-origin https://minecraftrecipetree.craftsmannsoftware.com \
   --core-token-file "/private/path/core-token" \
   --preview-token-file "/private/path/preview-token"
@@ -349,7 +502,10 @@ npm run publish:modpack -- upload \
 Use `--channel-action create` only for a new slug and `--channel-action update` only after reviewing
 the existing channel with that slug. `--default` is also an operator decision; it is intentionally
 absent from the contributor-controlled plan. Before reading the public catalog or credentials, the
-command revalidates the plan's exact receipt identity against the current version-specific JAR,
+GTNH path also revalidates `--benchmark-report` against the exact `--dist`, prepared publication,
+and packed export; a missing, non-eligible, stale, or mismatched cold-browser gate fails before
+catalog or credential access. The command then revalidates the plan's exact receipt identity
+against the current version-specific JAR,
 policy, profile, pack, and packed `exporter-build.json`. A replaced receipt, rebuilt JAR, or MM1/MM2
 workspace swap therefore fails before any network or credential access. It then converts the
 explicit channel intent into a compare-and-swap precondition and
@@ -393,6 +549,9 @@ credential bound to an exact object inventory, aggregate byte/object quotas, exp
 rate limits, server-side hash verification, moderation state, and orphan cleanup. That design keeps
 the current resumable protocol while removing the operator handoff. A local-only browser import can
 be added separately for private viewing, but it does not create a durable share URL.
+
+The concrete direct-to-R2, D1 state-machine, Queue backpressure, quota, and cleanup design is in
+[`high-volume-ingestion.md`](./high-volume-ingestion.md).
 
 ## Troubleshooting
 

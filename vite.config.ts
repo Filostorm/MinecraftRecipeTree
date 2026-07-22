@@ -14,9 +14,9 @@ export default defineConfig(async () => {
   const {cloudflare} = await import('@cloudflare/vite-plugin');
 
   return {
-    // Complete recipe publications are served from the Sites-managed R2 binding. Keeping Vite's
-    // public-directory copy enabled would silently rebundle the legacy 315 MiB MeatballCraft
-    // snapshot into every application release and defeat content-addressed dataset delivery.
+    // Complete recipe publications are served from the Sites-managed R2 binding. Curated static
+    // application files are copied individually by sites-vite-plugin.ts so an accidental
+    // public/exports corpus can never be swept into an application deployment.
     publicDir: false as const,
     resolve: {
       alias: {

@@ -35,9 +35,9 @@ function framedHashUpdate(hash, bytes) {
   hash.update(length).update(buffer);
 }
 
-function assetSetId(records) {
+function assetSetId(records, format = 'mrt-recipe-preview-sidecar-v1') {
   const hash = createHash('sha256');
-  hash.update('mrt-recipe-preview-sidecar-v1\0');
+  hash.update(`${format}\0`);
   framedHashUpdate(hash, DATASET_PUBLICATION_ID);
   for (const record of [...records].sort((left, right) =>
     left.path < right.path ? -1 : left.path > right.path ? 1 : 0,
@@ -46,6 +46,58 @@ function assetSetId(records) {
     framedHashUpdate(hash, Buffer.from(record.sha256, 'hex'));
   }
   return hash.digest('hex');
+}
+
+async function createDataOnlySidecarFixture(root, overrides = {}) {
+  const local = join(root, 'sidecar');
+  await mkdir(local, {recursive: true});
+  const manifest = {
+    format: 'mrt-recipe-preview-sidecar-v2',
+    publicationPolicy: 'gtnh-structured-data-only-v1',
+    exclusionReason: 'third-party-artwork-rights-not-cleared',
+    assetSetId: assetSetId([], 'mrt-recipe-preview-sidecar-v2'),
+    datasetPublicationId: DATASET_PUBLICATION_ID,
+    maxPackBytes: 1024 * 1024,
+    packIndexFormat: 'mrt-recipe-preview-pack-index-v1',
+    maxPackIndexBytes: 512 * 1024,
+    imageFormat: 'lossless-webp',
+    categoryFormat: 'mrt-recipe-preview-category-v1',
+    settings: {
+      itemIconPixels: 16,
+      recipeScale: 2,
+      webpEffort: 4,
+      maxCategoryBytes: 256 * 1024,
+    },
+    counts: {
+      categories: 42,
+      recipes: 1000,
+      previews: 0,
+      missing: 1000,
+      uniqueImages: 0,
+      duplicates: 0,
+      packs: 0,
+      inputBytes: 0,
+      hostedOmittedPngBytes: 987654,
+      encodedBytes: 0,
+      storedBytes: 0,
+      packIndexBytes: 0,
+    },
+    packs: [],
+    mapping: {documents: 0, parts: 0, bytes: 0},
+    categoryDocuments: [],
+    ...overrides,
+  };
+  const manifestBytes = jsonBytes(manifest);
+  await writeFile(join(local, 'manifest.json'), manifestBytes);
+  return {
+    local,
+    manifest,
+    manifestBytes,
+    packBytes: Buffer.alloc(0),
+    indexBytes: Buffer.alloc(0),
+    categoryBytes: Buffer.alloc(0),
+    entries: [],
+  };
 }
 
 function jsonBytes(value) {
@@ -262,6 +314,58 @@ async function startPublicServer(fixture, options = {}) {
     }),
   };
 }
+
+test('remote verifier accepts only the exact content-addressed manifest-only v2 branch', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'preview-sidecar-data-only-remote-test-'));
+  let server;
+  try {
+    const fixture = await createDataOnlySidecarFixture(root);
+    server = await startPublicServer(fixture);
+    const capture = recordingLogger();
+    const result = await verifyRemoteRecipePreviewSidecar({
+      local: fixture.local,
+      baseUrl: server.baseUrl,
+      mode: 'committed',
+      logger: capture,
+      allowHttpForTests: true,
+    });
+    assert.deepEqual(result, {
+      mode: 'committed',
+      assetSetId: fixture.manifest.assetSetId,
+      datasetPublicationId: DATASET_PUBLICATION_ID,
+      packs: 0,
+      categoryDocuments: 0,
+      imageSamples: 0,
+    });
+    assert.deepEqual(
+      server.requests.map(request => `${request.method}:${request.path}`),
+      [`GET:${PUBLIC_BASE_PATH}/${fixture.manifest.assetSetId}/manifest.json`],
+    );
+    assert.equal(
+      capture.messages.warn.some(message => message.includes('explicitly excludes 1000 recipe previews')),
+      true,
+    );
+
+    await server.close();
+    server = undefined;
+    const driftRoot = join(root, 'drift');
+    const drift = await createDataOnlySidecarFixture(driftRoot, {
+      counts: {...fixture.manifest.counts, packs: 1},
+    });
+    await assert.rejects(
+      verifyRemoteRecipePreviewSidecar({
+        local: drift.local,
+        baseUrl: 'https://example.test/dataset/preview-sets',
+        mode: 'committed',
+        logger: quietLogger(),
+      }),
+      /manifest-only with zero previews\/packs\/mappings/,
+    );
+  } finally {
+    if (server) await server.close();
+    await rm(root, {recursive: true, force: true});
+  }
+});
 
 async function withFixture(operation, settings) {
   const root = await mkdtemp(join(tmpdir(), 'remote-preview-verifier-test-'));

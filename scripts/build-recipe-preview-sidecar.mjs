@@ -18,7 +18,7 @@ import {
   exportQualityIssues,
   GENERIC_JEI_120_PROFILE,
   GTNH_DATA_ATTRIBUTION,
-  GTNH_HANDLER_POLICIES,
+  GTNH_284_HANDLER_POLICIES,
   GTNH_1710_PROFILE,
   GTNH_KNOWLEDGE_POLICY,
   gtnhManifestQualityIssues,
@@ -29,6 +29,7 @@ import {
   resolveQualityProfile,
 } from './export-quality-policy.mjs';
 import {parsePackedImagePath} from './packed-assets.mjs';
+import {GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY} from './core-dataset-publication-contract.mjs';
 import {requirePackIdentity} from './pack-identity.mjs';
 import {computePublicationId} from './publication-id.mjs';
 import {
@@ -40,6 +41,9 @@ import {
 import {MAX_SHARD_BYTES, SHARDED_JSON_FORMAT} from './sharded-documents.mjs';
 
 export const RECIPE_PREVIEW_SIDECAR_FORMAT = 'mrt-recipe-preview-sidecar-v1';
+export const RECIPE_PREVIEW_SIDECAR_DATA_ONLY_FORMAT = 'mrt-recipe-preview-sidecar-v2';
+export const GTNH_STRUCTURED_DATA_ONLY_EXCLUSION_REASON =
+  'third-party-artwork-rights-not-cleared';
 export const RECIPE_PREVIEW_CATEGORY_FORMAT = 'mrt-recipe-preview-category-v1';
 export const RECIPE_PREVIEW_PACK_INDEX_FORMAT = 'mrt-recipe-preview-pack-index-v1';
 export const MAX_PACK_BYTES = 1024 * 1024;
@@ -94,6 +98,16 @@ const HOSTED_WEB_CONTRACT = Object.freeze({
   maxPackBytes: 1024 * 1024,
   shardedJson: 'mrt-sharded-json-v1',
   maxShardBytes: 8 * 1024 * 1024,
+});
+const GTNH_STRUCTURED_DATA_ONLY_VISUAL_ASSETS = Object.freeze({
+  format: 'mrt-visual-assets-policy-v1',
+  mode: 'structured-data-only',
+  policy: GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY,
+  itemIcons: 0,
+  categoryIcons: 0,
+  recipePreviews: 0,
+  mobSprites: 0,
+  packedImageFiles: 0,
 });
 
 export const MEATBALLCRAFT_CONTRACT = Object.freeze({
@@ -442,7 +456,7 @@ export function recipePreviewContractForProfile(profile, rawManifest, warnings) 
     ...(requirements.provenance ?? {}),
     ...(resolvedProfile === GTNH_1710_PROFILE
       ? {
-          handlerPolicies: GTNH_HANDLER_POLICIES,
+          handlerPolicies: GTNH_284_HANDLER_POLICIES,
           knowledgePolicy: GTNH_KNOWLEDGE_POLICY,
           attribution: GTNH_DATA_ATTRIBUTION,
         }
@@ -683,7 +697,12 @@ function validateContract(contract, profile = null) {
   }
 }
 
-function validateDatasetManifest(manifest, contract, label, {hosted = false} = {}) {
+function validateDatasetManifest(
+  manifest,
+  contract,
+  label,
+  {hosted = false, publicationPolicy} = {},
+) {
   if (!isRecord(manifest)) throw new Error(`${label} must be a JSON object.`);
   const expectedManifestKeys = [
     'aborted',
@@ -706,6 +725,7 @@ function validateDatasetManifest(manifest, contract, label, {hosted = false} = {
   }
   if (contract.pack !== undefined) expectedManifestKeys.push('pack');
   if (hosted) expectedManifestKeys.push('publicationId', 'web');
+  if (publicationPolicy !== undefined) expectedManifestKeys.push('publicationPolicy');
   if (!hasExactKeys(manifest, expectedManifestKeys)) {
     throw new Error(
       `${label} must contain exactly the audited manifest fields: ` +
@@ -774,6 +794,17 @@ function validateDatasetManifest(manifest, contract, label, {hosted = false} = {
   validateRepairProvenance(manifest, contract, label);
 
   if (hosted) {
+    if (publicationPolicy !== undefined) {
+      if (
+        publicationPolicy !== GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY ||
+        manifest.publicationPolicy !== GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY
+      ) {
+        throw new Error(
+          `${label}.publicationPolicy must be ` +
+            `${JSON.stringify(GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY)}.`,
+        );
+      }
+    }
     if (!DATASET_PUBLICATION_ID_PATTERN.test(manifest.publicationId ?? '')) {
       throw new Error(
         `${label}.publicationId must be an exact lowercase SHA-256 digest; received ` +
@@ -781,13 +812,22 @@ function validateDatasetManifest(manifest, contract, label, {hosted = false} = {
       );
     }
     if (!isRecord(manifest.web)) throw new Error(`${label}.web must be an object.`);
-    const expectedWebKeys = ['recipeImages', ...Object.keys(contract.hostedWeb ?? {})];
+    const hostedWebEntries = Object.entries(contract.hostedWeb ?? {}).filter(([name]) =>
+      publicationPolicy === GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY
+        ? name !== 'maxPackBytes' && name !== 'packedImages'
+        : true,
+    );
+    const expectedWebKeys = [
+      'recipeImages',
+      ...hostedWebEntries.map(([name]) => name),
+      ...(publicationPolicy === undefined ? [] : ['visualAssets']),
+    ];
     if (!hasExactKeys(manifest.web, expectedWebKeys)) {
       throw new Error(
         `${label}.web must contain exactly ${expectedWebKeys.sort().join(', ')}.`,
       );
     }
-    for (const [name, expected] of Object.entries(contract.hostedWeb ?? {})) {
+    for (const [name, expected] of hostedWebEntries) {
       if (!isDeepStrictEqual(manifest.web[name], expected)) {
         throw new Error(
           `${label}.web.${name} must be ${JSON.stringify(expected)}; received ` +
@@ -795,20 +835,36 @@ function validateDatasetManifest(manifest, contract, label, {hosted = false} = {
         );
       }
     }
+    if (publicationPolicy !== undefined) {
+      assertExactRecord(
+        manifest.web.visualAssets,
+        GTNH_STRUCTURED_DATA_ONLY_VISUAL_ASSETS,
+        `${label}.web.visualAssets`,
+      );
+    }
     const recipeImages = manifest.web.recipeImages;
+    const expectedRecipeImageKeys = [
+      'mode',
+      'reason',
+      ...(publicationPolicy === GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY
+        ? ['policy']
+        : []),
+      'references',
+      'files',
+      'encoding',
+      'bytes',
+      'inventory',
+    ];
     if (
       !isRecord(recipeImages) ||
-      !hasExactKeys(recipeImages, [
-        'mode',
-        'reason',
-        'references',
-        'files',
-        'encoding',
-        'bytes',
-        'inventory',
-      ]) ||
+      !hasExactKeys(recipeImages, expectedRecipeImageKeys) ||
       recipeImages.mode !== 'omitted' ||
-      recipeImages.reason !== 'hosting-archive-budget' ||
+      recipeImages.reason !==
+        (publicationPolicy === GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY
+          ? GTNH_STRUCTURED_DATA_ONLY_EXCLUSION_REASON
+          : 'hosting-archive-budget') ||
+      (publicationPolicy === GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY &&
+        recipeImages.policy !== GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY) ||
       !Number.isSafeInteger(recipeImages.references) ||
       recipeImages.references < 0 ||
       !Number.isSafeInteger(recipeImages.files) ||
@@ -818,8 +874,13 @@ function validateDatasetManifest(manifest, contract, label, {hosted = false} = {
       recipeImages.bytes < 0
     ) {
       throw new Error(
-        `${label}.web.recipeImages must describe the omitted recipe images with non-negative ` +
-        'references, files, and bytes plus encoding="png".',
+        `${label}.web.recipeImages must describe the omitted recipe images with the exact ` +
+          `${publicationPolicy === GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY
+            ? 'rights-exclusion'
+            : 'hosting-budget'} reason, non-negative references, files, and bytes, plus ` +
+          `${publicationPolicy === GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY
+            ? `policy=${JSON.stringify(GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY)} and `
+            : ''}encoding="png".`,
       );
     }
     const inventory = requireRecipeImageInventory(
@@ -858,6 +919,7 @@ function validateDatasetManifest(manifest, contract, label, {hosted = false} = {
 function assertRawAndHostedIdentity(rawManifest, hostedManifest) {
   const normalizedHostedManifest = {...hostedManifest};
   delete normalizedHostedManifest.publicationId;
+  delete normalizedHostedManifest.publicationPolicy;
   delete normalizedHostedManifest.web;
   if (!isDeepStrictEqual(rawManifest, normalizedHostedManifest)) {
     throw new Error(
@@ -1121,7 +1183,7 @@ function hasOwn(value, key) {
   return Object.prototype.hasOwnProperty.call(value, key);
 }
 
-function normalizeRawCategory(category, index) {
+function normalizeRawCategory(category, index, {structuredDataOnly = false} = {}) {
   if (!isRecord(category)) throw new Error(`Raw category ${index} must be an object.`);
   if (!hasOwn(category, 'icon')) return category;
   if (!isSafeRelativePath(category.icon)) {
@@ -1130,13 +1192,31 @@ function normalizeRawCategory(category, index) {
         `${JSON.stringify(category.icon)}.`,
     );
   }
+  if (structuredDataOnly) {
+    const {icon: _icon, ...structuredCategory} = category;
+    return structuredCategory;
+  }
   return {...category, icon: NORMALIZED_CATEGORY_ICON};
 }
 
-function normalizeHostedCategory(category, rawCategory, index) {
+function normalizeHostedCategory(
+  category,
+  rawCategory,
+  index,
+  {structuredDataOnly = false} = {},
+) {
   if (!isRecord(category)) throw new Error(`Hosted category ${index} must be an object.`);
   const rawHasIcon = hasOwn(rawCategory, 'icon');
   const hostedHasIcon = hasOwn(category, 'icon');
+  if (structuredDataOnly) {
+    if (hostedHasIcon) {
+      throw new Error(
+        `Hosted structured-data-only category ${index} (${JSON.stringify(rawCategory.id)}) ` +
+          'must omit category.icon.',
+      );
+    }
+    return category;
+  }
   if (rawHasIcon !== hostedHasIcon) {
     throw new Error(
       `Raw category ${index} (${JSON.stringify(rawCategory.id)}) and hosted publication ` +
@@ -1153,7 +1233,11 @@ function normalizeHostedCategory(category, rawCategory, index) {
   return {...category, icon: NORMALIZED_CATEGORY_ICON};
 }
 
-function assertRawAndHostedCategoryIdentity(rawCategories, hostedDocument) {
+function assertRawAndHostedCategoryIdentity(
+  rawCategories,
+  hostedDocument,
+  {structuredDataOnly = false} = {},
+) {
   if (!isRecord(hostedDocument) || !Array.isArray(hostedDocument.categories)) {
     throw new Error('Hosted categories.json must be an object with a categories array.');
   }
@@ -1166,8 +1250,13 @@ function assertRawAndHostedCategoryIdentity(rawCategories, hostedDocument) {
   }
   for (let index = 0; index < rawCategories.length; index += 1) {
     const rawCategory = rawCategories[index];
-    const normalizedRaw = normalizeRawCategory(rawCategory, index);
-    const normalizedHosted = normalizeHostedCategory(hostedCategories[index], rawCategory, index);
+    const normalizedRaw = normalizeRawCategory(rawCategory, index, {structuredDataOnly});
+    const normalizedHosted = normalizeHostedCategory(
+      hostedCategories[index],
+      rawCategory,
+      index,
+      {structuredDataOnly},
+    );
     if (!isDeepStrictEqual(normalizedHosted, normalizedRaw)) {
       throw new Error(
         `Raw category ${index} (${JSON.stringify(rawCategory.id)}) does not match the hosted ` +
@@ -1750,9 +1839,13 @@ function framedHashUpdate(hash, bytes) {
   hash.update(length).update(buffer);
 }
 
-function computeAssetSetId(records, datasetPublicationId) {
+function computeAssetSetId(
+  records,
+  datasetPublicationId,
+  format = RECIPE_PREVIEW_SIDECAR_FORMAT,
+) {
   const hash = createHash('sha256');
-  hash.update(`${RECIPE_PREVIEW_SIDECAR_FORMAT}\0`);
+  hash.update(`${format}\0`);
   framedHashUpdate(hash, datasetPublicationId);
   for (const record of [...records].sort((a, b) =>
     a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
@@ -1979,9 +2072,27 @@ export async function buildRecipePreviewSidecar({
       );
     }
     const hostedManifest = hostedPublication.manifest;
+    const hasPublicationPolicy = Object.hasOwn(hostedManifest, 'publicationPolicy');
+    const structuredDataOnly =
+      hostedManifest.publicationPolicy === GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY;
+    if (hasPublicationPolicy && !structuredDataOnly) {
+      throw new Error(
+        `Hosted dataset manifest publicationPolicy ${JSON.stringify(hostedManifest.publicationPolicy)} ` +
+          'is unsupported.',
+      );
+    }
+    if (structuredDataOnly && resolvedProfile !== GTNH_1710_PROFILE) {
+      throw new Error(
+        `Publication policy ${GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY} is restricted to the ` +
+          `exact ${GTNH_1710_PROFILE} quality profile.`,
+      );
+    }
     validateDatasetManifest(rawManifest, datasetContract, 'Raw export manifest');
     validateDatasetManifest(hostedManifest, datasetContract, 'Hosted dataset manifest', {
       hosted: true,
+      ...(structuredDataOnly
+        ? {publicationPolicy: GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY}
+        : {}),
     });
     assertRawAndHostedIdentity(rawManifest, hostedManifest);
     await verifyHostedPublicationId(hostedPublication, logger);
@@ -2008,11 +2119,83 @@ export async function buildRecipePreviewSidecar({
     const hostedCategoriesDocument = (
       await hostedPublication.readDocument('categories.json', 'Hosted categories.json')
     ).value;
-    assertRawAndHostedCategoryIdentity(categories, hostedCategoriesDocument);
+    assertRawAndHostedCategoryIdentity(categories, hostedCategoriesDocument, {structuredDataOnly});
     logger.info(
       `Validated dataset publication ${hostedManifest.publicationId} manifest and exact ` +
         `category identity for ${datasetContract.counts.categories} categories.`,
     );
+
+    if (structuredDataOnly) {
+      logger.warn(
+        `Rights policy ${GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY} excludes every recipe ` +
+          'preview raster because third-party artwork rights are not cleared. No raster file ' +
+          'will be read, copied, encoded, hashed into a pack, or uploaded.',
+      );
+      const allContentRecords = [];
+      const assetSetId = computeAssetSetId(
+        allContentRecords,
+        hostedManifest.publicationId,
+        RECIPE_PREVIEW_SIDECAR_DATA_ONLY_FORMAT,
+      );
+      const manifest = {
+        format: RECIPE_PREVIEW_SIDECAR_DATA_ONLY_FORMAT,
+        publicationPolicy: GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY,
+        exclusionReason: GTNH_STRUCTURED_DATA_ONLY_EXCLUSION_REASON,
+        assetSetId,
+        datasetPublicationId: hostedManifest.publicationId,
+        maxPackBytes,
+        packIndexFormat: RECIPE_PREVIEW_PACK_INDEX_FORMAT,
+        maxPackIndexBytes: MAX_PACK_INDEX_BYTES,
+        imageFormat: IMAGE_FORMAT,
+        categoryFormat: RECIPE_PREVIEW_CATEGORY_FORMAT,
+        settings: {
+          itemIconPixels: 16 * datasetContract.settings.iconScale,
+          recipeScale: datasetContract.settings.recipeScale,
+          webpEffort: WEBP_EFFORT,
+          maxCategoryBytes,
+        },
+        counts: {
+          categories: categories.length,
+          recipes: datasetContract.counts.recipes,
+          previews: 0,
+          missing: datasetContract.counts.recipes,
+          uniqueImages: 0,
+          duplicates: 0,
+          packs: 0,
+          inputBytes: 0,
+          hostedOmittedPngBytes: hostedManifest.web.recipeImages.bytes,
+          encodedBytes: 0,
+          storedBytes: 0,
+          packIndexBytes: 0,
+        },
+        packs: [],
+        mapping: {documents: 0, parts: 0, bytes: 0},
+        categoryDocuments: [],
+      };
+      const manifestRecord = await writeOutputDocument(
+        stagingRoot,
+        'manifest.json',
+        jsonBytes(manifest),
+      );
+      await verifyGeneratedFiles(stagingRoot, [manifestRecord], {
+        maxPackBytes,
+        maxPackIndexBytes: MAX_PACK_INDEX_BYTES,
+        maxCategoryBytes,
+      });
+      await verifyHostedPublicationId(hostedPublication, logger);
+      const finalKind = await targetKind(outputRoot);
+      if (finalKind !== 'missing') {
+        throw new Error(
+          `Transactional output target appeared during the build; refusing to replace ${outputRoot}.`,
+        );
+      }
+      await rename(stagingRoot, outputRoot);
+      logger.info(
+        `Structured-data-only preview sidecar ${assetSetId} committed to ${outputRoot}: ` +
+          `0 content objects, 0 previews, ${datasetContract.counts.recipes} rights-excluded recipes.`,
+      );
+      return manifest;
+    }
 
     const packWriter = new PackWriter(stagingRoot, maxPackBytes);
     const visualCatalog = new VisualCatalog(packWriter, datasetContract.counts.recipes);

@@ -3,6 +3,7 @@ import {join} from 'node:path';
 import sharp from 'sharp';
 import {
   GTNH_1710_PROFILE,
+  MEATBALLCRAFT_112_PROFILE,
   MULTIBLOCK_MADNESS_112_PROFILE,
   MULTIBLOCK_MADNESS_2_118_PROFILE,
   qualityProfileRequirementsFor,
@@ -16,6 +17,7 @@ import {
 
 const SYNTHETIC_EXPORTER_ID_BY_PROFILE = new Map([
   [GTNH_1710_PROFILE, 'forge-nei-gtnh-1.7.10'],
+  [MEATBALLCRAFT_112_PROFILE, 'forge-hei-1.12.2'],
   [MULTIBLOCK_MADNESS_112_PROFILE, 'forge-hei-1.12.2'],
   [MULTIBLOCK_MADNESS_2_118_PROFILE, 'forge-rei-1.18.2'],
 ]);

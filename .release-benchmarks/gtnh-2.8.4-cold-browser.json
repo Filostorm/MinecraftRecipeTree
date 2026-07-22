@@ -1,0 +1,458 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-07-22T13:30:16.160Z",
+  "benchmark": {
+    "sourceSha256": "622052687811ed3c5baff73ec8566e9c9e785aea352cc32f2afe3b71c897c773",
+    "runs": 3,
+    "coldDefinition": "fresh Chrome process/profile per run; HTTP cache disabled/cleared; shared warm local Worker and operating-system file cache"
+  },
+  "platform": {
+    "node": "v22.22.3",
+    "platform": "darwin",
+    "arch": "arm64",
+    "release": "25.5.0",
+    "logicalCpuCount": 12
+  },
+  "chrome": {
+    "protocolVersion": "1.3",
+    "product": "Chrome/150.0.7871.129",
+    "revision": "@e69b30bba288603e514cffb4c79c359cac68e923",
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36",
+    "jsVersion": "15.0.1240245"
+  },
+  "build": {
+    "sha256": "6937e0b22f17c2bcb47eb2a4e4685a72c0bb4152dc8d3a4076276adb76747798",
+    "files": 40,
+    "bytes": 4525270
+  },
+  "dataset": {
+    "slug": "gt-new-horizons",
+    "displayName": "GT New Horizons",
+    "minecraftVersion": "1.7.10",
+    "packVersion": "2.8.4",
+    "publicationId": "074a1897536d0e2ca9c44c9717759582edadf7087ca9c1799182410c415473db",
+    "previewAssetSetId": "49c141ec4261147254ab79481472e3bbe30706a1f815cd72f27a5d7f7102ecbb",
+    "isDefault": true
+  },
+  "staticMetrics": {
+    "itemsBootstrapBytes": 24510759,
+    "indexBootstrapBytes": 39748848,
+    "combinedDatasetBootstrapBytes": 64259607,
+    "bootstrapDocumentCount": 15,
+    "coreBootstrapPaths": [
+      "blockdrops.json",
+      "categories.json",
+      "data/index/part-000.json",
+      "data/index/part-001.json",
+      "data/index/part-002.json",
+      "data/index/part-003.json",
+      "data/index/part-004.json",
+      "data/items/part-000.json",
+      "data/items/part-001.json",
+      "data/items/part-002.json",
+      "index.json",
+      "items.json",
+      "manifest.json",
+      "mobs.json"
+    ],
+    "previewBootstrapPaths": [],
+    "previewManifestBytes": 0
+  },
+  "thresholds": {
+    "eligible": {
+      "combinedDatasetBootstrapBytes": 75497472,
+      "indexBootstrapBytes": 41943040,
+      "bootstrapDocumentCount": 12,
+      "settledHeapBytes": 314572800,
+      "peakHeapBytes": 419430400,
+      "readyMs": 8000
+    },
+    "review": {
+      "combinedDatasetBootstrapBytes": 83886080,
+      "indexBootstrapBytes": 50331648,
+      "bootstrapDocumentCount": 16,
+      "settledHeapBytes": 335544320,
+      "peakHeapBytes": 419430400,
+      "readyMs": 8000
+    }
+  },
+  "runs": [
+    {
+      "run": 1,
+      "readyMs": 659.6,
+      "peakHeapBytes": 180186748,
+      "settledHeapBytes": 151621936,
+      "heapSampleCount": 42,
+      "settledHeapSamples": [
+        151621936,
+        151621936,
+        151621936
+      ],
+      "cdpTraffic": {
+        "datasetRequests": 16,
+        "datasetCompletedRequests": 16,
+        "datasetDecodedBytes": 64461913,
+        "datasetEncodedBytes": 64465086
+      },
+      "proxyTraffic": {
+        "requests": 25,
+        "datasetRequests": 16,
+        "catalogRequests": 1,
+        "documentRequests": 16,
+        "imageRequests": 0,
+        "documentBodyBytes": 64461913,
+        "imageBodyBytes": 0,
+        "totalDatasetBodyBytes": 64461913,
+        "bootstrapDocumentCount": 15,
+        "servedObjects": [
+          {
+            "key": "catalog:/api/datasets",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 311
+          },
+          {
+            "key": "core:blockdrops.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 13
+          },
+          {
+            "key": "core:categories.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 121994
+          },
+          {
+            "key": "core:data/index/part-000.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 8385072
+          },
+          {
+            "key": "core:data/index/part-001.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 8387700
+          },
+          {
+            "key": "core:data/index/part-002.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 8388592
+          },
+          {
+            "key": "core:data/index/part-003.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 8385433
+          },
+          {
+            "key": "core:data/index/part-004.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 6201648
+          },
+          {
+            "key": "core:data/items/part-000.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 8388463
+          },
+          {
+            "key": "core:data/items/part-001.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 8388436
+          },
+          {
+            "key": "core:data/items/part-002.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 7733550
+          },
+          {
+            "key": "core:index.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 403
+          },
+          {
+            "key": "core:items.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 310
+          },
+          {
+            "key": "core:manifest.json",
+            "kind": "document",
+            "requests": 2,
+            "responseBodyBytes": 79976
+          },
+          {
+            "key": "core:mobs.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 12
+          }
+        ]
+      }
+    },
+    {
+      "run": 2,
+      "readyMs": 538.7,
+      "peakHeapBytes": 177706228,
+      "settledHeapBytes": 151619740,
+      "heapSampleCount": 40,
+      "settledHeapSamples": [
+        151619740,
+        151619740,
+        151619740
+      ],
+      "cdpTraffic": {
+        "datasetRequests": 16,
+        "datasetCompletedRequests": 16,
+        "datasetDecodedBytes": 64461913,
+        "datasetEncodedBytes": 64465086
+      },
+      "proxyTraffic": {
+        "requests": 25,
+        "datasetRequests": 16,
+        "catalogRequests": 1,
+        "documentRequests": 16,
+        "imageRequests": 0,
+        "documentBodyBytes": 64461913,
+        "imageBodyBytes": 0,
+        "totalDatasetBodyBytes": 64461913,
+        "bootstrapDocumentCount": 15,
+        "servedObjects": [
+          {
+            "key": "catalog:/api/datasets",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 311
+          },
+          {
+            "key": "core:blockdrops.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 13
+          },
+          {
+            "key": "core:categories.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 121994
+          },
+          {
+            "key": "core:data/index/part-000.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 8385072
+          },
+          {
+            "key": "core:data/index/part-001.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 8387700
+          },
+          {
+            "key": "core:data/index/part-002.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 8388592
+          },
+          {
+            "key": "core:data/index/part-003.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 8385433
+          },
+          {
+            "key": "core:data/index/part-004.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 6201648
+          },
+          {
+            "key": "core:data/items/part-000.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 8388463
+          },
+          {
+            "key": "core:data/items/part-001.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 8388436
+          },
+          {
+            "key": "core:data/items/part-002.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 7733550
+          },
+          {
+            "key": "core:index.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 403
+          },
+          {
+            "key": "core:items.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 310
+          },
+          {
+            "key": "core:manifest.json",
+            "kind": "document",
+            "requests": 2,
+            "responseBodyBytes": 79976
+          },
+          {
+            "key": "core:mobs.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 12
+          }
+        ]
+      }
+    },
+    {
+      "run": 3,
+      "readyMs": 538.3,
+      "peakHeapBytes": 167893908,
+      "settledHeapBytes": 151407956,
+      "heapSampleCount": 39,
+      "settledHeapSamples": [
+        151407956,
+        151407956,
+        151407956
+      ],
+      "cdpTraffic": {
+        "datasetRequests": 16,
+        "datasetCompletedRequests": 16,
+        "datasetDecodedBytes": 64461913,
+        "datasetEncodedBytes": 64465086
+      },
+      "proxyTraffic": {
+        "requests": 25,
+        "datasetRequests": 16,
+        "catalogRequests": 1,
+        "documentRequests": 16,
+        "imageRequests": 0,
+        "documentBodyBytes": 64461913,
+        "imageBodyBytes": 0,
+        "totalDatasetBodyBytes": 64461913,
+        "bootstrapDocumentCount": 15,
+        "servedObjects": [
+          {
+            "key": "catalog:/api/datasets",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 311
+          },
+          {
+            "key": "core:blockdrops.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 13
+          },
+          {
+            "key": "core:categories.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 121994
+          },
+          {
+            "key": "core:data/index/part-000.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 8385072
+          },
+          {
+            "key": "core:data/index/part-001.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 8387700
+          },
+          {
+            "key": "core:data/index/part-002.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 8388592
+          },
+          {
+            "key": "core:data/index/part-003.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 8385433
+          },
+          {
+            "key": "core:data/index/part-004.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 6201648
+          },
+          {
+            "key": "core:data/items/part-000.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 8388463
+          },
+          {
+            "key": "core:data/items/part-001.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 8388436
+          },
+          {
+            "key": "core:data/items/part-002.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 7733550
+          },
+          {
+            "key": "core:index.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 403
+          },
+          {
+            "key": "core:items.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 310
+          },
+          {
+            "key": "core:manifest.json",
+            "kind": "document",
+            "requests": 2,
+            "responseBodyBytes": 79976
+          },
+          {
+            "key": "core:mobs.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 12
+          }
+        ]
+      }
+    }
+  ],
+  "decision": "operator-review-required",
+  "aggregate": {
+    "worstBootstrapDocumentCount": 15,
+    "worstReadyMs": 659.6,
+    "worstPeakHeapBytes": 180186748,
+    "worstSettledHeapBytes": 151621936
+  },
+  "violations": [
+    {
+      "name": "bootstrapDocumentCount",
+      "observed": 15,
+      "limit": 12
+    }
+  ]
+}

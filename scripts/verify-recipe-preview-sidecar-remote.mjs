@@ -9,6 +9,10 @@ import {posix, resolve, sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 const SIDECAR_FORMAT = 'mrt-recipe-preview-sidecar-v1';
+const DATA_ONLY_SIDECAR_FORMAT = 'mrt-recipe-preview-sidecar-v2';
+const GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY = 'gtnh-structured-data-only-v1';
+const GTNH_STRUCTURED_DATA_ONLY_EXCLUSION_REASON =
+  'third-party-artwork-rights-not-cleared';
 const CATEGORY_FORMAT = 'mrt-recipe-preview-category-v1';
 const PACK_INDEX_FORMAT = 'mrt-recipe-preview-pack-index-v1';
 const DATASET_ID_PATTERN = /^[a-f0-9]{64}$/;
@@ -68,9 +72,9 @@ function framedHashUpdate(hash, bytes) {
   hash.update(length).update(buffer);
 }
 
-function computeAssetSetId(records, datasetPublicationId) {
+function computeAssetSetId(records, datasetPublicationId, format = SIDECAR_FORMAT) {
   const hash = createHash('sha256');
-  hash.update(`${SIDECAR_FORMAT}\0`);
+  hash.update(`${format}\0`);
   framedHashUpdate(hash, datasetPublicationId);
   for (const record of [...records].sort((left, right) =>
     left.path < right.path ? -1 : left.path > right.path ? 1 : 0,
@@ -321,6 +325,10 @@ function validateCategoryRoot(document, categoryIndex, packs, label) {
 }
 
 function validateManifestShape(manifest) {
+  if (manifest?.format === DATA_ONLY_SIDECAR_FORMAT) {
+    validateDataOnlyManifestShape(manifest);
+    return;
+  }
   const manifestKeys = [
     'format',
     'assetSetId',
@@ -417,6 +425,17 @@ function validateManifestShape(manifest) {
   if (manifest.counts.uniqueImages + manifest.counts.duplicates !== manifest.counts.previews) {
     throw new Error('Local sidecar unique-image and duplicate counts do not sum to previews.');
   }
+  if (
+    manifest.counts.categories <= 0 ||
+    manifest.counts.recipes <= 0 ||
+    manifest.counts.previews <= 0 ||
+    manifest.counts.uniqueImages <= 0 ||
+    manifest.counts.packs <= 0
+  ) {
+    throw new Error(
+      'Ordinary v1 preview sidecars require positive categories, recipes, previews, images, and packs.',
+    );
+  }
 
   if (!Array.isArray(manifest.packs) || manifest.packs.length !== manifest.counts.packs) {
     throw new Error('Local sidecar manifest.packs length does not match counts.packs.');
@@ -449,7 +468,8 @@ function validateManifestShape(manifest) {
   }
   if (
     !Array.isArray(manifest.categoryDocuments) ||
-    manifest.categoryDocuments.length !== manifest.mapping.documents
+    manifest.categoryDocuments.length !== manifest.mapping.documents ||
+    manifest.mapping.documents <= 0
   ) {
     throw new Error(
       'Local sidecar manifest.categoryDocuments length does not match mapping.documents.',
@@ -472,6 +492,109 @@ function validateManifestShape(manifest) {
   const mappingBytes = manifest.categoryDocuments.reduce((sum, document) => sum + document.bytes, 0);
   if (!Number.isSafeInteger(mappingBytes) || mappingBytes !== manifest.mapping.bytes) {
     throw new Error('Local sidecar category document byte total does not match mapping.bytes.');
+  }
+}
+
+function validateDataOnlyManifestShape(manifest) {
+  assertExactKeys(manifest, [
+    'format',
+    'publicationPolicy',
+    'exclusionReason',
+    'assetSetId',
+    'datasetPublicationId',
+    'maxPackBytes',
+    'packIndexFormat',
+    'maxPackIndexBytes',
+    'imageFormat',
+    'categoryFormat',
+    'settings',
+    'counts',
+    'packs',
+    'mapping',
+    'categoryDocuments',
+  ], 'Local data-only sidecar manifest');
+  if (
+    manifest.publicationPolicy !== GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY ||
+    manifest.exclusionReason !== GTNH_STRUCTURED_DATA_ONLY_EXCLUSION_REASON
+  ) {
+    throw new Error(
+      'Local data-only sidecar must declare the exact GTNH publication policy and artwork-rights exclusion reason.',
+    );
+  }
+  if (
+    !DATASET_ID_PATTERN.test(manifest.assetSetId) ||
+    !DATASET_ID_PATTERN.test(manifest.datasetPublicationId) ||
+    manifest.maxPackBytes !== MAX_PACK_BYTES ||
+    manifest.packIndexFormat !== PACK_INDEX_FORMAT ||
+    manifest.maxPackIndexBytes !== MAX_PACK_INDEX_BYTES ||
+    manifest.imageFormat !== 'lossless-webp' ||
+    manifest.categoryFormat !== CATEGORY_FORMAT
+  ) {
+    throw new Error('Local data-only sidecar immutable format metadata is invalid.');
+  }
+  assertExactKeys(
+    manifest.settings,
+    ['itemIconPixels', 'recipeScale', 'webpEffort', 'maxCategoryBytes'],
+    'Local data-only sidecar manifest.settings',
+  );
+  if (
+    !Number.isSafeInteger(manifest.settings.itemIconPixels) ||
+    manifest.settings.itemIconPixels < 16 ||
+    manifest.settings.itemIconPixels % 16 !== 0 ||
+    !Number.isSafeInteger(manifest.settings.recipeScale) ||
+    manifest.settings.recipeScale <= 0 ||
+    manifest.settings.webpEffort !== 4 ||
+    !Number.isSafeInteger(manifest.settings.maxCategoryBytes) ||
+    manifest.settings.maxCategoryBytes < 256 ||
+    manifest.settings.maxCategoryBytes > MAX_CATEGORY_BYTES
+  ) {
+    throw new Error('Local data-only sidecar settings violate the exact bounded contract.');
+  }
+  const countKeys = [
+    'categories',
+    'recipes',
+    'previews',
+    'missing',
+    'uniqueImages',
+    'duplicates',
+    'packs',
+    'inputBytes',
+    'hostedOmittedPngBytes',
+    'encodedBytes',
+    'storedBytes',
+    'packIndexBytes',
+  ];
+  assertExactKeys(manifest.counts, countKeys, 'Local data-only sidecar manifest.counts');
+  for (const key of countKeys) {
+    assertNonNegativeInteger(
+      manifest.counts[key],
+      `Local data-only sidecar manifest.counts.${key}`,
+    );
+  }
+  if (
+    manifest.counts.categories <= 0 ||
+    manifest.counts.recipes <= 0 ||
+    manifest.counts.previews !== 0 ||
+    manifest.counts.missing !== manifest.counts.recipes ||
+    manifest.counts.uniqueImages !== 0 ||
+    manifest.counts.duplicates !== 0 ||
+    manifest.counts.packs !== 0 ||
+    manifest.counts.inputBytes !== 0 ||
+    manifest.counts.encodedBytes !== 0 ||
+    manifest.counts.storedBytes !== 0 ||
+    manifest.counts.packIndexBytes !== 0 ||
+    !Array.isArray(manifest.packs) ||
+    manifest.packs.length !== 0 ||
+    !hasExactKeys(manifest.mapping, ['documents', 'parts', 'bytes']) ||
+    manifest.mapping.documents !== 0 ||
+    manifest.mapping.parts !== 0 ||
+    manifest.mapping.bytes !== 0 ||
+    !Array.isArray(manifest.categoryDocuments) ||
+    manifest.categoryDocuments.length !== 0
+  ) {
+    throw new Error(
+      'Local data-only sidecar must be manifest-only with zero previews/packs/mappings and missing===recipes.',
+    );
   }
 }
 
@@ -543,6 +666,28 @@ export async function validateLocalRecipePreviewSidecar(local, concurrency = DEF
       `Local sidecar file inventory differs from the manifest; ` +
         `unexpected=${JSON.stringify(unexpected)}, missing=${JSON.stringify(missing)}.`,
     );
+  }
+
+  if (manifest.format === DATA_ONLY_SIDECAR_FORMAT) {
+    const computedAssetSetId = computeAssetSetId(
+      [],
+      manifest.datasetPublicationId,
+      DATA_ONLY_SIDECAR_FORMAT,
+    );
+    if (computedAssetSetId !== manifest.assetSetId) {
+      throw new Error(
+        `Local data-only sidecar assetSetId is ${manifest.assetSetId}; ` +
+          `content computes to ${computedAssetSetId}.`,
+      );
+    }
+    return {
+      root,
+      manifest,
+      manifestBytes,
+      categoryBytes: [],
+      packIndexBytes: [],
+      coordinatesByPack: [],
+    };
   }
 
   await mapConcurrent(manifest.packs, concurrency, async (record, index) => {
@@ -689,7 +834,11 @@ export async function validateLocalRecipePreviewSidecar(local, concurrency = DEF
       `Local category mappings contain ${partCount} parts; manifest declares ${manifest.mapping.parts}.`,
     );
   }
-  const computedAssetSetId = computeAssetSetId(records, manifest.datasetPublicationId);
+  const computedAssetSetId = computeAssetSetId(
+    records,
+    manifest.datasetPublicationId,
+    manifest.format,
+  );
   if (computedAssetSetId !== manifest.assetSetId) {
     throw new Error(
       `Local sidecar assetSetId is ${manifest.assetSetId}; content computes to ${computedAssetSetId}.`,
@@ -993,6 +1142,12 @@ export async function verifyRemoteRecipePreviewSidecar({
   try {
     const localState = await validateLocalRecipePreviewSidecar(local, concurrency);
     const {manifest} = localState;
+    if (manifest.format === DATA_ONLY_SIDECAR_FORMAT) {
+      logger.warn(
+        `Rights policy ${GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY} explicitly excludes ` +
+          `${manifest.counts.recipes} recipe previews; verifying a manifest-only sidecar.`,
+      );
+    }
     logger.info(
       `Validated local sidecar ${manifest.assetSetId}: ${manifest.packs.length} packs and ` +
         `${manifest.categoryDocuments.length} category documents.`,

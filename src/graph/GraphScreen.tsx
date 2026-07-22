@@ -283,6 +283,7 @@ export function GraphScreen() {
             alternatives: spec.alternatives,
             tag: spec.tag,
             nonConsumed: spec.nonConsumed,
+            consumptionProbability: spec.nonConsumed ? undefined : spec.probability,
             ancestors: [...node.ancestors, node.key],
             cyclic: node.ancestors.includes(spec.key) || spec.key === node.key,
           };
@@ -1198,7 +1199,7 @@ function CompactItemNodeView({
   return (
     <Pressable
       accessibilityRole={selectable ? 'button' : undefined}
-      accessibilityLabel={`${name}, quantity ${amount}${node.nonConsumed ? ', not consumed' : ''}${selectable ? ', choose source' : ''}`}
+      accessibilityLabel={`${name}, quantity ${amount}${node.nonConsumed ? ', not consumed' : ''}${node.consumptionProbability !== undefined ? `, ${node.consumptionProbability == null ? 'unknown' : `${String(Math.round(node.consumptionProbability * 10_000) / 100)} percent`} consume chance` : ''}${selectable ? ', choose source' : ''}`}
       disabled={!selectable || node.loading}
       onPress={onTap}
       style={[
@@ -1262,6 +1263,9 @@ function ItemNodeView({
             : ''}
           {node.cyclic ? '  ↻' : ''}
           {node.nonConsumed ? '  retained' : ''}
+          {node.consumptionProbability !== undefined
+            ? `  ${node.consumptionProbability == null ? '?' : `${String(Math.round(node.consumptionProbability * 10_000) / 100)}%`} consume`
+            : ''}
         </Text>
       </View>
       <TouchableOpacity onPress={onInfo} style={styles.infoBtn} hitSlop={6}>

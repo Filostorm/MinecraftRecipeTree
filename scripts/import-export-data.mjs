@@ -25,6 +25,10 @@ import {
   resolveQualityProfile,
 } from './export-quality-policy.mjs';
 import {readArrayDocument} from './sharded-documents.mjs';
+import {
+  GTNH_STRUCTURED_DATA_ONLY_POLICY_ID,
+  usesStructuredDataOnlyPublication,
+} from './visual-assets-rights-policy.mjs';
 
 const scriptRoot = dirname(fileURLToPath(import.meta.url));
 const defaultDestination = join(process.cwd(), 'public', 'exports');
@@ -472,6 +476,7 @@ export async function importExportData({
     throw new Error('A raw export source directory is required.');
   }
   const resolvedProfile = resolveQualityProfile(profile);
+  const structuredDataOnly = usesStructuredDataOnlyPublication(resolvedProfile);
   const resolvedStagingMode = resolveStagingMode(stagingMode);
   if (resolvedStagingMode !== 'clone' && resolvedStagingMode !== 'copy') {
     throw new Error('stagingMode must be exactly clone or copy.');
@@ -618,17 +623,32 @@ export async function importExportData({
       console.log('[import-data] Completed the caller-required staged-source integrity gate.');
     }
 
-    const optimizationArgs = ['--root', stagingReal];
-    if (omitRecipeImages) optimizationArgs.push('--omit-recipe-images');
-    await runStage(
-      omitRecipeImages
-        ? 'omission-aware retained-image optimization'
-        : 'lossless image optimization',
-      'optimize-export-assets.mjs',
-      optimizationArgs,
-    );
+    if (structuredDataOnly) {
+      console.warn(
+        `[import-data][rights-policy] ${GTNH_STRUCTURED_DATA_ONLY_POLICY_ID} keeps original ` +
+          'visual files only through exhaustive raw decoding and exclusion accounting. The ' +
+          'lossless WebP optimization stage is intentionally skipped because no visual file may ' +
+          'enter the public dataset.',
+      );
+      if (omitRecipeImages) {
+        console.info(
+          '[import-data][rights-policy] The explicit omitRecipeImages request is subsumed by ' +
+            'the stricter GTNH policy, which omits every visual asset class.',
+        );
+      }
+    } else {
+      const optimizationArgs = ['--root', stagingReal];
+      if (omitRecipeImages) optimizationArgs.push('--omit-recipe-images');
+      await runStage(
+        omitRecipeImages
+          ? 'omission-aware retained-image optimization'
+          : 'lossless image optimization',
+        'optimize-export-assets.mjs',
+        optimizationArgs,
+      );
+    }
     const packingArgs = ['--root', stagingReal, '--profile', resolvedProfile];
-    if (omitRecipeImages) packingArgs.push('--omit-recipe-images');
+    if (omitRecipeImages && !structuredDataOnly) packingArgs.push('--omit-recipe-images');
     await runStage(
       'exhaustive raw validation, asset packing, and exact publication validation',
       'pack-export-assets.mjs',

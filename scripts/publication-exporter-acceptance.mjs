@@ -13,6 +13,7 @@ import {
 } from './exporter-release-acceptance.mjs';
 import {
   EXPORTER_BUILD_EXPORT_PATH,
+  inspectExporterJarBuild,
   parseExporterBuildIdentityBytes,
 } from './exporter-artifact-provenance.mjs';
 import {resolveQualityProfile} from './export-quality-policy.mjs';
@@ -151,8 +152,11 @@ export async function loadCurrentPublicationExporterAcceptance({
   const definition = exporterReleaseDefinitionForId(definitions, releaseId);
   const packIdentity = requirePublishablePackIdentity(pack, 'Publication acceptance pack');
   const configurationMismatches = [];
-  if (definition.acceptanceProfile !== qualityProfile) {
-    configurationMismatches.push('release-defined acceptance profile');
+  if (
+    !Array.isArray(definition.qualityProfiles) ||
+    !definition.qualityProfiles.includes(qualityProfile)
+  ) {
+    configurationMismatches.push('release-advertised acceptance profile');
   }
   if (definition.minecraftVersion !== minecraftVersion) {
     configurationMismatches.push('release-defined Minecraft version');
@@ -174,7 +178,9 @@ export async function loadCurrentPublicationExporterAcceptance({
   const receipt = await requireAcceptedExporterRelease({
     definition,
     sourceBytes,
+    qualityProfile,
     acceptanceRoot,
+    logger,
   });
   const binding = buildPublicationExporterAcceptance(receipt);
   requireAcceptanceContext(binding, {
@@ -195,6 +201,54 @@ export async function loadCurrentPublicationExporterAcceptance({
       `to receipt sha256=${binding.receiptSha256}.`,
   );
   return Object.freeze({definition, binding});
+}
+
+/**
+ * Verify the current distributable JAR against an already-bound publication receipt without
+ * asserting that the historical validation-policy digest equals today's policy digest. This is
+ * intentionally narrower than loadCurrentPublicationExporterAcceptance and is used only after an
+ * exact prepared-publication migration allowlist has been matched by the caller.
+ */
+export async function verifyPublicationExporterArtifactBinding({
+  releaseId,
+  profile,
+  minecraftVersion,
+  pack,
+  definitions,
+  binding,
+  workspaceRoot = DEFAULT_EXPORTER_WORKSPACE_ROOT,
+}) {
+  const validated = requireAcceptanceContext(binding, {profile, minecraftVersion, pack});
+  const definition = exporterReleaseDefinitionForId(definitions, releaseId);
+  const {receipt} = validated;
+  if (
+    receipt.release.id !== releaseId ||
+    definition.id !== releaseId ||
+    definition.version !== receipt.release.version ||
+    definition.filename !== receipt.release.filename ||
+    definition.minecraftVersion !== minecraftVersion ||
+    !Array.isArray(definition.qualityProfiles) ||
+    !definition.qualityProfiles.includes(profile)
+  ) {
+    throw new Error('Prepared-publication migration does not match the configured exporter release.');
+  }
+  const sourcePath = resolveExporterReleaseSourcePath(definition, workspaceRoot);
+  const sourceBytes = await readVerifiedExporterJar(
+    sourcePath,
+    `Prepared-publication migration exporter ${releaseId}`,
+  );
+  const sourceSha256 = createHash('sha256').update(sourceBytes).digest('hex');
+  if (
+    sourceBytes.length !== receipt.release.bytes ||
+    sourceSha256 !== receipt.release.sha256
+  ) {
+    throw new Error('Prepared-publication migration exporter JAR bytes do not match its receipt.');
+  }
+  const jarBuild = inspectExporterJarBuild(sourceBytes);
+  if (!isDeepStrictEqual(jarBuild.identity, receipt.exporterBuild)) {
+    throw new Error('Prepared-publication migration exporter payload identity does not match its receipt.');
+  }
+  return Object.freeze({definition, binding: validated});
 }
 
 export async function verifyPublicationExporterBuildFile({

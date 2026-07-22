@@ -11,6 +11,10 @@ import {
   loadCommittedCorePublication,
 } from './coreDatasetUpload.ts';
 import {
+  type CommittedDatasetIdentity,
+  requireCommittedDatasetIdentity,
+} from './datasetIdentity.ts';
+import {
   type DatasetR2Bucket,
   type DatasetR2Object,
   type DatasetRuntime,
@@ -27,6 +31,7 @@ import {
   type PreviewPackRecord,
   type ValidatedPreviewManifest,
   requireContentAddressedPreviewManifest,
+  requirePairedPublicationPolicy,
 } from './previewAssetContract.ts';
 
 export const CORE_PUBLIC_ROUTE =
@@ -39,6 +44,7 @@ const MRPI_MAGIC = 0x4d525049;
 const MRPI_VERSION = 1;
 const IMMUTABLE = 'public, max-age=31536000, immutable';
 const IMMUTABLE_IMAGE = `${IMMUTABLE}, no-transform`;
+const STORED_BYTES_HEADER = 'X-MRT-Stored-Bytes';
 const MAX_MANIFEST_CACHE_ENTRIES = 12;
 const MAX_INDEX_CACHE_ENTRIES = 96;
 const MAX_INDEX_CACHE_BYTES = 3 * 1024 * 1024;
@@ -72,6 +78,7 @@ interface IndexCacheEntry {
 const bucketNamespaces = new WeakMap<object, number>();
 let nextBucketNamespace = 1;
 const coreManifestCache = new Map<string, ReturnType<typeof loadCommittedCorePublication>>();
+const coreDatasetIdentityCache = new Map<string, Promise<CommittedDatasetIdentity>>();
 const previewManifestCache = new Map<string, Promise<LoadedPreviewPublication>>();
 const indexCache = new Map<string, IndexCacheEntry>();
 let indexCacheBytes = 0;
@@ -244,11 +251,57 @@ async function loadCorePublication(
   return operation;
 }
 
+async function loadCoreDatasetIdentity(
+  bucket: DatasetR2Bucket,
+  publicationId: string,
+  publication: ValidatedCoreDatasetPublication,
+): Promise<CommittedDatasetIdentity> {
+  const cacheKey = `${bucketNamespace(bucket)}:${publicationId}`;
+  const cached = coreDatasetIdentityCache.get(cacheKey);
+  if (cached) {
+    touchBounded(coreDatasetIdentityCache, cacheKey, cached, MAX_MANIFEST_CACHE_ENTRIES);
+    return cached;
+  }
+  const operation = (async () => {
+    const record = publication.contentRecordsByPath.get('manifest.json');
+    if (!record) throw new Error('Committed core publication omits dataset manifest.json.');
+    const objectKey = coreObjectKey(publicationId, record.path);
+    const object = await bucket.get(objectKey);
+    if (
+      !object ||
+      object.key !== objectKey ||
+      !coreObjectMatches(object, publicationId, record)
+    ) {
+      throw new Error(`Committed dataset manifest ${objectKey} is missing or has invalid immutable metadata.`);
+    }
+    const bytes = new Uint8Array(await object.arrayBuffer());
+    if (bytes.byteLength !== record.bytes || (await sha256Hex(bytes)) !== record.sha256) {
+      throw new Error(`Committed dataset manifest ${objectKey} failed byte-length or SHA-256 validation.`);
+    }
+    let value: unknown;
+    try {
+      value = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+    } catch (error) {
+      throw new Error(
+        `Committed dataset manifest ${objectKey} is invalid JSON: ` +
+          `${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    return requireCommittedDatasetIdentity(value, publicationId);
+  })().catch(error => {
+    coreDatasetIdentityCache.delete(cacheKey);
+    console.error('Committed dataset manifest identity failed validation.', {publicationId, error});
+    throw error;
+  });
+  touchBounded(coreDatasetIdentityCache, cacheKey, operation, MAX_MANIFEST_CACHE_ENTRIES);
+  return operation;
+}
+
 export async function verifyCommittedDatasetPair(
   runtime: DatasetRuntime,
   publicationId: string,
   assetSetId: string,
-): Promise<void> {
+): Promise<CommittedDatasetIdentity> {
   const bucket = runtime.PREVIEW_ASSETS;
   if (!bucket) throw new Error('Dataset R2 binding is unavailable.');
   const [core, preview] = await Promise.all([
@@ -261,6 +314,8 @@ export async function verifyCommittedDatasetPair(
       `Preview asset set ${assetSetId} targets ${preview.state.manifest.datasetPublicationId}, not ${publicationId}.`,
     );
   }
+  requirePairedPublicationPolicy(core.state.manifest, preview.state.manifest);
+  return loadCoreDatasetIdentity(bucket, publicationId, core.state);
 }
 
 function validateAuthorizationIndex(
@@ -437,7 +492,7 @@ function edgeCache(): Cache | null {
   return cache ?? null;
 }
 
-async function cachedResponse(request: Request): Promise<Response | null> {
+async function cachedResponse(request: Request, storedBytes: number): Promise<Response | null> {
   const cache = edgeCache();
   if (!cache) return null;
   try {
@@ -445,6 +500,7 @@ async function cachedResponse(request: Request): Promise<Response | null> {
     if (!result) return null;
     const headers = new Headers(result.headers);
     headers.set('X-MRT-R2-Cache', 'HIT');
+    headers.set(STORED_BYTES_HEADER, String(storedBytes));
     return new Response(request.method === 'HEAD' ? null : result.body, {
       status: result.status,
       headers,
@@ -487,7 +543,7 @@ async function serveWholeObject(
   validatesMetadata: (object: DatasetR2Object) => boolean,
   ctx: DeliveryExecutionContext | undefined,
 ): Promise<Response> {
-  const cached = await cachedResponse(request);
+  const cached = await cachedResponse(request, record.bytes);
   if (cached) return cached;
   const object = await bucket.get(objectKey);
   if (!object || object.key !== objectKey || !validatesMetadata(object)) {
@@ -505,6 +561,7 @@ async function serveWholeObject(
       'Cache-Control': IMMUTABLE,
       'Content-Length': String(bytes.byteLength),
       'Content-Type': 'application/json; charset=utf-8',
+      [STORED_BYTES_HEADER]: String(bytes.byteLength),
       'X-MRT-R2-Cache': 'MISS',
       'X-Content-Type-Options': 'nosniff',
     },
@@ -522,7 +579,7 @@ async function serveRange(
   validatesMetadata: (object: DatasetR2Object) => boolean,
   ctx: DeliveryExecutionContext | undefined,
 ): Promise<Response> {
-  const cached = await cachedResponse(request);
+  const cached = await cachedResponse(request, coordinate.length);
   if (cached) return cached;
   const object = await bucket.get(objectKey, {
     range: {offset: coordinate.offset, length: coordinate.length},
@@ -550,6 +607,7 @@ async function serveRange(
       'Cache-Control': IMMUTABLE_IMAGE,
       'Content-Length': String(bytes.byteLength),
       'Content-Type': 'image/webp',
+      [STORED_BYTES_HEADER]: String(bytes.byteLength),
       'X-MRT-R2-Cache': 'MISS',
       'X-Content-Type-Options': 'nosniff',
     },

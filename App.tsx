@@ -1,5 +1,5 @@
 import {StatusBar} from 'expo-status-bar';
-import React, {useState} from 'react';
+import React, {useEffect, useState} from 'react';
 import {
   ActivityIndicator,
   Platform,
@@ -16,6 +16,7 @@ import {ItemsScreen} from './src/components/ItemsScreen';
 import {MobsScreen} from './src/components/MobsScreen';
 import {ModpackManager} from './src/components/ModpackManager';
 import {DataProvider, useData, useLoadState} from './src/data/DataContext';
+import {DatasetReadinessMarker} from './src/data/DatasetReadinessMarker';
 import {
   DatasetCatalogProvider,
   useDatasetCatalog,
@@ -23,6 +24,7 @@ import {
 import {datasetMountKey} from './src/data/datasetCatalog';
 import {GraphScreen} from './src/graph/GraphScreen';
 import {theme} from './src/theme';
+import type {Manifest} from './src/types';
 import {Tab, UiProvider, useUi} from './src/ui/UiContext';
 
 export default function App() {
@@ -42,12 +44,13 @@ function DatasetRoot() {
   const datasets = catalog.state.status === 'loading' ? [] : catalog.state.datasets;
   const selectedSlug = catalog.state.status === 'ready' ? catalog.state.selected.slug : null;
 
-  const datasetControls = (
+  const datasetControls = (loadedManifest: Manifest | null) => (
     <>
       <DatasetSwitcher
         status={catalog.state.status}
         datasets={datasets}
         selectedSlug={selectedSlug}
+        loadedManifest={loadedManifest}
         onSelect={catalog.select}
         onOpenPicker={() => setShowDatasetPicker(true)}
       />
@@ -67,7 +70,7 @@ function DatasetRoot() {
   if (catalog.state.status === 'loading') {
     return (
       <View style={styles.datasetRoot}>
-        {datasetControls}
+        {datasetControls(null)}
         <View style={styles.center}>
           <ActivityIndicator color={theme.accent} size="large" />
           <Text style={styles.loadingText}>loading published modpacks</Text>
@@ -78,7 +81,7 @@ function DatasetRoot() {
   if (catalog.state.status === 'error') {
     return (
       <View style={styles.datasetRoot}>
-        {datasetControls}
+        {datasetControls(null)}
         <View style={styles.center}>
           <Text style={styles.errorTitle}>Modpack selection unavailable</Text>
           <Text style={styles.errorText}>{catalog.state.message}</Text>
@@ -99,18 +102,36 @@ function DatasetRoot() {
 
   const {source} = catalog.state;
   return (
+    <DataProvider
+      key={datasetMountKey(source.descriptor)}
+      descriptor={source.descriptor}
+      base={source.base}
+      previewBase={source.previewBase}>
+      <LoadedDatasetLayout
+        expectedPublicationId={source.descriptor.publicationId}
+        renderControls={datasetControls}
+      />
+    </DataProvider>
+  );
+}
+
+function LoadedDatasetLayout({
+  expectedPublicationId,
+  renderControls,
+}: {
+  expectedPublicationId: string;
+  renderControls(manifest: Manifest | null): React.ReactNode;
+}) {
+  const state = useLoadState();
+  const manifest = state.status === 'ready' ? state.data.manifest : null;
+  return (
     <View style={styles.datasetRoot}>
-      {datasetControls}
+      <DatasetReadinessMarker expectedPublicationId={expectedPublicationId} />
+      {renderControls(manifest)}
       <View style={styles.datasetContent}>
-        <DataProvider
-          key={datasetMountKey(source.descriptor)}
-          descriptor={source.descriptor}
-          base={source.base}
-          previewBase={source.previewBase}>
-          <UiProvider>
-            <Root />
-          </UiProvider>
-        </DataProvider>
+        <UiProvider>
+          <Root />
+        </UiProvider>
       </View>
     </View>
   );
@@ -167,6 +188,12 @@ function Shell() {
   const data = useData();
   const {tab} = useUi();
   const [showSnapshots, setShowSnapshots] = useState(false);
+  useEffect(() => {
+    if (tab !== 'graph' || data.indexStatus === 'ready' || data.indexStatus === 'loading') return;
+    void data.ensureIndex().catch(() => {
+      // DataContext logs transport and validation detail and exposes the error below.
+    });
+  }, [data, tab]);
   return (
     <View style={styles.shell}>
       <View style={styles.header}>
@@ -196,7 +223,26 @@ function Shell() {
         <ItemsScreen />
       </View>
       <View style={[styles.body, tab !== 'graph' && styles.hidden]}>
-        <GraphScreen />
+        {data.indexStatus === 'ready' ? (
+          <GraphScreen />
+        ) : (
+          <View style={styles.center}>
+            {data.indexStatus !== 'error' && <ActivityIndicator color={theme.accent} size="large" />}
+            <Text style={data.indexStatus === 'error' ? styles.errorTitle : styles.loadingText}>
+              {data.indexStatus === 'error' ? 'Recipe index unavailable' : 'loading recipe index…'}
+            </Text>
+            {data.indexStatus === 'error' && (
+              <>
+                <Text style={styles.errorText}>{data.indexError}</Text>
+                <TouchableOpacity
+                  style={styles.reloadBtn}
+                  onPress={() => void data.ensureIndex().catch(() => {})}>
+                  <Text style={styles.reloadBtnText}>Retry recipe index</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        )}
       </View>
       {data.capabilities.mobs && (
         <View style={[styles.body, tab !== 'mobs' && styles.hidden]}>

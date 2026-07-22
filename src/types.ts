@@ -11,11 +11,17 @@ export interface Manifest {
   durationMs: number;
   aborted: boolean;
   minecraft: string;
+  /** Export-quality profile bound into the immutable publication manifest. */
+  profile?: string;
+  /** Exact public-use policy for profiles whose hosted representation is intentionally restricted. */
+  publicationPolicy?: string;
   /**
    * Canonical modpack identity emitted by current exporters. It remains optional while the
    * existing pre-identity publication is online; new hosted publications require it.
    */
   pack?: PackIdentity;
+  /** Normalized dataset-source licensing metadata for profiles that require attribution. */
+  attribution?: DatasetAttribution;
   settings: { iconScale: number; recipeScale: number; mobCanvas: number };
   counts: {
     items: number;
@@ -28,15 +34,30 @@ export interface Manifest {
   /** Present after the export has been transformed for bounded web publication. */
   web?: {
     format: 2;
-    packedImages: 'coordinate-v1';
-    maxPackBytes: number;
+    /** Absent only when the publication carries no raster/image pack objects. */
+    packedImages?: 'coordinate-v1';
+    /** Absent only when the publication carries no raster/image pack objects. */
+    maxPackBytes?: number;
     shardedJson: 'mrt-sharded-json-v1';
     maxShardBytes: number;
+    /** Exact accounting boundary for publications that intentionally contain no exported artwork. */
+    visualAssets?: {
+      format: 'mrt-visual-assets-policy-v1';
+      mode: 'structured-data-only';
+      policy: 'gtnh-structured-data-only-v1';
+      itemIcons: 0;
+      categoryIcons: 0;
+      recipePreviews: 0;
+      mobSprites: 0;
+      packedImageFiles: 0;
+    };
     recipeImages?:
       | {mode: 'included'}
       | {
           mode: 'omitted';
-          reason: 'hosting-archive-budget';
+          reason: 'hosting-archive-budget' | 'third-party-artwork-rights-not-cleared';
+          /** Present only for an immutable policy-driven omission. */
+          policy?: 'gtnh-structured-data-only-v1';
           references: number;
           files: number;
           /** New publications use png; absence identifies the legacy WebP-byte accounting contract. */
@@ -51,6 +72,13 @@ export interface Manifest {
           };
         };
   };
+}
+
+export interface DatasetAttribution {
+  sourceUrl: string;
+  projectUrl: string;
+  licenseIdentifier: string;
+  licenseUrl: string;
 }
 
 export interface PackIdentity {
@@ -116,13 +144,25 @@ export interface Category {
 }
 
 /**
- * [catalog key, amount, optional logical ingredient id]. The third field preserves
- * identities such as Forge 1.12 OreDictionary entries (`ore:ingotCopper`) while
- * retaining the resolved catalog alternatives used for icons and source picking.
+ * [catalog key, amount, optional logical ingredient id, optional occurrence probability].
+ * The third field preserves identities such as Forge 1.12 OreDictionary entries
+ * (`ore:ingotCopper`) while retaining the resolved catalog alternatives used for
+ * icons and source picking. Format-v2 exports use a null third field when a
+ * stochastic input/output has no logical ingredient id; the fourth field is its
+ * strict 0..1 exclusive consumption/production probability. Probabilities are
+ * forbidden in `cat` because catalysts are deterministic retained requirements.
  * In `in`/`out`, amount <= 0 means an explicitly unknown dynamic flow.
  * In `cat`, a positive amount is the minimum non-consumed reservoir/threshold requirement.
  */
-export type SlotEntry = [string, number, string?];
+export type SlotEntry =
+  | [catalogKey: string, amount: number]
+  | [catalogKey: string, amount: number, logicalIngredientId: string]
+  | [
+      catalogKey: string,
+      amount: number,
+      logicalIngredientId: string | null,
+      occurrenceProbability: number,
+    ];
 
 export interface Recipe {
   /** Present when the export of this recipe failed; image/slots missing. */
@@ -163,7 +203,8 @@ export interface Mob {
   n: string;
   m: string;
   /** Sprite sheet of `frames` square frames side by side (single frame when frames missing) */
-  icon: string;
+  /** Sprite sheet path; intentionally absent in structured-data-only publications. */
+  icon?: string;
   frames?: number;
   fps?: number;
   /** Bounding box in blocks */

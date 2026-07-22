@@ -1,5 +1,6 @@
 import {
   CORE_DATASET_PUBLICATION_ID_PATTERN,
+  GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY,
   MAX_CORE_DOCUMENT_BYTES,
   MAX_CORE_PACK_BYTES,
   MAX_CORE_PACK_INDEX_BYTES,
@@ -260,6 +261,13 @@ async function handleBegin(
   } catch (error) {
     console.warn('A core publication manifest failed the exact v1 contract.', {publicationId, error});
     return noStoreJson({error: 'Publication manifest contract validation failed.'}, 422);
+  }
+  if (state.manifest.publicationPolicy === GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY) {
+    console.info('Core ingestion accepted the exact GTNH structured-data-only rights policy.', {
+      publicationId,
+      packs: state.manifest.counts.packs,
+      packedImages: state.manifest.counts.packedImages,
+    });
   }
 
   const committed = await loadCommittedCorePublication(bucket, publicationId);

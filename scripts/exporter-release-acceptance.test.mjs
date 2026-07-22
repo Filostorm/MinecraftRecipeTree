@@ -9,6 +9,7 @@ import {
   buildExporterAcceptanceReceipt,
   exporterAcceptancePolicySha256,
   exporterAcceptanceReceiptPath,
+  legacyExporterAcceptanceReceiptPath,
   readExporterAcceptanceReceipt,
   requireAcceptedExporterRelease,
   requireExporterAcceptanceReceipt,
@@ -87,13 +88,20 @@ async function fixture(t) {
     source,
     filename: 'recipe-tree-exporter-forge-1.18.2-1.0.1.jar',
     qualityProfiles: ['multiblock-madness-2-1.18.2'],
-    acceptanceProfile: 'multiblock-madness-2-1.18.2',
     artifactProvenance: {
       format: EXPORTER_BUILD_FORMAT,
       exporterId: 'forge-rei-1.18.2',
       minecraftVersion: '1.18.2',
     },
-    acceptanceCorpus: {items: 10, recipes: 20, categories: 2, mobs: 0, blockDrops: 0},
+    acceptanceCorpora: {
+      'multiblock-madness-2-1.18.2': {
+        items: 10,
+        recipes: 20,
+        categories: 2,
+        mobs: 0,
+        blockDrops: 0,
+      },
+    },
     compatibility: 'Test compatibility',
   };
   return {
@@ -122,7 +130,10 @@ test('builds, writes, reads, and verifies an exact SHA-bound acceptance receipt'
     pack: value.manifest.pack,
     exporterBuild: value.exporterBuild,
     exportTree: await digestExportTree(value.exportRoot, {logger: quietLogger}),
-    validationPolicySha256: await exporterAcceptancePolicySha256(value.definition),
+    validationPolicySha256: await exporterAcceptancePolicySha256(
+      value.definition,
+      value.definition.qualityProfiles[0],
+    ),
     acceptedAt: '2026-07-20T03:00:00.000Z',
   });
   assert.equal(receipt.format, EXPORTER_ACCEPTANCE_RECEIPT_FORMAT);
@@ -136,18 +147,115 @@ test('builds, writes, reads, and verifies an exact SHA-bound acceptance receipt'
     publicRoot: value.publicRoot,
     logger: quietLogger,
   });
-  assert.equal(written.path, exporterAcceptanceReceiptPath(value.definition.id, value.acceptanceRoot));
+  assert.equal(
+    written.path,
+    exporterAcceptanceReceiptPath(
+      value.definition.id,
+      value.definition.qualityProfiles[0],
+      value.acceptanceRoot,
+    ),
+  );
   assert.deepEqual(
-    await readExporterAcceptanceReceipt(value.definition.id, value.acceptanceRoot),
+    await readExporterAcceptanceReceipt(
+      value.definition.id,
+      value.definition.qualityProfiles[0],
+      value.acceptanceRoot,
+      quietLogger,
+    ),
     receipt,
   );
   assert.deepEqual(
     await requireAcceptedExporterRelease({
       definition: value.definition,
       sourceBytes: value.sourceBytes,
+      qualityProfile: value.definition.qualityProfiles[0],
       acceptanceRoot: value.acceptanceRoot,
+      logger: quietLogger,
     }),
     receipt,
+  );
+});
+
+test('profile-keyed paths isolate receipts and legacy release-only discovery is explicit', async t => {
+  const value = await fixture(t);
+  const qualityProfile = value.definition.qualityProfiles[0];
+  const receipt = buildExporterAcceptanceReceipt({
+    definition: value.definition,
+    sourceBytes: value.sourceBytes,
+    qualityProfile,
+    exportManifestBytes: value.manifestBytes,
+    exportManifest: value.manifest,
+    pack: value.manifest.pack,
+    exporterBuild: value.exporterBuild,
+    exportTree: await digestExportTree(value.exportRoot, {logger: quietLogger}),
+    validationPolicySha256: await exporterAcceptancePolicySha256(
+      value.definition,
+      qualityProfile,
+    ),
+    acceptedAt: '2026-07-20T03:00:00.000Z',
+  });
+  await mkdir(value.acceptanceRoot, {recursive: true});
+  const legacyPath = legacyExporterAcceptanceReceiptPath(
+    value.definition.id,
+    value.acceptanceRoot,
+  );
+  await writeFile(legacyPath, `${JSON.stringify(receipt)}\n`, {mode: 0o600});
+  const warnings = [];
+  const logger = {info() {}, error() {}, warn(message) { warnings.push(message); }};
+
+  assert.deepEqual(
+    await readExporterAcceptanceReceipt(
+      value.definition.id,
+      qualityProfile,
+      value.acceptanceRoot,
+      logger,
+    ),
+    receipt,
+  );
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /\[migration\].*legacy release-only receipt/i);
+  assert.notEqual(
+    exporterAcceptanceReceiptPath(value.definition.id, qualityProfile, value.acceptanceRoot),
+    legacyPath,
+  );
+  await assert.rejects(
+    readExporterAcceptanceReceipt(
+      value.definition.id,
+      'generic-jei-1.20.1',
+      value.acceptanceRoot,
+      logger,
+    ),
+    /cross-profile receipt fallback is forbidden/,
+  );
+});
+
+test('profile policy identities bind the selected corpus without coupling sibling corpus promotion', async t => {
+  const value = await fixture(t);
+  const primaryProfile = value.definition.qualityProfiles[0];
+  const siblingProfile = 'generic-jei-1.20.1';
+  const definition = {
+    ...value.definition,
+    qualityProfiles: [primaryProfile, siblingProfile],
+    acceptanceCorpora: {
+      [primaryProfile]: value.definition.acceptanceCorpora[primaryProfile],
+      [siblingProfile]: null,
+    },
+  };
+  const promotedSibling = {
+    ...definition,
+    acceptanceCorpora: {
+      ...definition.acceptanceCorpora,
+      [siblingProfile]: {items: 1, recipes: 2, categories: 3, mobs: 0, blockDrops: 0},
+    },
+  };
+
+  assert.equal(
+    await exporterAcceptancePolicySha256(definition, primaryProfile),
+    await exporterAcceptancePolicySha256(promotedSibling, primaryProfile),
+  );
+  assert.notEqual(
+    await exporterAcceptancePolicySha256(definition, siblingProfile),
+    await exporterAcceptancePolicySha256(promotedSibling, siblingProfile),
   );
 });
 
@@ -207,7 +315,7 @@ test('acceptance cannot pair a rebuilt source JAR with an export from the prior 
   await assert.rejects(
     acceptExporterRelease({
       releaseId: value.definition.id,
-      profile: value.definition.acceptanceProfile,
+      profile: value.definition.qualityProfiles[0],
       exportRoot: value.exportRoot,
       workspaceRoot: value.workspaceRoot,
       acceptanceRoot: value.acceptanceRoot,
@@ -228,13 +336,16 @@ test('acceptance receipt replacement serializes with release-manifest transactio
   const receipt = buildExporterAcceptanceReceipt({
     definition: value.definition,
     sourceBytes: value.sourceBytes,
-    qualityProfile: value.definition.acceptanceProfile,
+    qualityProfile: value.definition.qualityProfiles[0],
     exportManifestBytes: value.manifestBytes,
     exportManifest: value.manifest,
     pack: value.manifest.pack,
     exporterBuild: value.exporterBuild,
     exportTree: await digestExportTree(value.exportRoot, {logger: quietLogger}),
-    validationPolicySha256: await exporterAcceptancePolicySha256(value.definition),
+    validationPolicySha256: await exporterAcceptancePolicySha256(
+      value.definition,
+      value.definition.qualityProfiles[0],
+    ),
     acceptedAt: '2026-07-20T03:00:00.000Z',
   });
   let markStarted;
@@ -266,7 +377,13 @@ test('acceptance receipt replacement serializes with release-manifest transactio
     /transaction lock already exists/,
   );
   await assert.rejects(
-    readFile(exporterAcceptanceReceiptPath(value.definition.id, value.acceptanceRoot)),
+    readFile(
+      exporterAcceptanceReceiptPath(
+        value.definition.id,
+        value.definition.qualityProfiles[0],
+        value.acceptanceRoot,
+      ),
+    ),
     error => error?.code === 'ENOENT',
   );
   releaseTransaction();
@@ -279,7 +396,12 @@ test('acceptance receipt replacement serializes with release-manifest transactio
     logger: quietLogger,
   });
   assert.deepEqual(
-    await readExporterAcceptanceReceipt(value.definition.id, value.acceptanceRoot),
+    await readExporterAcceptanceReceipt(
+      value.definition.id,
+      value.definition.qualityProfiles[0],
+      value.acceptanceRoot,
+      quietLogger,
+    ),
     receipt,
   );
 });
@@ -350,7 +472,13 @@ test('rejects diagnostic mini exports and manifests that mutate during validatio
     /export tree changed during exhaustive validation/,
   );
   await assert.rejects(
-    readFile(exporterAcceptanceReceiptPath(value.definition.id, value.acceptanceRoot)),
+    readFile(
+      exporterAcceptanceReceiptPath(
+        value.definition.id,
+        value.definition.qualityProfiles[0],
+        value.acceptanceRoot,
+      ),
+    ),
     error => error?.code === 'ENOENT',
   );
 });
@@ -366,7 +494,10 @@ test('receipt verification rejects artifact, profile, and contract drift', async
     pack: value.manifest.pack,
     exporterBuild: value.exporterBuild,
     exportTree: await digestExportTree(value.exportRoot, {logger: quietLogger}),
-    validationPolicySha256: await exporterAcceptancePolicySha256(value.definition),
+    validationPolicySha256: await exporterAcceptancePolicySha256(
+      value.definition,
+      value.definition.qualityProfiles[0],
+    ),
     acceptedAt: '2026-07-20T03:00:00.000Z',
   });
   await writeExporterAcceptanceReceipt({
@@ -379,7 +510,9 @@ test('receipt verification rejects artifact, profile, and contract drift', async
     requireAcceptedExporterRelease({
       definition: value.definition,
       sourceBytes: Buffer.concat([value.sourceBytes, Buffer.from([0x00])]),
+      qualityProfile: value.definition.qualityProfiles[0],
       acceptanceRoot: value.acceptanceRoot,
+      logger: quietLogger,
     }),
     /source JAR SHA-256, source JAR byte length/,
   );
@@ -388,18 +521,22 @@ test('receipt verification rejects artifact, profile, and contract drift', async
       definition: {
         ...value.definition,
         qualityProfiles: ['generic-jei-1.20.1'],
-        acceptanceProfile: 'generic-jei-1.20.1',
+        acceptanceCorpora: {'generic-jei-1.20.1': null},
       },
       sourceBytes: value.sourceBytes,
+      qualityProfile: value.definition.qualityProfiles[0],
       acceptanceRoot: value.acceptanceRoot,
+      logger: quietLogger,
     }),
-    /allowed quality profile/,
+    /exact per-profile acceptance/,
   );
   await assert.rejects(
     requireAcceptedExporterRelease({
       definition: {...value.definition, compatibility: 'Changed validation target'},
       sourceBytes: value.sourceBytes,
+      qualityProfile: value.definition.qualityProfiles[0],
       acceptanceRoot: value.acceptanceRoot,
+      logger: quietLogger,
     }),
     /validation policy or release definition SHA-256/,
   );
@@ -413,7 +550,9 @@ test('receipt verification rejects artifact, profile, and contract drift', async
         },
       },
       sourceBytes: value.sourceBytes,
+      qualityProfile: value.definition.qualityProfiles[0],
       acceptanceRoot: value.acceptanceRoot,
+      logger: quietLogger,
     }),
     /artifactProvenance must bind.*exact release ID and Minecraft version/,
   );
@@ -421,13 +560,16 @@ test('receipt verification rejects artifact, profile, and contract drift', async
   const wrongPackReceipt = buildExporterAcceptanceReceipt({
     definition: value.definition,
     sourceBytes: value.sourceBytes,
-    qualityProfile: value.definition.acceptanceProfile,
+    qualityProfile: value.definition.qualityProfiles[0],
     exportManifestBytes: value.manifestBytes,
     exportManifest: value.manifest,
     pack: {name: 'Different Pack', version: '1.0.0', identitySource: 'explicit-request'},
     exporterBuild: value.exporterBuild,
     exportTree: await digestExportTree(value.exportRoot, {logger: quietLogger}),
-    validationPolicySha256: await exporterAcceptancePolicySha256(value.definition),
+    validationPolicySha256: await exporterAcceptancePolicySha256(
+      value.definition,
+      value.definition.qualityProfiles[0],
+    ),
     acceptedAt: '2026-07-20T04:00:00.000Z',
   });
   await writeExporterAcceptanceReceipt({
@@ -440,7 +582,9 @@ test('receipt verification rejects artifact, profile, and contract drift', async
     requireAcceptedExporterRelease({
       definition: value.definition,
       sourceBytes: value.sourceBytes,
+      qualityProfile: value.definition.qualityProfiles[0],
       acceptanceRoot: value.acceptanceRoot,
+      logger: quietLogger,
     }),
     /validated export pack identity/,
   );
@@ -450,7 +594,7 @@ test('receipt verification rejects artifact, profile, and contract drift', async
   );
 });
 
-test('acceptance action requires the release-defined gate profile, not any advertised profile', async t => {
+test('acceptance action rejects a profile the release does not advertise', async t => {
   const value = await fixture(t);
   await assert.rejects(
     acceptExporterRelease({
@@ -460,18 +604,13 @@ test('acceptance action requires the release-defined gate profile, not any adver
       workspaceRoot: value.workspaceRoot,
       acceptanceRoot: value.acceptanceRoot,
       publicRoot: value.publicRoot,
-      definitions: [
-        {
-          ...value.definition,
-          qualityProfiles: [value.definition.acceptanceProfile, 'generic-jei-1.20.1'],
-        },
-      ],
+      definitions: [value.definition],
       logger: quietLogger,
       async testOnlyValidateExport() {
         throw new Error('validator must not run for the wrong gate profile');
       },
     }),
-    /requires acceptance profile.*received "generic-jei-1\.20\.1"/,
+    /does not advertise acceptance profile "generic-jei-1\.20\.1"/,
   );
 });
 
@@ -481,9 +620,21 @@ test('receipt reads refuse symlinks and the CLI parser requires an exact action'
     await mkdir(value.acceptanceRoot);
     const target = join(value.root, 'receipt-target.json');
     await writeFile(target, '{}\n');
-    await symlink(target, exporterAcceptanceReceiptPath(value.definition.id, value.acceptanceRoot));
+    await symlink(
+      target,
+      exporterAcceptanceReceiptPath(
+        value.definition.id,
+        value.definition.qualityProfiles[0],
+        value.acceptanceRoot,
+      ),
+    );
     await assert.rejects(
-      readExporterAcceptanceReceipt(value.definition.id, value.acceptanceRoot),
+      readExporterAcceptanceReceipt(
+        value.definition.id,
+        value.definition.qualityProfiles[0],
+        value.acceptanceRoot,
+        quietLogger,
+      ),
       /plain, non-hard-linked regular file/,
     );
   }

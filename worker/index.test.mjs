@@ -26,6 +26,13 @@ const ORIGIN = 'https://viewer.example';
 const PUBLICATION = 'a'.repeat(64);
 const OTHER_PUBLICATION = 'b'.repeat(64);
 const TOKEN = 'core-dataset-upload-token-'.padEnd(48, 'x');
+const GTNH_ATTRIBUTION = Object.freeze({
+  sourceUrl: 'https://github.com/GTNewHorizons/GT-New-Horizons-Modpack/tree/2.8.4',
+  projectUrl: 'https://www.gtnewhorizons.com/',
+  licenseIdentifier: 'CC BY-NC-SA 4.0',
+  licenseUrl: 'https://creativecommons.org/licenses/by-nc-sa/4.0/',
+});
+const GTNH_STRUCTURED_DATA_ONLY_POLICY = 'gtnh-structured-data-only-v1';
 
 function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
@@ -353,10 +360,16 @@ function mrpi(packNumber, packBytes, entries) {
   return bytes;
 }
 
-function coreFixture() {
+function coreFixture(datasetManifest = {
+  publicationId: PUBLICATION,
+  minecraft: '1.12.2',
+  aborted: false,
+}) {
+  const structuredDataOnly =
+    datasetManifest.publicationPolicy === GTNH_STRUCTURED_DATA_ONLY_POLICY;
   const documents = new Map([
     ['items.json', jsonBytes({items: [{k: 'item|minecraft:stone'}]})],
-    ['manifest.json', jsonBytes({publicationId: PUBLICATION, minecraft: '1.12.2', aborted: false})],
+    ['manifest.json', jsonBytes(datasetManifest)],
   ]);
   const pack = Buffer.from([1, 2, 3, 4, 5, 6, 7, 8]);
   const index = mrpi(0, pack.length, [[0, 4], [4, 4]]);
@@ -365,6 +378,9 @@ function coreFixture() {
     .sort((left, right) => left.path.localeCompare(right.path));
   const manifest = {
     format: 'mrt-core-dataset-publication-v1',
+    ...(structuredDataOnly
+      ? {publicationPolicy: GTNH_STRUCTURED_DATA_ONLY_POLICY}
+      : {}),
     publicationId: PUBLICATION,
     maxDocumentBytes: 8 * 1024 * 1024,
     maxPackBytes: 1024 * 1024,
@@ -372,37 +388,62 @@ function coreFixture() {
     maxPackIndexBytes: 512 * 1024,
     counts: {
       documents: 2,
-      packs: 1,
-      packedImages: 2,
+      packs: structuredDataOnly ? 0 : 1,
+      packedImages: structuredDataOnly ? 0 : 2,
       documentBytes: documentRecords.reduce((sum, record) => sum + record.bytes, 0),
-      packBytes: pack.length,
-      packIndexBytes: index.length,
-      objects: 4,
+      packBytes: structuredDataOnly ? 0 : pack.length,
+      packIndexBytes: structuredDataOnly ? 0 : index.length,
+      objects: structuredDataOnly ? 2 : 4,
       storedBytes:
-        documentRecords.reduce((sum, record) => sum + record.bytes, 0) + pack.length + index.length,
+        documentRecords.reduce((sum, record) => sum + record.bytes, 0) +
+        (structuredDataOnly ? 0 : pack.length + index.length),
     },
     documents: documentRecords,
-    packs: [
-      {
-        path: 'assets/pack-000.bin',
-        bytes: pack.length,
-        sha256: sha256(pack),
-        index: {
-          path: 'indexes/pack-000.bin',
-          bytes: index.length,
-          sha256: sha256(index),
-          entries: 2,
+    packs: structuredDataOnly
+      ? []
+      : [
+        {
+          path: 'assets/pack-000.bin',
+          bytes: pack.length,
+          sha256: sha256(pack),
+          index: {
+            path: 'indexes/pack-000.bin',
+            bytes: index.length,
+            sha256: sha256(index),
+            entries: 2,
+          },
         },
-      },
-    ],
+      ],
   };
   const publicationBytes = Buffer.from(canonicalCoreDatasetPublicationBytes(manifest));
   return {
     manifest,
     publicationBytes,
     publicationDigest: sha256(publicationBytes),
-    objects: new Map([...documents, ['assets/pack-000.bin', pack], ['indexes/pack-000.bin', index]]),
+    objects: new Map([
+      ...documents,
+      ...(structuredDataOnly
+        ? []
+        : [['assets/pack-000.bin', pack], ['indexes/pack-000.bin', index]]),
+    ]),
   };
+}
+
+function gtnhCoreFixture(overrides = {}) {
+  return coreFixture({
+    publicationId: PUBLICATION,
+    minecraft: '1.7.10',
+    profile: 'gtnh-1.7.10',
+    publicationPolicy: GTNH_STRUCTURED_DATA_ONLY_POLICY,
+    pack: {
+      name: 'GT New Horizons',
+      version: '2.8.4',
+      identitySource: 'explicit-request',
+    },
+    attribution: {...GTNH_ATTRIBUTION},
+    aborted: false,
+    ...overrides,
+  });
 }
 
 async function previewFixture(datasetPublicationId = PUBLICATION) {
@@ -451,6 +492,50 @@ async function previewFixture(datasetPublicationId = PUBLICATION) {
       ['indexes/pack-000.bin', index],
       ['categories/000.json', category],
     ]),
+  };
+}
+
+async function gtnhStructuredDataOnlyPreviewFixture(datasetPublicationId = PUBLICATION) {
+  const manifest = {
+    format: 'mrt-recipe-preview-sidecar-v2',
+    publicationPolicy: GTNH_STRUCTURED_DATA_ONLY_POLICY,
+    exclusionReason: 'third-party-artwork-rights-not-cleared',
+    assetSetId: '0'.repeat(64),
+    datasetPublicationId,
+    maxPackBytes: 1024 * 1024,
+    packIndexFormat: 'mrt-recipe-preview-pack-index-v1',
+    maxPackIndexBytes: 512 * 1024,
+    imageFormat: 'lossless-webp',
+    categoryFormat: 'mrt-recipe-preview-category-v1',
+    settings: {
+      itemIconPixels: 32,
+      recipeScale: 2,
+      webpEffort: 4,
+      maxCategoryBytes: 256 * 1024,
+    },
+    counts: {
+      categories: 1,
+      recipes: 1,
+      previews: 0,
+      missing: 1,
+      uniqueImages: 0,
+      duplicates: 0,
+      packs: 0,
+      inputBytes: 0,
+      hostedOmittedPngBytes: 0,
+      encodedBytes: 0,
+      storedBytes: 0,
+      packIndexBytes: 0,
+    },
+    packs: [],
+    mapping: {documents: 0, parts: 0, bytes: 0},
+    categoryDocuments: [],
+  };
+  manifest.assetSetId = await computePreviewAssetSetId(manifest);
+  return {
+    assetSetId: manifest.assetSetId,
+    manifest,
+    objects: new Map([['manifest.json', jsonBytes(manifest)]]),
   };
 }
 
@@ -659,7 +744,7 @@ test('core ingestion refuses undeclared objects, false digests, incomplete inven
 
 test('immutable core reads require exact publication queries and MRPI-authorized R2 ranges', async () => {
   const env = environment();
-  await publishCore(env);
+  const fixture = await publishCore(env);
   const base = `/dataset/publications/${PUBLICATION}/exports`;
   const malformed = await send(env, `${base}/items.json`);
   assert.equal(malformed.status, 400);
@@ -669,7 +754,16 @@ test('immutable core reads require exact publication queries and MRPI-authorized
   const items = await send(env, `${base}/items.json?dataset=${PUBLICATION}`);
   assert.equal(items.status, 200);
   assert.match(items.headers.get('cache-control'), /immutable/);
+  assert.equal(items.headers.get('x-mrt-stored-bytes'), items.headers.get('content-length'));
   assert.equal((await items.json()).items[0].k, 'item|minecraft:stone');
+
+  const itemHead = await send(env, `${base}/items.json?dataset=${PUBLICATION}`, {method: 'HEAD'});
+  assert.equal(itemHead.status, 200);
+  assert.equal(
+    itemHead.headers.get('x-mrt-stored-bytes'),
+    String(fixture.objects.get('items.json').length),
+  );
+  assert.equal(await itemHead.text(), '');
 
   const unauthorized = await send(
     env,
@@ -760,6 +854,146 @@ test('activation verifies the committed core/preview pair and publishes the exac
   assert.equal(catalog.status, 200);
   assert.deepEqual(await catalog.json(), {datasets: [{slug: 'multiblock-madness', ...descriptor}]});
   assert.equal(catalog.headers.get('cache-control'), 'no-store');
+});
+
+test('GTNH activation binds every mutable channel label to the exact committed manifest identity', async () => {
+  const env = environment();
+  await publishCore(env, gtnhCoreFixture());
+  const preview = await gtnhStructuredDataOnlyPreviewFixture();
+  seedPreview(env.PREVIEW_ASSETS, preview);
+  const body = {
+    displayName: 'GT New Horizons',
+    minecraftVersion: '1.7.10',
+    packVersion: '2.8.4',
+    publicationId: PUBLICATION,
+    previewAssetSetId: preview.assetSetId,
+    isDefault: true,
+    expectedPreviousPublicationId: null,
+  };
+
+  for (const candidate of [
+    {slug: 'gtnh', body},
+    {slug: 'gt-new-horizons', body: {...body, displayName: 'GTNH'}},
+    {slug: 'gt-new-horizons', body: {...body, minecraftVersion: '1.12.2'}},
+    {slug: 'gt-new-horizons', body: {...body, packVersion: 'latest'}},
+  ]) {
+    const response = await activateChannel(env, candidate.slug, candidate.body);
+    assert.equal(response.status, 409, candidate.slug + ' ' + JSON.stringify(candidate.body));
+    assert.equal(env.DB.channels.size, 0);
+  }
+
+  const response = await activateChannel(env, 'gt-new-horizons', body);
+  assert.equal(response.status, 200);
+  const {expectedPreviousPublicationId: _expectedPreviousPublicationId, ...descriptor} = body;
+  assert.deepEqual((await response.json()).dataset, {slug: 'gt-new-horizons', ...descriptor});
+  assert.deepEqual(env.DB.channels.get('gt-new-horizons'), {
+    slug: 'gt-new-horizons',
+    display_name: 'GT New Horizons',
+    minecraft_version: '1.7.10',
+    pack_version: '2.8.4',
+    publication_id: PUBLICATION,
+    preview_asset_set_id: preview.assetSetId,
+    is_default: 1,
+    revision: 1,
+    activated_at: env.DB.channels.get('gt-new-horizons').activated_at,
+  });
+});
+
+test('GTNH activation rejects immutable attribution drift and never mutates D1', async () => {
+  const env = environment();
+  await publishCore(env, gtnhCoreFixture({
+    attribution: {...GTNH_ATTRIBUTION, licenseIdentifier: 'CC BY 4.0'},
+  }));
+  const preview = await gtnhStructuredDataOnlyPreviewFixture();
+  seedPreview(env.PREVIEW_ASSETS, preview);
+  const response = await activateChannel(env, 'gt-new-horizons', {
+    displayName: 'GT New Horizons',
+    minecraftVersion: '1.7.10',
+    packVersion: '2.8.4',
+    publicationId: PUBLICATION,
+    previewAssetSetId: preview.assetSetId,
+    isDefault: true,
+    expectedPreviousPublicationId: null,
+  });
+  assert.equal(response.status, 409);
+  assert.equal(env.DB.channels.size, 0);
+});
+
+test('GTNH activation accepts runtime visuals but rejects drifted publication policy before D1 mutation', async () => {
+  {
+    const env = environment();
+    const core = gtnhCoreFixture({publicationPolicy: undefined});
+    await publishCore(env, core);
+    const preview = await previewFixture();
+    seedPreview(env.PREVIEW_ASSETS, preview);
+    const response = await activateChannel(env, 'gt-new-horizons', {
+      displayName: 'GT New Horizons',
+      minecraftVersion: '1.7.10',
+      packVersion: '2.8.4',
+      publicationId: PUBLICATION,
+      previewAssetSetId: preview.assetSetId,
+      isDefault: true,
+      expectedPreviousPublicationId: null,
+    });
+    assert.equal(response.status, 200);
+    assert.equal(env.DB.channels.size, 1);
+  }
+  for (const publicationPolicy of ['gtnh-structured-data-only-v2']) {
+    const env = environment();
+    await publishCore(env, gtnhCoreFixture({publicationPolicy}));
+    const preview = await previewFixture();
+    seedPreview(env.PREVIEW_ASSETS, preview);
+    const response = await activateChannel(env, 'gt-new-horizons', {
+      displayName: 'GT New Horizons',
+      minecraftVersion: '1.7.10',
+      packVersion: '2.8.4',
+      publicationId: PUBLICATION,
+      previewAssetSetId: preview.assetSetId,
+      isDefault: true,
+      expectedPreviousPublicationId: null,
+    });
+    assert.equal(response.status, 409);
+    assert.equal(env.DB.channels.size, 0);
+  }
+});
+
+test('activation validates committed manifest.json R2 metadata and bytes before any channel mutation', async () => {
+  const env = environment();
+  await publishCore(env);
+  const preview = await previewFixture();
+  seedPreview(env.PREVIEW_ASSETS, preview);
+  const manifestKey = `core/${PUBLICATION}/manifest.json`;
+  env.PREVIEW_ASSETS.objects.get(manifestKey).customMetadata['mrt-sha256'] = 'f'.repeat(64);
+
+  const response = await activateChannel(env, 'custom-pack', {
+    displayName: 'Custom display name',
+    minecraftVersion: '1.12.2',
+    packVersion: 'operator-label',
+    publicationId: PUBLICATION,
+    previewAssetSetId: preview.assetSetId,
+    isDefault: true,
+    expectedPreviousPublicationId: null,
+  });
+  assert.equal(response.status, 409);
+  assert.equal(env.DB.channels.size, 0);
+});
+
+test('GTNH channel reservation rejects a generic immutable publication', async () => {
+  const env = environment();
+  await publishCore(env);
+  const preview = await previewFixture();
+  seedPreview(env.PREVIEW_ASSETS, preview);
+  const response = await activateChannel(env, 'gt-new-horizons', {
+    displayName: 'GT New Horizons',
+    minecraftVersion: '1.7.10',
+    packVersion: '2.8.4',
+    publicationId: PUBLICATION,
+    previewAssetSetId: preview.assetSetId,
+    isDefault: true,
+    expectedPreviousPublicationId: null,
+  });
+  assert.equal(response.status, 409);
+  assert.equal(env.DB.channels.size, 0);
 });
 
 test('the dataset-administration feature gate disables channel mutations before authentication', async () => {

@@ -47,7 +47,7 @@ test('Multiblock Madness exporter releases remain isolated across independent ve
       version: mm1.version,
       source: mm1.source,
       filename: mm1.filename,
-      acceptanceProfile: mm1.acceptanceProfile,
+      qualityProfiles: mm1.qualityProfiles,
     },
     {
       id: 'forge-hei-1.12.2',
@@ -55,7 +55,7 @@ test('Multiblock Madness exporter releases remain isolated across independent ve
       version: '1.0.3',
       source: 'recipe-export-mod-1.12.2/build/libs/recipe-export-mod-1.12.2-1.0.3.jar',
       filename: 'recipe-tree-exporter-forge-1.12.2-1.0.3.jar',
-      acceptanceProfile: 'multiblock-madness-1.12.2',
+      qualityProfiles: ['meatballcraft-1.12.2', 'multiblock-madness-1.12.2'],
     },
   );
   assert.deepEqual(
@@ -65,33 +65,41 @@ test('Multiblock Madness exporter releases remain isolated across independent ve
       version: mm2.version,
       source: mm2.source,
       filename: mm2.filename,
-      acceptanceProfile: mm2.acceptanceProfile,
+      qualityProfiles: mm2.qualityProfiles,
     },
     {
       id: 'forge-rei-1.18.2',
       minecraftVersion: '1.18.2',
-      version: '1.0.1',
-      source: 'recipe-export-mod-1.18.2/build/libs/recipe-export-mod-1.18.2-1.0.1.jar',
-      filename: 'recipe-tree-exporter-forge-1.18.2-1.0.1.jar',
-      acceptanceProfile: 'multiblock-madness-2-1.18.2',
+      version: '1.0.44',
+      source: 'recipe-export-mod-1.18.2/build/libs/recipe-export-mod-1.18.2-1.0.44.jar',
+      filename: 'recipe-tree-exporter-forge-1.18.2-1.0.44.jar',
+      qualityProfiles: ['multiblock-madness-2-1.18.2'],
     },
   );
   assert.notEqual(mm1.id, mm2.id);
   assert.notEqual(mm1.source, mm2.source);
   assert.notEqual(mm1.filename, mm2.filename);
-  assert.notEqual(mm1.acceptanceProfile, mm2.acceptanceProfile);
-  assert.deepEqual(mm1.acceptanceCorpus, {
+  assert.deepEqual(mm1.acceptanceCorpora['meatballcraft-1.12.2'], {
+    items: 196161,
+    recipes: 359215,
+    categories: 674,
+    mobs: 0,
+    blockDrops: 0,
+  });
+  assert.deepEqual(mm1.acceptanceCorpora['multiblock-madness-1.12.2'], {
     items: 88268,
     recipes: 107819,
     categories: 378,
     mobs: 0,
     blockDrops: 0,
   });
-  assert.equal(
-    mm2.acceptanceCorpus,
-    null,
-    'MM2 must remain unaccepted until its own independent full export passes',
-  );
+  assert.deepEqual(mm2.acceptanceCorpora['multiblock-madness-2-1.18.2'], {
+    items: 68524,
+    recipes: 99908,
+    categories: 333,
+    mobs: 0,
+    blockDrops: 0,
+  });
 });
 
 test('GTNH release requires the exact runtime-bound exporter identity before acceptance', () => {
@@ -99,23 +107,25 @@ test('GTNH release requires the exact runtime-bound exporter identity before acc
     candidate => candidate.id === 'forge-nei-gtnh-1.7.10',
   );
   assert.ok(release);
-  assert.equal(release.version, '1.0.2');
+  assert.equal(release.version, '1.0.148');
   assert.equal(
     release.source,
-    'recipe-export-mod-1.7.10/build/libs/recipe-tree-gtnh-nei-exporter-1.0.2.jar',
+    'recipe-export-mod-1.7.10/build/libs/recipe-tree-gtnh-nei-exporter-1.0.148.jar',
   );
-  assert.equal(release.filename, 'recipe-tree-exporter-gtnh-1.7.10-1.0.2.jar');
-  assert.equal(release.acceptanceProfile, 'gtnh-1.7.10');
+  assert.equal(release.filename, 'recipe-tree-exporter-gtnh-1.7.10-1.0.148.jar');
+  assert.deepEqual(release.qualityProfiles, ['gtnh-1.7.10']);
   assert.deepEqual(release.artifactProvenance, {
     format: 'mrt-exporter-build-v1',
     exporterId: 'forge-nei-gtnh-1.7.10',
     minecraftVersion: '1.7.10',
   });
-  assert.equal(
-    release.acceptanceCorpus,
-    null,
-    'definitive full-export counts must remain unpromoted until the completed GTNH run',
-  );
+  assert.deepEqual(release.acceptanceCorpora['gtnh-1.7.10'], {
+    items: 143884,
+    recipes: 568820,
+    categories: 287,
+    mobs: 0,
+    blockDrops: 0,
+  });
 });
 
 async function fixture(t) {
@@ -139,9 +149,8 @@ function definition(overrides = {}) {
     source: 'build/libs/exporter.jar',
     filename: 'recipe-tree-exporter-test.jar',
     qualityProfiles: ['generic-jei-1.20.1'],
-    acceptanceProfile: 'generic-jei-1.20.1',
     artifactProvenance: null,
-    acceptanceCorpus: null,
+    acceptanceCorpora: {'generic-jei-1.20.1': null},
     compatibility: 'Test compatibility',
     ...overrides,
   };
@@ -349,7 +358,7 @@ test('packaging refuses to replace bytes under an existing release version and f
   assert.deepEqual(await readFile(join(publicRoot, release.filename)), publicJarBefore);
 });
 
-test('post-commit rollback restores the catalog but permanently retains the referenced JAR URL', async t => {
+test('post-commit rollback restores the catalog but permanently retains the external artifact', async t => {
   const {root, publicRoot} = await fixture(t);
   const releaseV100 = definition();
   await packageExporterReleases({
@@ -469,7 +478,10 @@ test('packages an artifact only when its exact source and allowed profile match 
       files: 1,
       bytes: exportManifestBytes.length,
     },
-    validationPolicySha256: await exporterAcceptancePolicySha256(release),
+    validationPolicySha256: await exporterAcceptancePolicySha256(
+      release,
+      release.qualityProfiles[0],
+    ),
     acceptedAt: '2026-07-19T12:00:00.000Z',
   });
   await mkdir(publicRoot, {recursive: true});
@@ -488,6 +500,66 @@ test('packages an artifact only when its exact source and allowed profile match 
     logger: quietLogger,
   });
   assert.equal(manifest.releases[0].sha256, receipt.release.sha256);
+});
+
+test('multi-profile packaging fails explicitly until every advertised profile has its own receipt', async t => {
+  const {root, publicRoot} = await fixture(t);
+  const release = definition({
+    qualityProfiles: ['generic-jei-1.20.1', 'multiblock-madness-2-1.18.2'],
+    acceptanceCorpora: {
+      'generic-jei-1.20.1': null,
+      'multiblock-madness-2-1.18.2': null,
+    },
+  });
+  const sourceBytes = await readFile(join(root, release.source));
+  const exportManifest = {
+    generatedAt: '2026-07-19T11:00:00.000Z',
+    minecraft: release.minecraftVersion,
+    counts: {items: 1, recipes: 1, categories: 1, mobs: 0, blockDrops: 0},
+  };
+  const exportManifestBytes = Buffer.from(`${JSON.stringify(exportManifest)}\n`);
+  const acceptanceRoot = join(root, 'acceptance-multi');
+  const qualityProfile = release.qualityProfiles[0];
+  const receipt = buildExporterAcceptanceReceipt({
+    definition: release,
+    sourceBytes,
+    qualityProfile,
+    exportManifestBytes,
+    exportManifest,
+    pack: {name: 'Test Pack', version: '1.0.0', identitySource: 'explicit-request'},
+    exporterBuild: null,
+    exportTree: {
+      format: 'mrt-export-tree-v1',
+      algorithm: 'sha256',
+      sha256: 'b'.repeat(64),
+      files: 1,
+      bytes: exportManifestBytes.length,
+    },
+    validationPolicySha256: await exporterAcceptancePolicySha256(
+      release,
+      qualityProfile,
+    ),
+    acceptedAt: '2026-07-19T12:00:00.000Z',
+  });
+  await writeExporterAcceptanceReceipt({
+    receipt,
+    acceptanceRoot,
+    logger: quietLogger,
+    testOnlyBypassManifestLock: true,
+  });
+
+  await assert.rejects(
+    packageExporterReleases({
+      workspaceRoot: root,
+      publicRoot,
+      acceptanceRoot,
+      definitions: [release],
+      generatedAt: '2026-07-19T13:00:00.000Z',
+      logger: quietLogger,
+    }),
+    /not fully accepted; profile multiblock-madness-2-1\.18\.2 failed: Exporter acceptance receipt is missing/,
+  );
+  await assert.rejects(lstat(publicRoot), error => error?.code === 'ENOENT');
 });
 
 test('exclusive manifest lock rejects concurrent and stale-lock guesses without auto-removal', async t => {

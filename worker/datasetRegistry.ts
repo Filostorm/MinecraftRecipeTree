@@ -1,5 +1,9 @@
 import {CORE_DATASET_PUBLICATION_ID_PATTERN} from './coreDatasetContract.ts';
 import {
+  type CommittedDatasetIdentity,
+  requireExactGtnhActivationBinding,
+} from './datasetIdentity.ts';
+import {
   authorizeDatasetAdmin,
   type D1Database,
   type DatasetRuntime,
@@ -231,7 +235,7 @@ function requireActivationInput(value: unknown): ActivationInput {
 export type VerifyPublicationPair = (
   publicationId: string,
   previewAssetSetId: string,
-) => Promise<void>;
+) => Promise<CommittedDatasetIdentity>;
 
 export async function handleDatasetChannelActivation(
   request: Request,
@@ -289,7 +293,8 @@ export async function handleDatasetChannelActivation(
       });
       return noStoreJson({error: 'Core dataset publication is not committed.'}, 409);
     }
-    await verifyPair(input.publicationId, input.previewAssetSetId);
+    const immutableIdentity = await verifyPair(input.publicationId, input.previewAssetSetId);
+    requireExactGtnhActivationBinding(slug, input, immutableIdentity);
 
     const now = Date.now();
     const statements = [];

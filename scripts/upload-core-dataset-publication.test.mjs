@@ -35,6 +35,22 @@ function loggerCapture() {
   };
 }
 
+function deferred() {
+  let resolvePromise;
+  const promise = new Promise(resolve => {
+    resolvePromise = resolve;
+  });
+  return {promise, resolve: resolvePromise};
+}
+
+async function waitForCondition(predicate, label) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (predicate()) return;
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  assert.fail(`Timed out waiting for ${label}.`);
+}
+
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'core-publication-upload-test-'));
   const exportRoot = join(root, 'exports');
@@ -257,6 +273,124 @@ test('fresh upload verifies every immutable object and commits publication.json 
   }
 });
 
+test('bounded workers stop dequeuing on the first failure and drain active secondary failures', async () => {
+  const data = await fixture();
+  const gates = [];
+  let uploadPromise = Promise.resolve();
+  try {
+    const api = createIngestionApi(data);
+    const originalFetch = api.fetchImpl;
+    const initialHeads = new Set();
+    let active = 0;
+    let peak = 0;
+    api.fetchImpl = async (input, init) => {
+      const url = new URL(input);
+      const suffix = url.pathname.slice('/api/admin/core-datasets/'.length);
+      if (init.method === 'HEAD' && suffix.startsWith('object/')) {
+        const path = suffix
+          .slice('object/'.length)
+          .split('/')
+          .map(decodeURIComponent)
+          .join('/');
+        if (!initialHeads.has(path)) {
+          initialHeads.add(path);
+          const gate = {...deferred(), failure: null, path};
+          gates.push(gate);
+          active += 1;
+          peak = Math.max(peak, active);
+          try {
+            await gate.promise;
+            if (gate.failure) throw gate.failure;
+          } finally {
+            active -= 1;
+          }
+        }
+      }
+      return originalFetch(input, init);
+    };
+
+    const capture = loggerCapture();
+    let settled = false;
+    let outcome;
+    uploadPromise = runUpload(data, api, {logger: capture.logger}).then(
+      value => {
+        settled = true;
+        outcome = {value};
+      },
+      error => {
+        settled = true;
+        outcome = {error};
+      },
+    );
+
+    await waitForCondition(() => gates.length === 2, 'two active core upload workers');
+    assert.equal(data.records.length > 2, true);
+    assert.equal(active, 2);
+    assert.equal(peak, 2);
+
+    gates[0].failure = new Error('primary core worker failure');
+    gates[0].resolve();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(settled, false, 'the uploader must wait for the other active worker');
+    assert.equal(active, 1);
+    assert.equal(gates.length, 2, 'the queued third record must not start');
+
+    gates[1].failure = new Error('secondary core worker failure');
+    gates[1].resolve();
+    await uploadPromise;
+
+    assert.match(outcome.error?.message ?? '', /primary core worker failure$/);
+    assert.doesNotMatch(outcome.error?.message ?? '', /secondary core worker failure/);
+    assert.equal(active, 0);
+    assert.equal(peak, 2);
+    assert.equal(gates.length, 2);
+    assert.equal(api.state.committed, false);
+    assert.equal(api.state.events.some(event => event.operation === 'commit'), false);
+    const errors = capture.entries
+      .filter(([level]) => level === 'error')
+      .map(([, message]) => message);
+    assert.equal(errors.some(message => message.includes('drained 1 secondary failure')), true);
+    assert.equal(errors.some(message => message.includes('secondary core worker failure')), true);
+  } finally {
+    for (const gate of gates) gate.resolve();
+    await uploadPromise;
+    await rm(data.root, {recursive: true, force: true});
+  }
+});
+
+test('core upload rejects concurrency outside 1..32 before validation or network access', async () => {
+  const data = await fixture();
+  try {
+    let validations = 0;
+    let requests = 0;
+    for (const concurrency of [0, 33]) {
+      await assert.rejects(
+        uploadCoreDatasetPublication({
+          exportRoot: data.exportRoot,
+          publication: data.publicationPath,
+          ingestBaseUrl: BASE_URL,
+          token: TOKEN,
+          concurrency,
+          localValidator: async () => {
+            validations += 1;
+            return data.localValidator();
+          },
+          fetchImpl: async () => {
+            requests += 1;
+            throw new Error('network must not be reached');
+          },
+          allowHttpForTests: true,
+        }),
+        /concurrency must be within 1\.\.32/,
+      );
+    }
+    assert.equal(validations, 0);
+    assert.equal(requests, 0);
+  } finally {
+    await rm(data.root, {recursive: true, force: true});
+  }
+});
+
 test('committed publication skips objects but replays commit for D1 reconciliation', async () => {
   const data = await fixture();
   try {
@@ -318,7 +452,7 @@ test('partial staging reuses exact objects and bounded retries resolve transient
   }
 });
 
-test('persistent consistency conflict exhausts bounded retries without PUT or commit', async () => {
+test('persistent consistency conflict exhausts bounded retries without target PUT or commit', async () => {
   const data = await fixture();
   try {
     const target = data.records[0];
@@ -329,7 +463,10 @@ test('persistent consistency conflict exhausts bounded retries without PUT or co
       /unexpected HTTP 409/,
     );
     assert.deepEqual(delays, [250, 500, 1_000, 2_000]);
-    assert.equal(api.state.events.some(event => event.method === 'PUT'), false);
+    assert.equal(
+      api.state.events.some(event => event.method === 'PUT' && event.path === target.path),
+      false,
+    );
     assert.equal(api.state.events.some(event => event.operation === 'commit'), false);
   } finally {
     await rm(data.root, {recursive: true, force: true});

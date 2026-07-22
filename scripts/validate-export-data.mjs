@@ -37,6 +37,12 @@ import {
   readArrayDocument,
   readObjectDocument,
 } from './sharded-documents.mjs';
+import {
+  GTNH_RECIPE_IMAGE_OMISSION_REASON,
+  GTNH_STRUCTURED_DATA_ONLY_POLICY_ID,
+  hasExactGtnhStructuredDataOnlyVisualAssets,
+  usesStructuredDataOnlyPublication,
+} from './visual-assets-rights-policy.mjs';
 
 const defaultExportRoot = join(process.cwd(), 'public', 'exports');
 const MAX_REPORTED_ERRORS = 100;
@@ -74,6 +80,8 @@ export async function validateExportData(exportRoot = defaultExportRoot, options
     options.allowLegacyRecipeImageAccounting === true;
   const qualityProfile = resolveQualityProfile(options.profile);
   const qualityRequirements = qualityProfileRequirementsFor(qualityProfile);
+  const profileRequiresStructuredDataOnly =
+    usesStructuredDataOnlyPublication(qualityProfile);
   let computedRecipeImageInventory = null;
   const errors = [];
   let suppressedErrors = 0;
@@ -177,6 +185,105 @@ export async function validateExportData(exportRoot = defaultExportRoot, options
   } else if (Object.values(manifest.mods).some(name => typeof name !== 'string')) {
     fail('manifest.mods values must all be strings.');
   }
+  const publicationPolicy = manifest?.publicationPolicy;
+  const exactStructuredDataOnlyVisualAssets =
+    hasExactGtnhStructuredDataOnlyVisualAssets(manifest?.web?.visualAssets);
+  const structuredDataOnly =
+    !forceRawAssets &&
+    publicationPolicy === GTNH_STRUCTURED_DATA_ONLY_POLICY_ID &&
+    exactStructuredDataOnlyVisualAssets;
+  if (forceRawAssets && publicationPolicy !== undefined) {
+    fail(
+      'Raw exports must not declare manifest.publicationPolicy; publication rights transforms run only after exhaustive raw validation.',
+    );
+  }
+  if (!forceRawAssets && profileRequiresStructuredDataOnly) {
+    if (publicationPolicy !== GTNH_STRUCTURED_DATA_ONLY_POLICY_ID) {
+      fail(
+        `Export quality profile ${qualityProfile} requires manifest.publicationPolicy to be ` +
+          `${GTNH_STRUCTURED_DATA_ONLY_POLICY_ID}.`,
+      );
+    }
+    if (!exactStructuredDataOnlyVisualAssets) {
+      fail(
+        `Export quality profile ${qualityProfile} requires the exact ` +
+          'manifest.web.visualAssets structured-data-only contract.',
+      );
+    }
+  } else if (
+    !forceRawAssets &&
+    qualityProfile !== null &&
+    (publicationPolicy === GTNH_STRUCTURED_DATA_ONLY_POLICY_ID ||
+      manifest?.web?.visualAssets?.policy === GTNH_STRUCTURED_DATA_ONLY_POLICY_ID)
+  ) {
+    fail(
+      `${GTNH_STRUCTURED_DATA_ONLY_POLICY_ID} is reserved for export quality profile ` +
+        'gtnh-1.7.10.',
+    );
+  }
+  if (
+    !forceRawAssets &&
+    (publicationPolicy !== undefined || manifest?.web?.visualAssets !== undefined) &&
+    !structuredDataOnly
+  ) {
+    fail(
+      'manifest.publicationPolicy and manifest.web.visualAssets must form the exact supported structured-data-only contract.',
+    );
+  }
+
+  const validateRecipeImageOmission = requireRightsPolicy => {
+    try {
+      const recipeImages = manifest?.web?.recipeImages;
+      if (recipeImages?.mode !== 'omitted') {
+        fail('manifest.web.recipeImages.mode must be omitted for this publication contract.');
+        return;
+      }
+      const inventory = requireRecipeImageInventory(
+        recipeImages.inventory,
+        'manifest.web.recipeImages.inventory',
+        manifest.counts?.recipes,
+      );
+      const currentPngAccounting = recipeImages.encoding === 'png';
+      const explicitLegacyAccounting =
+        !requireRightsPolicy &&
+        recipeImages.encoding === undefined &&
+        allowLegacyRecipeImageAccounting;
+      if (
+        countValue(recipeImages.references) === null ||
+        countValue(recipeImages.files) === null ||
+        countValue(recipeImages.bytes) === null ||
+        (!currentPngAccounting && !explicitLegacyAccounting) ||
+        inventory.previews !== recipeImages.references ||
+        inventory.missing !== manifest.counts.recipes - recipeImages.references ||
+        recipeImages.files !== recipeImages.references
+      ) {
+        fail(
+          'manifest.web.recipeImages inventory/counts must satisfy previews = references = ' +
+            'files, encoding = png, and missing = manifest.counts.recipes - references. ' +
+            'A missing encoding field is accepted only by the explicit legacy-read validation mode.',
+        );
+      } else if (explicitLegacyAccounting) {
+        console.warn(
+          '[legacy-read] Explicit compatibility mode accepted the omitted-WebP byte ' +
+            'accounting contract. This mode is only for validating the existing production ' +
+            'dataset during zero-downtime migration; new imports and final publications must ' +
+            'use encoding="png" and original PNG bytes.',
+        );
+      }
+      if (
+        requireRightsPolicy &&
+        (recipeImages.policy !== GTNH_STRUCTURED_DATA_ONLY_POLICY_ID ||
+          recipeImages.reason !== GTNH_RECIPE_IMAGE_OMISSION_REASON)
+      ) {
+        fail(
+          'manifest.web.recipeImages must bind its omission accounting to the exact GTNH publication rights policy.',
+        );
+      }
+    } catch (error) {
+      fail(error.message);
+    }
+  };
+
   const coordinatePacked =
     !forceRawAssets && manifest?.web?.packedImages === PACKED_IMAGE_FORMAT;
   if (coordinatePacked) {
@@ -192,43 +299,21 @@ export async function validateExportData(exportRoot = defaultExportRoot, options
     if (manifest.web.maxShardBytes !== MAX_SHARD_BYTES) {
       fail(`manifest.web.maxShardBytes must be exactly ${MAX_SHARD_BYTES}.`);
     }
-    if (manifest.web.recipeImages?.mode === 'omitted') {
-      try {
-        const recipeImages = manifest.web.recipeImages;
-        const inventory = requireRecipeImageInventory(
-          manifest.web.recipeImages.inventory,
-          'manifest.web.recipeImages.inventory',
-          manifest.counts?.recipes,
-        );
-        const currentPngAccounting = recipeImages.encoding === 'png';
-        const explicitLegacyAccounting =
-          recipeImages.encoding === undefined && allowLegacyRecipeImageAccounting;
-        if (
-          countValue(recipeImages.references) === null ||
-          countValue(recipeImages.files) === null ||
-          countValue(recipeImages.bytes) === null ||
-          (!currentPngAccounting && !explicitLegacyAccounting) ||
-          inventory.previews !== recipeImages.references ||
-          inventory.missing !== manifest.counts.recipes - recipeImages.references ||
-          recipeImages.files !== recipeImages.references
-        ) {
-          fail(
-            'manifest.web.recipeImages inventory/counts must satisfy previews = references = ' +
-              'files, encoding = png, and missing = manifest.counts.recipes - references. ' +
-              'A missing encoding field is accepted only by the explicit legacy-read validation mode.',
-          );
-        } else if (explicitLegacyAccounting) {
-          console.warn(
-            '[legacy-read] Explicit compatibility mode accepted the omitted-WebP byte ' +
-              'accounting contract. This mode is only for validating the existing production ' +
-              'dataset during zero-downtime migration; new imports and final publications must ' +
-              'use encoding="png" and original PNG bytes.',
-          );
-        }
-      } catch (error) {
-        fail(error.message);
-      }
+    if (manifest.web.recipeImages?.mode === 'omitted') validateRecipeImageOmission(false);
+  } else if (structuredDataOnly) {
+    if (manifest.web.format !== 2) {
+      fail('manifest.web.format must be 2 for structured-data-only exports.');
     }
+    if (manifest.web.shardedJson !== SHARDED_JSON_FORMAT) {
+      fail(`manifest.web.shardedJson must be ${SHARDED_JSON_FORMAT}.`);
+    }
+    if (manifest.web.maxShardBytes !== MAX_SHARD_BYTES) {
+      fail(`manifest.web.maxShardBytes must be exactly ${MAX_SHARD_BYTES}.`);
+    }
+    if (manifest.web.packedImages !== undefined || manifest.web.maxPackBytes !== undefined) {
+      fail('Structured-data-only exports must not declare packed-image storage.');
+    }
+    validateRecipeImageOmission(true);
   } else if (!forceRawAssets && manifest?.web !== undefined) {
     fail(
       `manifest.web declares an unsupported packed-image format: ${String(
@@ -333,7 +418,11 @@ export async function validateExportData(exportRoot = defaultExportRoot, options
       }
     }
     if (item.icon !== undefined) {
-      if (safeRelativePath(item.icon)) {
+      if (structuredDataOnly) {
+        fail(
+          `items[${itemIndex}].icon is forbidden by ${GTNH_STRUCTURED_DATA_ONLY_POLICY_ID}.`,
+        );
+      } else if (safeRelativePath(item.icon)) {
         referenceAsset(
           item.icon,
           iconScale && iconScale > 0 ? {width: 16 * iconScale, height: 16 * iconScale} : null,
@@ -355,7 +444,7 @@ export async function validateExportData(exportRoot = defaultExportRoot, options
   let totalRecipes = 0;
   let semanticErrorRecipes = 0;
 
-  const validateSlots = (slots, location) => {
+  const validateSlots = (slots, location, role) => {
     if (slots === undefined) return;
     if (!Array.isArray(slots)) {
       fail(`${location} must be an array.`);
@@ -369,18 +458,37 @@ export async function validateExportData(exportRoot = defaultExportRoot, options
       for (const [variantIndex, entry] of variants.entries()) {
         if (
           !Array.isArray(entry) ||
-          (entry.length !== 2 && entry.length !== 3) ||
+          (entry.length !== 2 && entry.length !== 3 && entry.length !== 4) ||
           typeof entry[0] !== 'string' ||
           typeof entry[1] !== 'number' ||
           !Number.isFinite(entry[1]) ||
           (entry.length === 3 &&
-            (typeof entry[2] !== 'string' || !/^ore:\S+$/.test(entry[2])))
+            (typeof entry[2] !== 'string' || !/^ore:\S+$/.test(entry[2]))) ||
+          (entry.length === 4 &&
+            !(
+              (entry[2] === null ||
+                (typeof entry[2] === 'string' && /^ore:\S+$/.test(entry[2]))) &&
+              typeof entry[3] === 'number' &&
+              Number.isFinite(entry[3]) &&
+              entry[3] > 0 &&
+              entry[3] < 1
+            ))
         ) {
           fail(
             `${location}[${slotIndex}][${variantIndex}] must be ` +
-              '[catalog key, amount, optional logical ingredient id].',
+              '[catalog key, amount, optional logical ingredient id, optional occurrence probability].',
           );
           continue;
+        }
+        if (entry.length === 4 && role === 'cat') {
+          fail(
+            `${location}[${slotIndex}][${variantIndex}] may declare an occurrence probability only in recipe.in or recipe.out.`,
+          );
+        }
+        if (entry.length === 4 && manifest?.format !== 2) {
+          fail(
+            `${location}[${slotIndex}][${variantIndex}] uses the stochastic-occurrence tuple introduced by manifest format 2.`,
+          );
         }
         if (!itemKeys.has(entry[0])) {
           fail(`${location}[${slotIndex}][${variantIndex}] references unknown key ${entry[0]}.`);
@@ -393,6 +501,18 @@ export async function validateExportData(exportRoot = defaultExportRoot, options
         (exportedIdentityCount !== variants.length || new Set(logicalIdentities).size !== 1)
       ) {
         fail(`${location}[${slotIndex}] must use one logical ingredient id for every variant.`);
+      }
+      const probabilities = variants.map(entry =>
+        Array.isArray(entry) && entry.length === 4 ? entry[3] : undefined,
+      );
+      const exportedProbabilityCount = probabilities.filter(
+        probability => probability !== undefined,
+      ).length;
+      if (
+        exportedProbabilityCount > 0 &&
+        (exportedProbabilityCount !== variants.length || new Set(probabilities).size !== 1)
+      ) {
+        fail(`${location}[${slotIndex}] must use one occurrence probability for every variant.`);
       }
     }
   };
@@ -449,7 +569,12 @@ export async function validateExportData(exportRoot = defaultExportRoot, options
       }
     }
     if (category.icon !== undefined) {
-      if (safeRelativePath(category.icon)) {
+      if (structuredDataOnly) {
+        fail(
+          `categories[${categoryIndex}].icon is forbidden by ` +
+            `${GTNH_STRUCTURED_DATA_ONLY_POLICY_ID}.`,
+        );
+      } else if (safeRelativePath(category.icon)) {
         // Category renderers choose their own canvas size; exhaustive decode
         // below still enforces positive, bounded dimensions and visible pixels.
         referenceAsset(category.icon, null, `category ${category.id ?? categoryIndex}`);
@@ -492,8 +617,18 @@ export async function validateExportData(exportRoot = defaultExportRoot, options
       } else if (recipe.err === true) {
         semanticErrorRecipes += 1;
       }
+      if (structuredDataOnly) {
+        for (const field of ['img', 'w', 'h']) {
+          if (field in recipe) {
+            fail(`${location}.${field} is forbidden by ${GTNH_STRUCTURED_DATA_ONLY_POLICY_ID}.`);
+          }
+        }
+      }
       if (recipe.img !== undefined) {
-        if (typeof recipe.img !== 'string' || !safeRelativePath(recipe.img)) {
+        if (structuredDataOnly) {
+          // The policy violation above is sufficient; do not register a surviving
+          // coordinate or raw path as an allowed visual asset.
+        } else if (typeof recipe.img !== 'string' || !safeRelativePath(recipe.img)) {
           fail(`${location} has an invalid image path.`);
         } else {
           const width = Number.isFinite(recipe.w) && recipe.w > 0 ? recipe.w : null;
@@ -534,9 +669,9 @@ export async function validateExportData(exportRoot = defaultExportRoot, options
       } else if (recipeImageInventoryEntries) {
         recipeImageInventoryEntries.push({kind: 'missing'});
       }
-      validateSlots(recipe.in, `${location}.in`);
-      validateSlots(recipe.out, `${location}.out`);
-      validateSlots(recipe.cat, `${location}.cat`);
+      validateSlots(recipe.in, `${location}.in`, 'in');
+      validateSlots(recipe.out, `${location}.out`, 'out');
+      validateSlots(recipe.cat, `${location}.cat`, 'cat');
     }
   }
 
@@ -548,7 +683,18 @@ export async function validateExportData(exportRoot = defaultExportRoot, options
     } else {
       mobs = mobsDoc.mobs;
       for (const [mobIndex, mob] of mobs.entries()) {
-        if (!isRecord(mob) || typeof mob.icon !== 'string' || !safeRelativePath(mob.icon)) {
+        if (!isRecord(mob)) {
+          fail(`mobs[${mobIndex}] must contain an object.`);
+        } else if (structuredDataOnly) {
+          for (const field of ['icon', 'frames', 'fps']) {
+            if (field in mob) {
+              fail(
+                `mobs[${mobIndex}].${field} is forbidden by ` +
+                  `${GTNH_STRUCTURED_DATA_ONLY_POLICY_ID}.`,
+              );
+            }
+          }
+        } else if (typeof mob.icon !== 'string' || !safeRelativePath(mob.icon)) {
           fail(`mobs[${mobIndex}] must contain a valid relative icon path.`);
         } else {
           const frames = Number.isSafeInteger(mob.frames) && mob.frames > 0 ? mob.frames : 1;
@@ -866,6 +1012,19 @@ export async function validateExportData(exportRoot = defaultExportRoot, options
       'Raw export validation is ignoring the previous packed-asset index during transactional repacking.',
     );
   }
+  const rasterExtensions = new Set([
+    '.png',
+    '.webp',
+    '.jpg',
+    '.jpeg',
+    '.gif',
+    '.bmp',
+    '.apng',
+    '.avif',
+  ]);
+  const allRasterFiles = allFiles.filter(path =>
+    rasterExtensions.has(extname(path).toLowerCase()),
+  );
   const rawImageFiles = allFiles.filter(path => {
     const key = relativeKey(root, path);
     const extension = extname(path).toLowerCase();
@@ -874,6 +1033,54 @@ export async function validateExportData(exportRoot = defaultExportRoot, options
       (key.startsWith('icons/') || key.startsWith('recipes/') || key.startsWith('mobs/'))
     );
   });
+  if (structuredDataOnly) {
+    for (const directoryName of ['icons', 'mobs']) {
+      const kind = await pathKind(join(root, directoryName));
+      if (kind !== 'missing') {
+        fail(
+          `${GTNH_STRUCTURED_DATA_ONLY_POLICY_ID} requires ${directoryName}/ to be omitted; ` +
+            `found ${kind}.`,
+        );
+      }
+    }
+    if (allRasterFiles.length > 0) {
+      fail(
+        `${GTNH_STRUCTURED_DATA_ONLY_POLICY_ID} forbids every raster file; found ` +
+          `${allRasterFiles.length}, including ${relativeKey(root, allRasterFiles[0])}.`,
+      );
+    }
+    const forbiddenPackFiles = [...fileKeys]
+      .filter(key => /(?:^|\/)pack-\d+\.bin$/.test(key))
+      .sort();
+    if (forbiddenPackFiles.length > 0) {
+      fail(
+        `${GTNH_STRUCTURED_DATA_ONLY_POLICY_ID} forbids packed-image files; found ` +
+          `${forbiddenPackFiles.length}, including ${forbiddenPackFiles[0]}.`,
+      );
+    }
+    for (const jsonPath of allFiles.filter(path => extname(path).toLowerCase() === '.json')) {
+      const documentKey = relativeKey(root, jsonPath);
+      const document = await readJsonDocument(jsonPath, documentKey);
+      const pending = [document];
+      let packedCoordinate = null;
+      while (pending.length > 0 && packedCoordinate === null) {
+        const value = pending.pop();
+        if (typeof value === 'string') {
+          packedCoordinate = /^assets\/s\/\d+-\d+-\d+\.webp$/.test(value) ? value : null;
+        } else if (Array.isArray(value)) {
+          for (const entry of value) pending.push(entry);
+        } else if (isRecord(value)) {
+          for (const entry of Object.values(value)) pending.push(entry);
+        }
+      }
+      if (packedCoordinate) {
+        fail(
+          `${GTNH_STRUCTURED_DATA_ONLY_POLICY_ID} forbids packed coordinates; ` +
+            `${documentKey} contains ${packedCoordinate}.`,
+        );
+      }
+    }
+  }
   const packSizes = new Map();
   const packIntervals = new Map();
   if (coordinatePacked) {

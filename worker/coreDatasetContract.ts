@@ -1,4 +1,6 @@
 export const CORE_DATASET_PUBLICATION_FORMAT = 'mrt-core-dataset-publication-v1';
+export const GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY =
+  'gtnh-structured-data-only-v1';
 export const CORE_DATASET_PUBLICATION_ID_PATTERN = /^[a-f0-9]{64}$/;
 export const MAX_CORE_PUBLICATION_MANIFEST_BYTES = 8 * 1024 * 1024;
 export const MAX_CORE_DOCUMENT_BYTES = 8 * 1024 * 1024;
@@ -33,6 +35,7 @@ export interface CorePackRecord extends CoreContentRecord {
 
 export interface CoreDatasetPublicationManifest {
   format: typeof CORE_DATASET_PUBLICATION_FORMAT;
+  publicationPolicy?: typeof GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY;
   publicationId: string;
   maxDocumentBytes: number;
   maxPackBytes: number;
@@ -119,18 +122,23 @@ export function requireCoreDatasetPublicationManifest(
   value: unknown,
   expectedPublicationId?: string,
 ): ValidatedCoreDatasetPublication {
+  const dataOnly =
+    isRecord(value) &&
+    value.publicationPolicy === GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY;
+  const topLevelKeys = [
+    'format',
+    'publicationId',
+    'maxDocumentBytes',
+    'maxPackBytes',
+    'packIndexFormat',
+    'maxPackIndexBytes',
+    'counts',
+    'documents',
+    'packs',
+    ...(dataOnly ? ['publicationPolicy'] : []),
+  ];
   if (
-    !hasExactKeys(value, [
-      'format',
-      'publicationId',
-      'maxDocumentBytes',
-      'maxPackBytes',
-      'packIndexFormat',
-      'maxPackIndexBytes',
-      'counts',
-      'documents',
-      'packs',
-    ]) ||
+    !hasExactKeys(value, topLevelKeys) ||
     value.format !== CORE_DATASET_PUBLICATION_FORMAT ||
     typeof value.publicationId !== 'string' ||
     !CORE_DATASET_PUBLICATION_ID_PATTERN.test(value.publicationId) ||
@@ -152,7 +160,7 @@ export function requireCoreDatasetPublicationManifest(
     !Array.isArray(value.documents) ||
     value.documents.length === 0 ||
     !Array.isArray(value.packs) ||
-    value.packs.length === 0
+    (dataOnly ? value.packs.length !== 0 : value.packs.length === 0)
   ) {
     throw new Error('Core dataset publication does not satisfy the exact v1 control-manifest contract.');
   }
@@ -267,6 +275,12 @@ export function requireCoreDatasetPublicationManifest(
     manifest,
     contentRecordsByPath: new Map(coreDatasetContentRecords(manifest).map(record => [record.path, record])),
   };
+}
+
+export function isGtnhStructuredDataOnlyCorePublication(
+  manifest: CoreDatasetPublicationManifest,
+): boolean {
+  return manifest.publicationPolicy === GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY;
 }
 
 /** Recursively sorted, compact JSON with one final newline. */

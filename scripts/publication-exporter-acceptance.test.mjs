@@ -85,25 +85,35 @@ async function fixture(t) {
     source,
     filename: 'recipe-tree-exporter-forge-1.18.2-1.0.1.jar',
     qualityProfiles: ['multiblock-madness-2-1.18.2'],
-    acceptanceProfile: 'multiblock-madness-2-1.18.2',
     artifactProvenance: {
       format: EXPORTER_BUILD_FORMAT,
       exporterId: 'forge-rei-1.18.2',
       minecraftVersion: '1.18.2',
     },
-    acceptanceCorpus: {items: 10, recipes: 20, categories: 2, mobs: 0, blockDrops: 0},
+    acceptanceCorpora: {
+      'multiblock-madness-2-1.18.2': {
+        items: 10,
+        recipes: 20,
+        categories: 2,
+        mobs: 0,
+        blockDrops: 0,
+      },
+    },
     compatibility: 'Test compatibility',
   };
   const receipt = buildExporterAcceptanceReceipt({
     definition,
     sourceBytes,
-    qualityProfile: definition.acceptanceProfile,
+    qualityProfile: definition.qualityProfiles[0],
     exportManifestBytes: manifestBytes,
     exportManifest: manifest,
     pack,
     exporterBuild,
     exportTree: await digestExportTree(exportRoot, {logger: quietLogger}),
-    validationPolicySha256: await exporterAcceptancePolicySha256(definition),
+    validationPolicySha256: await exporterAcceptancePolicySha256(
+      definition,
+      definition.qualityProfiles[0],
+    ),
     acceptedAt: '2026-07-20T03:10:00.000Z',
   });
   const acceptanceRoot = join(root, 'acceptance');
@@ -151,7 +161,7 @@ test('current release verification binds the exact receipt, JAR, profile, and pa
   const value = await fixture(t);
   const current = await loadCurrentPublicationExporterAcceptance({
     releaseId: value.definition.id,
-    profile: value.definition.acceptanceProfile,
+    profile: value.definition.qualityProfiles[0],
     minecraftVersion: value.definition.minecraftVersion,
     pack: value.pack,
     definitions: [value.definition],
@@ -186,7 +196,7 @@ test('staged-tree mutation and receipt replacement fail closed', async t => {
   const value = await fixture(t);
   const initial = await loadCurrentPublicationExporterAcceptance({
     releaseId: value.definition.id,
-    profile: value.definition.acceptanceProfile,
+    profile: value.definition.qualityProfiles[0],
     minecraftVersion: value.definition.minecraftVersion,
     pack: value.pack,
     definitions: [value.definition],
@@ -214,7 +224,7 @@ test('staged-tree mutation and receipt replacement fail closed', async t => {
   await assert.rejects(
     loadCurrentPublicationExporterAcceptance({
       releaseId: value.definition.id,
-      profile: value.definition.acceptanceProfile,
+      profile: value.definition.qualityProfiles[0],
       minecraftVersion: value.definition.minecraftVersion,
       pack: value.pack,
       definitions: [value.definition],

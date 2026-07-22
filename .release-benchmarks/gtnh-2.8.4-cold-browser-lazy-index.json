@@ -1,0 +1,357 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-07-22T13:35:55.849Z",
+  "benchmark": {
+    "sourceSha256": "9f7d073ee952c8cbb52b7d21cb2244383945cf68d803b23dbdee066d15e6e950",
+    "runs": 3,
+    "coldDefinition": "fresh Chrome process/profile per run; HTTP cache disabled/cleared; shared warm local Worker and operating-system file cache"
+  },
+  "platform": {
+    "node": "v22.22.3",
+    "platform": "darwin",
+    "arch": "arm64",
+    "release": "25.5.0",
+    "logicalCpuCount": 12
+  },
+  "chrome": {
+    "protocolVersion": "1.3",
+    "product": "Chrome/150.0.7871.129",
+    "revision": "@e69b30bba288603e514cffb4c79c359cac68e923",
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/150.0.0.0 Safari/537.36",
+    "jsVersion": "15.0.1240245"
+  },
+  "build": {
+    "sha256": "3750b2ac38f850e15703fb352115c11f3316ebbedc88d137453f42934424e132",
+    "files": 40,
+    "bytes": 4533359
+  },
+  "dataset": {
+    "slug": "gt-new-horizons",
+    "displayName": "GT New Horizons",
+    "minecraftVersion": "1.7.10",
+    "packVersion": "2.8.4",
+    "publicationId": "074a1897536d0e2ca9c44c9717759582edadf7087ca9c1799182410c415473db",
+    "previewAssetSetId": "49c141ec4261147254ab79481472e3bbe30706a1f815cd72f27a5d7f7102ecbb",
+    "isDefault": true
+  },
+  "staticMetrics": {
+    "itemsBootstrapBytes": 24510759,
+    "indexBootstrapBytes": 403,
+    "combinedDatasetBootstrapBytes": 24511162,
+    "bootstrapDocumentCount": 10,
+    "coreBootstrapPaths": [
+      "blockdrops.json",
+      "categories.json",
+      "data/items/part-000.json",
+      "data/items/part-001.json",
+      "data/items/part-002.json",
+      "index.json",
+      "items.json",
+      "manifest.json",
+      "mobs.json"
+    ],
+    "previewBootstrapPaths": [],
+    "previewManifestBytes": 0
+  },
+  "thresholds": {
+    "eligible": {
+      "combinedDatasetBootstrapBytes": 75497472,
+      "indexBootstrapBytes": 41943040,
+      "bootstrapDocumentCount": 12,
+      "settledHeapBytes": 314572800,
+      "peakHeapBytes": 419430400,
+      "readyMs": 8000
+    },
+    "review": {
+      "combinedDatasetBootstrapBytes": 83886080,
+      "indexBootstrapBytes": 50331648,
+      "bootstrapDocumentCount": 16,
+      "settledHeapBytes": 335544320,
+      "peakHeapBytes": 419430400,
+      "readyMs": 8000
+    }
+  },
+  "runs": [
+    {
+      "run": 1,
+      "readyMs": 380.4,
+      "peakHeapBytes": 69354352,
+      "settledHeapBytes": 53919676,
+      "heapSampleCount": 38,
+      "settledHeapSamples": [
+        53919676,
+        53919676,
+        53919676
+      ],
+      "cdpTraffic": {
+        "datasetRequests": 11,
+        "datasetCompletedRequests": 11,
+        "datasetDecodedBytes": 24713468,
+        "datasetEncodedBytes": 24715641
+      },
+      "proxyTraffic": {
+        "requests": 20,
+        "datasetRequests": 11,
+        "catalogRequests": 1,
+        "documentRequests": 11,
+        "imageRequests": 0,
+        "documentBodyBytes": 24713468,
+        "imageBodyBytes": 0,
+        "totalDatasetBodyBytes": 24713468,
+        "bootstrapDocumentCount": 10,
+        "servedObjects": [
+          {
+            "key": "catalog:/api/datasets",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 311
+          },
+          {
+            "key": "core:blockdrops.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 13
+          },
+          {
+            "key": "core:categories.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 121994
+          },
+          {
+            "key": "core:data/items/part-000.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 8388463
+          },
+          {
+            "key": "core:data/items/part-001.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 8388436
+          },
+          {
+            "key": "core:data/items/part-002.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 7733550
+          },
+          {
+            "key": "core:index.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 403
+          },
+          {
+            "key": "core:items.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 310
+          },
+          {
+            "key": "core:manifest.json",
+            "kind": "document",
+            "requests": 2,
+            "responseBodyBytes": 79976
+          },
+          {
+            "key": "core:mobs.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 12
+          }
+        ]
+      }
+    },
+    {
+      "run": 2,
+      "readyMs": 294.5,
+      "peakHeapBytes": 68254940,
+      "settledHeapBytes": 54165256,
+      "heapSampleCount": 36,
+      "settledHeapSamples": [
+        54165256,
+        54165256,
+        54165256
+      ],
+      "cdpTraffic": {
+        "datasetRequests": 11,
+        "datasetCompletedRequests": 11,
+        "datasetDecodedBytes": 24713468,
+        "datasetEncodedBytes": 24715641
+      },
+      "proxyTraffic": {
+        "requests": 20,
+        "datasetRequests": 11,
+        "catalogRequests": 1,
+        "documentRequests": 11,
+        "imageRequests": 0,
+        "documentBodyBytes": 24713468,
+        "imageBodyBytes": 0,
+        "totalDatasetBodyBytes": 24713468,
+        "bootstrapDocumentCount": 10,
+        "servedObjects": [
+          {
+            "key": "catalog:/api/datasets",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 311
+          },
+          {
+            "key": "core:blockdrops.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 13
+          },
+          {
+            "key": "core:categories.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 121994
+          },
+          {
+            "key": "core:data/items/part-000.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 8388463
+          },
+          {
+            "key": "core:data/items/part-001.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 8388436
+          },
+          {
+            "key": "core:data/items/part-002.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 7733550
+          },
+          {
+            "key": "core:index.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 403
+          },
+          {
+            "key": "core:items.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 310
+          },
+          {
+            "key": "core:manifest.json",
+            "kind": "document",
+            "requests": 2,
+            "responseBodyBytes": 79976
+          },
+          {
+            "key": "core:mobs.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 12
+          }
+        ]
+      }
+    },
+    {
+      "run": 3,
+      "readyMs": 284.2,
+      "peakHeapBytes": 68959936,
+      "settledHeapBytes": 54099692,
+      "heapSampleCount": 36,
+      "settledHeapSamples": [
+        54099692,
+        54099692,
+        54099692
+      ],
+      "cdpTraffic": {
+        "datasetRequests": 11,
+        "datasetCompletedRequests": 11,
+        "datasetDecodedBytes": 24713468,
+        "datasetEncodedBytes": 24715641
+      },
+      "proxyTraffic": {
+        "requests": 20,
+        "datasetRequests": 11,
+        "catalogRequests": 1,
+        "documentRequests": 11,
+        "imageRequests": 0,
+        "documentBodyBytes": 24713468,
+        "imageBodyBytes": 0,
+        "totalDatasetBodyBytes": 24713468,
+        "bootstrapDocumentCount": 10,
+        "servedObjects": [
+          {
+            "key": "catalog:/api/datasets",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 311
+          },
+          {
+            "key": "core:blockdrops.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 13
+          },
+          {
+            "key": "core:categories.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 121994
+          },
+          {
+            "key": "core:data/items/part-000.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 8388463
+          },
+          {
+            "key": "core:data/items/part-001.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 8388436
+          },
+          {
+            "key": "core:data/items/part-002.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 7733550
+          },
+          {
+            "key": "core:index.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 403
+          },
+          {
+            "key": "core:items.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 310
+          },
+          {
+            "key": "core:manifest.json",
+            "kind": "document",
+            "requests": 2,
+            "responseBodyBytes": 79976
+          },
+          {
+            "key": "core:mobs.json",
+            "kind": "document",
+            "requests": 1,
+            "responseBodyBytes": 12
+          }
+        ]
+      }
+    }
+  ],
+  "decision": "current-storage-eligible",
+  "aggregate": {
+    "worstBootstrapDocumentCount": 10,
+    "worstReadyMs": 380.4,
+    "worstPeakHeapBytes": 69354352,
+    "worstSettledHeapBytes": 54165256
+  },
+  "violations": []
+}

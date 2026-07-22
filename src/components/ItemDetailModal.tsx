@@ -1,5 +1,6 @@
 import React, {useEffect, useMemo, useState} from 'react';
 import {
+  ActivityIndicator,
   Modal,
   Pressable,
   ScrollView,
@@ -45,8 +46,37 @@ export function ItemDetailModal() {
   const [side, setSide] = useState<'p' | 'u' | 'i' | 'd' | number>('p');
 
   useEffect(() => setSide('p'), [key]);
+  useEffect(() => {
+    if (!key || data.indexStatus === 'ready' || data.indexStatus === 'loading') return;
+    void data.ensureIndex().catch(() => {
+      // DataContext logs transport and validation detail and exposes the error below.
+    });
+  }, [data, key]);
 
   if (!key) return null;
+  if (data.indexStatus !== 'ready') {
+    return (
+      <Modal visible transparent animationType="fade" onRequestClose={popItem}>
+        <Pressable style={styles.backdrop} onPress={closeItems}>
+          <Pressable style={[styles.card, {alignItems: 'center', justifyContent: 'center'}]} onPress={() => {}}>
+            {data.indexStatus !== 'error' && <ActivityIndicator color={theme.accent} size="large" />}
+            <Text style={data.indexStatus === 'error' ? styles.indexError : styles.emptyText}>
+              {data.indexStatus === 'error'
+                ? `Recipe index unavailable: ${data.indexError ?? 'unknown error'}`
+                : 'Loading recipe index…'}
+            </Text>
+            {data.indexStatus === 'error' && (
+              <TouchableOpacity
+                style={styles.headerBtn}
+                onPress={() => void data.ensureIndex().catch(() => {})}>
+                <Text style={styles.headerBtnText}>Retry recipe index</Text>
+              </TouchableOpacity>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
+    );
+  }
   const item = data.itemsByKey.get(key);
   const entry = data.index[key];
   const visible = (refs?: RecipeRef[]) =>
@@ -190,6 +220,7 @@ export function ItemDetailModal() {
             ) : (
               <RefsList
                 key={`${key}:${side}`}
+                itemKey={key}
                 refs={refs}
                 informational={side === 'i'}
               />
@@ -210,7 +241,15 @@ function SideTab({label, active, onPress}: {label: string; active: boolean; onPr
 }
 
 /** Loads only the bounded recipe shards containing the currently visible references. */
-function RefsList({refs, informational = false}: {refs: RecipeRef[]; informational?: boolean}) {
+function RefsList({
+  itemKey,
+  refs,
+  informational = false,
+}: {
+  itemKey: string;
+  refs: RecipeRef[];
+  informational?: boolean;
+}) {
   const data = useData();
   const {openRecipeInGraph} = useUi();
   const [visibleTarget, setVisibleTarget] = useState(PAGE);
@@ -483,7 +522,13 @@ function RefsList({refs, informational = false}: {refs: RecipeRef[]; information
       {shown.map(([catIdx, recipeIdx]) => {
         const cat = data.categories[catIdx];
         const recipe = recipesByRef.get(recipeRefKey([catIdx, recipeIdx]));
-        const outputKey = recipe ? slotSummary(recipe.out)[0]?.key : undefined;
+        const selectedOutput = recipe
+          ? slotSummary(recipe.out).find(
+              output =>
+                output.key === itemKey || output.alternatives.includes(itemKey),
+            )
+          : undefined;
+        const outputKey = selectedOutput ? itemKey : undefined;
         if (!cat) return null;
         return (
           <View key={`${catIdx}-${recipeIdx}`}>
@@ -621,6 +666,7 @@ const styles = StyleSheet.create({
   sideTabTextActive: {color: theme.accent, fontWeight: '700'},
   body: {marginTop: 12},
   emptyText: {color: theme.textDim, padding: 10},
+  indexError: {color: theme.danger, padding: 10, textAlign: 'center'},
   dropSection: {marginTop: 14},
   dropTitle: {color: theme.textDim, fontSize: 11, textTransform: 'uppercase', marginBottom: 6},
   mobRow: {

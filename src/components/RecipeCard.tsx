@@ -88,6 +88,8 @@ export function RecipeCard({
               variableAmount={item.variableAmount}
               variants={item.variants}
               tag={item.tag}
+              probability={item.probability}
+              probabilityRole="consume"
               interactive={!onPress}
             />
           ))}
@@ -100,6 +102,8 @@ export function RecipeCard({
               variableAmount={item.variableAmount}
               variants={item.variants}
               tag={item.tag}
+              probability={item.probability}
+              probabilityRole="produce"
               highlight
               interactive={!onPress}
             />
@@ -139,6 +143,8 @@ export function ItemChip({
   variableAmount,
   variants,
   tag,
+  probability,
+  probabilityRole = 'produce',
   highlight,
   interactive = true,
 }: {
@@ -147,6 +153,10 @@ export function ItemChip({
   variableAmount?: boolean;
   variants?: number;
   tag?: string;
+  /** Undefined is deterministic; null is an unresolved stochastic aggregate. */
+  probability?: number | null;
+  /** Whether the occurrence probability describes input consumption or output production. */
+  probabilityRole?: 'consume' | 'produce';
   highlight?: boolean;
   interactive?: boolean;
 }) {
@@ -168,6 +178,11 @@ export function ItemChip({
           : variableAmount
             ? ' (alternative quantities vary)'
             : ''}
+        {probability === null
+          ? ` · stochastic ${probabilityRole} chance unknown`
+          : probability === undefined
+            ? ''
+            : ` · ${String(Math.round(probability * 10_000) / 100)}% ${probabilityRole} chance`}
       </Text>
     </>
   );

@@ -5,6 +5,7 @@ import {fileURLToPath} from 'node:url';
 import {validateLocalCoreDatasetPublication} from './build-core-dataset-publication.mjs';
 import {
   CORE_DATASET_PUBLICATION_ID_PATTERN,
+  GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY,
   coreDatasetContentRecords,
   requireCanonicalCoreDatasetPublicationBytes,
   requireCoreDatasetPublicationManifest,
@@ -372,10 +373,25 @@ async function ensureObject(options) {
   return raced ? 'reused' : 'uploaded';
 }
 
-async function mapConcurrent(values, concurrency, operation) {
+function errorDetail(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function logDrainedFailure(logger, label, message) {
+  try {
+    logger.error(message);
+  } catch {
+    console.error(`${label} configured logger failed; emitting the drained failure directly.`);
+    console.error(message);
+  }
+}
+
+async function mapConcurrent(values, concurrency, operation, logger, label) {
   const results = new Array(values.length);
   let next = 0;
   let stopped = false;
+  let firstFailure = null;
+  const secondaryFailures = [];
   async function worker() {
     for (;;) {
       if (stopped) return;
@@ -385,12 +401,35 @@ async function mapConcurrent(values, concurrency, operation) {
       try {
         results[index] = await operation(values[index], index);
       } catch (error) {
-        stopped = true;
-        throw error;
+        if (firstFailure === null) {
+          stopped = true;
+          firstFailure = {error, index};
+        } else {
+          secondaryFailures.push({error, index});
+        }
+        return;
       }
     }
   }
   await Promise.all(Array.from({length: Math.min(concurrency, values.length)}, worker));
+  if (firstFailure !== null) {
+    if (secondaryFailures.length > 0) {
+      logDrainedFailure(
+        logger,
+        label,
+        `${label} drained ${secondaryFailures.length} secondary failure(s) after stopping on ` +
+          `record index ${firstFailure.index}.`,
+      );
+      for (const failure of secondaryFailures) {
+        logDrainedFailure(
+          logger,
+          label,
+          `${label} secondary failure at record index ${failure.index}: ${errorDetail(failure.error)}`,
+        );
+      }
+    }
+    throw firstFailure.error;
+  }
   return results;
 }
 
@@ -493,6 +532,12 @@ export async function uploadCoreDatasetPublication({
       await localValidator({exportRoot, publication, concurrency, logger}),
     );
     const {manifest, manifestBytes, records} = localState;
+    if (manifest.publicationPolicy === GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY) {
+      logger.warn(
+        `Rights policy ${GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY} excludes every core ` +
+          'image pack; uploading structured JSON documents and the zero-pack control manifest only.',
+      );
+    }
     const publicationId = manifest.publicationId;
     if (!CORE_DATASET_PUBLICATION_ID_PATTERN.test(publicationId)) {
       throw new Error('Validated core dataset publicationId is not a lowercase SHA-256 digest.');
@@ -568,23 +613,29 @@ export async function uploadCoreDatasetPublication({
     }
 
     let completed = 0;
-    const outcomes = await mapConcurrent(records, concurrency, async record => {
-      const outcome = await ensureObject({
-        baseUrl: validated.baseUrl,
-        record,
-        token: validated.token,
-        publicationId,
-        timeoutMs,
-        fetchImpl,
-        logger,
-        sleepImpl,
-      });
-      completed += 1;
-      if (completed % 50 === 0 || completed === records.length) {
-        logger.info(`Verified ${completed}/${records.length} immutable core dataset objects.`);
-      }
-      return outcome;
-    });
+    const outcomes = await mapConcurrent(
+      records,
+      concurrency,
+      async record => {
+        const outcome = await ensureObject({
+          baseUrl: validated.baseUrl,
+          record,
+          token: validated.token,
+          publicationId,
+          timeoutMs,
+          fetchImpl,
+          logger,
+          sleepImpl,
+        });
+        completed += 1;
+        if (completed % 50 === 0 || completed === records.length) {
+          logger.info(`Verified ${completed}/${records.length} immutable core dataset objects.`);
+        }
+        return outcome;
+      },
+      logger,
+      'Core dataset upload worker pool',
+    );
     const uploaded = outcomes.filter(value => value === 'uploaded').length;
     const reused = outcomes.length - uploaded;
     logger.info(

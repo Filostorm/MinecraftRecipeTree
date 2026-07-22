@@ -8,6 +8,8 @@ import {MAX_PACK_BYTES} from './packed-assets.mjs';
 import {MAX_SHARD_BYTES} from './sharded-documents.mjs';
 
 export const CORE_DATASET_PUBLICATION_FORMAT = 'mrt-core-dataset-publication-v1';
+export const GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY =
+  'gtnh-structured-data-only-v1';
 export const CORE_DATASET_PUBLICATION_ID_PATTERN = /^[a-f0-9]{64}$/;
 export const MAX_CORE_PUBLICATION_MANIFEST_BYTES = 8 * 1024 * 1024;
 export const MAX_CORE_DATASET_OBJECT_PATH_BYTES = 1024;
@@ -67,18 +69,23 @@ export function coreDatasetContentRecords(manifest) {
 
 /** Strictly validate the immutable core-dataset control manifest. */
 export function requireCoreDatasetPublicationManifest(value, expectedPublicationId) {
+  const dataOnly =
+    isRecord(value) &&
+    value.publicationPolicy === GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY;
+  const topLevelKeys = [
+    'format',
+    'publicationId',
+    'maxDocumentBytes',
+    'maxPackBytes',
+    'packIndexFormat',
+    'maxPackIndexBytes',
+    'counts',
+    'documents',
+    'packs',
+    ...(dataOnly ? ['publicationPolicy'] : []),
+  ];
   if (
-    !hasExactKeys(value, [
-      'format',
-      'publicationId',
-      'maxDocumentBytes',
-      'maxPackBytes',
-      'packIndexFormat',
-      'maxPackIndexBytes',
-      'counts',
-      'documents',
-      'packs',
-    ]) ||
+    !hasExactKeys(value, topLevelKeys) ||
     value.format !== CORE_DATASET_PUBLICATION_FORMAT ||
     !CORE_DATASET_PUBLICATION_ID_PATTERN.test(value.publicationId) ||
     (expectedPublicationId !== undefined && value.publicationId !== expectedPublicationId) ||
@@ -99,7 +106,7 @@ export function requireCoreDatasetPublicationManifest(value, expectedPublication
     !Array.isArray(value.documents) ||
     value.documents.length === 0 ||
     !Array.isArray(value.packs) ||
-    value.packs.length === 0
+    (dataOnly ? value.packs.length !== 0 : value.packs.length === 0)
   ) {
     throw new Error('Core dataset publication does not satisfy the v1 control-manifest contract.');
   }
@@ -197,6 +204,13 @@ export function requireCoreDatasetPublicationManifest(value, expectedPublication
     }
   }
   return value;
+}
+
+export function isGtnhStructuredDataOnlyCorePublication(manifest) {
+  return (
+    isRecord(manifest) &&
+    manifest.publicationPolicy === GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY
+  );
 }
 
 /** Stable compact JSON: recursively sorted object keys, array order preserved, one final newline. */

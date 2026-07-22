@@ -1,5 +1,6 @@
 import {
   MAX_PREVIEW_MANIFEST_BYTES,
+  GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY,
   PREVIEW_ASSET_SET_PATTERN,
   type PreviewContentRecord,
   type ValidatedPreviewManifest,
@@ -395,6 +396,14 @@ async function handleBegin(
   } catch (error) {
     console.error('A preview staging manifest failed contract validation.', {assetSetId, error});
     return jsonResponse(422, {error: 'Manifest does not satisfy the preview sidecar contract.'});
+  }
+  if (state.manifest.publicationPolicy === GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY) {
+    console.info('Preview ingestion accepted the exact GTNH manifest-only rights exclusion.', {
+      assetSetId,
+      datasetPublicationId: state.manifest.datasetPublicationId,
+      recipes: state.manifest.counts.recipes,
+      contentObjects: state.contentRecordsByPath.size,
+    });
   }
   const {datasetPublicationId} = state.manifest;
   if (request.headers.get(DATASET_ID_HEADER) !== datasetPublicationId) {
