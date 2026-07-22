@@ -45,7 +45,13 @@ function itemPath(key: string): string | null {
 }
 
 export function inferIngredientTag(slot: SlotEntry[]): string | undefined {
-  const explicitIdentities = [...new Set(slot.map(([, , identity]) => identity).filter(Boolean))];
+  const explicitIdentities = [
+    ...new Set(
+      slot
+        .map(([, , identity]) => identity)
+        .filter((identity): identity is string => typeof identity === 'string'),
+    ),
+  ];
   if (explicitIdentities.length === 1) return explicitIdentities[0];
   if (explicitIdentities.length > 1) {
     console.error('Ingredient slot contains conflicting explicit logical identities.', {

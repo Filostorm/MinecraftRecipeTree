@@ -15,6 +15,14 @@ import {
 } from '../types';
 import type {DatasetDescriptor} from './datasetCatalog';
 import {
+  GTNH_1710_DATASET_PROFILE,
+  GTNH_PACK_NAME,
+  GTNH_PACK_VERSION,
+  GTNH_STRUCTURED_DATA_ONLY_POLICY,
+  isExactGtnhDatasetAttribution,
+  isExactGtnhVisualAssetsPolicy,
+} from './datasetAttribution';
+import {
   datasetIdentityFromManifest,
   isDatasetPublicationId,
   versionExportUrl,
@@ -39,6 +47,11 @@ import {
   versionPreviewUrl,
 } from './previewAssets';
 import {
+  catalogVisualReferenceCounts,
+  recipeVisualReferenceIndices,
+  shouldFetchRecipePreviewSidecar,
+} from './publicationRights';
+import {
   isMetaRecipeCategory,
   isRepairRecipeCategory,
   isSecondaryRecipeCategory,
@@ -54,6 +67,7 @@ const UTF8_ENCODER = new TextEncoder();
 const PACKED_IMAGE_ROUTE = /^assets\/s\/(\d+)-(\d+)-(\d+)\.webp$/;
 const RECIPE_IMAGE_INVENTORY_FORMAT = 'mrt-recipe-image-inventory-v1';
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const QUALITY_PROFILE_PATTERN = /^[a-z0-9]+(?:-[a-z0-9.]+)*$/;
 
 interface BoundedJsonDocument {
   value: unknown;
@@ -589,6 +603,8 @@ function isManifestPack(value: unknown): boolean {
 
 function isManifestWeb(value: unknown, expectedRecipes: number): boolean {
   const recipeImages = isRecord(value) ? value.recipeImages : undefined;
+  const structuredDataOnly =
+    isRecord(value) && isExactGtnhVisualAssetsPolicy(value.visualAssets);
   const recipeImageInventory = isRecord(recipeImages) ? recipeImages.inventory : undefined;
   const recipeImageInventoryValid =
     isRecord(recipeImageInventory) &&
@@ -605,11 +621,25 @@ function isManifestWeb(value: unknown, expectedRecipes: number): boolean {
     recipeImageInventory.entries ===
       recipeImageInventory.previews + recipeImageInventory.missing;
   const recipeImagesValid =
-    recipeImages === undefined ||
-    (isRecord(recipeImages) && recipeImages.mode === 'included') ||
+    (!structuredDataOnly && recipeImages === undefined) ||
+    (!structuredDataOnly && isRecord(recipeImages) && recipeImages.mode === 'included') ||
     (isRecord(recipeImages) &&
       recipeImages.mode === 'omitted' &&
-      recipeImages.reason === 'hosting-archive-budget' &&
+      (!structuredDataOnly ||
+        hasExactKeys(recipeImages, [
+          'mode',
+          'reason',
+          'policy',
+          'references',
+          'files',
+          'encoding',
+          'bytes',
+          'inventory',
+        ])) &&
+      (structuredDataOnly
+        ? recipeImages.reason === 'third-party-artwork-rights-not-cleared' &&
+          recipeImages.policy === GTNH_STRUCTURED_DATA_ONLY_POLICY
+        : recipeImages.reason === 'hosting-archive-budget' && recipeImages.policy === undefined) &&
       typeof recipeImages.references === 'number' &&
       Number.isSafeInteger(recipeImages.references) &&
       recipeImages.references >= 0 &&
@@ -627,11 +657,65 @@ function isManifestWeb(value: unknown, expectedRecipes: number): boolean {
   return (
     isRecord(value) &&
     value.format === 2 &&
-    value.packedImages === 'coordinate-v1' &&
-    value.maxPackBytes === 1024 * 1024 &&
+    (structuredDataOnly
+      ? value.packedImages === undefined &&
+        value.maxPackBytes === undefined &&
+        hasExactKeys(value, [
+          'format',
+          'shardedJson',
+          'maxShardBytes',
+          'visualAssets',
+          'recipeImages',
+        ])
+      : value.packedImages === 'coordinate-v1' && value.maxPackBytes === 1024 * 1024) &&
     value.shardedJson === SHARDED_JSON_FORMAT &&
     value.maxShardBytes === MAX_SHARD_BYTES &&
     recipeImagesValid
+  );
+}
+
+function requireStructuredDataOnlyCatalog(
+  items: readonly CatalogItem[],
+  categories: readonly Category[],
+  mobs: readonly Mob[],
+  datasetIdentity: string,
+): void {
+  const counts = catalogVisualReferenceCounts(items, categories, mobs);
+  if (counts.itemIcons === 0 && counts.categoryIcons === 0 && counts.mobSprites === 0) return;
+  const error = new Error(
+    `Dataset ${datasetIdentity} claims ${GTNH_STRUCTURED_DATA_ONLY_POLICY} but its catalog ` +
+      `contains exported visual references (itemIcons=${counts.itemIcons}, ` +
+      `categoryIcons=${counts.categoryIcons}, mobSprites=${counts.mobSprites}).`,
+  );
+  console.error(error.message, {
+    counts,
+  });
+  throw error;
+}
+
+function requireStructuredDataOnlyRecipes(
+  recipes: Recipe[],
+  label: string,
+): Recipe[] {
+  const visualRecipeIndices = recipeVisualReferenceIndices(recipes);
+  if (visualRecipeIndices.length === 0) return recipes;
+  const error = new Error(
+    `${label} violates ${GTNH_STRUCTURED_DATA_ONLY_POLICY}: ` +
+      `${visualRecipeIndices.length} recipe records contain exported preview references.`,
+  );
+  console.error(error.message, {
+    recipeIndices: visualRecipeIndices.slice(0, 20),
+  });
+  throw error;
+}
+
+function isExactManifestPublicationPolicy(value: Record<string, unknown>): boolean {
+  const gtnh = value.profile === GTNH_1710_DATASET_PROFILE;
+  const visualAssets = isRecord(value.web) ? value.web.visualAssets : undefined;
+  if (!gtnh) return value.publicationPolicy === undefined && visualAssets === undefined;
+  return (
+    value.publicationPolicy === GTNH_STRUCTURED_DATA_ONLY_POLICY &&
+    isExactGtnhVisualAssetsPolicy(visualAssets)
   );
 }
 
@@ -650,7 +734,19 @@ function isManifestDocument(value: unknown): value is Manifest {
     value.durationMs >= 0 &&
     typeof value.minecraft === 'string' &&
     value.minecraft.length > 0 &&
+    (value.profile === undefined ||
+      (typeof value.profile === 'string' &&
+        value.profile.length <= 80 &&
+        QUALITY_PROFILE_PATTERN.test(value.profile))) &&
+    isExactManifestPublicationPolicy(value) &&
     (value.pack === undefined || isManifestPack(value.pack)) &&
+    (value.profile !== GTNH_1710_DATASET_PROFILE ||
+      (isRecord(value.pack) &&
+        isManifestPack(value.pack) &&
+        value.pack.name === GTNH_PACK_NAME &&
+        value.pack.version === GTNH_PACK_VERSION &&
+        value.pack.identitySource === 'explicit-request' &&
+        isExactGtnhDatasetAttribution(value.attribution))) &&
     isDatasetPublicationId(value.publicationId) &&
     typeof value.aborted === 'boolean' &&
     isManifestCounts(value.counts) &&
@@ -708,6 +804,10 @@ export interface Data {
   categories: Category[];
   mobs: Mob[];
   index: RecipeIndex;
+  indexStatus: 'idle' | 'loading' | 'ready' | 'error';
+  indexError: string | null;
+  /** Load and authenticate the reverse-index shards before recipe or graph access. */
+  ensureIndex(): Promise<void>;
   mods: ModInfo[];
   /** Block item key -> what breaking that block drops */
   blockDrops: Record<string, BlockDropEntry>;
@@ -797,6 +897,7 @@ export function DataProvider({
   );
   const missingPreviewDiagnostics = useRef(new Set<string>());
   const absentItemIconSummaryDataset = useRef<string | null>(null);
+  const indexLoadPromise = useRef<Promise<void> | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -806,6 +907,7 @@ export function DataProvider({
     previewPartCache.current.clear();
     missingPreviewDiagnostics.current.clear();
     absentItemIconSummaryDataset.current = null;
+    indexLoadPromise.current = null;
     (async () => {
       try {
         setState({status: 'loading', step: 'manifest.json'});
@@ -872,7 +974,16 @@ export function DataProvider({
             `Export manifest ${manifestUrl} is marked aborted; refusing to display partial data.`,
           );
         }
-        if (manifest.web?.recipeImages?.mode === 'omitted') {
+        const structuredDataOnly =
+          manifest.publicationPolicy === GTNH_STRUCTURED_DATA_ONLY_POLICY;
+        if (structuredDataOnly) {
+          console.info(
+            `${GTNH_STRUCTURED_DATA_ONLY_POLICY} is active; exported item/category icons, ` +
+              'mob sprites, and recipe-preview network requests are disabled. The UI will use ' +
+              'deterministic generated placeholders.',
+            {datasetIdentity, slug: descriptor.slug},
+          );
+        } else if (manifest.web?.recipeImages?.mode === 'omitted') {
           console.info(
             `The compact publication stores ${manifest.web.recipeImages.references} JEI layout ` +
               'previews in its required external sidecar.',
@@ -890,9 +1001,9 @@ export function DataProvider({
         const itemsUrl = versionExportUrl(`${base}/items.json`, datasetIdentity);
         const categoriesUrl = versionExportUrl(`${base}/categories.json`, datasetIdentity);
         const indexUrl = versionExportUrl(`${base}/index.json`, datasetIdentity);
-        const externalPreviewsRequired = manifest.web?.recipeImages?.mode === 'omitted';
+        const externalPreviewsRequired = shouldFetchRecipePreviewSidecar(manifest);
         const expectedExternalPreviewCount =
-          manifest.web?.recipeImages?.mode === 'omitted'
+          externalPreviewsRequired && manifest.web?.recipeImages?.mode === 'omitted'
             ? manifest.web.recipeImages.references
             : null;
         const previewBase = externalPreviewsRequired ? configuredPreviewBase : null;
@@ -959,19 +1070,22 @@ export function DataProvider({
           'an object with a categories array',
         );
         const indexDescriptor = parseShardedDescriptor(indexRoot.value, 'object', indexUrl);
-        const index = indexDescriptor
-          ? await loadObjectDescriptor<RecipeIndex[string]>(
-              indexDescriptor,
-              indexUrl,
-              base,
-              datasetIdentity,
-            )
+        const initialIndex = indexDescriptor
+          ? {}
           : requireDocument<RecipeIndex>(
               indexRoot.value,
               indexUrl,
               (value): value is RecipeIndex => isRecord(value),
               'a legacy object keyed by exported ingredient key or a sharded-object descriptor',
             );
+        if (structuredDataOnly) {
+          requireStructuredDataOnlyCatalog(
+            items,
+            categoriesDoc.categories,
+            mobsDoc.mobs,
+            datasetIdentity,
+          );
+        }
         if (previewManifest) {
           if (previewManifest.counts.hostedOmittedWebpBytes !== undefined) {
             console.warn(
@@ -1027,6 +1141,15 @@ export function DataProvider({
           );
         }
         const mobs = supplementCustomDeathDrops(mobsDoc.mobs);
+        const mobsWithoutSprites = mobs.filter(mob => !mob.icon).length;
+        if (mobsWithoutSprites > 0) {
+          const message = structuredDataOnly
+            ? 'The structured-data-only mob catalog intentionally omits exported sprites; deterministic generated placeholders will be rendered.'
+            : 'The loaded mob catalog contains entries without sprite URLs; deterministic generated placeholders will be rendered.';
+          const detail = {datasetIdentity, missing: mobsWithoutSprites, total: mobs.length};
+          if (structuredDataOnly) console.info(message, detail);
+          else console.warn(message, detail);
+        }
         const itemsByKey = new Map<string, CatalogItem>();
         const counts = new Map<string, number>();
         const absentItemIcons = new BoundedAbsentItemIconCollector();
@@ -1041,10 +1164,19 @@ export function DataProvider({
           absentItemIconSummaryDataset.current !== datasetIdentity
         ) {
           absentItemIconSummaryDataset.current = datasetIdentity;
-          console.warn(
-            'The loaded item catalog contains entries without icon URLs; named fallbacks will be rendered.',
-            {datasetIdentity, ...absentItemIconSummary},
-          );
+          const detail = {datasetIdentity, ...absentItemIconSummary};
+          if (structuredDataOnly) {
+            console.info(
+              'The structured-data-only item catalog intentionally omits exported icon URLs; ' +
+                'deterministic generated placeholders will be rendered.',
+              detail,
+            );
+          } else {
+            console.warn(
+              'The loaded item catalog contains entries without icon URLs; named fallbacks will be rendered.',
+              detail,
+            );
+          }
         }
         const itemIconFailureReporter = new BoundedItemIconFailureReporter(datasetIdentity);
         const mods: ModInfo[] = [...counts.entries()]
@@ -1056,7 +1188,8 @@ export function DataProvider({
           mobs: mobs.length > 0,
           blockDrops: Object.keys(blockDrops).length > 0,
           recipePreviews:
-            previewManifest !== null || manifest.web?.recipeImages?.mode !== 'omitted',
+            !structuredDataOnly &&
+            (previewManifest !== null || manifest.web?.recipeImages?.mode !== 'omitted'),
         };
         if (!capabilities.mobs) {
           console.info('The loaded export has no mob catalog; mob browsing is disabled.');
@@ -1135,6 +1268,9 @@ export function DataProvider({
                 );
               }
               const recipes = requireRecipeArray(value, category.count, recipesUrl);
+              if (structuredDataOnly) {
+                requireStructuredDataOnlyRecipes(recipes, recipesUrl);
+              }
               const cacheKey = `${datasetIdentity}:inline:${category.dir}`;
               // Inline documents are the explicit small-document schema. Retain them in the same
               // bounded cache as shards so visiting many categories cannot accumulate every list.
@@ -1168,7 +1304,10 @@ export function DataProvider({
               document.bytes,
               async () => {
                 const {value} = await fetchBoundedJson(document.url, document.bytes);
-                return requireRecipeArray(value, document.count, document.url);
+                const recipes = requireRecipeArray(value, document.count, document.url);
+                return structuredDataOnly
+                  ? requireStructuredDataOnlyRecipes(recipes, document.url)
+                  : recipes;
               },
             );
             for (const recipeIdx of requestedIndices) {
@@ -1219,7 +1358,10 @@ export function DataProvider({
                       `Invalid recipe shard ${shardUrl}: expected ${part.count} recipe objects.`,
                     );
                   }
-                  return value as unknown as Recipe[];
+                  const recipes = value as unknown as Recipe[];
+                  return structuredDataOnly
+                    ? requireStructuredDataOnlyRecipes(recipes, shardUrl)
+                    : recipes;
                 },
               );
               for (const recipeIdx of recipeIndices) {
@@ -1405,6 +1547,82 @@ export function DataProvider({
           });
         };
 
+        let loadedIndex: RecipeIndex | null = indexDescriptor ? null : initialIndex;
+        const ensureIndex = (): Promise<void> => {
+          if (loadedIndex) return Promise.resolve();
+          if (indexLoadPromise.current) return indexLoadPromise.current;
+          if (!indexDescriptor) {
+            const error = new Error('Reverse-index loader has no descriptor for the active dataset.');
+            console.error(error.message, {datasetIdentity});
+            return Promise.reject(error);
+          }
+
+          setState(previous =>
+            previous.status === 'ready' && previous.data.datasetIdentity === datasetIdentity
+              ? {
+                  status: 'ready',
+                  data: {...previous.data, indexStatus: 'loading', indexError: null},
+                }
+              : previous,
+          );
+          const pending = (async () => {
+            const nextIndex = await loadObjectDescriptor<RecipeIndex[string]>(
+              indexDescriptor,
+              indexUrl,
+              base,
+              datasetIdentity,
+            );
+            const confirmedManifest = requireDocument<Manifest>(
+              await fetchJson<unknown>(versionedManifestUrl, {cache: 'no-store'}),
+              versionedManifestUrl,
+              isManifestDocument,
+              'a manifest object with a SHA-256 publicationId and required export metadata',
+            );
+            if (datasetIdentityFromManifest(confirmedManifest) !== datasetIdentity) {
+              throw new Error('Dataset identity changed while loading reverse-index shards.');
+            }
+            loadedIndex = nextIndex;
+            if (alive) {
+              setState(previous =>
+                previous.status === 'ready' && previous.data.datasetIdentity === datasetIdentity
+                  ? {
+                      status: 'ready',
+                      data: {
+                        ...previous.data,
+                        index: nextIndex,
+                        indexStatus: 'ready',
+                        indexError: null,
+                      },
+                    }
+                  : previous,
+              );
+            }
+          })()
+            .catch(error => {
+              console.error('Required reverse-index shards could not be loaded.', {
+                datasetIdentity,
+                error,
+              });
+              if (alive) {
+                const message = String(error instanceof Error ? error.message : error);
+                setState(previous =>
+                  previous.status === 'ready' && previous.data.datasetIdentity === datasetIdentity
+                    ? {
+                        status: 'ready',
+                        data: {...previous.data, indexStatus: 'error', indexError: message},
+                      }
+                    : previous,
+                );
+              }
+              throw error;
+            })
+            .finally(() => {
+              if (!loadedIndex) indexLoadPromise.current = null;
+            });
+          indexLoadPromise.current = pending;
+          return pending;
+        };
+
         const data: Data = {
           descriptor,
           base,
@@ -1414,7 +1632,10 @@ export function DataProvider({
           itemsByKey,
           categories,
           mobs,
-          index,
+          index: initialIndex,
+          indexStatus: indexDescriptor ? 'idle' : 'ready',
+          indexError: null,
+          ensureIndex,
           mods,
           blockDrops,
           droppedByMobs,
@@ -1425,6 +1646,13 @@ export function DataProvider({
           repairCategories,
           imageUrl: rel => {
             if (!rel) return undefined;
+            if (structuredDataOnly) {
+              const error = new Error(
+                `${GTNH_STRUCTURED_DATA_ONLY_POLICY} refused exported visual reference ${rel}.`,
+              );
+              console.error(error.message, {datasetIdentity});
+              throw error;
+            }
             if (isCanonicalRecipePreviewImagePath(rel)) {
               if (!previewBase || !previewManifest) {
                 const error = new Error(

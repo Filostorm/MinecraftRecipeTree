@@ -1,15 +1,16 @@
 import React from 'react';
 import {Linking, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import type {DatasetDescriptor} from '../data/datasetCatalog';
+import {loadedDatasetAttribution} from '../data/datasetAttribution';
+import {MINECRAFT_PRODUCT_DISCLAIMER} from '../legalNotices';
 import {theme} from '../theme';
+import type {Manifest} from '../types';
 
 type CatalogStatus = 'loading' | 'ready' | 'error';
-const GTNH_SOURCE_URL = 'https://github.com/GTNewHorizons/GT-New-Horizons-Modpack/tree/2.8.4';
-const GTNH_LICENSE_URL = 'https://creativecommons.org/licenses/by-nc-sa/4.0/';
 
-function openAttributionLink(url: string, label: string) {
+function openAttributionLink(url: string, profile: string, label: string) {
   void Linking.openURL(url).catch(error => {
-    console.error(`Could not open the GT New Horizons ${label} link.`, {url, error});
+    console.error(`Could not open the ${profile} dataset ${label} link.`, {url, error});
   });
 }
 
@@ -24,17 +25,20 @@ export function DatasetSwitcher({
   status,
   datasets,
   selectedSlug,
+  loadedManifest,
   onSelect,
   onOpenPicker,
 }: {
   status: CatalogStatus;
   datasets: readonly DatasetDescriptor[];
   selectedSlug: string | null;
+  loadedManifest: Manifest | null;
   onSelect(slug: string): void;
   onOpenPicker(): void;
 }) {
   const selectedIndex = datasets.findIndex(dataset => dataset.slug === selectedSlug);
   const selected = selectedIndex >= 0 ? datasets[selectedIndex] : null;
+  const loadedAttribution = loadedDatasetAttribution(loadedManifest);
   const canCycle = status === 'ready' && selectedIndex >= 0 && datasets.length > 1;
   const canOpen = status !== 'loading' && datasets.length > 0;
 
@@ -141,25 +145,43 @@ export function DatasetSwitcher({
         <Text style={styles.publishLinkText}>Export &amp; publish ↗</Text>
       </TouchableOpacity>
 
-      {selected?.slug === 'gt-new-horizons' && (
+      <Text style={styles.minecraftDisclaimer} accessibilityRole="text">
+        {MINECRAFT_PRODUCT_DISCLAIMER}
+      </Text>
+
+      {loadedAttribution && (
         <Text style={styles.attribution}>
-          GT New Horizons {selected.packVersion} recipe data by the{' '}
+          {loadedAttribution.packName} {loadedAttribution.packVersion} structured recipe data
+          (profile {loadedAttribution.profile}; policy {loadedAttribution.publicationPolicy}) by the{' '}
           <Text
             style={styles.attributionLink}
             accessibilityRole="link"
-            onPress={() => openAttributionLink(GTNH_SOURCE_URL, 'source')}>
+            onPress={() =>
+              openAttributionLink(
+                loadedAttribution.attribution.sourceUrl,
+                loadedAttribution.profile,
+                'source',
+              )
+            }>
             GT New Horizons contributors
           </Text>
-          , adapted into this Recipe Tree database export. The GTNH-derived database is licensed
-          under{' '}
+          . Modification notice: Recipe Tree normalized, deduplicated, indexed, and converted the
+          source records into a structured-data-only web database; exported game/mod artwork and
+          recipe screenshots are omitted. This adapted GTNH-derived database is licensed under{' '}
           <Text
             style={styles.attributionLink}
             accessibilityRole="link"
-            onPress={() => openAttributionLink(GTNH_LICENSE_URL, 'license')}>
-            CC BY-NC-SA 4.0
+            onPress={() =>
+              openAttributionLink(
+                loadedAttribution.attribution.licenseUrl,
+                loadedAttribution.profile,
+                'license',
+              )
+            }>
+            {loadedAttribution.attribution.licenseIdentifier}
           </Text>{' '}
-          and provided as-is, without warranty. Recipe Tree is not affiliated with or endorsed by
-          GT New Horizons.
+          and provided noncommercially as-is, without warranty. Recipe Tree is not affiliated with
+          or endorsed by GT New Horizons.
         </Text>
       )}
     </View>
@@ -239,6 +261,14 @@ const styles = StyleSheet.create({
     color: theme.textDim,
     fontSize: 9,
     lineHeight: 13,
+  },
+  minecraftDisclaimer: {
+    flexBasis: '100%',
+    color: '#f0c75e',
+    fontSize: 10,
+    lineHeight: 14,
+    fontWeight: '900',
+    letterSpacing: 0.25,
   },
   attributionLink: {
     color: theme.accent,

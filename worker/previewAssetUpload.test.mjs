@@ -6,9 +6,13 @@ import {
   handlePreviewAssetUpload,
 } from './previewAssetUpload.ts';
 import {
+  computePreviewAssetSetId,
   PREVIEW_CATEGORY_ROUTE,
   PREVIEW_PACK_INDEX_ROUTE,
   PREVIEW_PACK_ROUTE,
+  requireContentAddressedPreviewManifest,
+  requirePairedPublicationPolicy,
+  requirePreviewManifest,
 } from './previewAssetContract.ts';
 
 // Independent known vector for the builder's framed content-address algorithm over fixture().
@@ -17,6 +21,49 @@ const SERVING_ASSET_SET = 'c'.repeat(64);
 const DATASET = 'b'.repeat(64);
 const TOKEN = 'upload-token-'.padEnd(48, 'x');
 const ORIGIN = 'https://viewer.example';
+
+async function dataOnlyManifestFixture(overrides = {}) {
+  const manifest = {
+    format: 'mrt-recipe-preview-sidecar-v2',
+    publicationPolicy: 'gtnh-structured-data-only-v1',
+    exclusionReason: 'third-party-artwork-rights-not-cleared',
+    assetSetId: '0'.repeat(64),
+    datasetPublicationId: DATASET,
+    maxPackBytes: 1024 * 1024,
+    packIndexFormat: 'mrt-recipe-preview-pack-index-v1',
+    maxPackIndexBytes: 512 * 1024,
+    imageFormat: 'lossless-webp',
+    categoryFormat: 'mrt-recipe-preview-category-v1',
+    settings: {
+      itemIconPixels: 16,
+      recipeScale: 2,
+      webpEffort: 4,
+      maxCategoryBytes: 256 * 1024,
+    },
+    counts: {
+      categories: 674,
+      recipes: 359215,
+      previews: 0,
+      missing: 359215,
+      uniqueImages: 0,
+      duplicates: 0,
+      packs: 0,
+      inputBytes: 0,
+      hostedOmittedPngBytes: 123456789,
+      encodedBytes: 0,
+      storedBytes: 0,
+      packIndexBytes: 0,
+    },
+    packs: [],
+    mapping: {documents: 0, parts: 0, bytes: 0},
+    categoryDocuments: [],
+    ...overrides,
+  };
+  if (overrides.assetSetId === undefined) {
+    manifest.assetSetId = await computePreviewAssetSetId(manifest);
+  }
+  return manifest;
+}
 
 test('preview object routes accept canonical indices beyond three digits', () => {
   assert.equal(PREVIEW_PACK_ROUTE.test('assets/pack-999.bin'), true);
@@ -44,6 +91,87 @@ test('preview object routes accept canonical indices beyond three digits', () =>
       noncanonical,
     );
   }
+});
+
+test('manifest-only v2 is content addressed and restricted to the exact GTNH rights policy', async () => {
+  const manifest = await dataOnlyManifestFixture();
+  const state = await requireContentAddressedPreviewManifest(manifest, manifest.assetSetId);
+  assert.equal(state.contentRecordsByPath.size, 0);
+  assert.equal(state.categoryDocumentsByPath.size, 0);
+  assert.equal(state.manifest.counts.missing, state.manifest.counts.recipes);
+  requirePairedPublicationPolicy(
+    {publicationPolicy: 'gtnh-structured-data-only-v1'},
+    state.manifest,
+  );
+
+  const drifts = [
+    {publicationPolicy: 'lookalike-policy'},
+    {exclusionReason: 'hosting-archive-budget'},
+    {counts: {...manifest.counts, previews: 1, missing: manifest.counts.recipes - 1}},
+    {counts: {...manifest.counts, packs: 1}},
+    {mapping: {documents: 1, parts: 0, bytes: 0}},
+    {categoryDocuments: [{path: 'categories/000.json', bytes: 1, sha256: 'f'.repeat(64)}]},
+  ];
+  for (const drift of drifts) {
+    const candidate = structuredClone({...manifest, ...drift});
+    await assert.rejects(
+      requireContentAddressedPreviewManifest(candidate, manifest.assetSetId),
+      /structured-data-only v2 contract|content address/,
+    );
+  }
+
+  const ordinaryEmpty = structuredClone(manifest);
+  ordinaryEmpty.format = 'mrt-recipe-preview-sidecar-v1';
+  delete ordinaryEmpty.publicationPolicy;
+  delete ordinaryEmpty.exclusionReason;
+  assert.throws(
+    () => requirePreviewManifest(ordinaryEmpty, ordinaryEmpty.assetSetId),
+    /does not satisfy the sidecar contract/,
+  );
+  assert.throws(
+    () => requirePairedPublicationPolicy({}, manifest),
+    /paired publication-policy contract/,
+  );
+  assert.throws(
+    () => requirePairedPublicationPolicy(
+      {publicationPolicy: 'gtnh-structured-data-only-v1'},
+      fixture().manifest,
+    ),
+    /paired publication-policy contract/,
+  );
+});
+
+test('preview ingestion commits an exact data-only v2 manifest without creating content objects', async () => {
+  const manifest = await dataOnlyManifestFixture();
+  const manifestBytes = Buffer.from(`${JSON.stringify(manifest)}\n`);
+  const bucket = new MemoryR2();
+  const env = runtime(bucket, {PREVIEW_UPLOAD_ASSET_SET_ID: manifest.assetSetId});
+  const endpointFor = action =>
+    `${ORIGIN}${PREVIEW_UPLOAD_BASE_PATH}${manifest.assetSetId}/${action}`;
+  const begin = await handlePreviewAssetUpload(
+    new Request(endpointFor('begin'), {
+      method: 'POST',
+      headers: authorizedHeaders({
+        'Content-Length': String(manifestBytes.byteLength),
+        'Content-Type': 'application/json',
+        'X-MRT-Content-SHA256': sha256(manifestBytes),
+        'X-MRT-Dataset-Publication-ID': DATASET,
+      }),
+      body: manifestBytes,
+    }),
+    env,
+  );
+  assert.equal(begin.status, 201);
+  const commit = await handlePreviewAssetUpload(
+    new Request(endpointFor('commit'), {
+      method: 'POST',
+      headers: authorizedHeaders({'Content-Length': '0'}),
+    }),
+    env,
+  );
+  assert.equal(commit.status, 201);
+  assert.deepEqual([...bucket.objects.keys()], [`${manifest.assetSetId}/manifest.json`]);
+  assert.equal((await commit.json()).objects, 0);
 });
 
 function sha256(bytes) {

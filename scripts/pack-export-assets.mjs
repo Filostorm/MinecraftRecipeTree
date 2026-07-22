@@ -39,6 +39,12 @@ import {
   compareExactRecipePngOmissionSet,
   exactRecipePngOmissionError,
 } from './recipe-image-omission.mjs';
+import {
+  GTNH_RECIPE_IMAGE_OMISSION_REASON,
+  GTNH_STRUCTURED_DATA_ONLY_POLICY_ID,
+  GTNH_STRUCTURED_DATA_ONLY_VISUAL_ASSETS,
+  requiresGtnhStructuredDataOnlyPolicy,
+} from './visual-assets-rights-policy.mjs';
 
 const defaultExportRoot = join(process.cwd(), 'public', 'exports');
 
@@ -186,6 +192,7 @@ if (showHelp) {
 }
 
 const validationOptions = profile ? {profile} : {};
+const structuredDataOnly = requiresGtnhStructuredDataOnlyPolicy(profile);
 const exportParent = dirname(exportRoot);
 const iconsRoot = join(exportRoot, 'icons');
 const recipesRoot = join(exportRoot, 'recipes');
@@ -207,17 +214,353 @@ const hasMobImages = await optionalDirectory(mobsRoot, 'mob images');
 // recipe/index graph is proven complete before any source path is moved.
 const preflightValidation = await validateExportData(exportRoot, {
   assetMode: 'raw',
-  computeRecipeImageInventory: omitRecipeImages,
+  computeRecipeImageInventory: omitRecipeImages || structuredDataOnly,
   ...validationOptions,
 });
-const omittedRecipeImageInventory = omitRecipeImages
+const omittedRecipeImageInventory = omitRecipeImages || structuredDataOnly
   ? preflightValidation.recipeImageInventory
   : null;
-if (omitRecipeImages && !omittedRecipeImageInventory) {
+if ((omitRecipeImages || structuredDataOnly) && !omittedRecipeImageInventory) {
   throw new Error(
     'Recipe-image omission preflight did not produce its required decoded-pixel inventory.',
   );
 }
+
+async function packGtnhStructuredDataOnly() {
+  console.warn(
+    `[rights-policy] Applying ${GTNH_STRUCTURED_DATA_ONLY_POLICY_ID} after exhaustive raw ` +
+      'validation. All third-party visual assets and visual metadata will be intentionally omitted.',
+  );
+
+  const recipeFiles = await collectFiles(recipesRoot);
+  const recipeMetadata = recipeFiles
+    .filter(path => extname(path).toLowerCase() === '.json')
+    .sort();
+  const omission = await collectDeclaredRecipePngOmissions(exportRoot, recipeMetadata);
+  let omittedRecipeImageBytes = 0;
+  for (const assetKey of omission.keys) {
+    const assetPath = join(exportRoot, ...assetKey.split('/'));
+    if ((await pathKind(assetPath)) !== 'file') {
+      throw new Error(
+        `[rights-policy] Declared recipe-image exclusion target is not a regular file: ${assetKey}`,
+      );
+    }
+    const bytes = (await stat(assetPath)).size;
+    if (!Number.isSafeInteger(bytes) || bytes <= 0) {
+      throw new Error(
+        `[rights-policy] Declared recipe-image exclusion target has invalid bytes ` +
+          `(${String(bytes)}): ${assetKey}`,
+      );
+    }
+    omittedRecipeImageBytes += bytes;
+  }
+  if (
+    omittedRecipeImageInventory.previews !== omission.references ||
+    omittedRecipeImageInventory.missing !==
+      preflightValidation.recipes - omission.references
+  ) {
+    throw new Error(
+      `[rights-policy] Decoded recipe-image inventory previews/missing ` +
+        `${omittedRecipeImageInventory.previews}/${omittedRecipeImageInventory.missing} does not ` +
+        `reconcile with ${preflightValidation.recipes} recipes and ${omission.references} ` +
+        'declared PNG exclusions.',
+    );
+  }
+
+  for (const path of [stagingRoot, backupRoot]) {
+    if ((await pathKind(path)) !== 'missing') {
+      throw new Error(
+        `[rights-policy] Packing recovery path already exists; refusing to overwrite it: ${path}`,
+      );
+    }
+  }
+  await mkdir(stagingDocumentsRoot, {recursive: true});
+
+  let strippedItemIcons = 0;
+  let strippedCategoryIcons = 0;
+  let strippedRecipeImages = 0;
+  let strippedRecipeDimensions = 0;
+  let strippedMobIcons = 0;
+  let strippedMobAnimationFields = 0;
+  try {
+    const manifest = await readJsonDocument(join(exportRoot, 'manifest.json'), 'manifest.json');
+    const packedManifest = {
+      ...manifest,
+      publicationPolicy: GTNH_STRUCTURED_DATA_ONLY_POLICY_ID,
+      web: {
+        format: 2,
+        shardedJson: SHARDED_JSON_FORMAT,
+        maxShardBytes: MAX_SHARD_BYTES,
+        visualAssets: GTNH_STRUCTURED_DATA_ONLY_VISUAL_ASSETS,
+        recipeImages: {
+          mode: 'omitted',
+          reason: GTNH_RECIPE_IMAGE_OMISSION_REASON,
+          policy: GTNH_STRUCTURED_DATA_ONLY_POLICY_ID,
+          references: omission.references,
+          files: omission.keys.size,
+          encoding: 'png',
+          bytes: omittedRecipeImageBytes,
+          inventory: omittedRecipeImageInventory,
+        },
+      },
+    };
+    delete packedManifest.publicationId;
+    await writeJson(
+      join(stagingDocumentsRoot, 'manifest.json'),
+      packedManifest,
+      'structured-data-only manifest.json',
+    );
+
+    const itemsDocument = await readJsonDocument(join(exportRoot, 'items.json'), 'items.json');
+    if (!Array.isArray(itemsDocument?.items)) {
+      throw new Error('[rights-policy] items.json must contain an items array after raw validation.');
+    }
+    const structuredItems = itemsDocument.items.map(item => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+      const {icon: _icon, ...structuredItem} = item;
+      if ('icon' in item) strippedItemIcons += 1;
+      return structuredItem;
+    });
+    const packedItems = await shardArrayDocument(
+      structuredItems,
+      stagingDocumentsRoot,
+      'data/items',
+      'items.json items',
+    );
+    await writeJson(
+      join(stagingDocumentsRoot, 'items.json'),
+      Array.isArray(packedItems) ? {...itemsDocument, items: packedItems} : packedItems,
+      'structured-data-only items.json',
+    );
+
+    const categoriesDocument = await readJsonDocument(
+      join(exportRoot, 'categories.json'),
+      'categories.json',
+    );
+    if (!Array.isArray(categoriesDocument?.categories)) {
+      throw new Error(
+        '[rights-policy] categories.json must contain a categories array after raw validation.',
+      );
+    }
+    const structuredCategories = {
+      ...categoriesDocument,
+      categories: categoriesDocument.categories.map(category => {
+        if (!category || typeof category !== 'object' || Array.isArray(category)) return category;
+        const {icon: _icon, ...structuredCategory} = category;
+        if ('icon' in category) strippedCategoryIcons += 1;
+        return structuredCategory;
+      }),
+    };
+    await writeJson(
+      join(stagingDocumentsRoot, 'categories.json'),
+      structuredCategories,
+      'structured-data-only categories.json',
+    );
+
+    const indexDocument = await readJsonDocument(join(exportRoot, 'index.json'), 'index.json');
+    const packedIndex = await shardObjectDocument(
+      indexDocument,
+      stagingDocumentsRoot,
+      'data/index',
+      'index.json',
+    );
+    await writeJson(
+      join(stagingDocumentsRoot, 'index.json'),
+      packedIndex,
+      'structured-data-only index.json',
+    );
+
+    if ((await pathKind(join(exportRoot, 'mobs.json'))) === 'file') {
+      const mobsDocument = await readJsonDocument(join(exportRoot, 'mobs.json'), 'mobs.json');
+      if (!Array.isArray(mobsDocument?.mobs)) {
+        throw new Error('[rights-policy] mobs.json must contain a mobs array after raw validation.');
+      }
+      const structuredMobs = {
+        ...mobsDocument,
+        mobs: mobsDocument.mobs.map(mob => {
+          if (!mob || typeof mob !== 'object' || Array.isArray(mob)) return mob;
+          const {
+            icon: _icon,
+            frames: _frames,
+            fps: _fps,
+            ...structuredMob
+          } = mob;
+          if ('icon' in mob) strippedMobIcons += 1;
+          if ('frames' in mob) strippedMobAnimationFields += 1;
+          if ('fps' in mob) strippedMobAnimationFields += 1;
+          return structuredMob;
+        }),
+      };
+      await writeJson(
+        join(stagingDocumentsRoot, 'mobs.json'),
+        structuredMobs,
+        'structured-data-only mobs.json',
+      );
+    }
+
+    for (const sourcePath of recipeMetadata) {
+      const documentKey = relativeKey(exportRoot, sourcePath);
+      let document = await readJsonDocument(sourcePath, documentKey);
+      if (basename(sourcePath) === 'recipes.json') {
+        if (!Array.isArray(document)) {
+          throw new Error(`${documentKey} must contain a recipe array before rights filtering.`);
+        }
+        document = document.map(recipe => {
+          if (!recipe || typeof recipe !== 'object' || Array.isArray(recipe)) return recipe;
+          const {
+            img: _image,
+            w: _width,
+            h: _height,
+            ...structuredRecipe
+          } = recipe;
+          if ('img' in recipe) strippedRecipeImages += 1;
+          if ('w' in recipe) strippedRecipeDimensions += 1;
+          if ('h' in recipe) strippedRecipeDimensions += 1;
+          return structuredRecipe;
+        });
+        document = await shardArrayDocument(
+          document,
+          stagingDocumentsRoot,
+          posix.join(posix.dirname(documentKey), 'parts'),
+          documentKey,
+        );
+      }
+      await writeJson(
+        join(stagingDocumentsRoot, ...documentKey.split('/')),
+        document,
+        `structured-data-only ${documentKey}`,
+      );
+    }
+
+    if (strippedRecipeImages !== omission.references) {
+      throw new Error(
+        `[rights-policy] Stripped ${strippedRecipeImages} recipe image field(s) after accounting ` +
+          `${omission.references}; publication was aborted.`,
+      );
+    }
+  } catch (error) {
+    console.error('[rights-policy] Structured-data-only staging failed before publication.', error);
+    await rm(stagingRoot, {recursive: true, force: true});
+    throw error;
+  }
+
+  await mkdir(backupRoot);
+  const moves = [
+    {
+      name: 'asset packs',
+      live: packRoot,
+      backup: join(backupRoot, 'assets'),
+      replacement: join(stagingRoot, 'no-assets'),
+      allowedKind: 'directory',
+    },
+    {
+      name: 'raw icons',
+      live: iconsRoot,
+      backup: join(backupRoot, 'icons'),
+      replacement: join(stagingRoot, 'no-icons'),
+      allowedKind: 'directory',
+      requiredKind: 'directory',
+    },
+    {
+      name: 'recipe documents and images',
+      live: recipesRoot,
+      backup: join(backupRoot, 'recipes'),
+      replacement: join(stagingDocumentsRoot, 'recipes'),
+      allowedKind: 'directory',
+      requiredKind: 'directory',
+      replacementRequired: true,
+    },
+    ...(hasMobImages
+      ? [
+          {
+            name: 'raw mob images',
+            live: mobsRoot,
+            backup: join(backupRoot, 'mobs'),
+            replacement: join(stagingRoot, 'no-mobs'),
+            allowedKind: 'directory',
+            requiredKind: 'directory',
+          },
+        ]
+      : []),
+    {
+      name: 'sharded data',
+      live: dataRoot,
+      backup: join(backupRoot, 'data'),
+      replacement: join(stagingDocumentsRoot, 'data'),
+      allowedKind: 'directory',
+    },
+    {
+      name: 'legacy asset index',
+      live: legacyAssetIndexPath,
+      backup: join(backupRoot, 'assets-index.json'),
+      replacement: join(stagingRoot, 'no-assets-index.json'),
+      allowedKind: 'file',
+    },
+    ...['manifest.json', 'items.json', 'categories.json', 'index.json', 'mobs.json'].map(name => ({
+      name,
+      live: join(exportRoot, name),
+      backup: join(backupRoot, name),
+      replacement: join(stagingDocumentsRoot, name),
+      allowedKind: 'file',
+      requiredKind: name === 'mobs.json' ? undefined : 'file',
+      replacementRequired: name !== 'mobs.json',
+    })),
+  ].map(move => ({...move, moved: false, published: false}));
+
+  try {
+    for (const move of moves) await moveIfPresent(move);
+    await writePublicationId(exportRoot);
+    await validateExportData(exportRoot, {
+      ...validationOptions,
+      requirePublicationId: true,
+      verifyPublicationId: true,
+    });
+  } catch (error) {
+    console.error(
+      '[rights-policy] Structured-data-only publication or final validation failed; restoring the raw export.',
+      error,
+    );
+    const rollbackErrors = [];
+    for (const move of [...moves].reverse()) await rollbackMove(move, rollbackErrors);
+    if (rollbackErrors.length > 0) {
+      console.error(
+        `[rights-policy] Rollback retained recovery data after ${rollbackErrors.length} ` +
+          `error(s): ${backupRoot}`,
+      );
+      throw new AggregateError(
+        [error, ...rollbackErrors],
+        'Structured-data-only publication failed and its rollback was incomplete.',
+      );
+    }
+    await rm(stagingRoot, {recursive: true, force: true});
+    await rm(backupRoot, {recursive: true, force: true});
+    throw error;
+  }
+
+  try {
+    await rm(backupRoot, {recursive: true, force: false});
+    await rm(stagingRoot, {recursive: true, force: true});
+  } catch (error) {
+    console.error(
+      '[rights-policy] The structured-data-only publication is valid, but recovery cleanup failed.',
+      error,
+    );
+    throw error;
+  }
+
+  console.warn(
+    `[rights-policy] Published ${GTNH_STRUCTURED_DATA_ONLY_POLICY_ID}: stripped ` +
+      `${strippedItemIcons} item icon, ${strippedCategoryIcons} category icon, ` +
+      `${strippedRecipeImages} recipe preview, ${strippedRecipeDimensions} recipe dimension, ` +
+      `${strippedMobIcons} mob sprite, and ${strippedMobAnimationFields} mob animation metadata ` +
+      `field(s). Accounted for ${omission.keys.size} original recipe PNG file(s) ` +
+      `(${omittedRecipeImageBytes} bytes); emitted zero raster or packed-image files.`,
+  );
+}
+
+if (structuredDataOnly) {
+  await packGtnhStructuredDataOnly();
+} else {
 
 const imageRoots = [iconsRoot, recipesRoot, ...(hasMobImages ? [mobsRoot] : [])];
 const filesByRoot = new Map();
@@ -668,4 +1011,5 @@ if (omitRecipeImages) {
       `file(s) (${omittedRecipeImageBytes} PNG bytes) without redundant WebP encoding; ` +
       'structured recipe data and packed item/category assets remain.',
   );
+}
 }

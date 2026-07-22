@@ -23,7 +23,7 @@ import {
 } from './import-export-data.mjs';
 import {
   GTNH_DATA_ATTRIBUTION,
-  GTNH_HANDLER_POLICIES,
+  GTNH_284_HANDLER_POLICIES,
   GTNH_1710_PROFILE,
   GTNH_KNOWLEDGE_POLICY,
   MEATBALLCRAFT_112_PROFILE,
@@ -40,6 +40,11 @@ import {
   writeNonUniformImage,
 } from './test-export-fixture.mjs';
 import {validateExportData} from './validate-export-data.mjs';
+import {
+  GTNH_RECIPE_IMAGE_OMISSION_REASON,
+  GTNH_STRUCTURED_DATA_ONLY_POLICY_ID,
+  GTNH_STRUCTURED_DATA_ONLY_VISUAL_ASSETS,
+} from './visual-assets-rights-policy.mjs';
 
 const execFileAsync = promisify(execFile);
 const PRODUCTION_RENDER_SETTINGS = Object.freeze({iconScale: 3, recipeScale: 2});
@@ -63,7 +68,7 @@ function isContained(parent, child) {
   return value === '' || (!value.startsWith(`..${sep}`) && value !== '..');
 }
 
-async function addSingleRecipePreview(source) {
+async function addSingleRecipePreview(source, {stochastic = false} = {}) {
   const categoryRoot = join(source, 'recipes', 'minecraft_crafting');
   const previewPath = join(categoryRoot, 'r0.png');
   // Production recipeScale=2 requires a 32×32 physical preview for a 16×16 logical layout.
@@ -75,8 +80,9 @@ async function addSingleRecipePreview(source) {
       img: 'r0.png',
       w: 16,
       h: 16,
-      in: [[['minecraft:stone', 1]]],
-      out: [[['minecraft:stone', 1]]],
+      in: [[stochastic ? ['minecraft:stone', 1, null, 0.5] : ['minecraft:stone', 1]]],
+      out: [[stochastic ? ['minecraft:stone', 1, null, 0.25] : ['minecraft:stone', 1]]],
+      ...(stochastic ? {cat: [[['minecraft:stone', 1]]]} : {}),
     },
   ]);
   const manifest = await readJson(join(source, 'manifest.json'));
@@ -122,9 +128,10 @@ test('imports both Multiblock Madness versions with dynamic counts and productio
 });
 
 async function configureGtnhFixture(source) {
-  await addSingleRecipePreview(source);
+  await addSingleRecipePreview(source, {stochastic: true});
   const manifestPath = join(source, 'manifest.json');
   const manifest = await readJson(manifestPath);
+  manifest.format = 2;
   manifest.minecraft = '1.7.10';
   manifest.profile = GTNH_1710_PROFILE;
   manifest.forge = '10.13.4.1614';
@@ -134,21 +141,109 @@ async function configureGtnhFixture(source) {
     version: '2.8.4',
     identitySource: 'explicit-request',
   };
-  manifest.handlerPolicies = structuredClone(GTNH_HANDLER_POLICIES);
+  manifest.handlerPolicies = structuredClone(GTNH_284_HANDLER_POLICIES);
   manifest.knowledgePolicy = {...GTNH_KNOWLEDGE_POLICY};
   manifest.attribution = {...GTNH_DATA_ATTRIBUTION};
   manifest.diagnostics.nei = {
     itemListLoaded: true,
-    registeredCraftingHandlers: 10,
+    itemListRawEntries: 48,
+    itemListExcludedEntries: 46,
+    itemListRetainedEntries: 2,
+    itemListRetainedUniqueIdentities: 1,
+    registeredCraftingHandlers: 44,
     exportableCraftingHandlers: 1,
-    adaptedHandlerCategories: 8,
-    excludedNonRecipeHandlers: 9,
+    adaptedHandlerCategories: 45,
+    excludedNonRecipeHandlers: 20,
+    excludedEmptyRecipeHandlers: 22,
+    excludedUnboundTemplateRecipeHandlers: 1,
+    excludedAe2fcFluidDropItemListPlaceholders: 1,
+    excludedAe2fcFluidPacketItemListPlaceholders: 1,
+    excludedAe2CableBusInternalBlockItemListEntries: 1,
+    excludedAe2MatrixFrameInternalBlockItemListEntries: 1,
+    excludedDreamcraftNothingLegacyLootBagSentinelItemListPlaceholders: 1,
+    excludedLittleTilesUnparameterizedMicrotileCarrierItemListEntries: 1,
+    excludedMalisisDoorsUnconfiguredCustomDoorItemListPlaceholders: 1,
+    malisisDoorsUnconfiguredCustomDoorRecipeReferences: 0,
+    malisisDoorsUnconfiguredCustomDoorQuestReferences: 0,
+    excludedMalisisDoorsUnconfiguredMixedBlockItemListPlaceholders: 1,
+    malisisDoorsUnconfiguredMixedBlockRecipeReferences: 0,
+    malisisDoorsUnconfiguredMixedBlockQuestReferences: 0,
+    excludedBloodMagicBloodLightItemListHelpers: 1,
+    excludedBloodMagicSpectralContainerItemListHelpers: 1,
+    excludedArchitectureCraftCladdingItemListPlaceholders: 1,
+    excludedAvaritiaEmptyMatterClusterItemListPlaceholders: 1,
+    excludedCarpentersBedInternalBlockItemListEntries: 1,
+    excludedCarpentersDoorInternalBlockItemListEntries: 1,
+    excludedStevesCartsUnconfiguredModularCartItemListPlaceholders: 1,
+    excludedTConstructBattleSignInternalBlockItemListEntries: 1,
+    excludedTConstructHeldItemInternalBlockItemListEntries: 1,
+    excludedThaumcraftBlockHoleInternalBlockItemListEntries: 1,
+    excludedThaumcraftEldritchPortalInternalBlockItemListEntries: 1,
+    excludedThaumicHorizonsBaseLightInternalBlockItemListEntries: 1,
+    excludedThaumicHorizonsSolarLightInternalBlockItemListEntries: 1,
+    excludedTwilightForestExperiment115InternalBlockItemListEntries: 1,
+    excludedWitchingGadgetsCustomAirInternalBlockItemListEntries: 1,
+    excludedBotaniaBifrostItemListWorldStateEntries: 1,
+    excludedBotaniaBuriedPetalsItemListWorldStateVariants: 16,
+    excludedBotaniaBuriedPetalsItemListWorldStateMetadataMask: 65535,
+    excludedBotaniaCacophoniumBlockItemListWorldStateEntries: 1,
+    excludedBotaniaEnchanterItemListWorldStateEntries: 1,
+    excludedBotaniaFakeAirItemListWorldStateEntries: 1,
+    excludedBotaniaManaFlameItemListWorldStateEntries: 1,
+    excludedBotaniaSolidVineItemListWorldStateEntries: 1,
+    excludedBotaniaStructureLibAnyFlowerItemListPresentationPlaceholders: 1,
+    adaptedBotaniaCocoonItemIcons: 1,
+    adaptedBotaniaCocoonRecipeWidgetRenderInvocations: 3,
+    adaptedBotaniaPrismItemIcons: 1,
+    adaptedBotaniaPrismRecipeWidgetRenderInvocations: 3,
+    adaptedGalacticraftFlagItemIcons: 1,
+    adaptedGalacticraftFlagRecipeWidgetRenderInvocations: 3,
+    adaptedWrcbeTriangulatorItemIcons: 1,
+    adaptedWrcbeTriangulatorRecipeWidgetRenderInvocations: 3,
+    adaptedModernMarkingsCrossingItemIcons: 6,
+    adaptedThaumcraftRunedStoneItemIcons: 1,
+    adaptedForestryScannedSaplingDisplayNames: 1,
+    gregTechForestryScannedSaplingRecipeOccurrences: 1,
+    adaptedForestryScannedPollenDisplayNames: 1,
+    gregTechForestryScannedPollenRecipeOccurrences: 1,
+    adaptedProjectBlueControlPanelItemIcons: 3,
+    adaptedProjectBlueControlPanelRecipeWidgetRenderInvocations: 3,
+    adaptedIc2FluidCannerRecipeWidgetRenderInvocations: 5,
+    adaptedBuildCraftPhasedFacadeItemIcons: 4,
+    adaptedMobsInfoInfernalPreviewOutputIcons: 58,
+    adaptedMobsInfoPreviewSlotIcons: 6093,
+    adaptedDraconicMobSoulItemIcons: 363,
+    adaptedGendustryLiquifierRecipes: 40,
+    adaptedGendustryMutagenProducerRecipes: 15,
+    adaptedGendustryExtractorRecipes: 1578,
+    adaptedGendustryReplicatorRecipes: 3,
+    adaptedGendustryTransposerRecipes: 8,
+    adaptedGendustryMutatronRecipes: 705,
+    adaptedGendustrySamplerRecipes: 9216,
+    adaptedGendustryImprinterRecipes: 1,
+    normalizedTcnaAspectCostInputOccurrences: 2,
+    normalizedTcnaAspectCostDistinctKeys: 1,
+    normalizedTcnaAspectCostHandlerCategories: 4,
+    gregTechFuelSinkRecipes: 289,
+    gregTechFuelSinkCategories: 14,
+    gregTechLargeBoilerFuelSinkRecipes: 49,
+    gregTechLargeBoilerFuelSinkCategories: 1,
+    gregTechRadioHatchInformationRecipes: 104,
+    gregTechQuantumComponentInformationRecipes: 27,
+    gregTechSpaceProjectInformationRecipes: 2,
+    gregTechOutputlessSemanticCategories: 18,
+    gregTechOutputlessSemanticRecipes: 471,
+    excludedGregTechLargeBoilerPresentationRows: 1,
+    excludedGregTechUnregisteredDoorRecyclingRows: 5,
+    excludedOwnerInternalFurnaceFuelRows: 5,
+    excludedAe2EnderIoInternalConduitFacadeRows: 1,
+    excludedUnregisteredGregTechMachineCatalysts: 1,
     loadedCategories: 1,
     recipesEnumerated: 1,
     recipeWidgetsRendered: 1,
     itemIconsRendered: 1,
-    informationalEmptyOutputRecipes: 488,
-    knowledgeIndependentAspectNames: 1,
+    informationalEmptyOutputRecipes: 513,
+    knowledgeIndependentAspectNames: 69,
     unloadedHandlerCategories: 0,
     ambiguousHandlerCategories: 0,
     duplicateHandlerCategories: 0,
@@ -158,22 +253,76 @@ async function configureGtnhFixture(source) {
   return manifest;
 }
 
-test('imports GTNH 2.8.4 with its strict dynamic NEI telemetry contract', async () => {
+test('imports GTNH 2.8.4 as an exhaustively validated structured-data-only publication', async () => {
   const root = await mkdtemp(join(tmpdir(), 'recipe-tree-import-gtnh-profile-test-'));
   try {
     const source = join(root, 'raw-source');
     const destination = join(root, 'public', 'exports');
     await createRawExportFixture(source, {iconScale: 1, recipeScale: 2});
     await configureGtnhFixture(source);
+    const rawRecipePreview = await readFile(
+      join(source, 'recipes', 'minecraft_crafting', 'r0.png'),
+    );
     await mkdir(dirname(destination), {recursive: true});
 
     await importExportDataImplementation({
       source,
       destination,
       profile: GTNH_1710_PROFILE,
-      dryRun: true,
     });
-    assert.equal(await pathIsMissing(destination), true);
+    const manifest = await readJson(join(destination, 'manifest.json'));
+    assert.equal(manifest.publicationPolicy, GTNH_STRUCTURED_DATA_ONLY_POLICY_ID);
+    assert.deepEqual(
+      manifest.web.visualAssets,
+      GTNH_STRUCTURED_DATA_ONLY_VISUAL_ASSETS,
+    );
+    assert.deepEqual(
+      {
+        mode: manifest.web.recipeImages.mode,
+        reason: manifest.web.recipeImages.reason,
+        policy: manifest.web.recipeImages.policy,
+        references: manifest.web.recipeImages.references,
+        files: manifest.web.recipeImages.files,
+        encoding: manifest.web.recipeImages.encoding,
+        bytes: manifest.web.recipeImages.bytes,
+      },
+      {
+        mode: 'omitted',
+        reason: GTNH_RECIPE_IMAGE_OMISSION_REASON,
+        policy: GTNH_STRUCTURED_DATA_ONLY_POLICY_ID,
+        references: 1,
+        files: 1,
+        encoding: 'png',
+        bytes: rawRecipePreview.length,
+      },
+    );
+    const item = (await readJson(join(destination, 'items.json'))).items[0];
+    const category = (await readJson(join(destination, 'categories.json'))).categories[0];
+    const recipe = (
+      await readJson(join(destination, 'recipes', 'minecraft_crafting', 'recipes.json'))
+    )[0];
+    assert.equal('icon' in item, false);
+    assert.equal('icon' in category, false);
+    assert.equal('img' in recipe, false);
+    assert.equal('w' in recipe, false);
+    assert.equal('h' in recipe, false);
+    assert.deepEqual(recipe.in, [[['minecraft:stone', 1, null, 0.5]]]);
+    assert.deepEqual(recipe.out, [[['minecraft:stone', 1, null, 0.25]]]);
+    assert.deepEqual(recipe.cat, [[['minecraft:stone', 1]]]);
+    assert.equal(await pathIsMissing(join(destination, 'icons')), true);
+    assert.equal(await pathIsMissing(join(destination, 'mobs')), true);
+    assert.equal(await pathIsMissing(join(destination, 'assets')), true);
+    const validation = await validateExportData(destination, {
+      profile: GTNH_1710_PROFILE,
+      requirePublicationId: true,
+      verifyPublicationId: true,
+    });
+    assert.equal(validation.imageReferences, 0);
+    assert.deepEqual(
+      await readFile(join(source, 'recipes', 'minecraft_crafting', 'r0.png')),
+      rawRecipePreview,
+      'the rights transform must never mutate the raw source',
+    );
     assert.equal(await pathIsMissing(importWorkspaceRootForDestination(destination)), true);
   } finally {
     await rm(root, {recursive: true, force: true});
@@ -346,6 +495,7 @@ test('dry run stages outside public and leaves the destination unchanged', async
     const destinationParent = join(root, 'public');
     const destination = join(destinationParent, 'exports');
     await createRawExportFixture(source, PRODUCTION_RENDER_SETTINGS);
+    await writeSyntheticExporterBuildIdentity(source, MEATBALLCRAFT_112_PROFILE);
     await mkdir(destination, {recursive: true});
     await writeFile(join(destination, 'sentinel.txt'), 'unchanged\n');
 
@@ -495,6 +645,7 @@ test('publishes the packed dataset atomically and removes rollback work data', a
     const source = join(root, 'raw-source');
     const destination = join(root, 'public', 'exports');
     await createRawExportFixture(source, PRODUCTION_RENDER_SETTINGS);
+    await writeSyntheticExporterBuildIdentity(source, MEATBALLCRAFT_112_PROFILE);
     await mkdir(destination, {recursive: true});
     await writeFile(join(destination, 'sentinel.txt'), 'old dataset\n');
 
@@ -557,6 +708,7 @@ test('omit-recipe-images imports retain original PNGs only through validation an
     const source = join(root, 'raw-source');
     const destination = join(root, 'public', 'exports');
     await createRawExportFixture(source, PRODUCTION_RENDER_SETTINGS);
+    await writeSyntheticExporterBuildIdentity(source, MEATBALLCRAFT_112_PROFILE);
     const {previewPath, physicalPreview} = await addSingleRecipePreview(source);
     await mkdir(dirname(destination), {recursive: true});
 

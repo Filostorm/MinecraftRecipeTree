@@ -21,6 +21,16 @@ function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
+function dataOnlyAssetSetId() {
+  const hash = createHash('sha256');
+  hash.update('mrt-recipe-preview-sidecar-v2\0');
+  const datasetBytes = Buffer.from(DATASET_PUBLICATION_ID, 'utf8');
+  const length = Buffer.alloc(8);
+  length.writeBigUInt64BE(BigInt(datasetBytes.length));
+  hash.update(length).update(datasetBytes);
+  return hash.digest('hex');
+}
+
 function record(path, bytes) {
   return {path, bytes: bytes.length, sha256: sha256(bytes)};
 }
@@ -67,6 +77,44 @@ async function fixture() {
   };
 }
 
+async function dataOnlyFixture() {
+  const root = await mkdtemp(join(tmpdir(), 'mrt-preview-upload-data-only-'));
+  const manifest = {
+    format: 'mrt-recipe-preview-sidecar-v2',
+    publicationPolicy: 'gtnh-structured-data-only-v1',
+    exclusionReason: 'third-party-artwork-rights-not-cleared',
+    assetSetId: dataOnlyAssetSetId(),
+    datasetPublicationId: DATASET_PUBLICATION_ID,
+    counts: {
+      categories: 1,
+      recipes: 10,
+      previews: 0,
+      missing: 10,
+      uniqueImages: 0,
+      duplicates: 0,
+      packs: 0,
+      inputBytes: 0,
+      hostedOmittedPngBytes: 500,
+      encodedBytes: 0,
+      storedBytes: 0,
+      packIndexBytes: 0,
+    },
+    packs: [],
+    mapping: {documents: 0, parts: 0, bytes: 0},
+    categoryDocuments: [],
+  };
+  const manifestBytes = Buffer.from(`${JSON.stringify(manifest)}\n`);
+  await writeFile(join(root, 'manifest.json'), manifestBytes);
+  return {
+    root,
+    files: new Map(),
+    records: [],
+    manifest,
+    manifestBytes,
+    localValidator: async () => ({root, manifest, manifestBytes}),
+  };
+}
+
 function responseHeadersForObject(object) {
   return {
     'content-length': String(object.bytes.length),
@@ -99,7 +147,7 @@ function createIngestionApi(fixtureState, options = {}) {
     if (headers.get('authorization') !== `Bearer ${TOKEN}`) {
       return new Response(null, {status: 401});
     }
-    if (assetSetId !== ASSET_SET_ID) return new Response(null, {status: 404});
+    if (assetSetId !== fixtureState.manifest.assetSetId) return new Response(null, {status: 404});
 
     if (operation === 'begin' && method === 'POST') {
       const bytes = Buffer.from(await new Response(init.body).arrayBuffer());
@@ -195,6 +243,22 @@ function loggerCapture() {
   };
 }
 
+function deferred() {
+  let resolvePromise;
+  const promise = new Promise(resolve => {
+    resolvePromise = resolve;
+  });
+  return {promise, resolve: resolvePromise};
+}
+
+async function waitForCondition(predicate, label) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (predicate()) return;
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  assert.fail(`Timed out waiting for ${label}.`);
+}
+
 function serializedErrorChain(error) {
   const entries = [];
   const seen = new Set();
@@ -252,6 +316,168 @@ test('fresh upload stages the manifest, verifies immutable objects, and commits 
     assert.ok(begin >= 0 && begin < firstPut);
     assert.ok(lastObjectHead < commit);
     assert.equal(api.state.events.at(-1).operation, 'status');
+  } finally {
+    await rm(data.root, {recursive: true, force: true});
+  }
+});
+
+test('bounded workers stop dequeuing on the first failure and drain active secondary failures', async () => {
+  const data = await fixture();
+  const gates = [];
+  let uploadPromise = Promise.resolve();
+  try {
+    const api = createIngestionApi(data);
+    const originalFetch = api.fetchImpl;
+    const initialHeads = new Set();
+    let active = 0;
+    let peak = 0;
+    api.fetchImpl = async (input, init) => {
+      const url = new URL(input);
+      const encodedPath = url.pathname.split('/objects/')[1];
+      if (init.method === 'HEAD' && encodedPath) {
+        const path = encodedPath.split('/').map(decodeURIComponent).join('/');
+        if (!initialHeads.has(path)) {
+          initialHeads.add(path);
+          const gate = {...deferred(), failure: null, path};
+          gates.push(gate);
+          active += 1;
+          peak = Math.max(peak, active);
+          try {
+            await gate.promise;
+            if (gate.failure) throw gate.failure;
+          } finally {
+            active -= 1;
+          }
+        }
+      }
+      return originalFetch(input, init);
+    };
+
+    const capture = loggerCapture();
+    let settled = false;
+    let outcome;
+    uploadPromise = runUpload(data, api, {logger: capture.logger}).then(
+      value => {
+        settled = true;
+        outcome = {value};
+      },
+      error => {
+        settled = true;
+        outcome = {error};
+      },
+    );
+
+    await waitForCondition(() => gates.length === 2, 'two active preview upload workers');
+    assert.equal(data.records.length > 2, true);
+    assert.equal(active, 2);
+    assert.equal(peak, 2);
+
+    gates[0].failure = new Error('primary preview worker failure');
+    gates[0].resolve();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(settled, false, 'the uploader must wait for the other active worker');
+    assert.equal(active, 1);
+    assert.equal(gates.length, 2, 'the queued third record must not start');
+
+    gates[1].failure = new Error('secondary preview worker failure');
+    gates[1].resolve();
+    await uploadPromise;
+
+    assert.match(outcome.error?.message ?? '', /primary preview worker failure$/);
+    assert.doesNotMatch(outcome.error?.message ?? '', /secondary preview worker failure/);
+    assert.equal(active, 0);
+    assert.equal(peak, 2);
+    assert.equal(gates.length, 2);
+    assert.equal(api.state.committed, false);
+    assert.equal(api.state.events.some(event => event.operation === 'commit'), false);
+    const errors = capture.entries
+      .filter(([level]) => level === 'error')
+      .map(([, message]) => message);
+    assert.equal(errors.some(message => message.includes('drained 1 secondary failure')), true);
+    assert.equal(errors.some(message => message.includes('secondary preview worker failure')), true);
+  } finally {
+    for (const gate of gates) gate.resolve();
+    await uploadPromise;
+    await rm(data.root, {recursive: true, force: true});
+  }
+});
+
+test('preview upload rejects concurrency outside 1..32 before validation or network access', async () => {
+  const data = await fixture();
+  try {
+    let validations = 0;
+    let requests = 0;
+    for (const concurrency of [0, 33]) {
+      await assert.rejects(
+        uploadRecipePreviewSidecar({
+          local: data.root,
+          ingestBaseUrl: BASE_URL,
+          token: TOKEN,
+          concurrency,
+          localValidator: async () => {
+            validations += 1;
+            return data.localValidator();
+          },
+          fetchImpl: async () => {
+            requests += 1;
+            throw new Error('network must not be reached');
+          },
+          allowHttpForTests: true,
+        }),
+        /concurrency must be within 1\.\.32/,
+      );
+    }
+    assert.equal(validations, 0);
+    assert.equal(requests, 0);
+  } finally {
+    await rm(data.root, {recursive: true, force: true});
+  }
+});
+
+test('data-only upload commits exactly one manifest and logs the explicit rights exclusion', async () => {
+  const data = await dataOnlyFixture();
+  try {
+    const api = createIngestionApi(data);
+    const capture = loggerCapture();
+    const result = await runUpload(data, api, {logger: capture.logger});
+    assert.deepEqual(result, {
+      assetSetId: data.manifest.assetSetId,
+      datasetPublicationId: DATASET_PUBLICATION_ID,
+      objects: 0,
+      uploaded: 0,
+      reused: 0,
+      committed: true,
+    });
+    assert.equal(api.state.objects.size, 0);
+    assert.equal(
+      capture.entries.some(([level, message]) =>
+        level === 'warn' && message.includes('excludes all recipe preview objects')),
+      true,
+    );
+
+    const ordinary = structuredClone(data.manifest);
+    ordinary.format = 'mrt-recipe-preview-sidecar-v1';
+    delete ordinary.publicationPolicy;
+    delete ordinary.exclusionReason;
+    await assert.rejects(
+      runUpload({...data, manifest: ordinary, localValidator: async () => ({
+        root: data.root,
+        manifest: ordinary,
+        manifestBytes: data.manifestBytes,
+      })}, createIngestionApi(data)),
+      /Ordinary v1 preview sidecars cannot use the manifest-only data-only upload branch/,
+    );
+
+    const drifted = structuredClone(data.manifest);
+    drifted.counts.uniqueImages = 1;
+    await assert.rejects(
+      runUpload({...data, manifest: drifted, localValidator: async () => ({
+        root: data.root,
+        manifest: drifted,
+        manifestBytes: data.manifestBytes,
+      })}, createIngestionApi(data)),
+      /drifted from the exact manifest-only GTNH rights-exclusion contract/,
+    );
   } finally {
     await rm(data.root, {recursive: true, force: true});
   }

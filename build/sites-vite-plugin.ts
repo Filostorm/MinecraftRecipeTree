@@ -1,4 +1,4 @@
-import {access, copyFile, cp, lstat, mkdir, readdir, rm} from 'node:fs/promises';
+import {access, appendFile, copyFile, cp, lstat, mkdir, readdir, rm} from 'node:fs/promises';
 import {basename, resolve} from 'node:path';
 import type {Plugin} from 'vite';
 
@@ -16,6 +16,23 @@ async function exists(path: string): Promise<boolean> {
 
 const MAX_EXPORTER_RELEASE_FILE_BYTES = 64 * 1024 * 1024;
 const MAX_EXPORTER_RELEASE_DIRECTORY_BYTES = 128 * 1024 * 1024;
+const MAX_FAVICON_BYTES = 64 * 1024;
+
+async function copyFavicon(root: string): Promise<void> {
+  const source = resolve(root, 'public', 'favicon.svg');
+  const destination = resolve(root, 'dist', 'client', 'favicon.svg');
+  const metadata = await lstat(source);
+  if (!metadata.isFile() || metadata.nlink !== 1 || metadata.size <= 0 || metadata.size > MAX_FAVICON_BYTES) {
+    console.error(`Sites build failed: favicon is not a bounded single-link regular file: ${source}`);
+    throw new Error('Application favicon violates its deployment contract');
+  }
+  await copyFile(source, destination);
+  await appendFile(
+    resolve(root, 'dist', 'client', '_headers'),
+    '\n/favicon.svg\n  Content-Type: image/svg+xml\n  Cache-Control: public, max-age=86400\n',
+    'utf8',
+  );
+}
 
 async function copyExporterReleases(root: string): Promise<void> {
   const sourceDirectory = resolve(root, 'public', 'exporters');
@@ -89,6 +106,7 @@ export function sites(): Plugin {
       }
 
       await copyExporterReleases(root);
+      await copyFavicon(root);
 
       const outputDirectory = resolve(root, 'dist', '.openai');
       const hostingConfig = resolve(root, '.openai', 'hosting.json');

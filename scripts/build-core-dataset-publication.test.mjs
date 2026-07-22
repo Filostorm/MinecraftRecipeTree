@@ -67,6 +67,77 @@ async function fixture(parent, {warnings} = {}) {
   return {exportRoot, publicationId, coordinates, payloads: {first, second, third}};
 }
 
+async function dataOnlyFixture(parent, overrides = {}) {
+  const exportRoot = join(parent, 'exports');
+  await mkdir(join(exportRoot, 'recipes', 'fixture'), {recursive: true});
+  const manifest = {
+    format: 2,
+    generatedAt: '2026-07-20T00:00:00.000Z',
+    aborted: false,
+    minecraft: '1.7.10',
+    profile: 'gtnh-1.7.10',
+    forge: '10.13.4.1614',
+    nei: '2.8.44-GTNH',
+    pack: {
+      name: 'GT New Horizons',
+      version: '2.8.4',
+      identitySource: 'explicit-request',
+    },
+    attribution: {
+      sourceUrl: 'https://github.com/GTNewHorizons/GT-New-Horizons-Modpack/tree/2.8.4',
+      projectUrl: 'https://www.gtnewhorizons.com/',
+      licenseIdentifier: 'CC BY-NC-SA 4.0',
+      licenseUrl: 'https://creativecommons.org/licenses/by-nc-sa/4.0/',
+    },
+    counts: {recipes: 1},
+    publicationPolicy: 'gtnh-structured-data-only-v1',
+    web: {
+      visualAssets: {
+        format: 'mrt-visual-assets-policy-v1',
+        mode: 'structured-data-only',
+        policy: 'gtnh-structured-data-only-v1',
+        itemIcons: 0,
+        categoryIcons: 0,
+        recipePreviews: 0,
+        mobSprites: 0,
+        packedImageFiles: 0,
+      },
+      recipeImages: {
+        mode: 'omitted',
+        reason: 'third-party-artwork-rights-not-cleared',
+        policy: 'gtnh-structured-data-only-v1',
+        references: 1,
+        files: 1,
+        encoding: 'png',
+        bytes: 123,
+        inventory: {
+          format: 'mrt-recipe-image-inventory-v1',
+          sha256: 'a'.repeat(64),
+          entries: 1,
+          previews: 1,
+          missing: 0,
+        },
+      },
+    },
+    ...overrides,
+  };
+  await writeJson(join(exportRoot, 'manifest.json'), manifest);
+  await writeJson(join(exportRoot, 'items.json'), {items: [{k: 'item|fixture:first'}]});
+  await writeJson(join(exportRoot, 'categories.json'), {
+    categories: [{id: 'fixture', dir: 'recipes/fixture', count: 1}],
+  });
+  await writeJson(join(exportRoot, 'recipes', 'fixture', 'recipes.json'), [
+    {
+      id: 'fixture:recipe',
+      in: [[['item|fixture:first', 1, null, 0.5]]],
+      out: [[['item|fixture:first', 1, null, 0.25]]],
+      cat: [[['item|fixture:first', 1]]],
+    },
+  ]);
+  const publicationId = await writePublicationId(exportRoot);
+  return {exportRoot, publicationId};
+}
+
 function silentLogger() {
   return {info() {}, warn() {}, error() {}};
 }
@@ -180,6 +251,95 @@ test('builder preserves warnings.json as an immutable core publication document'
     assert.deepEqual(
       await readFile(uploadRecord.localPath),
       await readFile(join(data.exportRoot, 'warnings.json')),
+    );
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
+});
+
+test('builder emits a zero-pack core bundle only for the exact GTNH data-only policy', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'core-publication-data-only-test-'));
+  try {
+    const data = await dataOnlyFixture(root);
+    const output = join(root, 'publication');
+    const messages = [];
+    const state = await buildCoreDatasetPublication({
+      exportRoot: data.exportRoot,
+      output,
+      logger: {
+        info(message) { messages.push(['info', message]); },
+        warn(message) { messages.push(['warn', message]); },
+        error(message) { messages.push(['error', message]); },
+      },
+    });
+    assert.equal(state.manifest.publicationPolicy, 'gtnh-structured-data-only-v1');
+    assert.deepEqual(state.manifest.packs, []);
+    assert.deepEqual(state.manifest.counts, {
+      documents: 4,
+      packs: 0,
+      packedImages: 0,
+      documentBytes: state.manifest.counts.documentBytes,
+      packBytes: 0,
+      packIndexBytes: 0,
+      objects: 4,
+      storedBytes: state.manifest.counts.documentBytes,
+    });
+    assert.equal(state.records.length, 4);
+    const recipeRecord = state.records.find(
+      record => record.path === 'recipes/fixture/recipes.json',
+    );
+    assert.ok(recipeRecord, 'stochastic recipe metadata must be an immutable publication object');
+    assert.deepEqual(
+      await readFile(recipeRecord.localPath),
+      await readFile(join(data.exportRoot, 'recipes', 'fixture', 'recipes.json')),
+    );
+    assert.equal(
+      messages.some(([level, message]) =>
+        level === 'warn' && message.includes('excludes all dataset-carried visual assets')),
+      true,
+    );
+
+    const ordinaryRoot = join(root, 'ordinary-empty');
+    const ordinary = await dataOnlyFixture(ordinaryRoot, {publicationPolicy: undefined});
+    const ordinaryManifestPath = join(ordinary.exportRoot, 'manifest.json');
+    const ordinaryManifest = JSON.parse(await readFile(ordinaryManifestPath, 'utf8'));
+    delete ordinaryManifest.publicationPolicy;
+    delete ordinaryManifest.web.visualAssets;
+    delete ordinaryManifest.web.recipeImages.policy;
+    ordinaryManifest.web.recipeImages.reason = 'hosting-archive-budget';
+    await writeJson(ordinaryManifestPath, ordinaryManifest);
+    await writePublicationId(ordinary.exportRoot);
+    await assert.rejects(
+      buildCoreDatasetPublication({
+        exportRoot: ordinary.exportRoot,
+        output: join(ordinaryRoot, 'publication'),
+        logger: silentLogger(),
+      }),
+      /requires packed-image blobs unless the exact GTNH structured-data-only policy is declared/,
+    );
+
+    const driftRoot = join(root, 'drift');
+    const drift = await dataOnlyFixture(driftRoot, {
+      web: {
+        visualAssets: {
+          format: 'mrt-visual-assets-policy-v1',
+          mode: 'structured-data-only',
+          policy: 'gtnh-structured-data-only-v1',
+          itemIcons: 1,
+          categoryIcons: 0,
+          recipePreviews: 0,
+          mobSprites: 0,
+          packedImageFiles: 0,
+        },
+      },
+    });
+    await assert.rejects(
+      buildCoreDatasetPublication({
+        exportRoot: drift.exportRoot,
+        output: join(driftRoot, 'publication'),
+        logger: silentLogger(),
+      }),
+      /exact GTNH 2\.8\.4 profile.*zero-visual-assets contract/,
     );
   } finally {
     await rm(root, {recursive: true, force: true});

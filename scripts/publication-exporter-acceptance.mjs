@@ -151,8 +151,11 @@ export async function loadCurrentPublicationExporterAcceptance({
   const definition = exporterReleaseDefinitionForId(definitions, releaseId);
   const packIdentity = requirePublishablePackIdentity(pack, 'Publication acceptance pack');
   const configurationMismatches = [];
-  if (definition.acceptanceProfile !== qualityProfile) {
-    configurationMismatches.push('release-defined acceptance profile');
+  if (
+    !Array.isArray(definition.qualityProfiles) ||
+    !definition.qualityProfiles.includes(qualityProfile)
+  ) {
+    configurationMismatches.push('release-advertised acceptance profile');
   }
   if (definition.minecraftVersion !== minecraftVersion) {
     configurationMismatches.push('release-defined Minecraft version');
@@ -174,7 +177,9 @@ export async function loadCurrentPublicationExporterAcceptance({
   const receipt = await requireAcceptedExporterRelease({
     definition,
     sourceBytes,
+    qualityProfile,
     acceptanceRoot,
+    logger,
   });
   const binding = buildPublicationExporterAcceptance(receipt);
   requireAcceptanceContext(binding, {

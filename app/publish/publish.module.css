@@ -60,6 +60,19 @@
   font-weight: 750;
 }
 
+.minecraftDisclaimer {
+  margin: 18px 0 0;
+  padding: 12px 15px;
+  border: 1px solid #735e25;
+  border-radius: 9px;
+  background: rgba(224, 179, 65, 0.1);
+  color: #f0c75e;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.055em;
+  line-height: 1.45;
+}
+
 .hero {
   max-width: 850px;
   padding: 84px 0 64px;

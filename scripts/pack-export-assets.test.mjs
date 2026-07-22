@@ -48,7 +48,7 @@ async function packFixture(exportRoot, extraArguments = []) {
   ]);
 }
 
-async function addSingleRecipePreview(exportRoot) {
+async function addSingleRecipePreview(exportRoot, {stochastic = false} = {}) {
   const categoryRoot = join(exportRoot, 'recipes', 'minecraft_crafting');
   await writeUniformVisibleImage(join(categoryRoot, 'r0.png'));
   await writeFile(
@@ -59,12 +59,14 @@ async function addSingleRecipePreview(exportRoot) {
         img: 'r0.png',
         w: 16,
         h: 16,
-        in: [[['minecraft:stone', 1]]],
-        out: [[['minecraft:stone', 1]]],
+        in: [[stochastic ? ['minecraft:stone', 1, null, 0.5] : ['minecraft:stone', 1]]],
+        out: [[stochastic ? ['minecraft:stone', 1, null, 0.25] : ['minecraft:stone', 1]]],
+        ...(stochastic ? {cat: [[['minecraft:stone', 1]]]} : {}),
       },
     ])}\n`,
   );
   const rawManifest = await readJson(join(exportRoot, 'manifest.json'));
+  if (stochastic) rawManifest.format = 2;
   rawManifest.counts.recipes = 1;
   await writeFile(join(exportRoot, 'manifest.json'), `${JSON.stringify(rawManifest)}\n`);
   const rawCategories = await readJson(join(exportRoot, 'categories.json'));
@@ -94,8 +96,11 @@ test('exact duplicate WebP assets share one coordinate and are written once', as
     const itemCoordinate = (await readJson(join(exportRoot, 'items.json'))).items[0].icon;
     const categoryCoordinate = (await readJson(join(exportRoot, 'categories.json')))
       .categories[0].icon;
+    const manifest = await readJson(join(exportRoot, 'manifest.json'));
     const packBytes = await readFile(join(exportRoot, 'assets', 'pack-000.bin'));
 
+    assert.equal(manifest.publicationPolicy, undefined);
+    assert.equal(manifest.web.visualAssets, undefined);
     assert.equal(categoryCoordinate, itemCoordinate);
     assert.deepEqual(packBytes, iconBytes);
     assert.match(stdout, /2 WebP assets \(1 unique, 1 duplicate\)/);
@@ -141,7 +146,7 @@ test('explicit structured-recipe policy omits only validated recipe screenshots'
   try {
     const exportRoot = join(root, 'exports');
     await createRawExportFixture(exportRoot);
-    const categoryRoot = await addSingleRecipePreview(exportRoot);
+    const categoryRoot = await addSingleRecipePreview(exportRoot, {stochastic: true});
     const originalRecipePngBytes = await readFile(join(categoryRoot, 'r0.png'));
     const {stdout: optimizationLog} = await optimizeFixture(exportRoot, [
       '--omit-recipe-images',
@@ -194,8 +199,9 @@ test('explicit structured-recipe policy omits only validated recipe screenshots'
     assert.equal('img' in recipe, false);
     assert.equal('w' in recipe, false);
     assert.equal('h' in recipe, false);
-    assert.deepEqual(recipe.in, [[['minecraft:stone', 1]]]);
-    assert.deepEqual(recipe.out, [[['minecraft:stone', 1]]]);
+    assert.deepEqual(recipe.in, [[['minecraft:stone', 1, null, 0.5]]]);
+    assert.deepEqual(recipe.out, [[['minecraft:stone', 1, null, 0.25]]]);
+    assert.deepEqual(recipe.cat, [[['minecraft:stone', 1]]]);
     assert.equal(categoryCoordinate, itemCoordinate, 'category and item icons must remain packed');
     assert.equal(await pathIsMissing(join(categoryRoot, 'r0.png')), true);
     assert.match(stderr, /Publication policy omitted 1 composite recipe-image reference/);

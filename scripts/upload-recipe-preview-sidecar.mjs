@@ -17,6 +17,10 @@ const SHA256_HEADER = 'x-mrt-content-sha256';
 const DATASET_HEADER = 'x-mrt-dataset-publication-id';
 const PUBLICATION_STATE_HEADER = 'x-mrt-publication-state';
 const MANIFEST_BYTES_HEADER = 'x-mrt-manifest-bytes';
+const DATA_ONLY_SIDECAR_FORMAT = 'mrt-recipe-preview-sidecar-v2';
+const GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY = 'gtnh-structured-data-only-v1';
+const GTNH_STRUCTURED_DATA_ONLY_EXCLUSION_REASON =
+  'third-party-artwork-rights-not-cleared';
 
 function isRecord(value) {
   return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -377,10 +381,25 @@ async function ensureObject(options) {
   return raced ? 'reused' : 'uploaded';
 }
 
-async function mapConcurrent(values, concurrency, operation) {
+function errorDetail(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function logDrainedFailure(logger, label, message) {
+  try {
+    logger.error(message);
+  } catch {
+    console.error(`${label} configured logger failed; emitting the drained failure directly.`);
+    console.error(message);
+  }
+}
+
+async function mapConcurrent(values, concurrency, operation, logger, label) {
   const results = new Array(values.length);
   let next = 0;
   let stopped = false;
+  let firstFailure = null;
+  const secondaryFailures = [];
   async function worker() {
     for (;;) {
       if (stopped) return;
@@ -390,12 +409,35 @@ async function mapConcurrent(values, concurrency, operation) {
       try {
         results[index] = await operation(values[index], index);
       } catch (error) {
-        stopped = true;
-        throw error;
+        if (firstFailure === null) {
+          stopped = true;
+          firstFailure = {error, index};
+        } else {
+          secondaryFailures.push({error, index});
+        }
+        return;
       }
     }
   }
   await Promise.all(Array.from({length: Math.min(concurrency, values.length)}, () => worker()));
+  if (firstFailure !== null) {
+    if (secondaryFailures.length > 0) {
+      logDrainedFailure(
+        logger,
+        label,
+        `${label} drained ${secondaryFailures.length} secondary failure(s) after stopping on ` +
+          `record index ${firstFailure.index}.`,
+      );
+      for (const failure of secondaryFailures) {
+        logDrainedFailure(
+          logger,
+          label,
+          `${label} secondary failure at record index ${failure.index}: ${errorDetail(failure.error)}`,
+        );
+      }
+    }
+    throw firstFailure.error;
+  }
   return results;
 }
 
@@ -461,6 +503,49 @@ export async function uploadRecipePreviewSidecar({
   try {
     const localState = await localValidator(local, concurrency);
     const {manifest, manifestBytes} = localState;
+    if (manifest.format === DATA_ONLY_SIDECAR_FORMAT) {
+      if (
+        manifest.publicationPolicy !== GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY ||
+        manifest.exclusionReason !== GTNH_STRUCTURED_DATA_ONLY_EXCLUSION_REASON ||
+        !Array.isArray(manifest.packs) ||
+        manifest.packs.length !== 0 ||
+        !Array.isArray(manifest.categoryDocuments) ||
+        manifest.categoryDocuments.length !== 0 ||
+        !Number.isSafeInteger(manifest.counts?.categories) ||
+        manifest.counts.categories <= 0 ||
+        !Number.isSafeInteger(manifest.counts?.recipes) ||
+        manifest.counts.recipes <= 0 ||
+        manifest.counts?.previews !== 0 ||
+        manifest.counts?.missing !== manifest.counts?.recipes ||
+        manifest.counts?.uniqueImages !== 0 ||
+        manifest.counts?.duplicates !== 0 ||
+        manifest.counts?.packs !== 0 ||
+        manifest.counts?.inputBytes !== 0 ||
+        !Number.isSafeInteger(manifest.counts?.hostedOmittedPngBytes) ||
+        manifest.counts.hostedOmittedPngBytes < 0 ||
+        manifest.counts?.encodedBytes !== 0 ||
+        manifest.counts?.storedBytes !== 0 ||
+        manifest.counts?.packIndexBytes !== 0 ||
+        manifest.mapping?.documents !== 0 ||
+        manifest.mapping?.parts !== 0 ||
+        manifest.mapping?.bytes !== 0
+      ) {
+        throw new Error(
+          'Validated v2 sidecar drifted from the exact manifest-only GTNH rights-exclusion contract.',
+        );
+      }
+      logger.warn(
+        `Rights policy ${GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY} excludes all recipe ` +
+          'preview objects; upload will stage and commit only the content-addressed manifest.',
+      );
+    } else if (
+      manifest.format === 'mrt-recipe-preview-sidecar-v1' &&
+      (!Array.isArray(manifest.packs) || manifest.packs.length === 0)
+    ) {
+      throw new Error(
+        'Ordinary v1 preview sidecars cannot use the manifest-only data-only upload branch.',
+      );
+    }
     if (!DATASET_ID_PATTERN.test(manifest.assetSetId ?? '')) {
       throw new Error('Validated sidecar assetSetId is not a lowercase SHA-256 digest.');
     }
@@ -527,25 +612,31 @@ export async function uploadRecipePreviewSidecar({
     logger.info(`Preview publication ${manifest.assetSetId} is ${initialState}; verifying objects.`);
 
     let completed = 0;
-    const outcomes = await mapConcurrent(records, concurrency, async record => {
-      const outcome = await ensureObject({
-        baseUrl: validated.baseUrl,
-        assetSetId: manifest.assetSetId,
-        record,
-        root: localState.root,
-        token: validated.token,
-        datasetPublicationId: manifest.datasetPublicationId,
-        timeoutMs,
-        fetchImpl,
-        logger,
-        sleepImpl,
-      });
-      completed += 1;
-      if (completed % 50 === 0 || completed === records.length) {
-        logger.info(`Verified ${completed}/${records.length} immutable preview objects.`);
-      }
-      return outcome;
-    });
+    const outcomes = await mapConcurrent(
+      records,
+      concurrency,
+      async record => {
+        const outcome = await ensureObject({
+          baseUrl: validated.baseUrl,
+          assetSetId: manifest.assetSetId,
+          record,
+          root: localState.root,
+          token: validated.token,
+          datasetPublicationId: manifest.datasetPublicationId,
+          timeoutMs,
+          fetchImpl,
+          logger,
+          sleepImpl,
+        });
+        completed += 1;
+        if (completed % 50 === 0 || completed === records.length) {
+          logger.info(`Verified ${completed}/${records.length} immutable preview objects.`);
+        }
+        return outcome;
+      },
+      logger,
+      'Recipe preview upload worker pool',
+    );
     const uploaded = outcomes.filter(value => value === 'uploaded').length;
     const reused = outcomes.length - uploaded;
     logger.info(

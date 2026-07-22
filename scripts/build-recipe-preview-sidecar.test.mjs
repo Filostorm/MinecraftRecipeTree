@@ -27,11 +27,12 @@ import {
   recipePreviewContractForProfile,
   RECIPE_PREVIEW_CATEGORY_FORMAT,
   RECIPE_PREVIEW_PACK_INDEX_FORMAT,
+  RECIPE_PREVIEW_SIDECAR_DATA_ONLY_FORMAT,
   RECIPE_PREVIEW_SIDECAR_FORMAT,
 } from './build-recipe-preview-sidecar.mjs';
 import {
   GTNH_DATA_ATTRIBUTION,
-  GTNH_HANDLER_POLICIES,
+  GTNH_284_HANDLER_POLICIES,
   GTNH_1710_PROFILE,
   GTNH_KNOWLEDGE_POLICY,
   MEATBALLCRAFT_112_PROFILE,
@@ -138,7 +139,7 @@ function completeProfileFixtureContract(
   return recipePreviewContractForProfile(
     profile,
     {
-      format: 1,
+      format: gtnh ? 2 : 1,
       minecraft,
       ...(pack === undefined ? {} : {pack}),
       ...(gtnh
@@ -146,7 +147,7 @@ function completeProfileFixtureContract(
             profile: GTNH_1710_PROFILE,
             forge: '10.13.4.1614',
             nei: '2.8.44-GTNH',
-            handlerPolicies: GTNH_HANDLER_POLICIES,
+            handlerPolicies: GTNH_284_HANDLER_POLICIES,
             knowledgePolicy: GTNH_KNOWLEDGE_POLICY,
             attribution: GTNH_DATA_ATTRIBUTION,
           }
@@ -173,16 +174,104 @@ function completeProfileFixtureContract(
           ? {
               nei: {
                 itemListLoaded: true,
-                registeredCraftingHandlers: 10,
+                itemListRawEntries: 49,
+                itemListExcludedEntries: 46,
+                itemListRetainedEntries: 3,
+                itemListRetainedUniqueIdentities: 2,
+                registeredCraftingHandlers: 44,
                 exportableCraftingHandlers: 1,
-                adaptedHandlerCategories: 8,
-                excludedNonRecipeHandlers: 9,
+                adaptedHandlerCategories: 45,
+                excludedNonRecipeHandlers: 20,
+                excludedEmptyRecipeHandlers: 22,
+                excludedUnboundTemplateRecipeHandlers: 1,
+                excludedAe2fcFluidDropItemListPlaceholders: 1,
+                excludedAe2fcFluidPacketItemListPlaceholders: 1,
+                excludedAe2CableBusInternalBlockItemListEntries: 1,
+                excludedAe2MatrixFrameInternalBlockItemListEntries: 1,
+                excludedDreamcraftNothingLegacyLootBagSentinelItemListPlaceholders: 1,
+                excludedLittleTilesUnparameterizedMicrotileCarrierItemListEntries: 1,
+                excludedMalisisDoorsUnconfiguredCustomDoorItemListPlaceholders: 1,
+                malisisDoorsUnconfiguredCustomDoorRecipeReferences: 0,
+                malisisDoorsUnconfiguredCustomDoorQuestReferences: 0,
+                excludedMalisisDoorsUnconfiguredMixedBlockItemListPlaceholders: 1,
+                malisisDoorsUnconfiguredMixedBlockRecipeReferences: 0,
+                malisisDoorsUnconfiguredMixedBlockQuestReferences: 0,
+                excludedBloodMagicBloodLightItemListHelpers: 1,
+                excludedBloodMagicSpectralContainerItemListHelpers: 1,
+                excludedArchitectureCraftCladdingItemListPlaceholders: 1,
+                excludedAvaritiaEmptyMatterClusterItemListPlaceholders: 1,
+                excludedCarpentersBedInternalBlockItemListEntries: 1,
+                excludedCarpentersDoorInternalBlockItemListEntries: 1,
+                excludedStevesCartsUnconfiguredModularCartItemListPlaceholders: 1,
+                excludedTConstructBattleSignInternalBlockItemListEntries: 1,
+                excludedTConstructHeldItemInternalBlockItemListEntries: 1,
+                excludedThaumcraftBlockHoleInternalBlockItemListEntries: 1,
+                excludedThaumcraftEldritchPortalInternalBlockItemListEntries: 1,
+                excludedThaumicHorizonsBaseLightInternalBlockItemListEntries: 1,
+                excludedThaumicHorizonsSolarLightInternalBlockItemListEntries: 1,
+                excludedTwilightForestExperiment115InternalBlockItemListEntries: 1,
+                excludedWitchingGadgetsCustomAirInternalBlockItemListEntries: 1,
+                excludedBotaniaBifrostItemListWorldStateEntries: 1,
+                excludedBotaniaBuriedPetalsItemListWorldStateVariants: 16,
+                excludedBotaniaBuriedPetalsItemListWorldStateMetadataMask: 65535,
+                excludedBotaniaCacophoniumBlockItemListWorldStateEntries: 1,
+                excludedBotaniaEnchanterItemListWorldStateEntries: 1,
+                excludedBotaniaFakeAirItemListWorldStateEntries: 1,
+                excludedBotaniaManaFlameItemListWorldStateEntries: 1,
+                excludedBotaniaSolidVineItemListWorldStateEntries: 1,
+                excludedBotaniaStructureLibAnyFlowerItemListPresentationPlaceholders: 1,
+                adaptedBotaniaCocoonItemIcons: 1,
+                adaptedBotaniaCocoonRecipeWidgetRenderInvocations: 3,
+                adaptedBotaniaPrismItemIcons: 1,
+                adaptedBotaniaPrismRecipeWidgetRenderInvocations: 3,
+                adaptedGalacticraftFlagItemIcons: 1,
+                adaptedGalacticraftFlagRecipeWidgetRenderInvocations: 3,
+                adaptedWrcbeTriangulatorItemIcons: 1,
+                adaptedWrcbeTriangulatorRecipeWidgetRenderInvocations: 3,
+                adaptedModernMarkingsCrossingItemIcons: 6,
+                adaptedThaumcraftRunedStoneItemIcons: 1,
+                adaptedForestryScannedSaplingDisplayNames: 1,
+                gregTechForestryScannedSaplingRecipeOccurrences: 1,
+                adaptedForestryScannedPollenDisplayNames: 1,
+                gregTechForestryScannedPollenRecipeOccurrences: 1,
+                adaptedProjectBlueControlPanelItemIcons: 3,
+                adaptedProjectBlueControlPanelRecipeWidgetRenderInvocations: 3,
+                adaptedIc2FluidCannerRecipeWidgetRenderInvocations: 5,
+                adaptedBuildCraftPhasedFacadeItemIcons: 4,
+                adaptedMobsInfoInfernalPreviewOutputIcons: 58,
+                adaptedMobsInfoPreviewSlotIcons: 6093,
+                adaptedDraconicMobSoulItemIcons: 363,
+                adaptedGendustryLiquifierRecipes: 40,
+                adaptedGendustryMutagenProducerRecipes: 15,
+                adaptedGendustryExtractorRecipes: 1578,
+                adaptedGendustryReplicatorRecipes: 3,
+                adaptedGendustryTransposerRecipes: 8,
+                adaptedGendustryMutatronRecipes: 705,
+                adaptedGendustrySamplerRecipes: 9216,
+                adaptedGendustryImprinterRecipes: 1,
+                normalizedTcnaAspectCostInputOccurrences: 2,
+                normalizedTcnaAspectCostDistinctKeys: 1,
+                normalizedTcnaAspectCostHandlerCategories: 4,
+                gregTechFuelSinkRecipes: 289,
+                gregTechFuelSinkCategories: 14,
+                gregTechLargeBoilerFuelSinkRecipes: 49,
+                gregTechLargeBoilerFuelSinkCategories: 1,
+                gregTechRadioHatchInformationRecipes: 104,
+                gregTechQuantumComponentInformationRecipes: 27,
+                gregTechSpaceProjectInformationRecipes: 2,
+                gregTechOutputlessSemanticCategories: 18,
+                gregTechOutputlessSemanticRecipes: 471,
+                excludedGregTechLargeBoilerPresentationRows: 1,
+                excludedGregTechUnregisteredDoorRecyclingRows: 5,
+                excludedOwnerInternalFurnaceFuelRows: 5,
+                excludedAe2EnderIoInternalConduitFacadeRows: 1,
+                excludedUnregisteredGregTechMachineCatalysts: 1,
                 loadedCategories: 1,
                 recipesEnumerated: FIXTURE_RECIPE_COUNT,
                 recipeWidgetsRendered: FIXTURE_RECIPE_COUNT,
                 itemIconsRendered: 2,
-                informationalEmptyOutputRecipes: 488,
-                knowledgeIndependentAspectNames: 1,
+                informationalEmptyOutputRecipes: 513,
+                knowledgeIndependentAspectNames: 69,
                 unloadedHandlerCategories: 0,
                 ambiguousHandlerCategories: 0,
                 duplicateHandlerCategories: 0,
@@ -285,25 +374,114 @@ test('profile contract resolution preserves MeatballCraft and derives only new-p
   assert.equal(second.diagnostics.nativeIconCorrections, 2);
   assert.equal(second.diagnostics.transparentIcons, 0);
   assert.equal(gtnh.minecraft, '1.7.10');
+  assert.equal(gtnh.format, 2);
   assert.equal(gtnh.profile, GTNH_1710_PROFILE);
   assert.equal(gtnh.forge, '10.13.4.1614');
   assert.equal(gtnh.nei, '2.8.44-GTNH');
   assert.deepEqual(gtnh.pack, GTNH_PACK_IDENTITY);
-  assert.deepEqual(gtnh.handlerPolicies, GTNH_HANDLER_POLICIES);
+  assert.deepEqual(gtnh.handlerPolicies, GTNH_284_HANDLER_POLICIES);
   assert.deepEqual(gtnh.knowledgePolicy, GTNH_KNOWLEDGE_POLICY);
   assert.deepEqual(gtnh.attribution, GTNH_DATA_ATTRIBUTION);
   assert.deepEqual(gtnh.diagnostics.nei, {
     itemListLoaded: true,
-    registeredCraftingHandlers: 10,
+    itemListRawEntries: 49,
+    itemListExcludedEntries: 46,
+    itemListRetainedEntries: 3,
+    itemListRetainedUniqueIdentities: 2,
+    registeredCraftingHandlers: 44,
     exportableCraftingHandlers: 1,
-    adaptedHandlerCategories: 8,
-    excludedNonRecipeHandlers: 9,
+    adaptedHandlerCategories: 45,
+    excludedNonRecipeHandlers: 20,
+    excludedEmptyRecipeHandlers: 22,
+    excludedUnboundTemplateRecipeHandlers: 1,
+    excludedAe2fcFluidDropItemListPlaceholders: 1,
+    excludedAe2fcFluidPacketItemListPlaceholders: 1,
+    excludedAe2CableBusInternalBlockItemListEntries: 1,
+    excludedAe2MatrixFrameInternalBlockItemListEntries: 1,
+    excludedDreamcraftNothingLegacyLootBagSentinelItemListPlaceholders: 1,
+    excludedLittleTilesUnparameterizedMicrotileCarrierItemListEntries: 1,
+    excludedMalisisDoorsUnconfiguredCustomDoorItemListPlaceholders: 1,
+    malisisDoorsUnconfiguredCustomDoorRecipeReferences: 0,
+    malisisDoorsUnconfiguredCustomDoorQuestReferences: 0,
+    excludedMalisisDoorsUnconfiguredMixedBlockItemListPlaceholders: 1,
+    malisisDoorsUnconfiguredMixedBlockRecipeReferences: 0,
+    malisisDoorsUnconfiguredMixedBlockQuestReferences: 0,
+    excludedBloodMagicBloodLightItemListHelpers: 1,
+    excludedBloodMagicSpectralContainerItemListHelpers: 1,
+    excludedArchitectureCraftCladdingItemListPlaceholders: 1,
+    excludedAvaritiaEmptyMatterClusterItemListPlaceholders: 1,
+    excludedCarpentersBedInternalBlockItemListEntries: 1,
+    excludedCarpentersDoorInternalBlockItemListEntries: 1,
+    excludedStevesCartsUnconfiguredModularCartItemListPlaceholders: 1,
+    excludedTConstructBattleSignInternalBlockItemListEntries: 1,
+    excludedTConstructHeldItemInternalBlockItemListEntries: 1,
+    excludedThaumcraftBlockHoleInternalBlockItemListEntries: 1,
+    excludedThaumcraftEldritchPortalInternalBlockItemListEntries: 1,
+    excludedThaumicHorizonsBaseLightInternalBlockItemListEntries: 1,
+    excludedThaumicHorizonsSolarLightInternalBlockItemListEntries: 1,
+    excludedTwilightForestExperiment115InternalBlockItemListEntries: 1,
+    excludedWitchingGadgetsCustomAirInternalBlockItemListEntries: 1,
+    excludedBotaniaBifrostItemListWorldStateEntries: 1,
+    excludedBotaniaBuriedPetalsItemListWorldStateVariants: 16,
+    excludedBotaniaBuriedPetalsItemListWorldStateMetadataMask: 65535,
+    excludedBotaniaCacophoniumBlockItemListWorldStateEntries: 1,
+    excludedBotaniaEnchanterItemListWorldStateEntries: 1,
+    excludedBotaniaFakeAirItemListWorldStateEntries: 1,
+    excludedBotaniaManaFlameItemListWorldStateEntries: 1,
+    excludedBotaniaSolidVineItemListWorldStateEntries: 1,
+    excludedBotaniaStructureLibAnyFlowerItemListPresentationPlaceholders: 1,
+    adaptedBotaniaCocoonItemIcons: 1,
+    adaptedBotaniaCocoonRecipeWidgetRenderInvocations: 3,
+    adaptedBotaniaPrismItemIcons: 1,
+    adaptedBotaniaPrismRecipeWidgetRenderInvocations: 3,
+    adaptedGalacticraftFlagItemIcons: 1,
+    adaptedGalacticraftFlagRecipeWidgetRenderInvocations: 3,
+    adaptedWrcbeTriangulatorItemIcons: 1,
+    adaptedWrcbeTriangulatorRecipeWidgetRenderInvocations: 3,
+    adaptedModernMarkingsCrossingItemIcons: 6,
+    adaptedThaumcraftRunedStoneItemIcons: 1,
+    adaptedForestryScannedSaplingDisplayNames: 1,
+    gregTechForestryScannedSaplingRecipeOccurrences: 1,
+    adaptedForestryScannedPollenDisplayNames: 1,
+    gregTechForestryScannedPollenRecipeOccurrences: 1,
+    adaptedProjectBlueControlPanelItemIcons: 3,
+    adaptedProjectBlueControlPanelRecipeWidgetRenderInvocations: 3,
+    adaptedIc2FluidCannerRecipeWidgetRenderInvocations: 5,
+    adaptedBuildCraftPhasedFacadeItemIcons: 4,
+    adaptedMobsInfoInfernalPreviewOutputIcons: 58,
+    adaptedMobsInfoPreviewSlotIcons: 6093,
+    adaptedDraconicMobSoulItemIcons: 363,
+    adaptedGendustryLiquifierRecipes: 40,
+    adaptedGendustryMutagenProducerRecipes: 15,
+    adaptedGendustryExtractorRecipes: 1578,
+    adaptedGendustryReplicatorRecipes: 3,
+    adaptedGendustryTransposerRecipes: 8,
+    adaptedGendustryMutatronRecipes: 705,
+    adaptedGendustrySamplerRecipes: 9216,
+    adaptedGendustryImprinterRecipes: 1,
+    normalizedTcnaAspectCostInputOccurrences: 2,
+    normalizedTcnaAspectCostDistinctKeys: 1,
+    normalizedTcnaAspectCostHandlerCategories: 4,
+    gregTechFuelSinkRecipes: 289,
+    gregTechFuelSinkCategories: 14,
+    gregTechLargeBoilerFuelSinkRecipes: 49,
+    gregTechLargeBoilerFuelSinkCategories: 1,
+    gregTechRadioHatchInformationRecipes: 104,
+    gregTechQuantumComponentInformationRecipes: 27,
+    gregTechSpaceProjectInformationRecipes: 2,
+    gregTechOutputlessSemanticCategories: 18,
+    gregTechOutputlessSemanticRecipes: 471,
+    excludedGregTechLargeBoilerPresentationRows: 1,
+    excludedGregTechUnregisteredDoorRecyclingRows: 5,
+    excludedOwnerInternalFurnaceFuelRows: 5,
+    excludedAe2EnderIoInternalConduitFacadeRows: 1,
+    excludedUnregisteredGregTechMachineCatalysts: 1,
     loadedCategories: 1,
     recipesEnumerated: FIXTURE_RECIPE_COUNT,
     recipeWidgetsRendered: FIXTURE_RECIPE_COUNT,
     itemIconsRendered: 2,
-    informationalEmptyOutputRecipes: 488,
-    knowledgeIndependentAspectNames: 1,
+    informationalEmptyOutputRecipes: 513,
+    knowledgeIndependentAspectNames: 69,
     unloadedHandlerCategories: 0,
     ambiguousHandlerCategories: 0,
     duplicateHandlerCategories: 0,
@@ -362,7 +540,7 @@ test('GTNH profile contract rejects NEI schema, handler, render, and pack-identi
         ...manifest,
         handlerPolicies: manifest.handlerPolicies.slice(0, -1),
       }),
-    /handlerPolicies must contain exactly 17 pinned handler policies/,
+    /handlerPolicies must contain exactly 66 pinned handler policies/,
   );
   assert.throws(
     () =>
@@ -1075,6 +1253,102 @@ test('builder accepts dynamic complete pack corpora with explicit profiles', asy
     } finally {
       await rm(root, {recursive: true, force: true});
     }
+  }
+});
+
+test('GTNH data-only policy emits a manifest-only v2 sidecar without reading recipe rasters', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'recipe-preview-sidecar-gtnh-data-only-test-'));
+  try {
+    const contract = completeProfileFixtureContract(GTNH_1710_PROFILE, '1.7.10');
+    const fixture = await createFixture(root, contract, {
+      missingRecipeIndex: null,
+      failures: [],
+    });
+    const hostedManifest = await readJson(fixture.hostedManifestPath);
+    hostedManifest.publicationPolicy = 'gtnh-structured-data-only-v1';
+    delete hostedManifest.web.maxPackBytes;
+    delete hostedManifest.web.packedImages;
+    const hostedCategoriesPath = join(fixture.hostedRoot, 'categories.json');
+    const hostedCategories = await readJson(hostedCategoriesPath);
+    delete hostedCategories.categories[0].icon;
+    await writeFile(hostedCategoriesPath, json(hostedCategories));
+    hostedManifest.web.visualAssets = {
+      format: 'mrt-visual-assets-policy-v1',
+      mode: 'structured-data-only',
+      policy: 'gtnh-structured-data-only-v1',
+      itemIcons: 0,
+      categoryIcons: 0,
+      recipePreviews: 0,
+      mobSprites: 0,
+      packedImageFiles: 0,
+    };
+    hostedManifest.web.recipeImages.reason = 'third-party-artwork-rights-not-cleared';
+    hostedManifest.web.recipeImages.policy = 'gtnh-structured-data-only-v1';
+    await writeFile(fixture.hostedManifestPath, json(hostedManifest));
+    const publicationId = await computePublicationId(fixture.hostedRoot);
+    await writeFile(
+      fixture.hostedManifestPath,
+      json({...hostedManifest, publicationId}),
+    );
+
+    for (const name of await readdir(fixture.categoryRoot)) {
+      if (name.endsWith('.png')) await unlink(join(fixture.categoryRoot, name));
+    }
+    const logged = [];
+    const output = join(root, 'sidecar');
+    const manifest = await buildRecipePreviewSidecar({
+      source: fixture.rawRoot,
+      datasetManifest: fixture.hostedManifestPath,
+      output,
+      profile: GTNH_1710_PROFILE,
+      logger: {
+        info(message) { logged.push(['info', message]); },
+        warn(message) { logged.push(['warn', message]); },
+        error(message) { logged.push(['error', message]); },
+      },
+    });
+    assert.equal(manifest.format, RECIPE_PREVIEW_SIDECAR_DATA_ONLY_FORMAT);
+    assert.equal(manifest.publicationPolicy, 'gtnh-structured-data-only-v1');
+    assert.equal(manifest.exclusionReason, 'third-party-artwork-rights-not-cleared');
+    assert.equal(manifest.datasetPublicationId, publicationId);
+    assert.deepEqual(manifest.packs, []);
+    assert.deepEqual(manifest.categoryDocuments, []);
+    assert.deepEqual(manifest.mapping, {documents: 0, parts: 0, bytes: 0});
+    assert.equal(manifest.counts.categories, 1);
+    assert.equal(manifest.counts.recipes, FIXTURE_RECIPE_COUNT);
+    assert.equal(manifest.counts.previews, 0);
+    assert.equal(manifest.counts.missing, FIXTURE_RECIPE_COUNT);
+    assert.equal(manifest.counts.inputBytes, 0);
+    assert.equal(manifest.counts.storedBytes, 0);
+    assert.equal(manifest.counts.packIndexBytes, 0);
+    assert.equal(manifest.counts.hostedOmittedPngBytes, fixture.sourcePngBytes);
+    assert.deepEqual(await collectRelativeFiles(output), ['manifest.json']);
+    assert.equal(
+      logged.some(([level, message]) =>
+        level === 'warn' && message.includes('No raster file will be read')),
+      true,
+    );
+
+    const driftedHostedManifest = await readJson(fixture.hostedManifestPath);
+    driftedHostedManifest.web.recipeImages.reason = 'hosting-archive-budget';
+    await writeFile(fixture.hostedManifestPath, json(driftedHostedManifest));
+    const driftedPublicationId = await computePublicationId(fixture.hostedRoot);
+    await writeFile(
+      fixture.hostedManifestPath,
+      json({...driftedHostedManifest, publicationId: driftedPublicationId}),
+    );
+    await assert.rejects(
+      buildRecipePreviewSidecar({
+        source: fixture.rawRoot,
+        datasetManifest: fixture.hostedManifestPath,
+        output: join(root, 'sidecar-reason-drift'),
+        profile: GTNH_1710_PROFILE,
+        logger: quietLogger,
+      }),
+      /exact rights-exclusion reason/,
+    );
+  } finally {
+    await rm(root, {recursive: true, force: true});
   }
 });
 

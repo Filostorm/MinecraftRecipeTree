@@ -37,9 +37,8 @@ export const EXPORTER_RELEASE_DEFINITIONS = Object.freeze([
     source: 'recipe-export-mod/build/libs/jeiexport-1.0.0.jar',
     filename: 'recipe-tree-exporter-forge-1.20.1-1.0.0.jar',
     qualityProfiles: Object.freeze(['generic-jei-1.20.1']),
-    acceptanceProfile: 'generic-jei-1.20.1',
     artifactProvenance: null,
-    acceptanceCorpus: null,
+    acceptanceCorpora: Object.freeze({'generic-jei-1.20.1': null}),
     compatibility: 'Forge 47 with JEI 15.x',
   }),
   Object.freeze({
@@ -47,17 +46,24 @@ export const EXPORTER_RELEASE_DEFINITIONS = Object.freeze([
     minecraftVersion: '1.18.2',
     recipeViewer: 'REI 8',
     loader: 'Forge 40',
-    version: '1.0.1',
-    source: 'recipe-export-mod-1.18.2/build/libs/recipe-export-mod-1.18.2-1.0.1.jar',
-    filename: 'recipe-tree-exporter-forge-1.18.2-1.0.1.jar',
+    version: '1.0.44',
+    source: 'recipe-export-mod-1.18.2/build/libs/recipe-export-mod-1.18.2-1.0.44.jar',
+    filename: 'recipe-tree-exporter-forge-1.18.2-1.0.44.jar',
     qualityProfiles: Object.freeze(['multiblock-madness-2-1.18.2']),
-    acceptanceProfile: 'multiblock-madness-2-1.18.2',
     artifactProvenance: Object.freeze({
       format: 'mrt-exporter-build-v1',
       exporterId: 'forge-rei-1.18.2',
       minecraftVersion: '1.18.2',
     }),
-    acceptanceCorpus: null,
+    acceptanceCorpora: Object.freeze({
+      'multiblock-madness-2-1.18.2': Object.freeze({
+        items: Object.freeze({min: 68520, max: 68540}),
+        recipes: 99908,
+        categories: 333,
+        mobs: 0,
+        blockDrops: 0,
+      }),
+    }),
     compatibility: 'Forge 40 with REI 8.4.x',
   }),
   Object.freeze({
@@ -69,18 +75,26 @@ export const EXPORTER_RELEASE_DEFINITIONS = Object.freeze([
     source: 'recipe-export-mod-1.12.2/build/libs/recipe-export-mod-1.12.2-1.0.3.jar',
     filename: 'recipe-tree-exporter-forge-1.12.2-1.0.3.jar',
     qualityProfiles: Object.freeze(['meatballcraft-1.12.2', 'multiblock-madness-1.12.2']),
-    acceptanceProfile: 'multiblock-madness-1.12.2',
     artifactProvenance: Object.freeze({
       format: 'mrt-exporter-build-v1',
       exporterId: 'forge-hei-1.12.2',
       minecraftVersion: '1.12.2',
     }),
-    acceptanceCorpus: Object.freeze({
-      items: 88268,
-      recipes: 107819,
-      categories: 378,
-      mobs: 0,
-      blockDrops: 0,
+    acceptanceCorpora: Object.freeze({
+      'meatballcraft-1.12.2': Object.freeze({
+        items: 196161,
+        recipes: 359215,
+        categories: 674,
+        mobs: 0,
+        blockDrops: 0,
+      }),
+      'multiblock-madness-1.12.2': Object.freeze({
+        items: 88268,
+        recipes: 107819,
+        categories: 378,
+        mobs: 0,
+        blockDrops: 0,
+      }),
     }),
     compatibility: 'Forge 14.23.5 with HEI 4.25.0+ (validated on 4.25.0 and 4.30.3)',
   }),
@@ -89,17 +103,24 @@ export const EXPORTER_RELEASE_DEFINITIONS = Object.freeze([
     minecraftVersion: '1.7.10',
     recipeViewer: 'NEI 2.8.44-GTNH',
     loader: 'Forge 10.13.4.1614',
-    version: '1.0.2',
-    source: 'recipe-export-mod-1.7.10/build/libs/recipe-tree-gtnh-nei-exporter-1.0.2.jar',
-    filename: 'recipe-tree-exporter-gtnh-1.7.10-1.0.2.jar',
+    version: '1.0.148',
+    source: 'recipe-export-mod-1.7.10/build/libs/recipe-tree-gtnh-nei-exporter-1.0.148.jar',
+    filename: 'recipe-tree-exporter-gtnh-1.7.10-1.0.148.jar',
     qualityProfiles: Object.freeze(['gtnh-1.7.10']),
-    acceptanceProfile: 'gtnh-1.7.10',
     artifactProvenance: Object.freeze({
       format: 'mrt-exporter-build-v1',
       exporterId: 'forge-nei-gtnh-1.7.10',
       minecraftVersion: '1.7.10',
     }),
-    acceptanceCorpus: null,
+    acceptanceCorpora: Object.freeze({
+      'gtnh-1.7.10': Object.freeze({
+        items: 143884,
+        recipes: 568820,
+        categories: 287,
+        mobs: 0,
+        blockDrops: 0,
+      }),
+    }),
     compatibility: 'GT New Horizons 2.8.4 with NEI 2.8.44-GTNH',
   }),
 ]);
@@ -206,17 +227,40 @@ async function requireAcceptance({
     logger.warn(
       `[exporter-release] TEST-ONLY acceptance receipt bypass used for ${definition.id}; production CLI calls cannot enable this option.`,
     );
-    return null;
+    return Object.freeze([]);
   }
-  return requireAcceptedExporterRelease({definition, sourceBytes, acceptanceRoot});
+  const receipts = [];
+  for (const qualityProfile of definition.qualityProfiles ?? []) {
+    try {
+      receipts.push(
+        await requireAcceptedExporterRelease({
+          definition,
+          sourceBytes,
+          qualityProfile,
+          acceptanceRoot,
+          logger,
+        }),
+      );
+    } catch (error) {
+      throw new Error(
+        `Exporter release ${definition.id} is not fully accepted; profile ${qualityProfile} failed: ${error.message}`,
+        {cause: error},
+      );
+    }
+  }
+  if (receipts.length !== definition.qualityProfiles?.length || receipts.length === 0) {
+    throw new Error(
+      `Exporter release ${definition.id} has an invalid or incomplete advertised profile set.`,
+    );
+  }
+  return Object.freeze(receipts);
 }
 
 function releaseForBytes(definition, bytes) {
   const {
     source: _source,
-    acceptanceProfile: _acceptanceProfile,
     artifactProvenance: _artifactProvenance,
-    acceptanceCorpus: _acceptanceCorpus,
+    acceptanceCorpora: _acceptanceCorpora,
     ...publicDefinition
   } = definition;
   return Object.freeze({

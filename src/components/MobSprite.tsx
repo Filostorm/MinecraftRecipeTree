@@ -1,8 +1,40 @@
 import React, {useEffect, useState} from 'react';
-import {Image, Platform, View} from 'react-native';
+import {
+  Image,
+  Platform,
+  StyleSheet,
+  Text,
+  View,
+  type ImageErrorEvent,
+} from 'react-native';
 import {useData} from '../data/DataContext';
+import {theme} from '../theme';
 import {Mob} from '../types';
 import {pixelated} from './ItemIcon';
+import {
+  generatedMobPlaceholderColor,
+  generatedMobPlaceholderLabel,
+} from './mobPlaceholder';
+
+function GeneratedMobPlaceholder({mob, size}: {mob: Mob; size: number}) {
+  return (
+    <View
+      accessible
+      accessibilityRole="image"
+      accessibilityLabel={`${mob.n} generated placeholder; exported mob artwork is unavailable`}
+      style={[
+        styles.placeholder,
+        {width: size, height: size, backgroundColor: generatedMobPlaceholderColor(mob.id)},
+      ]}>
+      <Text style={[styles.placeholderGlyph, {fontSize: Math.max(11, size * 0.28)}]}>◈</Text>
+      <Text
+        numberOfLines={1}
+        style={[styles.placeholderText, {fontSize: Math.max(9, size * 0.17)}]}>
+        {generatedMobPlaceholderLabel(mob.n)}
+      </Text>
+    </View>
+  );
+}
 
 // One global keyframes rule drives every sprite: -100% of the strip's own width
 // is exactly frames × frameSize, so it works for any sprite size.
@@ -25,9 +57,11 @@ export function MobSprite({mob, size, animate = true}: {mob: Mob; size: number; 
   const data = useData();
   const frames = mob.frames ?? 1;
   const fps = mob.fps ?? 10;
-  const uri = data.imageUrl(mob.icon);
+  const uri = mob.icon ? data.imageUrl(mob.icon) : undefined;
+  const [failedUri, setFailedUri] = useState<string | null>(null);
+  const unavailable = uri === undefined || failedUri === uri;
 
-  const useTimer = animate && frames > 1 && Platform.OS !== 'web';
+  const useTimer = !unavailable && animate && frames > 1 && Platform.OS !== 'web';
   const [frame, setFrame] = useState(0);
   useEffect(() => {
     if (!useTimer) return;
@@ -35,9 +69,26 @@ export function MobSprite({mob, size, animate = true}: {mob: Mob; size: number; 
     return () => clearInterval(id);
   }, [useTimer, frames, fps]);
 
+  if (unavailable) return <GeneratedMobPlaceholder mob={mob} size={size} />;
+
+  const onError = (event: ImageErrorEvent) => {
+    console.error('A mob sprite failed to load; rendering its deterministic generated placeholder.', {
+      mobId: mob.id,
+      mobName: mob.n,
+      uri,
+      detail: event.nativeEvent.error,
+    });
+    setFailedUri(uri);
+  };
+
   if (frames <= 1) {
     return (
-      <Image source={{uri}} style={[{width: size, height: size}, pixelated as object]} resizeMode="contain" />
+      <Image
+        source={{uri}}
+        style={[{width: size, height: size}, pixelated as object]}
+        resizeMode="contain"
+        onError={onError}
+      />
     );
   }
 
@@ -62,7 +113,29 @@ export function MobSprite({mob, size, animate = true}: {mob: Mob; size: number; 
           pixelated as object,
         ]}
         resizeMode="stretch"
+        onError={onError}
       />
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  placeholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: theme.borderLight,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  placeholderGlyph: {
+    color: theme.text,
+    fontWeight: '900',
+  },
+  placeholderText: {
+    maxWidth: '82%',
+    color: theme.text,
+    fontWeight: '900',
+    letterSpacing: 0.6,
+  },
+});

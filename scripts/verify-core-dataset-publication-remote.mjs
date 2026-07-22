@@ -2,6 +2,7 @@ import {open, readFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {validateLocalCoreDatasetPublication} from './build-core-dataset-publication.mjs';
+import {GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY} from './core-dataset-publication-contract.mjs';
 import {parsePackedImageAuthorizationIndex} from './packed-image-authorization.mjs';
 
 const DEFAULT_CONCURRENCY = 8;
@@ -69,10 +70,20 @@ async function fetchWithTimeout(fetchImpl, url, init, timeoutMs, label) {
   }
 }
 
-function assertResponseHeaders(response, {bytes, contentType, noTransform, label}) {
+function assertResponseHeaders(response, {bytes, contentType, noTransform, label, head = false}) {
   const length = response.headers.get('content-length');
-  if (!/^(0|[1-9]\d*)$/.test(length ?? '') || Number(length) !== bytes) {
+  const storedBytes = response.headers.get('x-mrt-stored-bytes');
+  if (storedBytes !== null && (!/^(0|[1-9]\d*)$/.test(storedBytes) || Number(storedBytes) !== bytes)) {
+    throw new Error(`${label} X-MRT-Stored-Bytes is ${JSON.stringify(storedBytes)}; expected ${bytes}.`);
+  }
+  if (length !== null && (!/^(0|[1-9]\d*)$/.test(length) || Number(length) !== bytes)) {
     throw new Error(`${label} Content-Length is ${JSON.stringify(length)}; expected ${bytes}.`);
+  }
+  if (length === null && (!head || storedBytes === null)) {
+    throw new Error(
+      `${label} omitted the exact stored-byte length; expected ${bytes} in ` +
+        `${head ? 'Content-Length or X-MRT-Stored-Bytes' : 'Content-Length'}.`,
+    );
   }
   const actualType = response.headers.get('content-type')?.split(';', 1)[0].trim().toLowerCase();
   if (actualType !== contentType) {
@@ -182,6 +193,12 @@ export async function verifyPublicCoreDatasetPublication({
       logger,
     });
     const publicationId = local.publicationId;
+    if (local.manifest.publicationPolicy === GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY) {
+      logger.warn(
+        `Rights policy ${GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY} excludes all core image ` +
+          'packs; public verification will require zero MRPI image samples.',
+      );
+    }
     const records = new Map(local.records.map(record => [record.path, record]));
     const documents = local.manifest.documents;
 
@@ -203,6 +220,7 @@ export async function verifyPublicCoreDatasetPublication({
         contentType: 'application/json',
         noTransform: false,
         label,
+        head: true,
       });
       await cancelBody(response, logger, label);
     });

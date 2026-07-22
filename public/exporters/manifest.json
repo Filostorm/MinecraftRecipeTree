@@ -1,6 +1,6 @@
 {
   "format": "mrt-exporter-releases-v1",
-  "generatedAt": "2026-07-20T07:10:56.481Z",
+  "generatedAt": "2026-07-22T14:05:58.380Z",
   "releases": [
     {
       "id": "forge-jei-1.20.1",
@@ -22,11 +22,11 @@
       "minecraftVersion": "1.18.2",
       "recipeViewer": "REI 8",
       "loader": "Forge 40",
-      "version": "1.0.0",
-      "filename": "recipe-tree-exporter-forge-1.18.2-1.0.0.jar",
-      "downloadUrl": "/exporters/recipe-tree-exporter-forge-1.18.2-1.0.0.jar",
-      "sha256": "8d286afef963d4b58fdfb8aef2c3c78d99f02d98ca9b5a0db2f4e57138ead4e3",
-      "bytes": 156626,
+      "version": "1.0.44",
+      "filename": "recipe-tree-exporter-forge-1.18.2-1.0.44.jar",
+      "downloadUrl": "/exporters/recipe-tree-exporter-forge-1.18.2-1.0.44.jar",
+      "sha256": "70c7d275bcd337bb9654ed3e367a4f2d78073dfdfa1b1471cc1a57393b1a2d70",
+      "bytes": 574182,
       "qualityProfiles": [
         "multiblock-madness-2-1.18.2"
       ],
@@ -53,11 +53,11 @@
       "minecraftVersion": "1.7.10",
       "recipeViewer": "NEI 2.8.44-GTNH",
       "loader": "Forge 10.13.4.1614",
-      "version": "1.0.0",
-      "filename": "recipe-tree-exporter-gtnh-1.7.10-1.0.0.jar",
-      "downloadUrl": "/exporters/recipe-tree-exporter-gtnh-1.7.10-1.0.0.jar",
-      "sha256": "da2de8a1d040e223174021e5b94b1eb191cae98f4f4cf3cb035869765e803c11",
-      "bytes": 70322,
+      "version": "1.0.148",
+      "filename": "recipe-tree-exporter-gtnh-1.7.10-1.0.148.jar",
+      "downloadUrl": "/exporters/recipe-tree-exporter-gtnh-1.7.10-1.0.148.jar",
+      "sha256": "6f9b5eaaa44d934772ff8ac1294adfb18e86b10d603260492b8f73a577dcbf3d",
+      "bytes": 1009908,
       "qualityProfiles": [
         "gtnh-1.7.10"
       ],

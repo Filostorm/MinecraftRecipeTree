@@ -20,7 +20,10 @@ export interface TreeCalculation extends TreeTotals {
 }
 
 const warnedMissingTreeYields = new Set<string>();
+const warnedStochasticTreeYields = new Set<string>();
 const warnedUnknownByproductBalances = new Set<string>();
+const warnedStochasticByproducts = new Set<string>();
+const warnedStochasticInputConsumption = new Set<string>();
 
 export function treeTotalIdentity(total: Pick<TreeTotal, 'key' | 'tag'>): string {
   return total.tag ? `#${total.tag}` : total.key;
@@ -138,6 +141,20 @@ export function calculateTreeTotals(
         });
       }
       outputYield = 1;
+    } else if (selectedOutput.probability !== undefined) {
+      const warningKey = `${source.ref?.[0] ?? 'unknown'}:${source.ref?.[1] ?? 'unknown'}:${node.key}`;
+      if (!warnedStochasticTreeYields.has(warningKey)) {
+        warnedStochasticTreeYields.add(warningKey);
+        console.warn(
+          'Tree totals cannot derive a guaranteed recipe count from a stochastic selected output; quantitative totals are intentionally unknown.',
+          {
+            recipe: source.ref,
+            itemKey: node.key,
+            probability: selectedOutput.probability,
+          },
+        );
+      }
+      outputYield = null;
     } else {
       outputYield = selectedOutput.amount;
     }
@@ -150,9 +167,26 @@ export function calculateTreeTotals(
           : required / outputYield;
 
     for (const child of source.inputs) {
+      const stochasticConsumption =
+        !child.nonConsumed && child.consumptionProbability !== undefined;
+      if (stochasticConsumption) {
+        const warningKey =
+          `${source.ref?.[0] ?? 'unknown'}:${source.ref?.[1] ?? 'unknown'}:${child.key}`;
+        if (!warnedStochasticInputConsumption.has(warningKey)) {
+          warnedStochasticInputConsumption.add(warningKey);
+          console.warn(
+            'Tree totals cannot derive guaranteed material consumption from a stochastic input; quantitative consumption is intentionally unknown.',
+            {
+              recipe: source.ref,
+              itemKey: child.key,
+              probability: child.consumptionProbability,
+            },
+          );
+        }
+      }
       visit(
         child,
-        child.amount == null || runs == null
+        stochasticConsumption || child.amount == null || runs == null
           ? null
           : child.nonConsumed
             ? child.amount
@@ -162,10 +196,26 @@ export function calculateTreeTotals(
 
     for (const output of outputs) {
       if (output === selectedOutput) continue;
+      const stochastic = output.probability !== undefined;
+      if (stochastic) {
+        const warningKey =
+          `${source.ref?.[0] ?? 'unknown'}:${source.ref?.[1] ?? 'unknown'}:${output.key}`;
+        if (!warnedStochasticByproducts.has(warningKey)) {
+          warnedStochasticByproducts.add(warningKey);
+          console.warn(
+            'Stochastic byproduct credits are disabled because a guaranteed material balance cannot be derived.',
+            {
+              recipe: source.ref,
+              itemKey: output.key,
+              probability: output.probability,
+            },
+          );
+        }
+      }
       addTotal(
         byproducts,
         output.key,
-        output.amount == null || runs == null ? null : output.amount * runs,
+        stochastic || output.amount == null || runs == null ? null : output.amount * runs,
         output.variants,
         output.tag,
       );

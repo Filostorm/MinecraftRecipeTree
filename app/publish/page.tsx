@@ -6,6 +6,7 @@ import {
   type ExporterReleaseManifest,
   requireExporterReleaseManifest,
 } from '../../src/data/exporterReleases';
+import {MINECRAFT_PRODUCT_DISCLAIMER} from '../../src/legalNotices';
 import styles from './publish.module.css';
 
 const MAX_RELEASE_MANIFEST_BYTES = 128 * 1024;
@@ -109,6 +110,10 @@ export default function PublishPage() {
             Open viewer
           </a>
         </header>
+
+        <p className={styles.minecraftDisclaimer} role="note">
+          {MINECRAFT_PRODUCT_DISCLAIMER}
+        </p>
 
         <section className={styles.hero} aria-labelledby="publish-title">
           <p className={styles.eyebrow}>PUBLIC EXPORT WORKFLOW</p>

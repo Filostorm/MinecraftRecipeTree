@@ -5,7 +5,9 @@ import {
   DEFAULT_EXPORTER_ACCEPTANCE_ROOT,
   DEFAULT_EXPORTER_WORKSPACE_ROOT,
   MAX_EXPORTER_MANIFEST_BYTES,
+  acceptanceCorpusMatchesCounts,
   buildExporterAcceptanceReceipt,
+  exporterAcceptanceCorpusForProfile,
   exporterAcceptancePolicySha256,
   exporterReleaseDefinitionForId,
   requireExporterArtifactProvenance,
@@ -119,17 +121,17 @@ export async function acceptExporterRelease({
   const qualityRequirements = qualityProfileRequirementsFor(qualityProfile);
   if (
     !Array.isArray(definition.qualityProfiles) ||
-    qualityProfile !== definition.acceptanceProfile ||
     !definition.qualityProfiles.includes(qualityProfile)
   ) {
     const allowedProfiles = Array.isArray(definition.qualityProfiles)
       ? definition.qualityProfiles.join(', ')
       : '(invalid configuration)';
     throw new Error(
-      `Release ${releaseId} requires acceptance profile ${JSON.stringify(definition.acceptanceProfile)}; ` +
-        `received ${JSON.stringify(qualityProfile)}. Advertised profiles: ${allowedProfiles}.`,
+      `Release ${releaseId} does not advertise acceptance profile ${JSON.stringify(qualityProfile)}. ` +
+        `Advertised profiles: ${allowedProfiles}.`,
     );
   }
+  const acceptanceCorpus = exporterAcceptanceCorpusForProfile(definition, qualityProfile);
   const artifactProvenance = requireExporterArtifactProvenance(definition);
   if (qualityRequirements?.requiresExporterBuildIdentity && artifactProvenance === null) {
     throw new Error(
@@ -141,9 +143,9 @@ export async function acceptExporterRelease({
       `Release ${releaseId} configures exporter provenance, but its acceptance profile does not require it.`,
     );
   }
-  if (qualityRequirements?.requiresExporterBuildIdentity && definition.acceptanceCorpus === null) {
+  if (qualityRequirements?.requiresExporterBuildIdentity && acceptanceCorpus === null) {
     throw new Error(
-      `Release ${releaseId} has no exact acceptanceCorpus yet. Populate its full-export counts after the completed run before issuing a receipt.`,
+      `Release ${releaseId}/${qualityProfile} has no exact acceptance corpus yet. Populate its full-export counts after the completed run before issuing a receipt.`,
     );
   }
   const sourcePath = resolveExporterReleaseSourcePath(definition, workspaceRoot);
@@ -164,7 +166,10 @@ export async function acceptExporterRelease({
       `Release ${releaseId} source JAR identity does not match its configured exporter ID and Minecraft version.`,
     );
   }
-  const validationPolicySha256 = await exporterAcceptancePolicySha256(definition);
+  const validationPolicySha256 = await exporterAcceptancePolicySha256(
+    definition,
+    qualityProfile,
+  );
   const root = requireContainedExportRoot(exportRoot);
   const exportTreeBefore = await digestExportTree(root, {logger});
   const manifestPath = join(root, 'manifest.json');
@@ -202,12 +207,12 @@ export async function acceptExporterRelease({
     blockDrops: manifest.counts?.blockDrops,
   };
   if (
-    definition.acceptanceCorpus !== null &&
-    !isDeepStrictEqual(corpus, definition.acceptanceCorpus)
+    acceptanceCorpus !== null &&
+    !acceptanceCorpusMatchesCounts(corpus, acceptanceCorpus)
   ) {
     throw new Error(
-      `Acceptance export corpus does not match release ${releaseId}: expected ` +
-        `${JSON.stringify(definition.acceptanceCorpus)}, received ${JSON.stringify(corpus)}.`,
+      `Acceptance export corpus does not match release ${releaseId}/${qualityProfile}: expected ` +
+        `${JSON.stringify(acceptanceCorpus)}, received ${JSON.stringify(corpus)}.`,
     );
   }
   let exporterBuild = null;
@@ -221,7 +226,7 @@ export async function acceptExporterRelease({
   }
 
   logger.info(
-    `[exporter-acceptance] Validating the complete ${definition.id} export before issuing a receipt.`,
+    `[exporter-acceptance] Validating the complete ${definition.id}/${qualityProfile} export before issuing a receipt.`,
   );
   const summary = await testOnlyValidateExport(root, {
     profile: qualityProfile,

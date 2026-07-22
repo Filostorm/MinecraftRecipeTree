@@ -44,6 +44,30 @@ function manifestFixture() {
   };
 }
 
+function dataOnlyManifestFixture() {
+  return {
+    format: 'mrt-core-dataset-publication-v1',
+    publicationPolicy: 'gtnh-structured-data-only-v1',
+    publicationId: DIGEST,
+    maxDocumentBytes: 8 * 1024 * 1024,
+    maxPackBytes: 1024 * 1024,
+    packIndexFormat: 'mrt-packed-image-authorization-index-v1',
+    maxPackIndexBytes: 512 * 1024,
+    counts: {
+      documents: 1,
+      packs: 0,
+      packedImages: 0,
+      documentBytes: 10,
+      packBytes: 0,
+      packIndexBytes: 0,
+      objects: 1,
+      storedBytes: 10,
+    },
+    documents: [{path: 'manifest.json', bytes: 10, sha256: DIGEST}],
+    packs: [],
+  };
+}
+
 test('MRPI v1 binary round-trips only exact contiguous full-pack boundaries', () => {
   const bytes = encodePackedImageAuthorizationIndex({
     packNumber: 7,
@@ -126,6 +150,41 @@ test('local builder and Worker ingestion retain byte-exact control-manifest pari
   assert.deepEqual(
     Buffer.from(workerManifestBytes(manifest)),
     coreDatasetPublicationManifestBytes(manifest),
+  );
+});
+
+test('only the exact GTNH structured-data-only policy permits a zero-pack core publication', () => {
+  const manifest = requireCoreDatasetPublicationManifest(dataOnlyManifestFixture(), DIGEST);
+  assert.deepEqual(requireWorkerManifest(manifest, DIGEST).manifest, manifest);
+  assert.deepEqual(
+    Buffer.from(workerManifestBytes(manifest)),
+    coreDatasetPublicationManifestBytes(manifest),
+  );
+
+  const ordinary = {...dataOnlyManifestFixture()};
+  delete ordinary.publicationPolicy;
+  assert.throws(
+    () => requireCoreDatasetPublicationManifest(ordinary, DIGEST),
+    /does not satisfy the v1 control-manifest contract/,
+  );
+  assert.throws(
+    () => requireWorkerManifest(ordinary, DIGEST),
+    /exact v1 control-manifest contract/,
+  );
+
+  assert.throws(
+    () => requireCoreDatasetPublicationManifest({
+      ...dataOnlyManifestFixture(),
+      publicationPolicy: 'lookalike-data-only-policy',
+    }),
+    /does not satisfy the v1 control-manifest contract/,
+  );
+  assert.throws(
+    () => requireCoreDatasetPublicationManifest({
+      ...dataOnlyManifestFixture(),
+      packs: manifestFixture().packs,
+    }),
+    /does not satisfy the v1 control-manifest contract/,
   );
 });
 

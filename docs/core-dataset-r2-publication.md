@@ -173,6 +173,12 @@ operator verifies the resulting public catalog after accepting the Worker's exac
 receipt. It retries only the read-side verification, with bounded 200/500/1000 ms backoff, and
 never repeats an acknowledged mutation.
 
+Before activation of a large publication, run the credential-free cold-browser gate documented in
+the viewer README. A `current-storage-eligible` report is the only automatic pass. Exit status `2`
+means either operator review or a lazy-index migration is required; it is not activation authority.
+The benchmark uses the existing production web app and local publication bytes without uploading,
+activating, deleting, or otherwise mutating D1/R2.
+
 An exit status of `2` means the mutation was acknowledged as committed but all four catalog
 verification attempts remained inconclusive. Automation must stop and inspect `/api/datasets`;
 it must not interpret status `2` as proof that the mutation was rolled back. Status `1` means the

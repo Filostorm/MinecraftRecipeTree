@@ -14,6 +14,7 @@ import {fileURLToPath} from 'node:url';
 import {
   CORE_DATASET_PUBLICATION_FORMAT,
   CORE_DATASET_PUBLICATION_ID_PATTERN,
+  GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY,
   MAX_CORE_PUBLICATION_MANIFEST_BYTES,
   coreDatasetContentRecords,
   coreDatasetPublicationManifestBytes,
@@ -34,10 +35,141 @@ import {
   parsePackedImagePath,
 } from './packed-assets.mjs';
 import {computePublicationId} from './publication-id.mjs';
+import {requireRecipeImageInventory} from './recipe-image-inventory.mjs';
 import {MAX_SHARD_BYTES} from './sharded-documents.mjs';
 
 const DEFAULT_CONCURRENCY = Math.max(1, Math.min(8, availableParallelism()));
 const MAX_CONCURRENCY = 32;
+const GTNH_STRUCTURED_DATA_ONLY_EXCLUSION_REASON =
+  'third-party-artwork-rights-not-cleared';
+const GTNH_STRUCTURED_DATA_ONLY_VISUAL_ASSETS = Object.freeze({
+  format: 'mrt-visual-assets-policy-v1',
+  mode: 'structured-data-only',
+  policy: GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY,
+  itemIcons: 0,
+  categoryIcons: 0,
+  recipePreviews: 0,
+  mobSprites: 0,
+  packedImageFiles: 0,
+});
+const GTNH_DATA_ATTRIBUTION = Object.freeze({
+  sourceUrl: 'https://github.com/GTNewHorizons/GT-New-Horizons-Modpack/tree/2.8.4',
+  projectUrl: 'https://www.gtnewhorizons.com/',
+  licenseIdentifier: 'CC BY-NC-SA 4.0',
+  licenseUrl: 'https://creativecommons.org/licenses/by-nc-sa/4.0/',
+});
+const GTNH_PACK_IDENTITY = Object.freeze({
+  name: 'GT New Horizons',
+  version: '2.8.4',
+  identitySource: 'explicit-request',
+});
+
+function isRecord(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function hasExactPrimitiveRecord(value, expected) {
+  if (!isRecord(value)) return false;
+  const actualKeys = Object.keys(value).sort();
+  const expectedKeys = Object.keys(expected).sort();
+  return (
+    actualKeys.length === expectedKeys.length &&
+    actualKeys.every((key, index) =>
+      key === expectedKeys[index] && value[key] === expected[key],
+    )
+  );
+}
+
+function hasExactKeys(value, expectedKeys) {
+  if (!isRecord(value)) return false;
+  const actualKeys = Object.keys(value).sort();
+  const sortedExpectedKeys = [...expectedKeys].sort();
+  return (
+    actualKeys.length === sortedExpectedKeys.length &&
+    actualKeys.every((key, index) => key === sortedExpectedKeys[index])
+  );
+}
+
+function requirePackedDatasetPublicationPolicy(manifest) {
+  const hasPolicy = isRecord(manifest) && Object.hasOwn(manifest, 'publicationPolicy');
+  const web = isRecord(manifest?.web) ? manifest.web : undefined;
+  const visualAssets = web?.visualAssets;
+  const recipeImages = web?.recipeImages;
+  if (!hasPolicy) {
+    if (
+      visualAssets !== undefined ||
+      (isRecord(recipeImages) && Object.hasOwn(recipeImages, 'policy'))
+    ) {
+      throw new Error(
+        'Dataset manifest contains a visual-rights policy without an exact top-level publicationPolicy.',
+      );
+    }
+    return undefined;
+  }
+  if (manifest.publicationPolicy !== GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY) {
+    throw new Error(
+      `Dataset manifest publicationPolicy ${JSON.stringify(manifest.publicationPolicy)} is unsupported.`,
+    );
+  }
+  if (
+    manifest.profile !== 'gtnh-1.7.10' ||
+    manifest.minecraft !== '1.7.10' ||
+    manifest.forge !== '10.13.4.1614' ||
+    manifest.nei !== '2.8.44-GTNH' ||
+    !hasExactPrimitiveRecord(manifest.pack, GTNH_PACK_IDENTITY) ||
+    !hasExactPrimitiveRecord(manifest.attribution, GTNH_DATA_ATTRIBUTION) ||
+    !hasExactPrimitiveRecord(visualAssets, GTNH_STRUCTURED_DATA_ONLY_VISUAL_ASSETS) ||
+    !isRecord(manifest.counts) ||
+    !Number.isSafeInteger(manifest.counts.recipes) ||
+    manifest.counts.recipes <= 0
+  ) {
+    throw new Error(
+      'The structured-data-only publication policy requires the exact GTNH 2.8.4 ' +
+        'profile, runtime provenance, attribution, and zero-visual-assets contract.',
+    );
+  }
+  if (
+    !hasExactKeys(recipeImages, [
+      'mode',
+      'reason',
+      'policy',
+      'references',
+      'files',
+      'encoding',
+      'bytes',
+      'inventory',
+    ]) ||
+    recipeImages.mode !== 'omitted' ||
+    recipeImages.reason !== GTNH_STRUCTURED_DATA_ONLY_EXCLUSION_REASON ||
+    recipeImages.policy !== GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY ||
+    recipeImages.encoding !== 'png' ||
+    !Number.isSafeInteger(recipeImages.references) ||
+    recipeImages.references < 0 ||
+    recipeImages.files !== recipeImages.references ||
+    !Number.isSafeInteger(recipeImages.bytes) ||
+    recipeImages.bytes < 0
+  ) {
+    throw new Error(
+      'The structured-data-only publication policy requires the exact recipe-image ' +
+        'rights-exclusion declaration and inventory envelope.',
+    );
+  }
+  const inventory = requireRecipeImageInventory(
+    recipeImages.inventory,
+    'Dataset manifest.web.recipeImages.inventory',
+    manifest.counts.recipes,
+  );
+  if (
+    inventory.previews !== recipeImages.references ||
+    inventory.missing !== manifest.counts.recipes - recipeImages.references
+  ) {
+    throw new Error(
+      'Dataset manifest.web.recipeImages inventory does not reconcile with the GTNH ' +
+        'structured-data-only exclusion counts.',
+    );
+  }
+  return GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY;
+}
 
 function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
@@ -224,6 +356,7 @@ async function analyzeExport(exportRoot, concurrency) {
     MAX_SHARD_BYTES,
   );
   const datasetManifest = parseJson(datasetManifestBytes, 'Dataset manifest.json');
+  const publicationPolicy = requirePackedDatasetPublicationPolicy(datasetManifest);
   const publicationId = datasetManifest?.publicationId;
   if (!CORE_DATASET_PUBLICATION_ID_PATTERN.test(publicationId ?? '')) {
     throw new Error('Dataset manifest.json must contain a lowercase SHA-256 publicationId.');
@@ -251,8 +384,20 @@ async function analyzeExport(exportRoot, concurrency) {
       );
     }
   }
-  if (documentFiles.length === 0 || packFiles.length === 0) {
-    throw new Error('Core dataset publication requires JSON documents and packed-image blobs.');
+  if (documentFiles.length === 0) {
+    throw new Error('Core dataset publication requires JSON documents.');
+  }
+  if (publicationPolicy === GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY) {
+    if (packFiles.length !== 0) {
+      throw new Error(
+        'The GTNH structured-data-only publication must contain zero packed-image blobs.',
+      );
+    }
+  } else if (packFiles.length === 0) {
+    throw new Error(
+      'Core dataset publication requires packed-image blobs unless the exact GTNH ' +
+        'structured-data-only policy is declared.',
+    );
   }
   packFiles.sort((left, right) => {
     const leftNumber = Number(/^assets\/pack-(\d+)\.bin$/.exec(left.key)[1]);
@@ -337,6 +482,7 @@ async function analyzeExport(exportRoot, concurrency) {
   const packedImages = packs.reduce((sum, record) => sum + record.index.entries, 0);
   const manifest = requireCoreDatasetPublicationManifest({
     format: CORE_DATASET_PUBLICATION_FORMAT,
+    ...(publicationPolicy === undefined ? {} : {publicationPolicy}),
     publicationId,
     maxDocumentBytes: MAX_SHARD_BYTES,
     maxPackBytes: MAX_PACK_BYTES,
@@ -459,6 +605,12 @@ export async function validateLocalCoreDatasetPublication({
   const bundleRoot = dirname(manifestPath);
   logger.info(`Re-deriving core publication from ${resolve(exportRoot)}.`);
   const analyzed = await analyzeExport(exportRoot, concurrency);
+  if (analyzed.manifest.publicationPolicy === GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY) {
+    logger.warn(
+      `Rights policy ${GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY} excludes all ` +
+        'dataset-carried visual assets; validating a zero-pack core publication.',
+    );
+  }
   await verifyBundleFiles(bundleRoot, analyzed);
   await verifySourceRecords(
     analyzed.exportRoot,
@@ -507,6 +659,12 @@ export async function buildCoreDatasetPublication({
     throw new Error('Core dataset publication output must be outside the source export root.');
   }
   const analyzed = await analyzeExport(canonicalExportRoot, concurrency);
+  if (analyzed.manifest.publicationPolicy === GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY) {
+    logger.warn(
+      `Rights policy ${GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY} excludes all ` +
+        'dataset-carried visual assets; building a zero-pack core publication.',
+    );
+  }
 
   try {
     const existing = await lstat(outputRoot);

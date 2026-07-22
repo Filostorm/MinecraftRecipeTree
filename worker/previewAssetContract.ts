@@ -4,6 +4,12 @@ export const MAX_PREVIEW_PACK_BYTES = 1024 * 1024;
 export const MAX_PREVIEW_CATEGORY_BYTES = 256 * 1024;
 export const MAX_PREVIEW_PACK_INDEX_BYTES = 512 * 1024;
 export const MAX_PREVIEW_MANIFEST_BYTES = 1024 * 1024;
+export const RECIPE_PREVIEW_SIDECAR_V1_FORMAT = 'mrt-recipe-preview-sidecar-v1';
+export const RECIPE_PREVIEW_SIDECAR_V2_FORMAT = 'mrt-recipe-preview-sidecar-v2';
+export const GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY =
+  'gtnh-structured-data-only-v1';
+export const GTNH_STRUCTURED_DATA_ONLY_EXCLUSION_REASON =
+  'third-party-artwork-rights-not-cleared';
 export const PREVIEW_PACK_INDEX_FORMAT = 'mrt-recipe-preview-pack-index-v1';
 export const PREVIEW_PACK_INDEX_HEADER_BYTES = 20;
 export const PREVIEW_PACK_INDEX_ENTRY_BYTES = 8;
@@ -38,13 +44,25 @@ export interface PreviewPackRecord extends PreviewContentRecord {
 }
 
 export interface PreviewManifest {
-  format: 'mrt-recipe-preview-sidecar-v1';
+  format:
+    | typeof RECIPE_PREVIEW_SIDECAR_V1_FORMAT
+    | typeof RECIPE_PREVIEW_SIDECAR_V2_FORMAT;
+  publicationPolicy?: typeof GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY;
+  exclusionReason?: typeof GTNH_STRUCTURED_DATA_ONLY_EXCLUSION_REASON;
   assetSetId: string;
   datasetPublicationId: string;
   maxPackBytes: number;
   packIndexFormat: typeof PREVIEW_PACK_INDEX_FORMAT;
   maxPackIndexBytes: number;
   counts: {
+    categories?: number;
+    recipes?: number;
+    previews?: number;
+    missing?: number;
+    duplicates?: number;
+    inputBytes?: number;
+    hostedOmittedPngBytes?: number;
+    encodedBytes?: number;
     uniqueImages: number;
     packIndexBytes: number;
     packs?: number;
@@ -63,6 +81,21 @@ export interface ValidatedPreviewManifest {
 }
 
 const utf8 = new TextEncoder();
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function hasExactKeys(value: unknown, expected: readonly string[]): value is Record<string, unknown> {
+  if (!isRecord(value)) return false;
+  const actual = Object.keys(value).sort();
+  const wanted = [...expected].sort();
+  return actual.length === wanted.length && actual.every((key, index) => key === wanted[index]);
+}
+
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0;
+}
 
 function digestBytes(value: string): Uint8Array {
   const bytes = new Uint8Array(value.length / 2);
@@ -142,17 +175,135 @@ function validPreviewContentRecord(
   );
 }
 
+function requireGtnhStructuredDataOnlyPreviewManifest(
+  value: unknown,
+  expectedAssetSetId: string,
+): ValidatedPreviewManifest {
+  const topLevelKeys = [
+    'format',
+    'publicationPolicy',
+    'exclusionReason',
+    'assetSetId',
+    'datasetPublicationId',
+    'maxPackBytes',
+    'packIndexFormat',
+    'maxPackIndexBytes',
+    'imageFormat',
+    'categoryFormat',
+    'settings',
+    'counts',
+    'packs',
+    'mapping',
+    'categoryDocuments',
+  ];
+  const countKeys = [
+    'categories',
+    'recipes',
+    'previews',
+    'missing',
+    'uniqueImages',
+    'duplicates',
+    'packs',
+    'inputBytes',
+    'hostedOmittedPngBytes',
+    'encodedBytes',
+    'storedBytes',
+    'packIndexBytes',
+  ];
+  if (
+    !PREVIEW_ASSET_SET_PATTERN.test(expectedAssetSetId) ||
+    !hasExactKeys(value, topLevelKeys)
+  ) {
+    throw new Error(
+      'The configured preview manifest does not satisfy the exact GTNH structured-data-only v2 contract.',
+    );
+  }
+
+  const candidate = value;
+  if (
+    !hasExactKeys(candidate.settings, [
+      'itemIconPixels',
+      'recipeScale',
+      'webpEffort',
+      'maxCategoryBytes',
+    ]) ||
+    !hasExactKeys(candidate.counts, countKeys) ||
+    !hasExactKeys(candidate.mapping, ['documents', 'parts', 'bytes']) ||
+    !Array.isArray(candidate.packs) ||
+    !Array.isArray(candidate.categoryDocuments)
+  ) {
+    throw new Error(
+      'The configured preview manifest does not satisfy the exact GTNH structured-data-only v2 contract.',
+    );
+  }
+
+  const settings = candidate.settings;
+  const counts = candidate.counts;
+  const mapping = candidate.mapping;
+  if (
+    candidate.format !== RECIPE_PREVIEW_SIDECAR_V2_FORMAT ||
+    candidate.publicationPolicy !== GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY ||
+    candidate.exclusionReason !== GTNH_STRUCTURED_DATA_ONLY_EXCLUSION_REASON ||
+    candidate.assetSetId !== expectedAssetSetId ||
+    !isDatasetPublicationId(candidate.datasetPublicationId) ||
+    candidate.maxPackBytes !== MAX_PREVIEW_PACK_BYTES ||
+    candidate.packIndexFormat !== PREVIEW_PACK_INDEX_FORMAT ||
+    candidate.maxPackIndexBytes !== MAX_PREVIEW_PACK_INDEX_BYTES ||
+    candidate.imageFormat !== 'lossless-webp' ||
+    candidate.categoryFormat !== 'mrt-recipe-preview-category-v1' ||
+    !isNonNegativeSafeInteger(settings.itemIconPixels) ||
+    settings.itemIconPixels < 16 ||
+    settings.itemIconPixels % 16 !== 0 ||
+    !isNonNegativeSafeInteger(settings.recipeScale) ||
+    settings.recipeScale <= 0 ||
+    settings.webpEffort !== 4 ||
+    !isNonNegativeSafeInteger(settings.maxCategoryBytes) ||
+    settings.maxCategoryBytes < 256 ||
+    settings.maxCategoryBytes > MAX_PREVIEW_CATEGORY_BYTES ||
+    !countKeys.every(key => isNonNegativeSafeInteger(counts[key])) ||
+    (counts.categories as number) <= 0 ||
+    (counts.recipes as number) <= 0 ||
+    counts.previews !== 0 ||
+    counts.missing !== counts.recipes ||
+    counts.uniqueImages !== 0 ||
+    counts.duplicates !== 0 ||
+    counts.packs !== 0 ||
+    counts.inputBytes !== 0 ||
+    counts.encodedBytes !== 0 ||
+    counts.storedBytes !== 0 ||
+    counts.packIndexBytes !== 0 ||
+    candidate.packs.length !== 0 ||
+    mapping.documents !== 0 ||
+    mapping.parts !== 0 ||
+    mapping.bytes !== 0 ||
+    candidate.categoryDocuments.length !== 0
+  ) {
+    throw new Error(
+      'The configured preview manifest does not satisfy the exact GTNH structured-data-only v2 contract.',
+    );
+  }
+  return {
+    manifest: value as PreviewManifest,
+    categoryDocumentsByPath: new Map(),
+    contentRecordsByPath: new Map(),
+  };
+}
+
 export function requirePreviewManifest(
   value: unknown,
   expectedAssetSetId: string,
 ): ValidatedPreviewManifest {
   const candidate = value as Partial<PreviewManifest> | null;
+  if (candidate?.format === RECIPE_PREVIEW_SIDECAR_V2_FORMAT) {
+    return requireGtnhStructuredDataOnlyPreviewManifest(value, expectedAssetSetId);
+  }
   if (
     !PREVIEW_ASSET_SET_PATTERN.test(expectedAssetSetId) ||
     !value ||
     typeof value !== 'object' ||
     Array.isArray(value) ||
-    candidate?.format !== 'mrt-recipe-preview-sidecar-v1' ||
+    candidate?.format !== RECIPE_PREVIEW_SIDECAR_V1_FORMAT ||
+    Object.hasOwn(candidate, 'publicationPolicy') ||
     candidate.assetSetId !== expectedAssetSetId ||
     !isDatasetPublicationId(candidate.datasetPublicationId) ||
     candidate.maxPackBytes !== MAX_PREVIEW_PACK_BYTES ||
@@ -227,6 +378,31 @@ export function requirePreviewManifest(
   }
 
   return {manifest, categoryDocumentsByPath, contentRecordsByPath};
+}
+
+/** Fail closed unless core and preview manifests declare one identical publication policy. */
+export function requirePairedPublicationPolicy(
+  coreManifest: {publicationPolicy?: unknown},
+  previewManifest: PreviewManifest,
+): void {
+  const corePolicy = coreManifest.publicationPolicy;
+  const previewPolicy = previewManifest.publicationPolicy;
+  if (corePolicy === undefined && previewPolicy === undefined) {
+    if (previewManifest.format !== RECIPE_PREVIEW_SIDECAR_V1_FORMAT) {
+      throw new Error('An ordinary core publication requires a v1 preview sidecar.');
+    }
+    return;
+  }
+  if (
+    corePolicy === GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY &&
+    previewPolicy === GTNH_STRUCTURED_DATA_ONLY_PUBLICATION_POLICY &&
+    previewManifest.format === RECIPE_PREVIEW_SIDECAR_V2_FORMAT
+  ) {
+    return;
+  }
+  throw new Error(
+    'Core and preview publications do not satisfy one exact paired publication-policy contract.',
+  );
 }
 
 /** Validate shape and independently prove that the configured ID addresses these exact records. */

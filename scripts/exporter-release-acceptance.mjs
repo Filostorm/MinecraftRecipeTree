@@ -49,6 +49,10 @@ const ACCEPTANCE_POLICY_FILES = Object.freeze([
     path: join(SCRIPT_DIRECTORY, 'export-quality-policy.mjs'),
   }),
   Object.freeze({
+    label: 'visual-assets-rights-policy.mjs',
+    path: join(SCRIPT_DIRECTORY, 'visual-assets-rights-policy.mjs'),
+  }),
+  Object.freeze({
     label: 'pack-identity.mjs',
     path: join(SCRIPT_DIRECTORY, 'pack-identity.mjs'),
   }),
@@ -234,6 +238,20 @@ export function resolveExporterReleaseSourcePath(definition, workspaceRoot) {
 
 export function exporterAcceptanceReceiptPath(
   releaseId,
+  qualityProfile,
+  acceptanceRoot = DEFAULT_EXPORTER_ACCEPTANCE_ROOT,
+) {
+  if (typeof releaseId !== 'string' || !RELEASE_ID_PATTERN.test(releaseId)) {
+    throw new Error('Acceptance receipt release ID must be canonical.');
+  }
+  if (typeof qualityProfile !== 'string' || !RELEASE_ID_PATTERN.test(qualityProfile)) {
+    throw new Error('Acceptance receipt quality profile must be canonical.');
+  }
+  return join(resolve(acceptanceRoot), `${releaseId}--${qualityProfile}.json`);
+}
+
+export function legacyExporterAcceptanceReceiptPath(
+  releaseId,
   acceptanceRoot = DEFAULT_EXPORTER_ACCEPTANCE_ROOT,
 ) {
   if (typeof releaseId !== 'string' || !RELEASE_ID_PATTERN.test(releaseId)) {
@@ -251,12 +269,54 @@ function updateDigestPart(hash, label, bytes) {
   hash.update(';');
 }
 
-function canonicalAcceptanceDefinition(definition) {
+function isAcceptanceCountConstraint(value) {
+  return (
+    (Number.isSafeInteger(value) && value >= 0) ||
+    (hasExactKeys(value, ['max', 'min']) &&
+      Number.isSafeInteger(value.min) &&
+      value.min >= 0 &&
+      Number.isSafeInteger(value.max) &&
+      value.max >= value.min)
+  );
+}
+
+function cloneAcceptanceCorpus(corpus) {
+  return Object.fromEntries(
+    Object.entries(corpus).map(([name, constraint]) => [
+      name,
+      typeof constraint === 'number' ? constraint : {...constraint},
+    ]),
+  );
+}
+
+function isAcceptanceCorpus(value) {
+  return (
+    value === null ||
+    (hasExactKeys(value, ['blockDrops', 'categories', 'items', 'mobs', 'recipes']) &&
+      Object.values(value).every(isAcceptanceCountConstraint))
+  );
+}
+
+export function acceptanceCorpusMatchesCounts(actualCounts, corpus) {
+  if (corpus === null || !isAcceptanceCorpus(corpus)) return corpus === null;
+  if (!hasExactKeys(actualCounts, ['blockDrops', 'categories', 'items', 'mobs', 'recipes'])) {
+    return false;
+  }
+  return Object.entries(corpus).every(([name, constraint]) => {
+    const actual = actualCounts[name];
+    if (!Number.isSafeInteger(actual) || actual < 0) return false;
+    if (typeof constraint === 'number') return actual === constraint;
+    return actual >= constraint.min && actual <= constraint.max;
+  });
+}
+
+function canonicalAcceptanceDefinition(definition, qualityProfile) {
   const artifactProvenance = requireExporterArtifactProvenance(definition);
+  const qualityProfiles = definition?.qualityProfiles;
+  const acceptanceCorpora = definition?.acceptanceCorpora;
   if (
     !hasExactKeys(definition, [
-      'acceptanceProfile',
-      'acceptanceCorpus',
+      'acceptanceCorpora',
       'artifactProvenance',
       'compatibility',
       'filename',
@@ -268,26 +328,25 @@ function canonicalAcceptanceDefinition(definition) {
       'source',
       'version',
     ]) ||
-    !Array.isArray(definition.qualityProfiles) ||
-    !definition.qualityProfiles.includes(definition.acceptanceProfile) ||
-    !(
-      definition.acceptanceCorpus === null ||
-      (hasExactKeys(definition.acceptanceCorpus, [
-        'blockDrops',
-        'categories',
-        'items',
-        'mobs',
-        'recipes',
-      ]) &&
-        Object.values(definition.acceptanceCorpus).every(
-          count => Number.isSafeInteger(count) && count >= 0,
-        ))
-    )
+    !Array.isArray(qualityProfiles) ||
+    qualityProfiles.length < 1 ||
+    qualityProfiles.length > 8 ||
+    new Set(qualityProfiles).size !== qualityProfiles.length ||
+    qualityProfiles.some(
+      profile => typeof profile !== 'string' || !RELEASE_ID_PATTERN.test(profile),
+    ) ||
+    !isRecord(acceptanceCorpora) ||
+    !hasExactKeys(acceptanceCorpora, qualityProfiles) ||
+    Object.values(acceptanceCorpora).some(corpus => !isAcceptanceCorpus(corpus)) ||
+    typeof qualityProfile !== 'string' ||
+    !qualityProfiles.includes(qualityProfile)
   ) {
     throw new Error(
-      `Exporter release ${String(definition?.id)} must satisfy the exact acceptance profile, provenance, and corpus-definition contract.`,
+      `Exporter release ${String(definition?.id)} must satisfy the exact per-profile acceptance, provenance, and corpus-definition contract.`,
     );
   }
+  for (const profile of qualityProfiles) qualityProfileRequirementsFor(profile);
+  const selectedCorpus = acceptanceCorpora[qualityProfile];
   return {
     id: definition.id,
     minecraftVersion: definition.minecraftVersion,
@@ -296,13 +355,18 @@ function canonicalAcceptanceDefinition(definition) {
     version: definition.version,
     source: definition.source,
     filename: definition.filename,
-    qualityProfiles: [...definition.qualityProfiles],
-    acceptanceProfile: definition.acceptanceProfile,
+    qualityProfiles: [...qualityProfiles],
     artifactProvenance,
-    acceptanceCorpus:
-      definition.acceptanceCorpus === null ? null : {...definition.acceptanceCorpus},
+    acceptance: {
+      qualityProfile,
+      corpus: selectedCorpus === null ? null : cloneAcceptanceCorpus(selectedCorpus),
+    },
     compatibility: definition.compatibility,
   };
+}
+
+export function exporterAcceptanceCorpusForProfile(definition, qualityProfile) {
+  return canonicalAcceptanceDefinition(definition, qualityProfile).acceptance.corpus;
 }
 
 export function requireExporterArtifactProvenance(definition) {
@@ -361,9 +425,10 @@ async function sharpValidationDependencyLockBytes() {
 
 /**
  * Bind a receipt to the exact validation entrypoint, profile/identity policy, receipt machinery,
- * and complete local release definition. Tightening any of those inputs invalidates old receipts.
+ * and the shared release definition plus selected profile corpus. Tightening shared inputs
+ * invalidates every profile; promoting a sibling corpus does not invalidate an independent receipt.
  */
-export async function exporterAcceptancePolicySha256(definition) {
+export async function exporterAcceptancePolicySha256(definition, qualityProfile) {
   const hash = createHash('sha256');
   updateDigestPart(
     hash,
@@ -373,7 +438,10 @@ export async function exporterAcceptancePolicySha256(definition) {
   updateDigestPart(
     hash,
     'release-definition',
-    Buffer.from(JSON.stringify(canonicalAcceptanceDefinition(definition)), 'utf8'),
+    Buffer.from(
+      JSON.stringify(canonicalAcceptanceDefinition(definition, qualityProfile)),
+      'utf8',
+    ),
   );
   for (const policyFile of ACCEPTANCE_POLICY_FILES) {
     const {bytes} = await readVerifiedRegularFile(
@@ -669,14 +737,18 @@ async function writeExporterAcceptanceReceiptUnlocked({
   if (rootEntry.isSymbolicLink() || !rootEntry.isDirectory()) {
     throw new Error(`Exporter acceptance root must be a real directory: ${acceptanceRoot}.`);
   }
-  const path = exporterAcceptanceReceiptPath(validated.release.id, acceptanceRoot);
+  const path = exporterAcceptanceReceiptPath(
+    validated.release.id,
+    validated.qualityProfile,
+    acceptanceRoot,
+  );
   try {
     const existing = await lstat(path);
     if (existing.isSymbolicLink() || !existing.isFile() || existing.nlink !== 1) {
       throw new Error(`Existing exporter acceptance receipt is not a plain regular file: ${path}.`);
     }
     logger.info(
-      `[exporter-acceptance] Replacing the existing receipt for ${validated.release.id} with a newly validated exact artifact receipt.`,
+      `[exporter-acceptance] Replacing the existing ${validated.release.id}/${validated.qualityProfile} receipt with a newly validated exact artifact receipt.`,
     );
   } catch (error) {
     if (error?.code !== 'ENOENT') throw error;
@@ -684,7 +756,7 @@ async function writeExporterAcceptanceReceiptUnlocked({
   const bytes = Buffer.from(`${JSON.stringify(validated, null, 2)}\n`, 'utf8');
   await atomicWrite(path, bytes);
   logger.info(
-    `[exporter-acceptance] Wrote ${validated.release.id} receipt: exporter sha256=${validated.release.sha256}, export manifest sha256=${validated.exportManifest.sha256}.`,
+    `[exporter-acceptance] Wrote ${validated.release.id}/${validated.qualityProfile} receipt: exporter sha256=${validated.release.sha256}, export manifest sha256=${validated.exportManifest.sha256}.`,
   );
   return Object.freeze({path, receipt: validated});
 }
@@ -709,7 +781,7 @@ export async function writeExporterAcceptanceReceipt({
   }
   return withExporterReleaseManifestLock({
     publicRoot,
-    operation: `acceptance receipt ${validated.release.id}`,
+    operation: `acceptance receipt ${validated.release.id}/${validated.qualityProfile}`,
     logger,
     action: async assertLockOwned => {
       await assertLockOwned();
@@ -726,42 +798,80 @@ export async function writeExporterAcceptanceReceipt({
 
 export async function readExporterAcceptanceReceipt(
   releaseId,
+  qualityProfile,
   acceptanceRoot = DEFAULT_EXPORTER_ACCEPTANCE_ROOT,
+  logger = console,
 ) {
-  const path = exporterAcceptanceReceiptPath(releaseId, acceptanceRoot);
+  const path = exporterAcceptanceReceiptPath(releaseId, qualityProfile, acceptanceRoot);
   let result;
+  let migratedLegacyPath = null;
   try {
-    result = await readVerifiedRegularFile(path, `Exporter acceptance receipt ${releaseId}`, {
-      minimumBytes: 2,
-      maximumBytes: MAX_EXPORTER_ACCEPTANCE_RECEIPT_BYTES,
-    });
+    result = await readVerifiedRegularFile(
+      path,
+      `Exporter acceptance receipt ${releaseId}/${qualityProfile}`,
+      {minimumBytes: 2, maximumBytes: MAX_EXPORTER_ACCEPTANCE_RECEIPT_BYTES},
+    );
   } catch (error) {
-    if (error?.code === 'ENOENT') {
+    if (error?.code !== 'ENOENT') throw error;
+    const legacyPath = legacyExporterAcceptanceReceiptPath(releaseId, acceptanceRoot);
+    try {
+      result = await readVerifiedRegularFile(
+        legacyPath,
+        `Legacy exporter acceptance receipt ${releaseId}`,
+        {minimumBytes: 2, maximumBytes: MAX_EXPORTER_ACCEPTANCE_RECEIPT_BYTES},
+      );
+    } catch (legacyError) {
+      if (legacyError?.code !== 'ENOENT') throw legacyError;
       throw new Error(
-        `Exporter acceptance receipt is missing for ${releaseId}: ${path}. Run the acceptance command against the completed full export before packaging.`,
+        `Exporter acceptance receipt is missing for ${releaseId}/${qualityProfile}: ${path}. Run the acceptance command against that completed full export before packaging.`,
         {cause: error},
       );
     }
-    throw error;
+    migratedLegacyPath = legacyPath;
   }
   let parsed;
   try {
     parsed = JSON.parse(result.bytes.toString('utf8'));
   } catch (error) {
-    throw new Error(`Exporter acceptance receipt ${releaseId} is not valid JSON.`, {cause: error});
+    throw new Error(
+      `Exporter acceptance receipt ${releaseId}/${qualityProfile} is not valid JSON.`,
+      {cause: error},
+    );
   }
-  return requireExporterAcceptanceReceipt(parsed);
+  const receipt = requireExporterAcceptanceReceipt(parsed);
+  if (receipt.qualityProfile !== qualityProfile) {
+    throw new Error(
+      `Exporter acceptance receipt lookup for ${releaseId}/${qualityProfile} found a receipt for ${receipt.qualityProfile}; cross-profile receipt fallback is forbidden.`,
+    );
+  }
+  if (migratedLegacyPath !== null) {
+    logger.warn(
+      `[exporter-acceptance][migration] Using legacy release-only receipt ${migratedLegacyPath} for an explicit ${releaseId}/${qualityProfile} lookup. Write a fresh profile-keyed receipt before removing the legacy file.`,
+    );
+  }
+  return receipt;
 }
 
 export async function requireAcceptedExporterRelease({
   definition,
   sourceBytes,
+  qualityProfile,
   acceptanceRoot = DEFAULT_EXPORTER_ACCEPTANCE_ROOT,
+  logger = console,
 }) {
-  const receipt = await readExporterAcceptanceReceipt(definition.id, acceptanceRoot);
+  const acceptanceCorpus = exporterAcceptanceCorpusForProfile(definition, qualityProfile);
+  const receipt = await readExporterAcceptanceReceipt(
+    definition.id,
+    qualityProfile,
+    acceptanceRoot,
+    logger,
+  );
   const expectedSha256 = sha256Hex(sourceBytes);
-  const expectedPolicySha256 = await exporterAcceptancePolicySha256(definition);
-  const qualityRequirements = qualityProfileRequirementsFor(definition.acceptanceProfile);
+  const expectedPolicySha256 = await exporterAcceptancePolicySha256(
+    definition,
+    qualityProfile,
+  );
+  const qualityRequirements = qualityProfileRequirementsFor(qualityProfile);
   const artifactProvenance = requireExporterArtifactProvenance(definition);
   const sourceArtifactMatches =
     receipt.release.sha256 === expectedSha256 && receipt.release.bytes === sourceBytes.length;
@@ -776,7 +886,7 @@ export async function requireAcceptedExporterRelease({
   }
   if (
     !Array.isArray(definition.qualityProfiles) ||
-    receipt.qualityProfile !== definition.acceptanceProfile ||
+    receipt.qualityProfile !== qualityProfile ||
     !definition.qualityProfiles.includes(receipt.qualityProfile)
   ) {
     mismatches.push('allowed quality profile');
@@ -806,21 +916,21 @@ export async function requireAcceptedExporterRelease({
         mismatches.push('exporter-emitted exact JAR build identity');
       }
     }
-    if (definition.acceptanceCorpus === null) {
+    if (acceptanceCorpus === null) {
       mismatches.push('pending exact full-export corpus definition');
     }
   } else if (receipt.exporterBuild !== null) {
     mismatches.push('unexpected exporter build identity');
   }
   if (
-    definition.acceptanceCorpus !== null &&
-    !isDeepStrictEqual(receipt.exportManifest.counts, definition.acceptanceCorpus)
+    acceptanceCorpus !== null &&
+    !acceptanceCorpusMatchesCounts(receipt.exportManifest.counts, acceptanceCorpus)
   ) {
-    mismatches.push('validated exact full-export corpus counts');
+    mismatches.push('validated bounded full-export corpus counts');
   }
   if (mismatches.length > 0) {
     throw new Error(
-      `Exporter acceptance receipt for ${definition.id} does not match the configured artifact: ${mismatches.join(', ')}. Validate the exact current JAR and full export again.`,
+      `Exporter acceptance receipt for ${definition.id}/${qualityProfile} does not match the configured artifact: ${mismatches.join(', ')}. Validate the exact current JAR and full export again.`,
     );
   }
   return receipt;

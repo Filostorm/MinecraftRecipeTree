@@ -9,13 +9,14 @@ import {verifyPublicCoreDatasetPublication} from './verify-core-dataset-publicat
 const PUBLICATION = 'a'.repeat(64);
 const BASE_URL = 'http://public.example/dataset/publications';
 
-function responseHeaders(bytes, contentType, image = false) {
+function responseHeaders(bytes, contentType, image = false, omitContentLength = false) {
   return {
     'Cache-Control': image
       ? 'public, max-age=31536000, immutable, no-transform'
       : 'public, max-age=31536000, immutable',
-    'Content-Length': String(bytes),
+    ...(omitContentLength ? {} : {'Content-Length': String(bytes)}),
     'Content-Type': contentType,
+    'X-MRT-Stored-Bytes': String(bytes),
   };
 }
 
@@ -122,6 +123,46 @@ test('public verifier checks every JSON object and first/middle/last authorized 
     assert.equal(calls.filter(call => call.method === 'HEAD').length, 2);
     assert.equal(calls.filter(call => call.url.pathname.includes('/assets/s/')).length, 3);
     assert.equal(calls.some(call => /pack-000\.bin|indexes\//.test(call.url.pathname)), false);
+  } finally {
+    await rm(data.root, {recursive: true, force: true});
+  }
+});
+
+test('public verifier accepts Cloudflare HEAD responses with explicit stored bytes and no Content-Length', async () => {
+  const data = await fixture();
+  try {
+    const result = await verifyPublicCoreDatasetPublication({
+      exportRoot: data.exportRoot,
+      publication: join(data.bundleRoot, 'publication.json'),
+      baseUrl: BASE_URL,
+      allowHttpForTests: true,
+      logger: silentLogger(),
+      localValidator: async () => data.state,
+      async fetchImpl(url, init) {
+        const path = new URL(url).pathname;
+        if (init.method === 'HEAD') {
+          const bytes = path.endsWith('/manifest.json') ? data.manifestBytes.length : data.itemsBytes.length;
+          return new Response(null, {
+            status: 200,
+            headers: responseHeaders(bytes, 'application/json', false, true),
+          });
+        }
+        if (path.endsWith('/manifest.json')) {
+          return new Response(data.manifestBytes, {
+            status: 200,
+            headers: responseHeaders(data.manifestBytes.length, 'application/json'),
+          });
+        }
+        const match = /\/assets\/s\/000-(\d+)-(\d+)\.webp$/.exec(path);
+        const offset = Number(match[1]);
+        const length = Number(match[2]);
+        return new Response(data.packBytes.subarray(offset, offset + length), {
+          status: 200,
+          headers: responseHeaders(length, 'image/webp', true),
+        });
+      },
+    });
+    assert.equal(result.documents, 2);
   } finally {
     await rm(data.root, {recursive: true, force: true});
   }
