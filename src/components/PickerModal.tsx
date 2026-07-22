@@ -61,9 +61,6 @@ export function PickerModal({
             <View style={styles.rememberRow}>
               <View style={styles.rememberCopy}>
                 <Text style={styles.rememberTitle}>★ Use automatically in future trees</Text>
-                <Text style={styles.rememberHint}>
-                  Saves the recipe or drop you select as the preferred source for this item.
-                </Text>
               </View>
               <Switch
                 accessibilityLabel="Use automatically in future trees"
