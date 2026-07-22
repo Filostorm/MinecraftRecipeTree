@@ -2,7 +2,6 @@ import React from 'react';
 import {Linking, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import type {DatasetDescriptor} from '../data/datasetCatalog';
 import {loadedDatasetAttribution} from '../data/datasetAttribution';
-import {MINECRAFT_PRODUCT_DISCLAIMER} from '../legalNotices';
 import {theme} from '../theme';
 import type {Manifest} from '../types';
 
@@ -145,10 +144,6 @@ export function DatasetSwitcher({
         <Text style={styles.importLinkText}>Import ↗</Text>
       </TouchableOpacity>
 
-      <Text style={styles.minecraftDisclaimer} accessibilityRole="text">
-        {MINECRAFT_PRODUCT_DISCLAIMER}
-      </Text>
-
       {loadedAttribution && (
         <Text style={styles.attribution}>
           {loadedAttribution.packName} {loadedAttribution.packVersion} recipe data
@@ -262,14 +257,6 @@ const styles = StyleSheet.create({
     color: theme.textDim,
     fontSize: 9,
     lineHeight: 13,
-  },
-  minecraftDisclaimer: {
-    flexBasis: '100%',
-    color: '#f0c75e',
-    fontSize: 10,
-    lineHeight: 14,
-    fontWeight: '900',
-    letterSpacing: 0.25,
   },
   attributionLink: {
     color: theme.accent,
