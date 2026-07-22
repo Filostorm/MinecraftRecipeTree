@@ -153,7 +153,8 @@ export default function PublishPage() {
               <h2 id="downloads-title">Identify the exact externally distributed exporter</h2>
               <p>
                 Minecraft, mod loader, and JEI/REI/HEI/NEI APIs are version-specific. A near match
-                is not compatible.
+                is not compatible. The records below are verification metadata, not hosted
+                downloads.
               </p>
             </div>
             {manifestState.status === 'ready' && (
