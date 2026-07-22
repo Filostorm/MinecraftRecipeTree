@@ -107,12 +107,12 @@ test('GTNH release requires the exact runtime-bound exporter identity before acc
     candidate => candidate.id === 'forge-nei-gtnh-1.7.10',
   );
   assert.ok(release);
-  assert.equal(release.version, '1.0.149');
+  assert.equal(release.version, '1.0.150');
   assert.equal(
     release.source,
-    'recipe-export-mod-1.7.10/build/libs/recipe-tree-gtnh-nei-exporter-1.0.149.jar',
+    'recipe-export-mod-1.7.10/build/libs/recipe-tree-gtnh-nei-exporter-1.0.150.jar',
   );
-  assert.equal(release.filename, 'recipe-tree-exporter-gtnh-1.7.10-1.0.149.jar');
+  assert.equal(release.filename, 'recipe-tree-exporter-gtnh-1.7.10-1.0.150.jar');
   assert.deepEqual(release.qualityProfiles, ['gtnh-1.7.10']);
   assert.deepEqual(release.artifactProvenance, {
     format: 'mrt-exporter-build-v1',
@@ -120,7 +120,7 @@ test('GTNH release requires the exact runtime-bound exporter identity before acc
     minecraftVersion: '1.7.10',
   });
   assert.deepEqual(release.acceptanceCorpora['gtnh-1.7.10'], {
-    items: 143884,
+    items: 143885,
     recipes: 568820,
     categories: 287,
     mobs: 0,
