@@ -15,6 +15,7 @@ import {DatasetSwitcher} from './src/components/DatasetSwitcher';
 import {ItemsScreen} from './src/components/ItemsScreen';
 import {MobsScreen} from './src/components/MobsScreen';
 import {ModpackManager} from './src/components/ModpackManager';
+import {RecipeHistoryModal} from './src/components/RecipeHistoryModal';
 import {DataProvider, useData, useLoadState} from './src/data/DataContext';
 import {DatasetReadinessMarker} from './src/data/DatasetReadinessMarker';
 import {
@@ -188,6 +189,7 @@ function Shell() {
   const data = useData();
   const {tab} = useUi();
   const [showSnapshots, setShowSnapshots] = useState(false);
+  const [showRecipeHistory, setShowRecipeHistory] = useState(false);
   useEffect(() => {
     if (tab !== 'graph' || data.indexStatus === 'ready' || data.indexStatus === 'loading') return;
     void data.ensureIndex().catch(() => {
@@ -213,6 +215,13 @@ function Shell() {
           accessibilityRole="button"
           accessibilityLabel="Open saved export snapshots">
           <Text style={styles.modpackBtnText}>▣ Saved snapshots</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.historyBtn}
+          onPress={() => setShowRecipeHistory(true)}
+          accessibilityRole="button"
+          accessibilityLabel={`Open recipe history for ${data.descriptor.displayName}`}>
+          <Text style={styles.historyBtnText}>↶ Recipe history</Text>
         </TouchableOpacity>
         <TabBtn tab="items" label="Items" />
         <TabBtn tab="graph" label="Graph" />
@@ -251,6 +260,10 @@ function Shell() {
       )}
       <ItemDetailModal />
       <ModpackManager visible={showSnapshots} onClose={() => setShowSnapshots(false)} />
+      <RecipeHistoryModal
+        visible={showRecipeHistory}
+        onClose={() => setShowRecipeHistory(false)}
+      />
     </View>
   );
 }
@@ -321,6 +334,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   modpackBtnText: {color: theme.accent, fontSize: 12, fontWeight: '700'},
+  historyBtn: {
+    minHeight: 44,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: theme.borderLight,
+    justifyContent: 'center',
+  },
+  historyBtnText: {color: theme.text, fontSize: 12, fontWeight: '700'},
   body: {flex: 1, minHeight: 0},
   hidden: {display: 'none'},
 });
