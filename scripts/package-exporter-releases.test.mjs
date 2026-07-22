@@ -70,9 +70,9 @@ test('Multiblock Madness exporter releases remain isolated across independent ve
     {
       id: 'forge-rei-1.18.2',
       minecraftVersion: '1.18.2',
-      version: '1.0.44',
-      source: 'recipe-export-mod-1.18.2/build/libs/recipe-export-mod-1.18.2-1.0.44.jar',
-      filename: 'recipe-tree-exporter-forge-1.18.2-1.0.44.jar',
+      version: '1.0.47',
+      source: 'recipe-export-mod-1.18.2/build/libs/recipe-export-mod-1.18.2-1.0.47.jar',
+      filename: 'recipe-tree-exporter-forge-1.18.2-1.0.47.jar',
       qualityProfiles: ['multiblock-madness-2-1.18.2'],
     },
   );
@@ -87,14 +87,14 @@ test('Multiblock Madness exporter releases remain isolated across independent ve
     blockDrops: 0,
   });
   assert.deepEqual(mm1.acceptanceCorpora['multiblock-madness-1.12.2'], {
-    items: 88268,
-    recipes: 107819,
+    items: 88262,
+    recipes: 107814,
     categories: 378,
     mobs: 0,
     blockDrops: 0,
   });
   assert.deepEqual(mm2.acceptanceCorpora['multiblock-madness-2-1.18.2'], {
-    items: 68524,
+    items: 68526,
     recipes: 99908,
     categories: 333,
     mobs: 0,
@@ -107,12 +107,12 @@ test('GTNH release requires the exact runtime-bound exporter identity before acc
     candidate => candidate.id === 'forge-nei-gtnh-1.7.10',
   );
   assert.ok(release);
-  assert.equal(release.version, '1.0.148');
+  assert.equal(release.version, '1.0.149');
   assert.equal(
     release.source,
-    'recipe-export-mod-1.7.10/build/libs/recipe-tree-gtnh-nei-exporter-1.0.148.jar',
+    'recipe-export-mod-1.7.10/build/libs/recipe-tree-gtnh-nei-exporter-1.0.149.jar',
   );
-  assert.equal(release.filename, 'recipe-tree-exporter-gtnh-1.7.10-1.0.148.jar');
+  assert.equal(release.filename, 'recipe-tree-exporter-gtnh-1.7.10-1.0.149.jar');
   assert.deepEqual(release.qualityProfiles, ['gtnh-1.7.10']);
   assert.deepEqual(release.artifactProvenance, {
     format: 'mrt-exporter-build-v1',

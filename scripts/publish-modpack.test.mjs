@@ -310,7 +310,7 @@ async function rawPublicationFixture(t, publicationPlan, {qualitySample} = {}) {
   t.after(() => rm(root, {recursive: true, force: true}));
   const source = join(root, 'raw');
   const workspace = join(root, 'publication');
-  await createRawExportFixture(source, {iconScale: 1, recipeScale: 2});
+  await createRawExportFixture(source, {iconScale: 3, recipeScale: 2});
   await writeNonUniformImage(join(source, 'recipes', 'minecraft_crafting', 'r0.png'), 32);
   await writeJson(join(source, 'recipes', 'minecraft_crafting', 'recipes.json'), [{
     id: 'minecraft:test',

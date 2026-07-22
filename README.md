@@ -85,10 +85,8 @@ Expo (React Native Web) app for browsing a `jei-exports` dataset produced by
 views, a mob gallery, and a pan/zoom crafting flowchart built from the exported recipe images.
 
 The web publication is content-addressed. Runtime-rendered item/block captures retain each
-profile's audited pixel grid. Multiblock Madness and
-Multiblock Madness 2 preserve those renderer outputs as 16×16 canvases; the already-audited
-MeatballCraft corpus remains
-pinned to its historical 48×48 canvases. Composite NEI/HEI/REI layouts are rasterized at 2×
+profile's audited logical 16×16 pixel grid while rasterizing it to a 48×48 physical canvas for
+GT New Horizons, both Multiblock Madness packs, and MeatballCraft. Composite NEI/HEI/REI layouts are rasterized at 2×
 physical resolution but retain logical layout dimensions in recipe metadata.
 They live in a separate immutable sidecar so the 359k-preview MeatballCraft corpus does not
 inflate the Sites deployment archive or create one storage object per recipe.
@@ -120,27 +118,25 @@ npm run import-data -- \
 |---|---:|---:|---:|---|
 | `generic-jei-1.20.1` | 1.20.1 | 64×64 (`iconScale=4`) | 2× JEI | dynamically counted, exact diagnostics, zero missing previews |
 | `meatballcraft-1.12.2` | 1.12.2 | 48×48 (`iconScale=3`) | 2× | immutable audited counts/provenance |
-| `multiblock-madness-1.12.2` | 1.12.2 | 16×16 (`iconScale=1`) | 2× | dynamically counted, zero missing previews |
-| `multiblock-madness-2-1.18.2` | 1.18.2 | 16×16 (`iconScale=1`) | 2× | dynamically counted, zero missing previews |
-| `gtnh-1.7.10` | 1.7.10 | generated UI placeholders | structured records, no NEI rasters | GTNH 2.8.4, dynamically counted, zero failures, exact rights-policy accounting |
+| `multiblock-madness-1.12.2` | 1.12.2 | 48×48 (`iconScale=3`) | 2× | dynamically counted, zero missing previews |
+| `multiblock-madness-2-1.18.2` | 1.18.2 | 48×48 (`iconScale=3`) | 2× | dynamically counted, zero missing previews |
+| `gtnh-1.7.10` | 1.7.10 | 48×48 (`iconScale=3`) | 2× NEI | GTNH 2.8.4, dynamically counted, zero failures, exact rights-policy accounting |
 
 Dynamic counting means the pack's item, recipe, and category totals are accepted from that
 specific completed export rather than hard-coded in source. It does not weaken completeness:
 manifest/document counts, failure diagnostics, semantic direction, and raw/hosted identity still
-fail closed. Visual profiles require one preview per recipe. GTNH instead proves every raw visual
-before a post-validation rights transform removes all dataset-carried raster references and files.
+fail closed. Every visual profile, including GTNH, requires one preview per recipe and preserves
+the exporter-rendered runtime icons and recipe previews in the content-addressed asset service.
 
 The GTNH profile pins the latest stable pack release, 2.8.4, plus Forge `10.13.4.1614`
 and NotEnoughItems `2.8.44-GTNH`. Its raw manifest must identify the pack as
 `{name: "GT New Horizons", version: "2.8.4", identitySource: "explicit-request"}` and include
 the exact 86-field NEI telemetry schema. It must also preserve an exact `attribution` object for the
 normalized GTNH 2.8.4 recipe data: the pinned source and project URLs, `CC BY-NC-SA 4.0`
-identifier, and Creative Commons license URL. This data attribution does not claim that every
-third-party mod texture or other artwork is licensed by GTNH; those assets retain their respective
-licenses. Public GTNH output is therefore locked to
-`publicationPolicy: "gtnh-structured-data-only-v1"` and an exact zero-count
-`web.visualAssets` ledger. The web client generates deterministic identifier-based placeholders;
-it does not fetch a preview sidecar for this policy. Publication still requires the item list to
+identifier, and Creative Commons license URL. This noncommercial deployment preserves the actual
+runtime-rendered visuals; individual third-party mod textures retain their respective licenses and
+are not relicensed by the dataset attribution. Exporter JARs contain rendering code only and are
+distributed separately rather than hosted or bundled with the website. Publication still requires the item list to
 load, every registered handler admitted to category
 export to produce exactly one loaded category, every enumerated recipe widget and item icon to
 render, all handler-anomaly counters to remain zero, and `failures.json` to be empty. The exact
@@ -154,9 +150,9 @@ source-backed zero-row handlers plus the two registered but empty GregTech maps
 `gt.recipe.spaceResearch` (category `gtnh:bbc9b803242009c80d39be2aaad5786d`). Each exclusion is
 revalidated against its authoritative source registry, prototype cache, freshly loaded cache, and
 promoted corpus fingerprint before planning can omit it. Missing or unknown telemetry fields are
-schema drift and abort the import; they are not treated as compatibility fallbacks. The raw/private export retains
-its render evidence for validation, while the public packed export omits item/category icons, mob
-sprites, recipe screenshots, and image packs.
+schema drift and abort the import; they are not treated as compatibility fallbacks. The public
+packed export preserves the validated item/category icons and recipe previews as immutable,
+content-addressed assets loaded on demand.
 
 The separately accounted unbound-template exclusion is
 `com.rwtema.extrautils.nei.MicroBlocksHandler`. Its four authoritative `RecipeMicroBlocks` rows are

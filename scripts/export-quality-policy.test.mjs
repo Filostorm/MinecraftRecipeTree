@@ -71,7 +71,7 @@ test('registers explicit immutable requirements for all production pack profiles
     label: 'Multiblock Madness',
     minecraft: '1.12.2',
     format: 1,
-    iconScale: 1,
+    iconScale: 3,
     recipeScale: 2,
     recipeViewer: 'HEI',
     corpus: 'dynamic-complete',
@@ -94,7 +94,7 @@ test('registers explicit immutable requirements for all production pack profiles
     label: 'Multiblock Madness 2',
     minecraft: '1.18.2',
     format: 1,
-    iconScale: 1,
+    iconScale: 3,
     recipeScale: 2,
     recipeViewer: 'REI',
     corpus: 'dynamic-complete',
@@ -117,7 +117,7 @@ test('registers explicit immutable requirements for all production pack profiles
     label: 'GT New Horizons',
     minecraft: '1.7.10',
     format: 2,
-    iconScale: 1,
+    iconScale: 3,
     recipeScale: 2,
     recipeViewer: 'NEI',
     corpus: 'dynamic-complete',
@@ -198,7 +198,7 @@ function validGtnhManifest() {
     handlerPolicies: structuredClone(GTNH_284_HANDLER_POLICIES),
     knowledgePolicy: {...GTNH_KNOWLEDGE_POLICY},
     aborted: false,
-    settings: {iconScale: 1, recipeScale: 2},
+    settings: {iconScale: 3, recipeScale: 2},
     counts: {items: 2, recipes: 3, categories: 1, mobs: 0, blockDrops: 0, failures: 0},
     diagnostics: {
       failureEvents: 0,
@@ -1322,7 +1322,7 @@ test('GTNH rejects every serialized failure and classifies exporter failure pref
   assert.match(issues.join('\n'), /recipe-preview render\/write/);
 });
 
-test('accepts dynamic complete Multiblock Madness profiles only at 16px icons and 2x layouts', () => {
+test('accepts dynamic complete Multiblock Madness profiles only at 48px icons and 2x layouts', () => {
   for (const [profile, minecraft, pack, diagnostics] of [
     [
       MULTIBLOCK_MADNESS_112_PROFILE,
@@ -1354,7 +1354,7 @@ test('accepts dynamic complete Multiblock Madness profiles only at 16px icons an
             ...validManifest,
             minecraft,
             pack,
-            settings: {iconScale: 1, recipeScale: 2},
+            settings: {iconScale: 3, recipeScale: 2},
             counts: {failures: 0},
             diagnostics,
           },
@@ -1388,7 +1388,7 @@ test('Multiblock Madness 1.12 audits only the pinned complete warning classes', 
       version: '3.2.3',
       identitySource: 'explicit-request',
     },
-    settings: {iconScale: 1, recipeScale: 2},
+    settings: {iconScale: 3, recipeScale: 2},
     counts: {failures: 0},
     diagnostics: {
       failureEvents: 0,
@@ -1442,7 +1442,7 @@ test('rejects Multiblock Madness version, scale, semantic, and unclassified-zero
           version: '0.9.0',
           identitySource: 'explicit-request',
         },
-        settings: {iconScale: 3, recipeScale: 1},
+        settings: {iconScale: 1, recipeScale: 1},
         counts: {failures: 1},
         diagnostics: {
           failureEvents: 1,
@@ -1460,7 +1460,7 @@ test('rejects Multiblock Madness version, scale, semantic, and unclassified-zero
     MULTIBLOCK_MADNESS_2_118_PROFILE,
   );
   assert.match(issues.join('\n'), /manifest\.minecraft "1\.18\.2"/);
-  assert.match(issues.join('\n'), /16×16 item canvases/);
+  assert.match(issues.join('\n'), /48×48 item canvases/);
   assert.match(issues.join('\n'), /REI layouts rendered at 2×/);
   assert.match(issues.join('\n'), /manifest\.pack\.version "1\.0\.0"/);
   assert.match(issues.join('\n'), /manifest\.diagnostics to contain exactly/);

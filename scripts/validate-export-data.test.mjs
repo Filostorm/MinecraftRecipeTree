@@ -211,7 +211,7 @@ test('structured-data-only validation requires the exact manifest policy object'
 test('MM1 validation requires and reconciles the complete warnings.json audit', async () => {
   const root = await mkdtemp(join(tmpdir(), 'recipe-tree-mm1-warnings-test-'));
   try {
-    await createRawExportFixture(root, {iconScale: 1, recipeScale: 2});
+    await createRawExportFixture(root, {iconScale: 3, recipeScale: 2});
     const manifest = await configureMultiblockExportFixture(
       root,
       MULTIBLOCK_MADNESS_112_PROFILE,

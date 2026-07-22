@@ -72,7 +72,7 @@ async function fixture(t) {
       version: '1.0.0',
       identitySource: 'explicit-request',
     },
-    settings: {iconScale: 1, recipeScale: 2, mobCanvas: 256},
+    settings: {iconScale: 3, recipeScale: 2, mobCanvas: 256},
     counts: {items: 10, recipes: 20, categories: 2, mobs: 0, blockDrops: 0, failures: 0},
     mods: {minecraft: 'Minecraft'},
   };

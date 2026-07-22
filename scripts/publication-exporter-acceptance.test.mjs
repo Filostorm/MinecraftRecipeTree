@@ -68,7 +68,7 @@ async function fixture(t) {
     aborted: false,
     minecraft: '1.18.2',
     pack,
-    settings: {iconScale: 1, recipeScale: 2, mobCanvas: 256},
+    settings: {iconScale: 3, recipeScale: 2, mobCanvas: 256},
     counts: {items: 10, recipes: 20, categories: 2, mobs: 0, blockDrops: 0, failures: 0},
     mods: {minecraft: 'Minecraft'},
   };

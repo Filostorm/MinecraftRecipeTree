@@ -28,7 +28,7 @@ test('explicit full-copy staging validates without selecting clone fallback', as
   try {
     const source = join(root, 'raw');
     const destination = join(root, 'published', 'exports');
-    await createRawExportFixture(source, {iconScale: 1, recipeScale: 2});
+    await createRawExportFixture(source, {iconScale: 3, recipeScale: 2});
     await configureMultiblockExportFixture(source, MULTIBLOCK_MADNESS_112_PROFILE);
     await mkdir(dirname(destination), {recursive: true});
 

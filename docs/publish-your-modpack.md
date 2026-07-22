@@ -80,13 +80,13 @@ For 1.18.2 and 1.12.2 request files, include:
 }
 ```
 
-The two Multiblock Madness publication profiles deliberately keep the source renderer at
-Minecraft's native 16×16 grid and rasterize the complete recipe-viewer layout at 2×:
+The two Multiblock Madness publication profiles retain Minecraft's logical 16×16 sprite grid,
+rasterize item canvases at 3×, and rasterize the complete recipe-viewer layout at 2×:
 
 | Pack profile | Request contract | Hosted quality contract |
 |---|---|---|
-| `multiblock-madness-1.12.2` | `jeiexport-request.json` with `iconScale: 1`, `recipeScale: 2`, explicit `packName`/`packVersion`, and `exitOnComplete: true` | select `--profile multiblock-madness-1.12.2` during validation/preparation; do not add a `profile` field to the 1.12.2 request because that exporter rejects unknown keys |
-| `multiblock-madness-2-1.18.2` | `reiexport-request.json` with the exact matching `profile`, `iconScale: 1`, `recipeScale: 2`, `exitOnComplete: true`, `failOnError: true`, and `pngQueueCapacity` in the validated `8..128` range | select `--profile multiblock-madness-2-1.18.2` during validation/preparation |
+| `multiblock-madness-1.12.2` | `jeiexport-request.json` with `iconScale: 3`, `recipeScale: 2`, explicit `packName`/`packVersion`, and `exitOnComplete: true` | select `--profile multiblock-madness-1.12.2` during validation/preparation; do not add a `profile` field to the 1.12.2 request because that exporter rejects unknown keys |
+| `multiblock-madness-2-1.18.2` | `reiexport-request.json` with the exact matching `profile`, `iconScale: 3`, `recipeScale: 2`, `exitOnComplete: true`, `failOnError: true`, and `pngQueueCapacity` in the validated `8..128` range | select `--profile multiblock-madness-2-1.18.2` during validation/preparation |
 
 Use `qualitySample` only for a bounded diagnostic mini export. A production full request omits
 that field; the publisher rejects a manifest containing `qualitySample` instead of silently
@@ -105,7 +105,7 @@ The pinned GTNH 1.7.10 exporter instead requires this object in `neiexport-reque
 }
 ```
 
-Its full request also fixes `iconScale: 1` and `recipeScale: 2`; start from
+Its full request also fixes `iconScale: 3` and `recipeScale: 2`; start from
 `recipe-export-mod-1.7.10/example-request.json` because that exporter intentionally rejects other
 pack identities and scale values.
 
@@ -126,15 +126,13 @@ The importer and preview-sidecar builder require exact raw/hosted preservation o
 Its license fields describe the normalized GTNH modpack data source; they do not relicense or
 claim coverage over third-party mod artwork and textures.
 
-Because the GTNH repository license does not establish publication rights for every bundled
-Minecraft/mod texture or rendered screenshot, the public GTNH representation is fixed to
-`publicationPolicy: "gtnh-structured-data-only-v1"`. Only after exhaustive raw validation, the
-packer removes every item/category icon, mob sprite, recipe image/dimension reference, and raster
-file. It emits the exact `web.visualAssets` zero-count ledger and a zero-raster preview-sidecar
-control manifest. The browser verifies those immutable declarations, refuses any residual visual
-reference, never requests GTNH preview objects, and renders deterministic generated placeholders.
-This is a rights boundary, not a missing-asset compatibility fallback; every activation stage logs
-the policy explicitly and fails closed on drift.
+This deployment is explicitly noncommercial and publishes GTNH's actual exporter-rendered runtime
+icons and recipe previews. Individual Minecraft and mod artwork retains its respective license;
+the GTNH dataset attribution does not relicense third-party textures. The packer preserves the
+exhaustively validated visual references in immutable content-addressed objects, and the browser
+loads those objects on demand. Exporter JARs contain no bundled pack graphics and are distributed
+separately rather than hosted by the website. Missing, altered, or unaccounted visual objects fail
+validation and activation instead of producing a silent placeholder substitution.
 
 The pinned GTNH adapters classify AE2 in-world crafting's complete wildcard-query closure and
 BetterQuesting pages as informational associations. BetterQuesting preserves all item references
@@ -401,10 +399,9 @@ Multiblock Madness 2 uses its independently accepted 1.18.2 release:
 
 GTNH uses `--profile gtnh-1.7.10 --release forge-nei-gtnh-1.7.10` and is permanently bound to
 the `gt-new-horizons` channel. The preparer selects that slug when `--slug` is omitted and rejects
-any different explicit slug before acceptance-receipt access or workspace creation. Its
-`publication-plan.json` persists the exact `gtnh-structured-data-only-v1` decision; upload
-revalidates both that value and the zero-count visual-assets ledger before catalog access or
-credential loading.
+any different explicit slug before acceptance-receipt access or workspace creation. New GTNH
+publications follow the ordinary runtime-visual path and require exact icon and preview inventories;
+the legacy `gtnh-structured-data-only-v1` contract remains readable only for historical publications.
 
 Use `npm run publish:modpack -- --help` for the live list of supported strict profiles. A profile
 is not just a label: it selects version-specific completeness, image scale, diagnostics, and recipe

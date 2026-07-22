@@ -153,7 +153,7 @@ function completeProfileFixtureContract(
           }
         : {}),
       aborted: false,
-      settings: {iconScale: 1, recipeScale: 2, mobCanvas: 256},
+      settings: {iconScale: 3, recipeScale: 2, mobCanvas: 256},
       counts: {
         items: 2,
         recipes: FIXTURE_RECIPE_COUNT,
@@ -357,7 +357,7 @@ test('profile contract resolution preserves MeatballCraft and derives only new-p
   );
   const gtnh = completeProfileFixtureContract(GTNH_1710_PROFILE, '1.7.10');
   for (const contract of [first, second, gtnh]) {
-    assert.deepEqual(contract.settings, {iconScale: 1, recipeScale: 2, mobCanvas: 256});
+    assert.deepEqual(contract.settings, {iconScale: 3, recipeScale: 2, mobCanvas: 256});
     assert.deepEqual(contract.recipeImages, {previews: FIXTURE_RECIPE_COUNT, missing: 0});
     assert.equal(contract.counts.recipes, FIXTURE_RECIPE_COUNT);
     assert.equal(contract.hostedWeb.packedImages, 'coordinate-v1');
@@ -649,7 +649,7 @@ test('profile contract resolution rejects unsupported scale and zero-failure dri
     minecraft: '1.18.2',
     pack: MULTIBLOCK_MADNESS_2_PACK_IDENTITY,
     aborted: false,
-    settings: {iconScale: 3, recipeScale: 2, mobCanvas: 256},
+    settings: {iconScale: 1, recipeScale: 2, mobCanvas: 256},
     counts: {
       items: 2,
       recipes: 3,
@@ -668,9 +668,9 @@ test('profile contract resolution rejects unsupported scale and zero-failure dri
   };
   assert.throws(
     () => recipePreviewContractForProfile(MULTIBLOCK_MADNESS_2_118_PROFILE, manifest),
-    /16×16 item canvases/,
+    /48×48 item canvases/,
   );
-  manifest.settings.iconScale = 1;
+  manifest.settings.iconScale = 3;
   assert.throws(
     () => recipePreviewContractForProfile(MULTIBLOCK_MADNESS_2_118_PROFILE, manifest),
     /manifest\.counts\.failures to be 0/,
@@ -1242,7 +1242,7 @@ test('builder accepts dynamic complete pack corpora with explicit profiles', asy
       });
 
       assert.deepEqual(manifest.settings, {
-        itemIconPixels: 16,
+        itemIconPixels: 48,
         recipeScale: 2,
         webpEffort: 4,
         maxCategoryBytes: MAX_CATEGORY_BYTES,

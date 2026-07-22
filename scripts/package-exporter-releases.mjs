@@ -46,9 +46,9 @@ export const EXPORTER_RELEASE_DEFINITIONS = Object.freeze([
     minecraftVersion: '1.18.2',
     recipeViewer: 'REI 8',
     loader: 'Forge 40',
-    version: '1.0.44',
-    source: 'recipe-export-mod-1.18.2/build/libs/recipe-export-mod-1.18.2-1.0.44.jar',
-    filename: 'recipe-tree-exporter-forge-1.18.2-1.0.44.jar',
+    version: '1.0.47',
+    source: 'recipe-export-mod-1.18.2/build/libs/recipe-export-mod-1.18.2-1.0.47.jar',
+    filename: 'recipe-tree-exporter-forge-1.18.2-1.0.47.jar',
     qualityProfiles: Object.freeze(['multiblock-madness-2-1.18.2']),
     artifactProvenance: Object.freeze({
       format: 'mrt-exporter-build-v1',
@@ -57,7 +57,7 @@ export const EXPORTER_RELEASE_DEFINITIONS = Object.freeze([
     }),
     acceptanceCorpora: Object.freeze({
       'multiblock-madness-2-1.18.2': Object.freeze({
-        items: 68524,
+        items: 68526,
         recipes: 99908,
         categories: 333,
         mobs: 0,
@@ -89,8 +89,8 @@ export const EXPORTER_RELEASE_DEFINITIONS = Object.freeze([
         blockDrops: 0,
       }),
       'multiblock-madness-1.12.2': Object.freeze({
-        items: 88268,
-        recipes: 107819,
+        items: 88262,
+        recipes: 107814,
         categories: 378,
         mobs: 0,
         blockDrops: 0,
@@ -103,9 +103,9 @@ export const EXPORTER_RELEASE_DEFINITIONS = Object.freeze([
     minecraftVersion: '1.7.10',
     recipeViewer: 'NEI 2.8.44-GTNH',
     loader: 'Forge 10.13.4.1614',
-    version: '1.0.148',
-    source: 'recipe-export-mod-1.7.10/build/libs/recipe-tree-gtnh-nei-exporter-1.0.148.jar',
-    filename: 'recipe-tree-exporter-gtnh-1.7.10-1.0.148.jar',
+    version: '1.0.149',
+    source: 'recipe-export-mod-1.7.10/build/libs/recipe-tree-gtnh-nei-exporter-1.0.149.jar',
+    filename: 'recipe-tree-exporter-gtnh-1.7.10-1.0.149.jar',
     qualityProfiles: Object.freeze(['gtnh-1.7.10']),
     artifactProvenance: Object.freeze({
       format: 'mrt-exporter-build-v1',
