@@ -42,6 +42,7 @@ import {
   persistPreferredSources,
 } from './preferredSources';
 import {automaticGraphFitScale} from './fitScale';
+import {recordRecipeHistory} from './recipeHistory';
 import {ItemTreeNode, SourceTreeNode, makeRoot} from './model';
 import {
   buildTreeTotalsCsv,
@@ -298,6 +299,15 @@ export function GraphScreen() {
           catTitle: recipeDisplayTitle(cat.title, recipe),
           inputs,
         };
+        if (node.id === 'root') {
+          recordRecipeHistory(data.descriptor, {
+            itemKey: node.key,
+            ref,
+            title: recipeDisplayTitle(cat.title, recipe),
+            recipeId: recipe.id ?? null,
+            openedAt: Date.now(),
+          });
+        }
         for (const child of inputs) {
           if (child.cyclic) continue;
           const preferred = preferredSourceFor(child.key);
