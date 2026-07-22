@@ -13,13 +13,6 @@ function openAttributionLink(url: string, profile: string, label: string) {
   });
 }
 
-function openImportGuide() {
-  const url = '/publish';
-  void Linking.openURL(url).catch(error => {
-    console.error('Could not open the validated modpack import guide.', {url, error});
-  });
-}
-
 export function DatasetSwitcher({
   status,
   datasets,
@@ -134,16 +127,6 @@ export function DatasetSwitcher({
         </TouchableOpacity>
       </View>
 
-      <TouchableOpacity
-        style={styles.importLink}
-        onPress={openImportGuide}
-        accessibilityRole="link"
-        accessibilityLabel="Import a modpack"
-        accessibilityHint="Opens the validated modpack import guide in a new tab"
-        focusable>
-        <Text style={styles.importLinkText}>Import ↗</Text>
-      </TouchableOpacity>
-
       {loadedAttribution && (
         <Text style={styles.attribution}>
           {loadedAttribution.packName} {loadedAttribution.packVersion} recipe data
@@ -236,21 +219,6 @@ const styles = StyleSheet.create({
   datasetButtonLabel: {color: theme.textDim, fontSize: 9, fontWeight: '800'},
   datasetButtonText: {color: theme.accent, fontSize: 13, fontWeight: '800', marginTop: 1},
   datasetButtonMeta: {color: theme.textDim, fontSize: 9, marginTop: 1},
-  importLink: {
-    minHeight: 44,
-    paddingHorizontal: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 9,
-    borderWidth: 1,
-    borderColor: theme.borderLight,
-    backgroundColor: theme.panelAlt,
-  },
-  importLinkText: {
-    color: theme.text,
-    fontSize: 11,
-    fontWeight: '800',
-  },
   attribution: {
     flexBasis: '100%',
     flexGrow: 1,
