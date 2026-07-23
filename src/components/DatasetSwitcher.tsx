@@ -1,17 +1,12 @@
 import React from 'react';
-import {Linking, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import type {DatasetDescriptor} from '../data/datasetCatalog';
 import {loadedDatasetAttribution} from '../data/datasetAttribution';
 import {theme} from '../theme';
 import type {Manifest} from '../types';
+import {DatasetDisclaimer} from './DatasetDisclaimer';
 
 type CatalogStatus = 'loading' | 'ready' | 'error';
-
-function openAttributionLink(url: string, profile: string, label: string) {
-  void Linking.openURL(url).catch(error => {
-    console.error(`Could not open the ${profile} dataset ${label} link.`, {url, error});
-  });
-}
 
 export function DatasetSwitcher({
   status,
@@ -69,6 +64,7 @@ export function DatasetSwitcher({
               ? 'Loading published packs'
               : 'Published pack catalog unavailable'}
         </Text>
+        {loadedAttribution && <DatasetDisclaimer attribution={loadedAttribution} />}
       </View>
 
       <View style={styles.controls}>
@@ -127,42 +123,6 @@ export function DatasetSwitcher({
         </TouchableOpacity>
       </View>
 
-      {loadedAttribution && (
-        <Text style={styles.attribution}>
-          {loadedAttribution.packName} {loadedAttribution.packVersion} recipe data
-          (profile {loadedAttribution.profile}; visuals {loadedAttribution.visualMode}) by the{' '}
-          <Text
-            style={styles.attributionLink}
-            accessibilityRole="link"
-            onPress={() =>
-              openAttributionLink(
-                loadedAttribution.attribution.sourceUrl,
-                loadedAttribution.profile,
-                'source',
-              )
-            }>
-            GT New Horizons contributors
-          </Text>
-          . Modification notice: Recipe Tree normalized, deduplicated, indexed, and converted the
-          source records into a web database. Runtime-rendered icons and recipe layouts were captured
-          from the operator&apos;s installed pack by an exporter that does not bundle source textures.
-          The adapted GTNH-derived data is licensed under{' '}
-          <Text
-            style={styles.attributionLink}
-            accessibilityRole="link"
-            onPress={() =>
-              openAttributionLink(
-                loadedAttribution.attribution.licenseUrl,
-                loadedAttribution.profile,
-                'license',
-              )
-            }>
-            {loadedAttribution.attribution.licenseIdentifier}
-          </Text>{' '}
-          and provided noncommercially as-is, without warranty. Third-party artwork remains subject
-          to its original terms. Recipe Tree is not affiliated with or endorsed by GT New Horizons.
-        </Text>
-      )}
     </View>
   );
 }
@@ -219,16 +179,5 @@ const styles = StyleSheet.create({
   datasetButtonLabel: {color: theme.textDim, fontSize: 9, fontWeight: '800'},
   datasetButtonText: {color: theme.accent, fontSize: 13, fontWeight: '800', marginTop: 1},
   datasetButtonMeta: {color: theme.textDim, fontSize: 9, marginTop: 1},
-  attribution: {
-    flexBasis: '100%',
-    flexGrow: 1,
-    color: theme.textDim,
-    fontSize: 9,
-    lineHeight: 13,
-  },
-  attributionLink: {
-    color: theme.accent,
-    textDecorationLine: 'underline',
-  },
   disabled: {opacity: 0.46},
 });
