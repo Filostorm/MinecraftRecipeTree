@@ -35,6 +35,11 @@ import {
   layoutTree,
   recipeImageDisplay,
 } from './layout';
+import type {LaidInputCluster} from './layout';
+import {
+  PACKED_ITEM_SIZE,
+  layoutAdaptiveTree,
+} from './adaptiveLayout';
 import {
   PreferredSource,
   PreferredSources,
@@ -106,6 +111,7 @@ function choiceMatchesPreference(choice: SourceChoice, preferred: PreferredSourc
 /** Dragging the canvas must never start a text selection (web). */
 const noSelect = Platform.OS === 'web' ? ({userSelect: 'none'} as unknown as object) : null;
 const COMPACT_MODE_KEY = 'graphCompactMode';
+const PACKED_LAYOUT_KEY = 'graphPackedLayout';
 const USE_BYPRODUCTS_KEY = 'graphUseByproducts';
 const MAX_RECIPE_PICKER_CHOICES = 40;
 const RECIPE_PICKER_SCAN_BATCH = 40;
@@ -123,6 +129,15 @@ function loadCompactMode(): boolean {
   } catch (error) {
     console.error('Compact graph mode could not be loaded from localStorage.', error);
     return false;
+  }
+}
+
+function loadPackedLayout(): boolean {
+  try {
+    return globalThis.localStorage?.getItem(PACKED_LAYOUT_KEY) !== '0';
+  } catch (error) {
+    console.error('Packed graph layout could not be loaded from localStorage.', error);
+    return true;
   }
 }
 
@@ -146,6 +161,7 @@ export function GraphScreen() {
   const bump = useCallback(() => setVersion(v => v + 1), []);
   const [picker, setPicker] = useState<PickerState | null>(null);
   const [compactMode, setCompactMode] = useState(loadCompactMode);
+  const [packedLayout, setPackedLayout] = useState(loadPackedLayout);
   const [showTreeTotals, setShowTreeTotals] = useState(true);
   const [useByproducts, setUseByproducts] = useState(loadUseByproducts);
   const [exportingTree, setExportingTree] = useState(false);
@@ -327,13 +343,17 @@ export function GraphScreen() {
   const applyPreferredSourceAcrossTree = useCallback(
     (target: ItemTreeNode, choice: SourceChoice) => {
       const matches = new Set<ItemTreeNode>([target]);
-      const visit = (node: ItemTreeNode) => {
+      const traversal = rootRef.current ? [rootRef.current] : [];
+      while (traversal.length > 0) {
+        const node = traversal.pop()!;
         if (node.key === target.key && !node.source && !node.loading && !node.cyclic) {
           matches.add(node);
         }
-        for (const child of node.source?.inputs ?? []) visit(child);
-      };
-      if (rootRef.current) visit(rootRef.current);
+        const children = node.source?.inputs ?? [];
+        for (let index = children.length - 1; index >= 0; index -= 1) {
+          traversal.push(children[index]);
+        }
+      }
       for (const match of matches) {
         if (!match.cyclic && !match.loading && !match.source) {
           applyChoiceRef.current?.(match, choice);
@@ -594,8 +614,13 @@ export function GraphScreen() {
   ]);
 
   const graph = useMemo(
-    () => (root ? layoutTree(root, compactMode) : null),
-    [root, version, compactMode],
+    () =>
+      root
+        ? packedLayout
+          ? layoutAdaptiveTree(root, compactMode)
+          : layoutTree(root, compactMode)
+        : null,
+    [root, version, compactMode, packedLayout],
   );
   const graphRef = useRef(graph);
   graphRef.current = graph;
@@ -742,6 +767,23 @@ export function GraphScreen() {
         }
       } catch (error) {
         console.error('Compact graph mode could not be saved to localStorage.', error);
+      }
+      return next;
+    });
+  }, []);
+
+  const togglePackedLayout = useCallback(() => {
+    setPackedLayout(current => {
+      const next = !current;
+      needsFitRef.current = true;
+      try {
+        const storage = globalThis.localStorage;
+        if (storage) storage.setItem(PACKED_LAYOUT_KEY, next ? '1' : '0');
+        else if (Platform.OS === 'web') {
+          console.warn('Packed graph layout is using memory only because localStorage is unavailable.');
+        }
+      } catch (error) {
+        console.error('Packed graph layout could not be saved to localStorage.', error);
       }
       return next;
     });
@@ -904,6 +946,9 @@ export function GraphScreen() {
               ],
             },
           ]}>
+          {graph?.clusters?.map(cluster => (
+            <PackedInputClusterView key={cluster.id} cluster={cluster} />
+          ))}
           {graph?.edges.map((e, i) => (
             <View
               key={`e${i}`}
@@ -911,7 +956,7 @@ export function GraphScreen() {
             />
           ))}
           {graph?.nodes.map(n =>
-            compactMode ? (
+            compactMode || n.packed ? (
               <CompactItemNodeView
                 key={n.id}
                 x={n.x}
@@ -920,7 +965,10 @@ export function GraphScreen() {
                 requiredAmount={requiredAmountFor(n.item, treeTotals)}
                 isRoot={n.item.id === 'root'}
                 selectable={choicesFor(n.item.key).length > 0}
-                onTap={() => openPickerWithErrorHandling(n.item)}
+                packed={n.packed === true}
+                onTap={() =>
+                  n.packed ? onItemTap(n.item) : openPickerWithErrorHandling(n.item)
+                }
               />
             ) : n.kind === 'item' ? (
               <ItemNodeView
@@ -958,6 +1006,7 @@ export function GraphScreen() {
 
       <View style={styles.controls}>
         <CtrlBtn label="Totals" active={showTreeTotals} onPress={() => setShowTreeTotals(value => !value)} />
+        <CtrlBtn label="Packed" active={packedLayout} onPress={togglePackedLayout} />
         <CtrlBtn label="Compact" active={compactMode} onPress={toggleCompactMode} />
         <CtrlBtn label="＋" onPress={() => zoomAt(viewportRef.current.w / 2, viewportRef.current.h / 2, 1.25)} />
         <CtrlBtn label="－" onPress={() => zoomAt(viewportRef.current.w / 2, viewportRef.current.h / 2, 0.8)} />
@@ -976,6 +1025,7 @@ export function GraphScreen() {
         />
       )}
       <Text style={styles.hint}>
+        {packedLayout ? 'packed fan inputs promote to branches when opened · ' : ''}
         {compactMode
           ? 'tap item = pick recipe/drop source · drag = pan · scroll = zoom'
           : 'tap node = expand/collapse · ⇄ = pick recipe/drop source · drag = pan · scroll = zoom'}
@@ -1153,6 +1203,7 @@ function CompactItemNodeView({
   requiredAmount,
   isRoot,
   selectable,
+  packed = false,
   onTap,
 }: {
   x: number;
@@ -1161,9 +1212,11 @@ function CompactItemNodeView({
   requiredAmount: number | null;
   isRoot: boolean;
   selectable: boolean;
+  packed?: boolean;
   onTap: () => void;
 }) {
   const data = useData();
+  const [showPackedLabel, setShowPackedLabel] = useState(false);
   const item = data.itemsByKey.get(node.key);
   const name = displayIngredientName(item?.n ?? node.key, node.tag);
   const amount = formatIngredientQuantity(node.key, requiredAmount);
@@ -1173,9 +1226,14 @@ function CompactItemNodeView({
       accessibilityLabel={`${name}, quantity ${amount}${node.nonConsumed ? ', not consumed' : ''}${node.consumptionProbability !== undefined ? `, ${node.consumptionProbability == null ? 'unknown' : `${String(Math.round(node.consumptionProbability * 10_000) / 100)} percent`} consume chance` : ''}${selectable ? ', choose source' : ''}`}
       disabled={!selectable || node.loading}
       onPress={onTap}
+      onHoverIn={packed ? () => setShowPackedLabel(true) : undefined}
+      onHoverOut={packed ? () => setShowPackedLabel(false) : undefined}
+      onFocus={packed ? () => setShowPackedLabel(true) : undefined}
+      onBlur={packed ? () => setShowPackedLabel(false) : undefined}
       style={[
-        styles.compactItemNode,
+        packed ? styles.packedItemNode : styles.compactItemNode,
         {left: x, top: y},
+        packed && showPackedLabel && styles.packedItemNodeRaised,
         isRoot && styles.nodeRoot,
         node.nonConsumed && styles.nodePrerequisite,
         node.cyclic && styles.nodeCyclic,
@@ -1185,7 +1243,62 @@ function CompactItemNodeView({
       <View style={styles.compactCountBadge}>
         <Text style={[styles.compactCountText, noSelect]}>{amount}</Text>
       </View>
+      {packed && showPackedLabel && (
+        <View pointerEvents="none" style={styles.packedItemTooltip}>
+          <Text style={[styles.packedItemTooltipText, noSelect]} numberOfLines={1}>
+            {name} · {amount}
+          </Text>
+        </View>
+      )}
     </Pressable>
+  );
+}
+
+function PackedInputClusterView({cluster}: {cluster: LaidInputCluster}) {
+  return (
+    <View
+      pointerEvents="none"
+      accessibilityLabel={`${cluster.itemCount} packed recipe inputs`}
+      style={[
+        styles.packedInputCluster,
+        {
+          left: cluster.x,
+          top: cluster.y,
+          width: cluster.w,
+          height: cluster.h,
+        },
+      ]}>
+      <Text style={[styles.packedInputClusterTitle, noSelect]}>
+        {cluster.itemCount} packed inputs
+      </Text>
+      <Text style={[styles.packedInputClusterHint, noSelect]}>tap an icon to expand</Text>
+      <View
+        style={[
+          styles.packedFanSurface,
+          {
+            left: 0,
+            top: cluster.fanCenterY,
+            width: cluster.w,
+            height: cluster.h - cluster.fanCenterY,
+          },
+        ]}>
+        {cluster.ringRadii.map(radius => (
+          <View
+            key={radius}
+            style={[
+              styles.packedFanArc,
+              {
+                left: cluster.fanCenterX - radius,
+                top: -radius,
+                width: radius * 2,
+                height: radius * 2,
+                borderRadius: radius,
+              },
+            ]}
+          />
+        ))}
+      </View>
+    </View>
   );
 }
 
@@ -1406,6 +1519,73 @@ const styles = StyleSheet.create({
     borderColor: theme.border,
     borderWidth: 1,
     borderRadius: 9,
+  },
+  packedItemNode: {
+    position: 'absolute',
+    width: PACKED_ITEM_SIZE,
+    height: PACKED_ITEM_SIZE,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.panel,
+    borderColor: theme.border,
+    borderWidth: 1,
+    borderRadius: PACKED_ITEM_SIZE / 2,
+  },
+  packedItemNodeRaised: {
+    zIndex: 20,
+    borderColor: theme.accent,
+  },
+  packedItemTooltip: {
+    position: 'absolute',
+    left: PACKED_ITEM_SIZE / 2,
+    bottom: PACKED_ITEM_SIZE + 5,
+    maxWidth: 220,
+    minWidth: 96,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 6,
+    borderColor: theme.borderLight,
+    borderWidth: 1,
+    backgroundColor: 'rgba(14,17,22,0.97)',
+  },
+  packedItemTooltipText: {
+    color: theme.text,
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  packedInputCluster: {
+    position: 'absolute',
+    overflow: 'hidden',
+    backgroundColor: 'rgba(23,29,38,0.72)',
+    borderColor: theme.borderLight,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderRadius: 22,
+  },
+  packedInputClusterTitle: {
+    position: 'absolute',
+    top: 7,
+    left: 12,
+    color: theme.text,
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  packedInputClusterHint: {
+    position: 'absolute',
+    top: 7,
+    right: 12,
+    color: theme.textDim,
+    fontSize: 9,
+  },
+  packedFanSurface: {
+    position: 'absolute',
+    overflow: 'hidden',
+  },
+  packedFanArc: {
+    position: 'absolute',
+    borderColor: 'rgba(77,101,127,0.34)',
+    borderWidth: 1,
   },
   compactCountBadge: {
     position: 'absolute',

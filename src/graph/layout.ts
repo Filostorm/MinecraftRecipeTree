@@ -23,6 +23,8 @@ export interface LaidNode {
   /** The tree item (owner for both kinds). */
   item: ItemTreeNode;
   source?: SourceTreeNode;
+  /** Adaptive-layout ingredient rendered as an icon inside a packed fan. */
+  packed?: boolean;
 }
 
 export interface EdgeRect {
@@ -32,9 +34,23 @@ export interface EdgeRect {
   h: number;
 }
 
+export interface LaidInputCluster {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  itemCount: number;
+  fanCenterX: number;
+  fanCenterY: number;
+  ringRadii: number[];
+}
+
 export interface GraphLayout {
   nodes: LaidNode[];
   edges: EdgeRect[];
+  /** Present only for adaptive compound-input presentation. */
+  clusters?: LaidInputCluster[];
   minX: number;
   minY: number;
   maxX: number;
