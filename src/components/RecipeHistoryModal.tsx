@@ -13,6 +13,7 @@ import {loadRecipeHistory, type RecipeHistoryEntry} from '../graph/recipeHistory
 import {theme} from '../theme';
 import {useUi} from '../ui/UiContext';
 import {ItemIcon} from './ItemIcon';
+import {RECIPE_HISTORY_ITEM_ICON_SIZE} from './itemIconSizing';
 
 export function RecipeHistoryModal({visible, onClose}: {visible: boolean; onClose: () => void}) {
   const data = useData();
@@ -72,7 +73,11 @@ export function RecipeHistoryModal({visible, onClose}: {visible: boolean; onClos
                       onClose();
                       openRecipeInGraph(entry.itemKey, entry.ref);
                     }}>
-                    <ItemIcon item={item} itemKey={entry.itemKey} size={36} />
+                    <ItemIcon
+                      item={item}
+                      itemKey={entry.itemKey}
+                      size={RECIPE_HISTORY_ITEM_ICON_SIZE}
+                    />
                     <View style={styles.rowCopy}>
                       <Text style={styles.recipeTitle} numberOfLines={1}>
                         {entry.title}

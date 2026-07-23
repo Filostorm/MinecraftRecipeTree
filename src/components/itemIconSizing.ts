@@ -1,5 +1,6 @@
 /** One Minecraft/JEI item occupies a 16×16 logical texel grid, independent of export canvas size. */
 export const LOGICAL_ITEM_ICON_GRID_SIZE = 16;
+export const RECIPE_HISTORY_ITEM_ICON_SIZE = 32;
 
 /**
  * Pixel-art icons must occupy an integer multiple of their logical grid on the web.

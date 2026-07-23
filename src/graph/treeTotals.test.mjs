@@ -166,3 +166,30 @@ test('stochastic byproducts remain unknown and cannot be consumed as material cr
   assert.match(String(warnings[0][0]), /Stochastic byproduct credits are disabled/);
   assert.match(String(warnings[1][0]), /material balance is unknown/);
 });
+
+test('calculates a 10,000-node dependency chain without recursive call-stack growth', () => {
+  const nodeCount = 10_000;
+  let root = item(`node-${nodeCount - 1}`, `item|test:node-${nodeCount - 1}`, 1);
+  for (let index = nodeCount - 2; index >= 0; index -= 1) {
+    const key = `item|test:node-${index}`;
+    root = item(`node-${index}`, key, 1, {
+      source: {
+        id: `node-${index}.source`,
+        kind: 'recipe',
+        recipe: {out: [[[key, 1]]]},
+        inputs: [root],
+      },
+    });
+  }
+
+  const totals = calculateTreeTotals(root);
+  assert.equal(totals.requiredByNode.size, nodeCount);
+  assert.deepEqual(totals.inputs, [
+    {
+      key: `item|test:node-${nodeCount - 1}`,
+      amount: 1,
+      variants: 1,
+      tag: undefined,
+    },
+  ]);
+});

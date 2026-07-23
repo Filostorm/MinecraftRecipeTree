@@ -1,6 +1,6 @@
-import {Recipe} from '../types';
-import {pixelArtDisplaySize} from '../data/pixelArtSizing';
-import {ItemTreeNode, SourceTreeNode} from './model';
+import type {Recipe} from '../types.ts';
+import {pixelArtDisplaySize} from '../data/pixelArtSizing.ts';
+import type {ItemTreeNode, SourceTreeNode} from './model.ts';
 
 export const ITEM_W = 172;
 export const ITEM_H = 58;
@@ -72,15 +72,18 @@ export function layoutTree(root: ItemTreeNode, compact = false): GraphLayout {
   const seeH = (d: number, h: number) => {
     rowH[d] = Math.max(rowH[d] ?? 0, h);
   };
-  const rowWalk = (n: ItemTreeNode, d: number) => {
-    if (n.source) {
-      seeH(d, compact ? COMPACT_ITEM_SIZE : sourceNodeSize(n.source).h);
-      for (const input of n.source.inputs) rowWalk(input, d + 1);
+  const rowStack: Array<{node: ItemTreeNode; depth: number}> = [{node: root, depth: 0}];
+  while (rowStack.length > 0) {
+    const {node, depth} = rowStack.pop()!;
+    if (node.source) {
+      seeH(depth, compact ? COMPACT_ITEM_SIZE : sourceNodeSize(node.source).h);
+      for (let index = node.source.inputs.length - 1; index >= 0; index -= 1) {
+        rowStack.push({node: node.source.inputs[index], depth: depth + 1});
+      }
     } else {
-      seeH(d, compact ? COMPACT_ITEM_SIZE : ITEM_H);
+      seeH(depth, compact ? COMPACT_ITEM_SIZE : ITEM_H);
     }
-  };
-  rowWalk(root, 0);
+  }
 
   const rowTop: number[] = [0];
   for (let d = 1; d < rowH.length; d++) {
@@ -89,21 +92,38 @@ export function layoutTree(root: ItemTreeNode, compact = false): GraphLayout {
 
   // Pass 2: subtree widths.
   const wMemo = new Map<string, number>();
-  const widthItem = (n: ItemTreeNode): number => {
-    const cached = wMemo.get(n.id);
-    if (cached != null) return cached;
-    let w = compact ? COMPACT_ITEM_SIZE : ITEM_W;
-    if (n.source) {
-      const own = compact ? COMPACT_ITEM_SIZE : sourceNodeSize(n.source).w;
-      const kids = n.source.inputs;
-      const kidsW = kids.length
-        ? kids.reduce((s, k) => s + widthItem(k), 0) + SIBLING_GAP * (kids.length - 1)
-        : 0;
-      w = Math.max(own, kidsW);
+  const widthStack: Array<{node: ItemTreeNode; visited: boolean}> = [
+    {node: root, visited: false},
+  ];
+  while (widthStack.length > 0) {
+    const frame = widthStack.pop()!;
+    if (!frame.visited && frame.node.source?.inputs.length) {
+      widthStack.push({node: frame.node, visited: true});
+      for (let index = frame.node.source.inputs.length - 1; index >= 0; index -= 1) {
+        widthStack.push({node: frame.node.source.inputs[index], visited: false});
+      }
+      continue;
     }
-    wMemo.set(n.id, w);
-    return w;
-  };
+
+    let width = compact ? COMPACT_ITEM_SIZE : ITEM_W;
+    if (frame.node.source) {
+      const own = compact ? COMPACT_ITEM_SIZE : sourceNodeSize(frame.node.source).w;
+      const kids = frame.node.source.inputs;
+      const kidsWidth =
+        kids.length === 0
+          ? 0
+          : kids.reduce((sum, child) => {
+              const childWidth = wMemo.get(child.id);
+              if (childWidth === undefined) {
+                throw new Error(`Graph layout width is missing for child node ${child.id}.`);
+              }
+              return sum + childWidth;
+            }, 0) +
+            SIBLING_GAP * (kids.length - 1);
+      width = Math.max(own, kidsWidth);
+    }
+    wMemo.set(frame.node.id, width);
+  }
 
   // Pass 3: placement + edges (child top-center up to parent bottom-center).
   const elbow = (x1: number, y1: number, x2: number, y2: number) => {
@@ -118,35 +138,94 @@ export function layoutTree(root: ItemTreeNode, compact = false): GraphLayout {
     edges.push({x: x2 - EDGE_T / 2, y: Math.min(midY, y2), w: EDGE_T, h: Math.abs(y2 - midY)});
   };
 
-  const placeItem = (n: ItemTreeNode, d: number, left: number, band: number) => {
-    if (!n.source) {
+  type PlacementAction =
+    | {kind: 'node'; node: ItemTreeNode; depth: number; left: number; band: number}
+    | {kind: 'edge'; x1: number; y1: number; x2: number; y2: number};
+  const rootWidth = wMemo.get(root.id);
+  if (rootWidth === undefined) {
+    throw new Error('Graph layout did not calculate a width for the root node.');
+  }
+  const placementStack: PlacementAction[] = [
+    {kind: 'node', node: root, depth: 0, left: 0, band: rootWidth},
+  ];
+  while (placementStack.length > 0) {
+    const action = placementStack.pop()!;
+    if (action.kind === 'edge') {
+      elbow(action.x1, action.y1, action.x2, action.y2);
+      continue;
+    }
+
+    const {node, depth, left, band} = action;
+    if (!node.source) {
       const size = compact ? COMPACT_ITEM_SIZE : ITEM_W;
       const height = compact ? COMPACT_ITEM_SIZE : ITEM_H;
       const x = left + (band - size) / 2;
-      nodes.push({id: n.id, kind: 'item', x, y: rowTop[d], w: size, h: height, item: n});
-      return;
+      nodes.push({
+        id: node.id,
+        kind: 'item',
+        x,
+        y: rowTop[depth],
+        w: size,
+        h: height,
+        item: node,
+      });
+      continue;
     }
     const size = compact
       ? {w: COMPACT_ITEM_SIZE, h: COMPACT_ITEM_SIZE}
-      : sourceNodeSize(n.source);
+      : sourceNodeSize(node.source);
     const x = left + (band - size.w) / 2;
-    const y = rowTop[d];
-    nodes.push({id: n.source.id, kind: 'source', x, y, w: size.w, h: size.h, item: n, source: n.source});
+    const y = rowTop[depth];
+    nodes.push({
+      id: node.source.id,
+      kind: 'source',
+      x,
+      y,
+      w: size.w,
+      h: size.h,
+      item: node,
+      source: node.source,
+    });
 
-    const kids = n.source.inputs;
+    const kids = node.source.inputs;
     if (kids.length) {
-      const kidsW = kids.reduce((s, k) => s + widthItem(k), 0) + SIBLING_GAP * (kids.length - 1);
-      let childLeft = left + (band - kidsW) / 2;
+      let kidsWidth = SIBLING_GAP * (kids.length - 1);
+      for (const child of kids) {
+        const childWidth = wMemo.get(child.id);
+        if (childWidth === undefined) {
+          throw new Error(`Graph placement width is missing for child node ${child.id}.`);
+        }
+        kidsWidth += childWidth;
+      }
+      let childLeft = left + (band - kidsWidth) / 2;
+      const childPlacements: Array<{node: ItemTreeNode; left: number; width: number}> = [];
       for (const kid of kids) {
-        const kw = widthItem(kid);
-        placeItem(kid, d + 1, childLeft, kw);
-        elbow(childLeft + kw / 2, rowTop[d + 1], x + size.w / 2, y + size.h);
-        childLeft += kw + SIBLING_GAP;
+        const childWidth = wMemo.get(kid.id);
+        if (childWidth === undefined) {
+          throw new Error(`Graph placement width is missing for child node ${kid.id}.`);
+        }
+        childPlacements.push({node: kid, left: childLeft, width: childWidth});
+        childLeft += childWidth + SIBLING_GAP;
+      }
+      for (let index = childPlacements.length - 1; index >= 0; index -= 1) {
+        const child = childPlacements[index];
+        placementStack.push({
+          kind: 'edge',
+          x1: child.left + child.width / 2,
+          y1: rowTop[depth + 1],
+          x2: x + size.w / 2,
+          y2: y + size.h,
+        });
+        placementStack.push({
+          kind: 'node',
+          node: child.node,
+          depth: depth + 1,
+          left: child.left,
+          band: child.width,
+        });
       }
     }
-  };
-
-  placeItem(root, 0, 0, widthItem(root));
+  }
 
   let minX = Infinity;
   let minY = Infinity;

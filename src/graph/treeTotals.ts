@@ -1,5 +1,5 @@
 import {slotSummary} from '../data/slotSummary.ts';
-import type {ItemTreeNode} from './model';
+import type {ItemTreeNode} from './model.ts';
 
 export interface TreeTotal {
   key: string;
@@ -105,7 +105,55 @@ export function calculateTreeTotals(
   const byproducts = new Map<string, TreeTotal>();
   const requiredByNode = new Map<string, number | null>();
 
-  const visit = (node: ItemTreeNode, required: number | null) => {
+  type VisitFrame =
+    | {phase: 'enter'; node: ItemTreeNode; required: number | null}
+    | {
+        phase: 'exit';
+        source: NonNullable<ItemTreeNode['source']>;
+        outputs: ReturnType<typeof slotSummary>;
+        selectedOutput: ReturnType<typeof slotSummary>[number] | undefined;
+        runs: number | null;
+      };
+  const stack: VisitFrame[] = [
+    {phase: 'enter', node: root, required: root.amount === undefined ? 1 : root.amount},
+  ];
+
+  while (stack.length > 0) {
+    const frame = stack.pop()!;
+    if (frame.phase === 'exit') {
+      for (const output of frame.outputs) {
+        if (output === frame.selectedOutput) continue;
+        const stochastic = output.probability !== undefined;
+        if (stochastic) {
+          const warningKey =
+            `${frame.source.ref?.[0] ?? 'unknown'}:` +
+            `${frame.source.ref?.[1] ?? 'unknown'}:${output.key}`;
+          if (!warnedStochasticByproducts.has(warningKey)) {
+            warnedStochasticByproducts.add(warningKey);
+            console.warn(
+              'Stochastic byproduct credits are disabled because a guaranteed material balance cannot be derived.',
+              {
+                recipe: frame.source.ref,
+                itemKey: output.key,
+                probability: output.probability,
+              },
+            );
+          }
+        }
+        addTotal(
+          byproducts,
+          output.key,
+          stochastic || output.amount == null || frame.runs == null
+            ? null
+            : output.amount * frame.runs,
+          output.variants,
+          output.tag,
+        );
+      }
+      continue;
+    }
+
+    const {node, required} = frame;
     requiredByNode.set(node.id, required);
     if (node.nonConsumed) {
       addTotal(
@@ -123,7 +171,7 @@ export function calculateTreeTotals(
       if (!node.nonConsumed) {
         addTotal(inputs, node.key, required, node.variantCount ?? 1, node.tag);
       }
-      return;
+      continue;
     }
 
     const outputs = slotSummary(source.recipe.out);
@@ -166,7 +214,9 @@ export function calculateTreeTotals(
           ? Math.ceil(required / outputYield)
           : required / outputYield;
 
-    for (const child of source.inputs) {
+    stack.push({phase: 'exit', source, outputs, selectedOutput, runs});
+    for (let index = source.inputs.length - 1; index >= 0; index -= 1) {
+      const child = source.inputs[index];
       const stochasticConsumption =
         !child.nonConsumed && child.consumptionProbability !== undefined;
       if (stochasticConsumption) {
@@ -184,45 +234,19 @@ export function calculateTreeTotals(
           );
         }
       }
-      visit(
-        child,
-        stochasticConsumption || child.amount == null || runs == null
-          ? null
-          : child.nonConsumed
-            ? child.amount
-            : child.amount * runs,
-      );
+      stack.push({
+        phase: 'enter',
+        node: child,
+        required:
+          stochasticConsumption || child.amount == null || runs == null
+            ? null
+            : child.nonConsumed
+              ? child.amount
+              : child.amount * runs,
+      });
     }
+  }
 
-    for (const output of outputs) {
-      if (output === selectedOutput) continue;
-      const stochastic = output.probability !== undefined;
-      if (stochastic) {
-        const warningKey =
-          `${source.ref?.[0] ?? 'unknown'}:${source.ref?.[1] ?? 'unknown'}:${output.key}`;
-        if (!warnedStochasticByproducts.has(warningKey)) {
-          warnedStochasticByproducts.add(warningKey);
-          console.warn(
-            'Stochastic byproduct credits are disabled because a guaranteed material balance cannot be derived.',
-            {
-              recipe: source.ref,
-              itemKey: output.key,
-              probability: output.probability,
-            },
-          );
-        }
-      }
-      addTotal(
-        byproducts,
-        output.key,
-        stochastic || output.amount == null || runs == null ? null : output.amount * runs,
-        output.variants,
-        output.tag,
-      );
-    }
-  };
-
-  visit(root, root.amount === undefined ? 1 : root.amount);
   const credits = useByproducts ? applyByproductCredits(inputs, byproducts) : new Map();
   const nonZero = (total: TreeTotal) => total.amount == null || total.amount > 0;
 

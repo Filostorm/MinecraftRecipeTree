@@ -46,7 +46,6 @@ import {recordRecipeHistory} from './recipeHistory';
 import {ItemTreeNode, SourceTreeNode, makeRoot} from './model';
 import {
   buildTreeTotalsCsv,
-  dataUrlToBlob,
   downloadBlob,
   safeExportFilename,
 } from './treeExports';
@@ -113,8 +112,6 @@ const RECIPE_PICKER_SCAN_BATCH = 40;
 const MAX_RECIPE_PICKER_SCAN = 400;
 const GRAPH_EXPORT_PADDING = 48;
 const GRAPH_EXPORT_PIXEL_RATIO = 3;
-const GRAPH_EXPORT_MAX_DIMENSION = 16_384;
-const GRAPH_EXPORT_MAX_PIXELS = 64_000_000;
 
 function recipeRefKey([categoryIndex, recipeIndex]: RecipeRef): string {
   return `${categoryIndex}:${recipeIndex}`;
@@ -664,84 +661,41 @@ export function GraphScreen() {
 
     setExportingTree(true);
     setExportMessage('Rendering high-quality PNG…');
-    let staging: HTMLDivElement | null = null;
     try {
       const width = Math.ceil(currentGraph.maxX - currentGraph.minX + GRAPH_EXPORT_PADDING * 2);
       const height = Math.ceil(currentGraph.maxY - currentGraph.minY + GRAPH_EXPORT_PADDING * 2);
-      const pixelRatio = Math.min(
-        GRAPH_EXPORT_PIXEL_RATIO,
-        GRAPH_EXPORT_MAX_DIMENSION / width,
-        GRAPH_EXPORT_MAX_DIMENSION / height,
-        Math.sqrt(GRAPH_EXPORT_MAX_PIXELS / (width * height)),
-      );
-      if (!Number.isFinite(pixelRatio) || pixelRatio < 1) {
-        throw new Error(
-          'This tree exceeds the browser image limit. Collapse branches or enable Compact mode before exporting.',
-        );
-      }
-      if (pixelRatio < GRAPH_EXPORT_PIXEL_RATIO) {
-        console.warn('Tree PNG resolution was capped to stay within browser canvas limits.', {
-          requestedPixelRatio: GRAPH_EXPORT_PIXEL_RATIO,
-          appliedPixelRatio: pixelRatio,
-          width,
-          height,
+      const {renderTiledPng} = await import('./tiledPng');
+      const result = await renderTiledPng({
+        source,
+        logicalWidth: width,
+        logicalHeight: height,
+        sourceLeft: GRAPH_EXPORT_PADDING - currentGraph.minX,
+        sourceTop: GRAPH_EXPORT_PADDING - currentGraph.minY,
+        requestedScale: GRAPH_EXPORT_PIXEL_RATIO,
+        backgroundColor: theme.bg,
+        onProgress: (completedTiles, totalTiles) => {
+          setExportMessage(`Rendering PNG tile ${completedTiles} of ${totalTiles}…`);
+        },
+      });
+      if (result.plan.scale < GRAPH_EXPORT_PIXEL_RATIO) {
+        console.warn('Tree PNG resolution was capped by the tiled export safety budget.', {
+          requestedScale: GRAPH_EXPORT_PIXEL_RATIO,
+          appliedScale: result.plan.scale,
+          outputWidth: result.plan.outputWidth,
+          outputHeight: result.plan.outputHeight,
+          outputPixels: result.plan.outputPixels,
+          tiles: result.plan.totalTiles,
         });
       }
-
-      staging = document.createElement('div');
-      Object.assign(staging.style, {
-        position: 'fixed',
-        left: '-100000px',
-        top: '0',
-        width: `${width}px`,
-        height: `${height}px`,
-        overflow: 'hidden',
-        backgroundColor: theme.bg,
-      });
-      const clone = source.cloneNode(true) as HTMLElement;
-      Object.assign(clone.style, {
-        position: 'absolute',
-        left: `${GRAPH_EXPORT_PADDING - currentGraph.minX}px`,
-        top: `${GRAPH_EXPORT_PADDING - currentGraph.minY}px`,
-        width: '0px',
-        height: '0px',
-        transform: 'none',
-      });
-      staging.appendChild(clone);
-      document.body.appendChild(staging);
-
-      await document.fonts?.ready;
-      const images = [...clone.querySelectorAll('img')];
-      await Promise.all(
-        images.map(async image => {
-          if (image.complete && image.naturalWidth > 0) return;
-          try {
-            await image.decode();
-          } catch (error) {
-            console.error('A tree image asset failed to decode during PNG export.', {
-              source: image.currentSrc || image.src,
-              error,
-            });
-            throw error;
-          }
-        }),
+      downloadBlob(`${rootExportName}-tree.png`, result.blob);
+      setExportMessage(
+        `Tree exported at ${result.plan.scale}× resolution using ` +
+          `${result.plan.totalTiles} ${result.plan.totalTiles === 1 ? 'tile' : 'tiles'}.`,
       );
-
-      const {toPng} = await import('html-to-image');
-      const dataUrl = await toPng(staging, {
-        width,
-        height,
-        pixelRatio,
-        backgroundColor: theme.bg,
-        cacheBust: true,
-      });
-      downloadBlob(`${rootExportName}-tree.png`, await dataUrlToBlob(dataUrl));
-      setExportMessage(`Tree exported at ${pixelRatio.toFixed(1)}× resolution.`);
     } catch (error) {
       console.error('High-quality tree PNG export failed.', error);
       setExportMessage(error instanceof Error ? error.message : 'Tree PNG export failed.');
     } finally {
-      staging?.remove();
       setExportingTree(false);
     }
   }, [rootExportName]);
