@@ -37,6 +37,7 @@ import {
 } from './layout';
 import type {LaidInputCluster} from './layout';
 import {
+  COMPACT_BRANCH_LABEL_WIDTH,
   PACKED_ITEM_SIZE,
   layoutAdaptiveTree,
 } from './adaptiveLayout';
@@ -946,14 +947,21 @@ export function GraphScreen() {
               ],
             },
           ]}>
-          {graph?.clusters?.map(cluster => (
-            <PackedInputClusterView key={cluster.id} cluster={cluster} />
-          ))}
           {graph?.edges.map((e, i) => (
             <View
               key={`e${i}`}
-              style={[styles.edge, {left: e.x, top: e.y, width: e.w, height: e.h}]}
+              style={[
+                styles.edge,
+                e.root && styles.rootEdge,
+                e.root && {
+                  opacity: Math.max(0.3, 0.72 - (e.rootDepth ?? 0) * 0.045),
+                },
+                {left: e.x, top: e.y, width: e.w, height: e.h},
+              ]}
             />
+          ))}
+          {graph?.clusters?.map(cluster => (
+            <PackedInputClusterView key={cluster.id} cluster={cluster} />
           ))}
           {graph?.nodes.map(n =>
             compactMode || n.packed ? (
@@ -966,6 +974,7 @@ export function GraphScreen() {
                 isRoot={n.item.id === 'root'}
                 selectable={choicesFor(n.item.key).length > 0}
                 packed={n.packed === true}
+                branchLabel={n.compactBranch === true}
                 onTap={() =>
                   n.packed ? onItemTap(n.item) : openPickerWithErrorHandling(n.item)
                 }
@@ -1025,7 +1034,7 @@ export function GraphScreen() {
         />
       )}
       <Text style={styles.hint}>
-        {packedLayout ? 'packed fan inputs promote to branches when opened · ' : ''}
+        {packedLayout ? 'root-packed inputs promote to full branches when opened · ' : ''}
         {compactMode
           ? 'tap item = pick recipe/drop source · drag = pan · scroll = zoom'
           : 'tap node = expand/collapse · ⇄ = pick recipe/drop source · drag = pan · scroll = zoom'}
@@ -1204,6 +1213,7 @@ function CompactItemNodeView({
   isRoot,
   selectable,
   packed = false,
+  branchLabel = false,
   onTap,
 }: {
   x: number;
@@ -1213,6 +1223,7 @@ function CompactItemNodeView({
   isRoot: boolean;
   selectable: boolean;
   packed?: boolean;
+  branchLabel?: boolean;
   onTap: () => void;
 }) {
   const data = useData();
@@ -1232,6 +1243,7 @@ function CompactItemNodeView({
       onBlur={packed ? () => setShowPackedLabel(false) : undefined}
       style={[
         packed ? styles.packedItemNode : styles.compactItemNode,
+        branchLabel && styles.compactBranchNode,
         {left: x, top: y},
         packed && showPackedLabel && styles.packedItemNodeRaised,
         isRoot && styles.nodeRoot,
@@ -1250,6 +1262,13 @@ function CompactItemNodeView({
           </Text>
         </View>
       )}
+      {branchLabel && (
+        <View pointerEvents="none" style={styles.compactBranchLabel}>
+          <Text style={[styles.compactBranchLabelText, noSelect]} numberOfLines={1}>
+            {name}
+          </Text>
+        </View>
+      )}
     </Pressable>
   );
 }
@@ -1258,46 +1277,15 @@ function PackedInputClusterView({cluster}: {cluster: LaidInputCluster}) {
   return (
     <View
       pointerEvents="none"
-      accessibilityLabel={`${cluster.itemCount} packed recipe inputs`}
+      accessibilityLabel={`${cluster.itemCount} root-packed recipe inputs`}
       style={[
-        styles.packedInputCluster,
+        styles.packedRootHub,
         {
-          left: cluster.x,
-          top: cluster.y,
-          width: cluster.w,
-          height: cluster.h,
+          left: cluster.x + cluster.hubX - 18,
+          top: cluster.y + cluster.hubY - 9,
         },
       ]}>
-      <Text style={[styles.packedInputClusterTitle, noSelect]}>
-        {cluster.itemCount} packed inputs
-      </Text>
-      <Text style={[styles.packedInputClusterHint, noSelect]}>tap an icon to expand</Text>
-      <View
-        style={[
-          styles.packedFanSurface,
-          {
-            left: 0,
-            top: cluster.fanCenterY,
-            width: cluster.w,
-            height: cluster.h - cluster.fanCenterY,
-          },
-        ]}>
-        {cluster.ringRadii.map(radius => (
-          <View
-            key={radius}
-            style={[
-              styles.packedFanArc,
-              {
-                left: cluster.fanCenterX - radius,
-                top: -radius,
-                width: radius * 2,
-                height: radius * 2,
-                borderRadius: radius,
-              },
-            ]}
-          />
-        ))}
-      </View>
+      <Text style={[styles.packedRootHubText, noSelect]}>{cluster.itemCount}</Text>
     </View>
   );
 }
@@ -1499,6 +1487,7 @@ const styles = StyleSheet.create({
   canvas: {flex: 1, overflow: 'hidden', backgroundColor: theme.bg},
   anchor: {position: 'absolute', left: 0, top: 0, width: 0, height: 0},
   edge: {position: 'absolute', backgroundColor: theme.borderLight},
+  rootEdge: {backgroundColor: theme.accent},
   itemNode: {
     position: 'absolute',
     flexDirection: 'row',
@@ -1519,6 +1508,25 @@ const styles = StyleSheet.create({
     borderColor: theme.border,
     borderWidth: 1,
     borderRadius: 9,
+  },
+  compactBranchNode: {
+    borderColor: theme.accent,
+    borderWidth: 2,
+    borderRadius: COMPACT_ITEM_SIZE / 2,
+  },
+  compactBranchLabel: {
+    position: 'absolute',
+    top: COMPACT_ITEM_SIZE + 4,
+    left: -(COMPACT_BRANCH_LABEL_WIDTH - COMPACT_ITEM_SIZE) / 2,
+    width: COMPACT_BRANCH_LABEL_WIDTH,
+    alignItems: 'center',
+  },
+  compactBranchLabelText: {
+    color: theme.textDim,
+    fontSize: 9,
+    lineHeight: 12,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   packedItemNode: {
     position: 'absolute',
@@ -1553,39 +1561,21 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '600',
   },
-  packedInputCluster: {
+  packedRootHub: {
     position: 'absolute',
-    overflow: 'hidden',
-    backgroundColor: 'rgba(23,29,38,0.72)',
-    borderColor: theme.borderLight,
+    width: 36,
+    height: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.bg,
+    borderColor: theme.accent,
     borderWidth: 1,
-    borderStyle: 'dashed',
-    borderRadius: 22,
+    borderRadius: 9,
   },
-  packedInputClusterTitle: {
-    position: 'absolute',
-    top: 7,
-    left: 12,
+  packedRootHubText: {
     color: theme.text,
-    fontSize: 10,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-  },
-  packedInputClusterHint: {
-    position: 'absolute',
-    top: 7,
-    right: 12,
-    color: theme.textDim,
     fontSize: 9,
-  },
-  packedFanSurface: {
-    position: 'absolute',
-    overflow: 'hidden',
-  },
-  packedFanArc: {
-    position: 'absolute',
-    borderColor: 'rgba(77,101,127,0.34)',
-    borderWidth: 1,
+    fontWeight: '700',
   },
   compactCountBadge: {
     position: 'absolute',

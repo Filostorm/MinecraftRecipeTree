@@ -54,12 +54,13 @@ function rectanglesOverlap(left, right) {
   );
 }
 
-test('plans deterministic concentric fan rings without overlapping packed icons', () => {
+test('plans deterministic staggered root rows without overlapping packed icons', () => {
   const first = planPackedInputFan(200);
   const second = planPackedInputFan(200);
   assert.deepEqual(second, first);
   assert.equal(first.members.length, 200);
-  assert.ok(first.ringRadii.length > 1);
+  assert.ok(first.rowYs.length > 1);
+  assert.ok(first.members.at(-1).row > first.members[0].row);
 
   for (let leftIndex = 0; leftIndex < first.members.length; leftIndex += 1) {
     const left = {
@@ -92,7 +93,7 @@ test('packs at the threshold while preserving the classic layout below it', () =
   assert.equal(atThreshold.clusters[0].itemCount, PACKED_INPUT_THRESHOLD);
 });
 
-test('radial fan substantially reduces high-arity recipe width and edge elements', () => {
+test('root network substantially reduces high-arity recipe width and edge elements', () => {
   const root = highFanout(64);
   const classic = layoutTree(root);
   const adaptive = layoutAdaptiveTree(root);
@@ -104,7 +105,8 @@ test('radial fan substantially reduces high-arity recipe width and edge elements
   assert.equal(adaptive.clusters.length, 1);
   assert.equal(adaptive.nodes.filter(node => node.packed).length, 64);
   assert.ok(adaptiveWidth < classicWidth * 0.2, `${adaptiveWidth} is not <20% of ${classicWidth}`);
-  assert.ok(adaptive.edges.length < classic.edges.length * 0.1);
+  assert.ok(adaptive.edges.some(edge => edge.root));
+  assert.ok(adaptive.edges.length < classic.edges.length * 0.75);
 });
 
 test('keeps the compact 112-input fan inside the area budget while removing most width', () => {
@@ -199,12 +201,34 @@ test('promotes an expanded fan member into an external branch without changing i
   assert.ok(promotedLeaf.y >= cluster.y + cluster.h);
 });
 
+test('keeps expanded source context visible across compact root tiers', () => {
+  const root = sourceNode('root', [
+    sourceNode('tier-one', [
+      sourceNode('tier-two', [item('terminal-a'), item('terminal-b')]),
+      item('tier-one-terminal'),
+    ]),
+  ]);
+  const graph = layoutAdaptiveTree(root, true);
+  const branches = graph.nodes.filter(node => node.compactBranch);
+
+  assert.deepEqual(
+    branches.map(node => [node.item.id, node.depth]),
+    [
+      ['root', 0],
+      ['tier-one', 1],
+      ['tier-two', 2],
+    ],
+  );
+  assert.ok(branches.every(node => node.w === 52 && node.h === 52));
+  assert.ok(graph.maxX - graph.minX >= 96);
+});
+
 test('lays out a 10,000-node adaptive chain without recursion or non-finite geometry', () => {
   const graph = layoutAdaptiveTree(deepChain(10_000), true);
   assert.equal(graph.nodes.length, 10_000);
   assert.equal(graph.edges.length, 29_997);
   assert.equal(graph.clusters.length, 0);
-  assert.equal(graph.maxX - graph.minX, 52);
+  assert.equal(graph.maxX - graph.minX, 96);
   assert.ok(graph.maxY > 900_000);
   assert.ok(
     graph.nodes.every(node =>

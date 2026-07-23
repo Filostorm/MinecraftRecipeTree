@@ -18,33 +18,35 @@ const EDGE_T = 2;
 
 export const PACKED_INPUT_THRESHOLD = 9;
 export const PACKED_ITEM_SIZE = 44;
+export const COMPACT_BRANCH_LABEL_WIDTH = 96;
 const PACKED_ITEM_GAP = 8;
 const PACKED_CLUSTER_PADDING = 12;
-const PACKED_CLUSTER_HEADER = 28;
-const FAN_ARC_MARGIN = 0.2;
-const FAN_ARC_SPAN = Math.PI - FAN_ARC_MARGIN * 2;
+const ROOT_FIRST_DROP = 54;
+const ROOT_ROW_GAP = 72;
+const ROOT_ROW_SPLAY = 10;
+const ROOT_GROUP_SIZE = 4;
 
 export interface PackedFanMemberPosition {
   x: number;
   y: number;
-  ring: number;
+  row: number;
 }
 
 export interface PackedFanPlan {
   w: number;
   h: number;
-  fanCenterX: number;
-  fanCenterY: number;
-  ringRadii: number[];
+  hubX: number;
+  hubY: number;
+  rowYs: number[];
   members: PackedFanMemberPosition[];
 }
 
 /**
- * Plan collision-safe, concentric lower-half rings for a compound ingredient node.
+ * Plan a collision-safe, widening root bed for a compound ingredient node.
  *
- * Adjacent points on one ring have at least one icon-width of chord clearance.
- * Rings are separated by sqrt(2) times that clearance, which guarantees that
- * axis-aligned icon rectangles on different rings separate on at least one axis.
+ * Each successive row grows by two slots, producing a tapered root silhouette.
+ * Rows are staggered vertically at their outer edges so the result reads as
+ * spreading roots instead of a rectangular grid.
  */
 export function planPackedInputFan(itemCount: number): PackedFanPlan {
   if (!Number.isSafeInteger(itemCount) || itemCount <= 0) {
@@ -52,59 +54,51 @@ export function planPackedInputFan(itemCount: number): PackedFanPlan {
   }
 
   const axisClearance = PACKED_ITEM_SIZE + PACKED_ITEM_GAP;
-  const geometricClearance = Math.ceil(Math.SQRT2 * axisClearance) + 1;
-  const ringSpacing = geometricClearance;
-  const relativeMembers: Array<{x: number; y: number; ring: number}> = [];
-  const ringRadii: number[] = [];
+  const rowCounts: number[] = [];
   let remaining = itemCount;
-  let ring = 1;
-
+  let row = 0;
   while (remaining > 0) {
-    const radius = ring * ringSpacing;
-    const minimumAngle = 2 * Math.asin(geometricClearance / (2 * radius));
-    const capacity = Math.max(1, Math.floor(FAN_ARC_SPAN / minimumAngle) + 1);
-    const ringCount = Math.min(capacity, remaining);
-    const usedSpan = minimumAngle * (ringCount - 1);
-    const startAngle = Math.PI / 2 - usedSpan / 2;
-    ringRadii.push(radius);
+    const capacity = 3 + row * 2;
+    const rowCount = Math.min(capacity, remaining);
+    rowCounts.push(rowCount);
+    remaining -= rowCount;
+    row += 1;
+  }
 
-    for (let index = 0; index < ringCount; index += 1) {
-      const angle = ringCount === 1 ? Math.PI / 2 : startAngle + minimumAngle * index;
-      relativeMembers.push({
-        x: radius * Math.cos(angle),
-        y: radius * Math.sin(angle),
-        ring: ring - 1,
-      });
+  const widestRow = Math.max(...rowCounts);
+  const widestSpan = (widestRow - 1) * axisClearance;
+  const w = widestSpan + PACKED_ITEM_SIZE + PACKED_CLUSTER_PADDING * 2;
+  const hubX = w / 2;
+  const hubY = 0;
+  const rowYs: number[] = [];
+  const members: PackedFanMemberPosition[] = [];
+  let maxBottom = hubY;
+
+  rowCounts.forEach((rowCount, rowIndex) => {
+    const span = (rowCount - 1) * axisClearance;
+    const rowBaseY = ROOT_FIRST_DROP + rowIndex * ROOT_ROW_GAP;
+    rowYs.push(rowBaseY);
+    for (let index = 0; index < rowCount; index += 1) {
+      const centerOffset = -span / 2 + index * axisClearance;
+      const normalizedDistance = span === 0 ? 0 : Math.abs(centerOffset) / (span / 2);
+      const y = rowBaseY + Math.round(normalizedDistance * ROOT_ROW_SPLAY);
+      const member = {
+        x: hubX + centerOffset - PACKED_ITEM_SIZE / 2,
+        y,
+        row: rowIndex,
+      };
+      members.push(member);
+      maxBottom = Math.max(maxBottom, member.y + PACKED_ITEM_SIZE);
     }
-    remaining -= ringCount;
-    ring += 1;
-  }
-
-  const outerRadius = ringRadii.at(-1);
-  if (outerRadius === undefined) {
-    throw new Error('Packed input fan planning did not create a ring.');
-  }
-  const w = Math.ceil(
-    outerRadius * 2 + PACKED_ITEM_SIZE + PACKED_CLUSTER_PADDING * 2,
-  );
-  const fanCenterX = w / 2;
-  const fanCenterY =
-    PACKED_CLUSTER_HEADER + PACKED_CLUSTER_PADDING + PACKED_ITEM_SIZE / 2;
-  const h = Math.ceil(
-    fanCenterY + outerRadius + PACKED_ITEM_SIZE / 2 + PACKED_CLUSTER_PADDING,
-  );
+  });
 
   return {
     w,
-    h,
-    fanCenterX,
-    fanCenterY,
-    ringRadii,
-    members: relativeMembers.map(member => ({
-      x: fanCenterX + member.x - PACKED_ITEM_SIZE / 2,
-      y: fanCenterY + member.y - PACKED_ITEM_SIZE / 2,
-      ring: member.ring,
-    })),
+    h: maxBottom + PACKED_CLUSTER_PADDING,
+    hubX,
+    hubY,
+    rowYs,
+    members,
   };
 }
 
@@ -136,7 +130,12 @@ interface LayoutUnit {
 }
 
 function itemNodeSize(item: ItemTreeNode, compact: boolean): {w: number; h: number} {
-  if (compact) return {w: COMPACT_ITEM_SIZE, h: COMPACT_ITEM_SIZE};
+  if (compact) {
+    return {
+      w: item.source ? COMPACT_BRANCH_LABEL_WIDTH : COMPACT_ITEM_SIZE,
+      h: COMPACT_ITEM_SIZE,
+    };
+  }
   if (item.source) return sourceNodeSize(item.source);
   return {w: ITEM_W, h: ITEM_H};
 }
@@ -550,9 +549,110 @@ function addBundledEdges(
   }
 }
 
+function addRootSegment(
+  edges: EdgeRect[],
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  rootDepth: number,
+): void {
+  if (w <= 0 || h <= 0) return;
+  edges.push({x, y, w, h, root: true, rootDepth});
+}
+
+/**
+ * Route terminal inputs through shared shoulders and forks. The result is a
+ * sparse root network: a central trunk, lateral arms, then short terminal
+ * rootlets. It deliberately uses export-safe rectangles instead of a second
+ * SVG/canvas renderer.
+ */
+function addFanRootEdges(edges: EdgeRect[], unit: LayoutUnit): void {
+  const fan = unit.fan;
+  if (!fan) throw new Error(`Adaptive fan unit ${unit.id} is missing its root plan.`);
+  const left = unit.centerX - unit.w / 2;
+  const hubX = left + fan.plan.hubX;
+  const hubY = unit.y + fan.plan.hubY;
+  const membersByRow: PackedFanMemberPosition[][] = Array.from(
+    {length: fan.plan.rowYs.length},
+    () => [],
+  );
+  fan.plan.members.forEach(member => {
+    const members = membersByRow[member.row];
+    if (!members) {
+      throw new Error(`Adaptive fan ${fan.id} references missing root row ${member.row}.`);
+    }
+    members.push(member);
+  });
+
+  for (let row = 0; row < fan.plan.rowYs.length; row += 1) {
+    const rowMembers = membersByRow[row];
+    if (rowMembers.length === 0) {
+      throw new Error(`Adaptive fan ${fan.id} has an empty planned root row ${row}.`);
+    }
+    const shoulderY = hubY + 14 + row * 7;
+    const branchY =
+      unit.y + Math.min(...rowMembers.map(member => member.y)) - 14;
+    addRootSegment(
+      edges,
+      hubX - EDGE_T / 2,
+      Math.min(hubY, shoulderY),
+      EDGE_T,
+      Math.abs(shoulderY - hubY),
+      row,
+    );
+
+    for (let offset = 0; offset < rowMembers.length; offset += ROOT_GROUP_SIZE) {
+      const group = rowMembers.slice(offset, offset + ROOT_GROUP_SIZE);
+      const centers = group.map(
+        member => left + member.x + PACKED_ITEM_SIZE / 2,
+      );
+      const groupX = centers.reduce((sum, value) => sum + value, 0) / centers.length;
+      const minimumX = Math.min(...centers);
+      const maximumX = Math.max(...centers);
+      addRootSegment(
+        edges,
+        Math.min(hubX, groupX),
+        shoulderY - EDGE_T / 2,
+        Math.abs(groupX - hubX) + EDGE_T,
+        EDGE_T,
+        row,
+      );
+      addRootSegment(
+        edges,
+        groupX - EDGE_T / 2,
+        Math.min(shoulderY, branchY),
+        EDGE_T,
+        Math.abs(branchY - shoulderY),
+        row,
+      );
+      addRootSegment(
+        edges,
+        minimumX - EDGE_T / 2,
+        branchY - EDGE_T / 2,
+        maximumX - minimumX + EDGE_T,
+        EDGE_T,
+        row + 1,
+      );
+      group.forEach((member, memberIndex) => {
+        const memberX = centers[memberIndex];
+        const memberY = unit.y + member.y;
+        addRootSegment(
+          edges,
+          memberX - EDGE_T / 2,
+          Math.min(branchY, memberY),
+          EDGE_T,
+          Math.abs(memberY - branchY),
+          row + 1,
+        );
+      });
+    }
+  }
+}
+
 /**
  * Experimental graph layout: linear-time Buchheim contour compaction plus
- * compound radial fans for high-arity collapsed inputs.
+ * unboxed root networks for high-arity collapsed inputs.
  */
 export function layoutAdaptiveTree(
   root: ItemTreeNode,
@@ -569,19 +669,26 @@ export function layoutAdaptiveTree(
   while (traversal.length > 0) {
     const index = traversal.pop()!;
     const unit = units[index];
-    const x = unit.centerX - unit.w / 2;
     if (unit.kind === 'tree') {
       const item = unit.item;
       if (!item) throw new Error(`Adaptive tree unit ${unit.id} is missing its item.`);
+      const visualSize =
+        compact
+          ? {w: COMPACT_ITEM_SIZE, h: COMPACT_ITEM_SIZE}
+          : item.source
+            ? sourceNodeSize(item.source)
+            : {w: ITEM_W, h: ITEM_H};
       nodes.push({
         id: item.source?.id ?? item.id,
         kind: item.source ? 'source' : 'item',
-        x,
+        x: unit.centerX - visualSize.w / 2,
         y: unit.y,
-        w: unit.w,
-        h: unit.h,
+        w: visualSize.w,
+        h: visualSize.h,
         item,
         source: item.source,
+        depth: unit.depth,
+        compactBranch: compact && item.source !== undefined,
       });
       addBundledEdges(
         edges,
@@ -591,6 +698,7 @@ export function layoutAdaptiveTree(
     } else {
       const fan = unit.fan;
       if (!fan) throw new Error(`Adaptive fan unit ${unit.id} is missing its plan.`);
+      const x = unit.centerX - unit.w / 2;
       clusters.push({
         id: fan.id,
         x,
@@ -598,10 +706,10 @@ export function layoutAdaptiveTree(
         w: fan.plan.w,
         h: fan.plan.h,
         itemCount: fan.items.length,
-        fanCenterX: fan.plan.fanCenterX,
-        fanCenterY: fan.plan.fanCenterY,
-        ringRadii: fan.plan.ringRadii,
+        hubX: fan.plan.hubX,
+        hubY: fan.plan.hubY,
       });
+      addFanRootEdges(edges, unit);
       fan.items.forEach((item, itemIndex) => {
         const position = fan.plan.members[itemIndex];
         if (!position) {
@@ -616,6 +724,7 @@ export function layoutAdaptiveTree(
           h: PACKED_ITEM_SIZE,
           item,
           packed: true,
+          depth: unit.depth,
         });
       });
     }
@@ -634,7 +743,17 @@ export function layoutAdaptiveTree(
     maxX = Math.max(maxX, x + w);
     maxY = Math.max(maxY, y + h);
   };
-  nodes.forEach(seeRect);
+  nodes.forEach(node => {
+    seeRect(node);
+    if (node.compactBranch) {
+      seeRect({
+        x: node.x - (COMPACT_BRANCH_LABEL_WIDTH - node.w) / 2,
+        y: node.y,
+        w: COMPACT_BRANCH_LABEL_WIDTH,
+        h: node.h + 20,
+      });
+    }
+  });
   clusters.forEach(seeRect);
   edges.forEach(seeRect);
   if (![minX, minY, maxX, maxY].every(Number.isFinite)) {
