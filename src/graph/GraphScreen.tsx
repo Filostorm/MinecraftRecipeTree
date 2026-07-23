@@ -462,11 +462,20 @@ export function GraphScreen() {
           const [c, i] = choice.ref;
           const cat = data.categories[c];
           const recipe = recipesByRef.get(recipeRefKey(choice.ref));
+          if (!cat) {
+            console.error('A recipe-source picker option references a missing category.', {
+              itemKey: target.key,
+              categoryIndex: c,
+              recipeIndex: i,
+            });
+          }
           const title = recipe && cat ? recipeDisplayTitle(cat.title, recipe) : cat?.title;
           return {
             choice,
             option: {
               label: `${favoritePrefix}${title ?? `category ${c}`}`,
+              groupKey: `recipe:${c}`,
+              groupLabel: cat?.title ?? `Recipe category ${c}`,
               sublabel: [
                 recipe?.id,
                 recipe && !recipe.img ? 'JEI layout preview unavailable' : undefined,
@@ -489,6 +498,8 @@ export function GraphScreen() {
             choice,
             option: {
               label: `${favoritePrefix}Mining · ${itemName(choice.blockKey)}`,
+              groupKey: 'physical:mining',
+              groupLabel: 'Mining',
               sublabel: formatDropStat(choice.stat),
             },
           };
@@ -497,6 +508,8 @@ export function GraphScreen() {
           choice,
           option: {
             label: `${favoritePrefix}Mob drop · ${choice.mob.n}`,
+            groupKey: 'physical:mob-drops',
+            groupLabel: 'Mob drops',
             sublabel: formatDropStat(choice.stat),
           },
         };
