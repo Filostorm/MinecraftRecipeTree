@@ -26,6 +26,12 @@ import {GraphScreen} from './src/graph/GraphScreen';
 import {theme} from './src/theme';
 import type {Manifest} from './src/types';
 import {Tab, UiProvider, useUi} from './src/ui/UiContext';
+import {
+  INTERFACE_ZOOM_LEVELS,
+  adjacentInterfaceZoom,
+  loadInterfaceZoom,
+  persistInterfaceZoom,
+} from './src/ui/interfaceZoom';
 
 export default function App() {
   return (
@@ -188,12 +194,37 @@ function Shell() {
   const data = useData();
   const {tab} = useUi();
   const [showRecipeHistory, setShowRecipeHistory] = useState(false);
+  const [interfaceZoom, setInterfaceZoom] = useState(1);
   useEffect(() => {
     if (tab !== 'graph' || data.indexStatus === 'ready' || data.indexStatus === 'loading') return;
     void data.ensureIndex().catch(() => {
       // DataContext logs transport and validation detail and exposes the error below.
     });
   }, [data, tab]);
+  useEffect(() => {
+    if (Platform.OS === 'web') setInterfaceZoom(loadInterfaceZoom());
+  }, []);
+  const updateInterfaceZoom = (direction: -1 | 1) => {
+    setInterfaceZoom(current => {
+      const next = adjacentInterfaceZoom(current, direction);
+      try {
+        persistInterfaceZoom(next);
+      } catch (error) {
+        console.error('Interface zoom could not be saved.', error);
+      }
+      return next;
+    });
+  };
+  const minimumInterfaceZoom = INTERFACE_ZOOM_LEVELS[0];
+  const maximumInterfaceZoom = INTERFACE_ZOOM_LEVELS[INTERFACE_ZOOM_LEVELS.length - 1];
+  const scaledWorkspaceStyle =
+    Platform.OS === 'web'
+      ? ({
+          zoom: interfaceZoom,
+          width: `${100 / interfaceZoom}%`,
+          height: `${100 / interfaceZoom}%`,
+        } as unknown as object)
+      : null;
   return (
     <View style={styles.shell}>
       <View style={styles.header}>
@@ -217,38 +248,79 @@ function Shell() {
         <TabBtn tab="items" label="Items" />
         <TabBtn tab="graph" label="Graph" />
         {data.capabilities.mobs && <TabBtn tab="mobs" label="Mobs" />}
-      </View>
-      {/* All tabs stay mounted so graph expansion state survives tab switches. */}
-      <View style={[styles.body, tab !== 'items' && styles.hidden]}>
-        <ItemsScreen />
-      </View>
-      <View style={[styles.body, tab !== 'graph' && styles.hidden]}>
-        {data.indexStatus === 'ready' ? (
-          <GraphScreen />
-        ) : (
-          <View style={styles.center}>
-            {data.indexStatus !== 'error' && <ActivityIndicator color={theme.accent} size="large" />}
-            <Text style={data.indexStatus === 'error' ? styles.errorTitle : styles.loadingText}>
-              {data.indexStatus === 'error' ? 'Recipe index unavailable' : 'loading recipe index…'}
+        {Platform.OS === 'web' && (
+          <View
+            style={styles.interfaceZoomControls}
+            accessibilityLabel="Interface zoom controls">
+            <TouchableOpacity
+              style={[
+                styles.interfaceZoomButton,
+                interfaceZoom === minimumInterfaceZoom && styles.interfaceZoomButtonDisabled,
+              ]}
+              disabled={interfaceZoom === minimumInterfaceZoom}
+              onPress={() => updateInterfaceZoom(-1)}
+              accessibilityRole="button"
+              accessibilityLabel="Decrease interface zoom">
+              <Text style={styles.interfaceZoomButtonText}>−</Text>
+            </TouchableOpacity>
+            <Text
+              style={styles.interfaceZoomValue}
+              accessibilityLabel={`Interface zoom ${Math.round(interfaceZoom * 100)} percent`}>
+              UI {Math.round(interfaceZoom * 100)}%
             </Text>
-            {data.indexStatus === 'error' && (
-              <>
-                <Text style={styles.errorText}>{data.indexError}</Text>
-                <TouchableOpacity
-                  style={styles.reloadBtn}
-                  onPress={() => void data.ensureIndex().catch(() => {})}>
-                  <Text style={styles.reloadBtnText}>Retry recipe index</Text>
-                </TouchableOpacity>
-              </>
-            )}
+            <TouchableOpacity
+              style={[
+                styles.interfaceZoomButton,
+                interfaceZoom === maximumInterfaceZoom && styles.interfaceZoomButtonDisabled,
+              ]}
+              disabled={interfaceZoom === maximumInterfaceZoom}
+              onPress={() => updateInterfaceZoom(1)}
+              accessibilityRole="button"
+              accessibilityLabel="Increase interface zoom">
+              <Text style={styles.interfaceZoomButtonText}>＋</Text>
+            </TouchableOpacity>
           </View>
         )}
       </View>
-      {data.capabilities.mobs && (
-        <View style={[styles.body, tab !== 'mobs' && styles.hidden]}>
-          <MobsScreen />
+      <View style={styles.workspaceViewport}>
+        <View style={[styles.workspace, scaledWorkspaceStyle]}>
+          {/* All tabs stay mounted so graph expansion state survives tab switches. */}
+          <View style={[styles.body, tab !== 'items' && styles.hidden]}>
+            <ItemsScreen />
+          </View>
+          <View style={[styles.body, tab !== 'graph' && styles.hidden]}>
+            {data.indexStatus === 'ready' ? (
+              <GraphScreen />
+            ) : (
+              <View style={styles.center}>
+                {data.indexStatus !== 'error' && (
+                  <ActivityIndicator color={theme.accent} size="large" />
+                )}
+                <Text style={data.indexStatus === 'error' ? styles.errorTitle : styles.loadingText}>
+                  {data.indexStatus === 'error'
+                    ? 'Recipe index unavailable'
+                    : 'loading recipe index…'}
+                </Text>
+                {data.indexStatus === 'error' && (
+                  <>
+                    <Text style={styles.errorText}>{data.indexError}</Text>
+                    <TouchableOpacity
+                      style={styles.reloadBtn}
+                      onPress={() => void data.ensureIndex().catch(() => {})}>
+                      <Text style={styles.reloadBtnText}>Retry recipe index</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
+              </View>
+            )}
+          </View>
+          {data.capabilities.mobs && (
+            <View style={[styles.body, tab !== 'mobs' && styles.hidden]}>
+              <MobsScreen />
+            </View>
+          )}
         </View>
-      )}
+      </View>
       <ItemDetailModal />
       <RecipeHistoryModal
         visible={showRecipeHistory}
@@ -324,6 +396,33 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   historyBtnText: {color: theme.text, fontSize: 12, fontWeight: '700'},
+  interfaceZoomControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: theme.borderLight,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  interfaceZoomButton: {
+    width: 34,
+    minHeight: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.panelAlt,
+  },
+  interfaceZoomButtonDisabled: {opacity: 0.35},
+  interfaceZoomButtonText: {color: theme.accent, fontSize: 18, fontWeight: '800'},
+  interfaceZoomValue: {
+    minWidth: 72,
+    paddingHorizontal: 8,
+    color: theme.text,
+    fontSize: 11,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  workspaceViewport: {flex: 1, minHeight: 0, overflow: 'hidden'},
+  workspace: {flex: 1, minHeight: 0},
   body: {flex: 1, minHeight: 0},
   hidden: {display: 'none'},
 });
