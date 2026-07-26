@@ -289,12 +289,21 @@ function applyByproductCredits(
   return {credits, coverageByNode};
 }
 
+function effectiveNodeRequirement(
+  node: ItemTreeNode,
+  required: number | null,
+): number | null {
+  if (!node.nonConsumed || !node.key.startsWith('item|')) return required;
+  return required === 0 ? 0 : 1;
+}
+
 /**
  * Calculate the graph's material balance.
  *
- * Consumed leaf inputs are summed, retained prerequisites use their maximum
- * simultaneous requirement, and optional byproduct credits reduce only
- * consumed inputs with the same exact logical ingredient identity.
+ * Consumed leaf inputs are summed. Retained item prerequisites are normalized
+ * to one reusable item per logical ingredient, while other retained resources
+ * use their maximum simultaneous requirement. Optional byproduct credits reduce
+ * only consumed inputs with the same exact logical ingredient identity.
  */
 export function calculateTreeTotals(
   root: ItemTreeNode,
@@ -373,7 +382,9 @@ export function calculateTreeTotals(
       continue;
     }
 
-    const {node, required, grossRequired} = frame;
+    const {node} = frame;
+    const required = effectiveNodeRequirement(node, frame.required);
+    const grossRequired = effectiveNodeRequirement(node, frame.grossRequired);
     requiredByNode.set(node.id, required);
     if (
       useByproducts &&

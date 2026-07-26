@@ -10,8 +10,16 @@ const item = (id, key, amount, options = {}) => ({
   ...options,
 });
 
-test('retained prerequisites use the maximum requirement instead of consumption', () => {
-  const catalystA = item('root.s.0', 'item|test:catalyst', 2, {nonConsumed: true});
+test('retained items normalize to one in both the tree and prerequisite totals', () => {
+  const catalystA = item('root.s.0', 'item|test:catalyst', 2, {
+    nonConsumed: true,
+    source: {
+      id: 'root.s.0.s',
+      kind: 'recipe',
+      recipe: {out: [[['item|test:catalyst', 1]]]},
+      inputs: [item('root.s.0.s.0', 'item|test:catalyst_core', 2)],
+    },
+  });
   const catalystB = item('root.s.1', 'item|test:catalyst', 5, {nonConsumed: true});
   const root = item('root', 'item|test:output', 10, {
     source: {
@@ -23,9 +31,18 @@ test('retained prerequisites use the maximum requirement instead of consumption'
   });
 
   const totals = calculateTreeTotals(root);
-  assert.deepEqual(totals.inputs, []);
+  assert.deepEqual(totals.inputs, [
+    {
+      key: 'item|test:catalyst_core',
+      amount: 2,
+      variants: 1,
+      tag: undefined,
+    },
+  ]);
   assert.equal(totals.prerequisites.length, 1);
-  assert.equal(totals.prerequisites[0].amount, 5);
+  assert.equal(totals.prerequisites[0].amount, 1);
+  assert.equal(totals.requiredByNode.get(catalystA.id), 1);
+  assert.equal(totals.requiredByNode.get(catalystB.id), 1);
 });
 
 test('byproduct credits reduce consumed inputs and leave residual outputs', () => {
