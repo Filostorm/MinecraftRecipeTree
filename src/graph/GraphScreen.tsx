@@ -12,7 +12,11 @@ import {
 import {formatDropStat} from '../components/DropList';
 import {ItemIcon, pixelated} from '../components/ItemIcon';
 import {MobSprite} from '../components/MobSprite';
-import {PickerModal, PickerOption} from '../components/PickerModal';
+import {
+  PickerGroupProgress,
+  PickerModal,
+  PickerOption,
+} from '../components/PickerModal';
 import {prerequisiteSummary, slotSummary} from '../data/slotSummary';
 import {RecipePreviewImage} from '../components/RecipePreviewImage';
 import {recipeImagePath, useData} from '../data/DataContext';
@@ -22,10 +26,15 @@ import {
 } from '../data/ingredientQuantities';
 import {displayIngredientName} from '../data/ingredientTags';
 import {isDefaultDisabledRecipeCategory} from '../data/recipeCategories';
+import {
+  loadCollapsedRecipeCategories,
+  persistCollapsedRecipeCategories,
+  toggleCollapsedRecipeCategory,
+} from '../data/recipeCategoryPreferences';
 import {isFluidContainerTransferRecipe} from '../data/recipeVisibility';
 import {recipeDisplayTitle} from '../data/recipeTitles';
 import {theme} from '../theme';
-import {DropStat, Mob, RecipeRef} from '../types';
+import {DropStat, Mob, Recipe, RecipeRef} from '../types';
 import {useUi} from '../ui/UiContext';
 import {
   COMPACT_ITEM_SIZE,
@@ -49,6 +58,7 @@ import {
 } from './preferredSources';
 import {automaticGraphFitScale} from './fitScale';
 import {recordRecipeHistory} from './recipeHistory';
+import {planRecipePickerChoices} from './recipePickerPlan';
 import {ItemTreeNode, SourceTreeNode, makeRoot} from './model';
 import {
   buildTreeTotalsCsv,
@@ -80,14 +90,20 @@ interface PickerEntry {
   choice: SourceChoice;
 }
 
+type RecipeSourceChoice = Extract<SourceChoice, {t: 'recipe'}>;
+
 interface PickerState {
+  requestId: number;
   title: string;
   standardEntries: PickerEntry[];
   fluidTransferEntries: PickerEntry[];
   showFluidTransfers: boolean;
   identifiedFluidTransferCount: number;
+  remainingRecipeChoices: Record<string, RecipeSourceChoice[]>;
+  recipeGroupProgress: Record<string, PickerGroupProgress>;
   target: ItemTreeNode;
   rememberSource: boolean;
+  collapsedGroupKeys: Set<string>;
 }
 
 function preferredSourceFromChoice(choice: SourceChoice): PreferredSource {
@@ -115,8 +131,7 @@ const COMPACT_MODE_KEY = 'graphCompactMode';
 const PACKED_LAYOUT_KEY = 'graphPackedLayout';
 const USE_BYPRODUCTS_KEY = 'graphUseByproducts';
 const MAX_RECIPE_PICKER_CHOICES = 40;
-const RECIPE_PICKER_SCAN_BATCH = 40;
-const MAX_RECIPE_PICKER_SCAN = 400;
+const RECIPE_PICKER_GROUP_PAGE = 40;
 const GRAPH_EXPORT_PADDING = 48;
 const GRAPH_EXPORT_PIXEL_RATIO = 3;
 
@@ -161,6 +176,10 @@ export function GraphScreen() {
   const [version, setVersion] = useState(0);
   const bump = useCallback(() => setVersion(v => v + 1), []);
   const [picker, setPicker] = useState<PickerState | null>(null);
+  const pickerRef = useRef<PickerState | null>(null);
+  pickerRef.current = picker;
+  const pickerGroupLoadsRef = useRef(new Set<string>());
+  const pickerRequestIdRef = useRef(0);
   const [compactMode, setCompactMode] = useState(loadCompactMode);
   const [packedLayout, setPackedLayout] = useState(loadPackedLayout);
   const [showTreeTotals, setShowTreeTotals] = useState(true);
@@ -381,150 +400,299 @@ export function GraphScreen() {
   );
   applyChoiceRef.current = applyChoice;
 
+  const pickerEntryFor = useCallback(
+    (
+      targetKey: string,
+      choice: SourceChoice,
+      recipe?: Recipe,
+    ): PickerEntry => {
+      const currentPreferred = preferredSourcesRef.current[targetKey];
+      const favoritePrefix =
+        currentPreferred && choiceMatchesPreference(choice, currentPreferred) ? '★ ' : '';
+      const itemName = (key: string) => data.itemsByKey.get(key)?.n ?? key;
+      if (choice.t === 'recipe') {
+        const [categoryIndex, recipeIndex] = choice.ref;
+        const category = data.categories[categoryIndex];
+        if (!category) {
+          console.error('A recipe-source picker option references a missing category.', {
+            itemKey: targetKey,
+            categoryIndex,
+            recipeIndex,
+          });
+        }
+        const title =
+          recipe && category
+            ? recipeDisplayTitle(category.title, recipe)
+            : category?.title;
+        return {
+          choice,
+          option: {
+            label: `${favoritePrefix}${title ?? `category ${categoryIndex}`}`,
+            groupKey: category?.id ?? `recipe-category:${categoryIndex}`,
+            groupLabel: category?.title ?? `Recipe category ${categoryIndex}`,
+            sublabel:
+              [
+                recipe?.id,
+                recipe && !recipe.img ? 'JEI layout preview unavailable' : undefined,
+              ]
+                .filter((value): value is string => !!value)
+                .join(' · ') || undefined,
+            imageUri:
+              recipe?.img && category
+                ? data.imageUrl(recipeImagePath(category.dir, recipe.img))
+                : undefined,
+            imageW: recipe?.w,
+            imageH: recipe?.h,
+            inputs: recipe ? slotSummary(recipe.in) : undefined,
+            prerequisites: recipe ? prerequisiteSummary(recipe.cat) : undefined,
+          },
+        };
+      }
+      if (choice.t === 'block') {
+        return {
+          choice,
+          option: {
+            label: `${favoritePrefix}Mining · ${itemName(choice.blockKey)}`,
+            groupKey: 'physical:mining',
+            groupLabel: 'Mining',
+            sublabel: formatDropStat(choice.stat),
+          },
+        };
+      }
+      return {
+        choice,
+        option: {
+          label: `${favoritePrefix}Mob drop · ${choice.mob.n}`,
+          groupKey: 'physical:mob-drops',
+          groupLabel: 'Mob drops',
+          sublabel: formatDropStat(choice.stat),
+        },
+      };
+    },
+    [data],
+  );
+
   const openPicker = useCallback(
     async (target: ItemTreeNode) => {
+      const requestId = ++pickerRequestIdRef.current;
       const currentPreferred = preferredSourcesRef.current[target.key];
       const allChoices = choicesFor(target.key);
       const physicalChoices = allChoices.filter(choice => choice.t !== 'recipe');
       const recipeChoices = allChoices.filter(
-        (choice): choice is Extract<SourceChoice, {t: 'recipe'}> => choice.t === 'recipe',
+        (choice): choice is RecipeSourceChoice => choice.t === 'recipe',
+      );
+      const plan = planRecipePickerChoices(
+        recipeChoices,
+        data.categories,
+        MAX_RECIPE_PICKER_CHOICES,
       );
       const recipesByRef = new Map<string, Awaited<ReturnType<typeof data.getRecipes>>[number]>();
-      const standardRecipeChoices: Extract<SourceChoice, {t: 'recipe'}>[] = [];
-      const fluidTransferChoices: Extract<SourceChoice, {t: 'recipe'}>[] = [];
+      const standardRecipeChoices: RecipeSourceChoice[] = [];
+      const fluidTransferChoices: RecipeSourceChoice[] = [];
+      const loadedRefKeys = new Set<string>();
       let identifiedFluidTransferCount = 0;
-      let scannedRecipeCount = 0;
-      const scanMaximum = Math.min(recipeChoices.length, MAX_RECIPE_PICKER_SCAN);
+      const initialRecipes = await data.getRecipes(
+        plan.initialChoices.map(choice => choice.ref),
+      );
+      plan.initialChoices.forEach((choice, index) => {
+        const recipe = initialRecipes[index];
+        const refKey = recipeRefKey(choice.ref);
+        recipesByRef.set(refKey, recipe);
+        loadedRefKeys.add(refKey);
+        if (isFluidContainerTransferRecipe(recipe, data.itemsByKey)) {
+          identifiedFluidTransferCount += 1;
+          fluidTransferChoices.push({...choice, allowFluidTransfer: true});
+        } else {
+          standardRecipeChoices.push(choice);
+        }
+      });
 
-      // Scan bounded batches until the picker has a full page of real recipes.
-      // This avoids eagerly fetching every category shard for extremely broad items.
-      while (
-        scannedRecipeCount < scanMaximum &&
-        standardRecipeChoices.length < MAX_RECIPE_PICKER_CHOICES
-      ) {
-        const batch = recipeChoices.slice(
-          scannedRecipeCount,
-          Math.min(scanMaximum, scannedRecipeCount + RECIPE_PICKER_SCAN_BATCH),
-        );
-        const refs = batch.map(choice => choice.ref);
-        const loaded = await data.getRecipes(refs);
-        batch.forEach((choice, index) => {
-          const recipe = loaded[index];
-          recipesByRef.set(recipeRefKey(choice.ref), recipe);
-          if (isFluidContainerTransferRecipe(recipe, data.itemsByKey)) {
-            identifiedFluidTransferCount += 1;
-            fluidTransferChoices.push({...choice, allowFluidTransfer: true});
-          } else if (standardRecipeChoices.length < MAX_RECIPE_PICKER_CHOICES) {
-            standardRecipeChoices.push(choice);
-          }
-        });
-        scannedRecipeCount += batch.length;
-      }
-
-      if (
-        scannedRecipeCount >= MAX_RECIPE_PICKER_SCAN &&
-        scannedRecipeCount < recipeChoices.length &&
-        standardRecipeChoices.length < MAX_RECIPE_PICKER_CHOICES
-      ) {
-        console.warn('Recipe-source filtering reached its bounded scan limit.', {
-          itemKey: target.key,
-          scannedRecipeCount,
-          totalRecipeChoices: recipeChoices.length,
-          visibleRecipeChoices: standardRecipeChoices.length,
-        });
-      }
-
-      // Preserve a saved source in the picker even when it lies beyond the scan window.
+      // Preserve a saved source even when it is a later variant in a staged group.
       if (currentPreferred?.t === 'recipe') {
         const preferredChoice = recipeChoices.find(choice =>
           choiceMatchesPreference(choice, currentPreferred),
         );
         if (preferredChoice && !recipesByRef.has(recipeRefKey(preferredChoice.ref))) {
           const [recipe] = await data.getRecipes([preferredChoice.ref]);
-          recipesByRef.set(recipeRefKey(preferredChoice.ref), recipe);
+          const preferredRefKey = recipeRefKey(preferredChoice.ref);
+          recipesByRef.set(preferredRefKey, recipe);
+          loadedRefKeys.add(preferredRefKey);
           if (isFluidContainerTransferRecipe(recipe, data.itemsByKey)) {
             identifiedFluidTransferCount += 1;
             const explicitChoice = {...preferredChoice, allowFluidTransfer: true as const};
             fluidTransferChoices.push(explicitChoice);
-          } else if (standardRecipeChoices.length >= MAX_RECIPE_PICKER_CHOICES) {
-            standardRecipeChoices[standardRecipeChoices.length - 1] = preferredChoice;
           } else {
             standardRecipeChoices.push(preferredChoice);
           }
         }
       }
 
-      const itemName = (key: string) => data.itemsByKey.get(key)?.n ?? key;
-      const entryFor = (choice: SourceChoice): PickerEntry => {
-        const favoritePrefix =
-          currentPreferred && choiceMatchesPreference(choice, currentPreferred) ? '★ ' : '';
-        if (choice.t === 'recipe') {
-          const [c, i] = choice.ref;
-          const cat = data.categories[c];
-          const recipe = recipesByRef.get(recipeRefKey(choice.ref));
-          if (!cat) {
-            console.error('A recipe-source picker option references a missing category.', {
-              itemKey: target.key,
-              categoryIndex: c,
-              recipeIndex: i,
-            });
-          }
-          const title = recipe && cat ? recipeDisplayTitle(cat.title, recipe) : cat?.title;
-          return {
-            choice,
-            option: {
-              label: `${favoritePrefix}${title ?? `category ${c}`}`,
-              groupKey: `recipe:${c}`,
-              groupLabel: cat?.title ?? `Recipe category ${c}`,
-              sublabel: [
-                recipe?.id,
-                recipe && !recipe.img ? 'JEI layout preview unavailable' : undefined,
-              ]
-                .filter((value): value is string => !!value)
-                .join(' · ') || undefined,
-              imageUri:
-                recipe?.img && cat
-                  ? data.imageUrl(recipeImagePath(cat.dir, recipe.img))
-                  : undefined,
-              imageW: recipe?.w,
-              imageH: recipe?.h,
-              inputs: recipe ? slotSummary(recipe.in) : undefined,
-              prerequisites: recipe ? prerequisiteSummary(recipe.cat) : undefined,
-            },
-          };
-        }
-        if (choice.t === 'block') {
-          return {
-            choice,
-            option: {
-              label: `${favoritePrefix}Mining · ${itemName(choice.blockKey)}`,
-              groupKey: 'physical:mining',
-              groupLabel: 'Mining',
-              sublabel: formatDropStat(choice.stat),
-            },
-          };
-        }
-        return {
-          choice,
-          option: {
-            label: `${favoritePrefix}Mob drop · ${choice.mob.n}`,
-            groupKey: 'physical:mob-drops',
-            groupLabel: 'Mob drops',
-            sublabel: formatDropStat(choice.stat),
-          },
+      const remainingRecipeChoices: Record<string, RecipeSourceChoice[]> = {};
+      const recipeGroupProgress: Record<string, PickerGroupProgress> = {};
+      for (const group of plan.groups) {
+        const remaining = group.choices.filter(
+          choice => !loadedRefKeys.has(recipeRefKey(choice.ref)),
+        );
+        remainingRecipeChoices[group.groupKey] = remaining;
+        recipeGroupProgress[group.groupKey] = {
+          loaded: group.choices.length - remaining.length,
+          total: group.choices.length,
         };
-      };
+      }
+
+      const itemName = data.itemsByKey.get(target.key)?.n ?? target.key;
+      if (requestId !== pickerRequestIdRef.current) {
+        console.info('A stale recipe-source picker request was discarded.', {
+          itemKey: target.key,
+          requestId,
+          currentRequestId: pickerRequestIdRef.current,
+        });
+        return;
+      }
       setPicker({
-        title: `Obtain ${itemName(target.key)}`,
-        standardEntries: [...physicalChoices, ...standardRecipeChoices].map(entryFor),
-        fluidTransferEntries: fluidTransferChoices.map(entryFor),
+        requestId,
+        title: `Obtain ${itemName}`,
+        standardEntries: [
+          ...physicalChoices.map(choice => pickerEntryFor(target.key, choice)),
+          ...standardRecipeChoices.map(choice =>
+            pickerEntryFor(
+              target.key,
+              choice,
+              recipesByRef.get(recipeRefKey(choice.ref)),
+            ),
+          ),
+        ],
+        fluidTransferEntries: fluidTransferChoices.map(choice =>
+          pickerEntryFor(
+            target.key,
+            choice,
+            recipesByRef.get(recipeRefKey(choice.ref)),
+          ),
+        ),
         showFluidTransfers: false,
         identifiedFluidTransferCount,
+        remainingRecipeChoices,
+        recipeGroupProgress,
         target,
         rememberSource: true,
+        collapsedGroupKeys: loadCollapsedRecipeCategories(),
       });
     },
-    [data, choicesFor],
+    [data, choicesFor, pickerEntryFor],
+  );
+
+  const loadPickerRecipeGroup = useCallback(
+    async (groupKey: string) => {
+      const snapshot = pickerRef.current;
+      const remaining = snapshot?.remainingRecipeChoices[groupKey] ?? [];
+      if (!snapshot || remaining.length === 0 || pickerGroupLoadsRef.current.has(groupKey)) {
+        return;
+      }
+      const batch = remaining.slice(0, RECIPE_PICKER_GROUP_PAGE);
+      pickerGroupLoadsRef.current.add(groupKey);
+      setPicker(current => {
+        if (!current || current.requestId !== snapshot.requestId) return current;
+        return {
+          ...current,
+          recipeGroupProgress: {
+            ...current.recipeGroupProgress,
+            [groupKey]: {...current.recipeGroupProgress[groupKey], loading: true},
+          },
+        };
+      });
+      try {
+        const recipes = await data.getRecipes(batch.map(choice => choice.ref));
+        const standardEntries: PickerEntry[] = [];
+        const fluidTransferEntries: PickerEntry[] = [];
+        let identifiedFluidTransferCount = 0;
+        batch.forEach((choice, index) => {
+          const recipe = recipes[index];
+          if (isFluidContainerTransferRecipe(recipe, data.itemsByKey)) {
+            identifiedFluidTransferCount += 1;
+            const explicitChoice = {...choice, allowFluidTransfer: true as const};
+            fluidTransferEntries.push(
+              pickerEntryFor(snapshot.target.key, explicitChoice, recipe),
+            );
+          } else {
+            standardEntries.push(pickerEntryFor(snapshot.target.key, choice, recipe));
+          }
+        });
+        setPicker(current => {
+          if (!current || current.requestId !== snapshot.requestId) return current;
+          const currentRemaining = current.remainingRecipeChoices[groupKey] ?? [];
+          const loadedKeys = new Set(batch.map(choice => recipeRefKey(choice.ref)));
+          const nextRemaining = currentRemaining.filter(
+            choice => !loadedKeys.has(recipeRefKey(choice.ref)),
+          );
+          const progress = current.recipeGroupProgress[groupKey];
+          return {
+            ...current,
+            standardEntries: [...current.standardEntries, ...standardEntries],
+            fluidTransferEntries: [
+              ...current.fluidTransferEntries,
+              ...fluidTransferEntries,
+            ],
+            identifiedFluidTransferCount:
+              current.identifiedFluidTransferCount + identifiedFluidTransferCount,
+            remainingRecipeChoices: {
+              ...current.remainingRecipeChoices,
+              [groupKey]: nextRemaining,
+            },
+            recipeGroupProgress: {
+              ...current.recipeGroupProgress,
+              [groupKey]: {
+                loaded: (progress?.loaded ?? 0) + batch.length,
+                total: progress?.total ?? batch.length,
+                loading: false,
+              },
+            },
+          };
+        });
+      } catch (error) {
+        console.error('Additional recipe-source variants could not be loaded.', {
+          itemKey: snapshot.target.key,
+          groupKey,
+          requestedRecipes: batch.length,
+          error,
+        });
+        setPicker(current => {
+          if (!current || current.requestId !== snapshot.requestId) return current;
+          return {
+            ...current,
+            recipeGroupProgress: {
+              ...current.recipeGroupProgress,
+              [groupKey]: {
+                ...current.recipeGroupProgress[groupKey],
+                loading: false,
+              },
+            },
+          };
+        });
+      } finally {
+        pickerGroupLoadsRef.current.delete(groupKey);
+      }
+    },
+    [data, pickerEntryFor],
+  );
+
+  const togglePickerGroup = useCallback(
+    (groupKey: string) => {
+      setPicker(current => {
+        if (!current) return current;
+        const nextCollapsed = toggleCollapsedRecipeCategory(
+          current.collapsedGroupKeys,
+          groupKey,
+        );
+        if (data.categories.some(category => category.id === groupKey)) {
+          const categoryIds = new Set(data.categories.map(category => category.id));
+          persistCollapsedRecipeCategories(
+            new Set([...nextCollapsed].filter(id => categoryIds.has(id))),
+          );
+        }
+        return {...current, collapsedGroupKeys: nextCollapsed};
+      });
+    },
+    [data.categories],
   );
 
   const openPickerWithErrorHandling = useCallback(
@@ -1082,6 +1250,10 @@ export function GraphScreen() {
                   setPicker(current => (current ? {...current, showFluidTransfers} : current))
               : undefined
           }
+          collapsedGroupKeys={picker.collapsedGroupKeys}
+          onToggleGroup={togglePickerGroup}
+          groupProgress={picker.recipeGroupProgress}
+          onLoadGroup={groupKey => void loadPickerRecipeGroup(groupKey)}
           onClose={() => setPicker(null)}
           onSelect={i => {
             const p = picker;

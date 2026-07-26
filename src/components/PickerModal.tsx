@@ -1,4 +1,4 @@
-import React, {useMemo, useState} from 'react';
+import React, {useMemo} from 'react';
 import {
   Modal,
   Pressable,
@@ -31,6 +31,12 @@ export interface PickerOption {
   prerequisites?: SlotSummary[];
 }
 
+export interface PickerGroupProgress {
+  loaded: number;
+  total: number;
+  loading?: boolean;
+}
+
 /** Generic chooser used to pick between recipes and drop sources for an item. */
 export function PickerModal({
   visible,
@@ -42,6 +48,10 @@ export function PickerModal({
   filterHint,
   filterValue,
   onFilterValueChange,
+  collapsedGroupKeys,
+  onToggleGroup,
+  groupProgress,
+  onLoadGroup,
   onSelect,
   onClose,
 }: {
@@ -54,20 +64,27 @@ export function PickerModal({
   filterHint?: string;
   filterValue?: boolean;
   onFilterValueChange?: (show: boolean) => void;
+  collapsedGroupKeys?: ReadonlySet<string>;
+  onToggleGroup?: (groupKey: string) => void;
+  groupProgress?: Readonly<Record<string, PickerGroupProgress>>;
+  onLoadGroup?: (groupKey: string) => void;
   onSelect: (index: number) => void;
   onClose: () => void;
 }) {
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set());
   const groups = useMemo(() => groupPickerOptions(options), [options]);
-  const allCollapsed = groups.length > 0 && groups.every(group => collapsedGroups.has(group.key));
-  const toggleGroup = (key: string) => {
-    setCollapsedGroups(current => {
-      const next = new Set(current);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  };
+  const collapsedGroups = groups.filter(group => collapsedGroupKeys?.has(group.key));
+  const expandedGroups = groups.filter(group => !collapsedGroupKeys?.has(group.key));
+  const allCollapsed = groups.length > 0 && collapsedGroups.length === groups.length;
+  const toggleGroup = (key: string) => onToggleGroup?.(key);
+  const stagedProgress = Object.values(groupProgress ?? {});
+  const immediateGroups = groups.filter(group => !groupProgress?.[group.key]);
+  const sourceTypeCount = stagedProgress.length + immediateGroups.length;
+  const loadedOptionCount =
+    stagedProgress.reduce((sum, progress) => sum + progress.loaded, 0) +
+    immediateGroups.reduce((sum, group) => sum + group.entries.length, 0);
+  const totalOptionCount =
+    stagedProgress.reduce((sum, progress) => sum + progress.total, 0) +
+    immediateGroups.reduce((sum, group) => sum + group.entries.length, 0);
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -106,16 +123,19 @@ export function PickerModal({
           {groups.length > 1 ? (
             <View style={styles.groupActions}>
               <Text style={styles.groupSummary}>
-                {groups.length} source types · {options.length} options
+                {sourceTypeCount} source types · {loadedOptionCount}/{totalOptionCount} loaded
               </Text>
               <TouchableOpacity
                 accessibilityRole="button"
                 style={styles.groupAction}
-                onPress={() =>
-                  setCollapsedGroups(
-                    allCollapsed ? new Set() : new Set(groups.map(group => group.key)),
-                  )
-                }>
+                onPress={() => {
+                  const shouldExpand = allCollapsed;
+                  for (const group of groups) {
+                    if (shouldExpand === Boolean(collapsedGroupKeys?.has(group.key))) {
+                      toggleGroup(group.key);
+                    }
+                  }
+                }}>
                 <Text style={styles.groupActionText}>
                   {allCollapsed ? 'Expand all' : 'Collapse all'}
                 </Text>
@@ -128,80 +148,120 @@ export function PickerModal({
             {options.length === 0 ? (
               <Text style={styles.emptyText}>No standard sources are available.</Text>
             ) : null}
-            {groups.map(group => {
-              const collapsed = collapsedGroups.has(group.key);
+            {collapsedGroups.length > 0 ? (
+              <View style={styles.collapsedBubbles}>
+                {collapsedGroups.map(group => {
+                  const progress = groupProgress?.[group.key];
+                  return (
+                    <TouchableOpacity
+                      key={group.key}
+                      accessibilityRole="button"
+                      accessibilityState={{expanded: false}}
+                      accessibilityLabel={`Expand ${group.label}`}
+                      style={styles.collapsedBubble}
+                      onPress={() => toggleGroup(group.key)}>
+                      <Text style={styles.collapsedBubbleCaret}>▸</Text>
+                      <Text style={styles.collapsedBubbleText}>{group.label}</Text>
+                      <Text style={styles.collapsedBubbleCount}>
+                        {progress ? `${progress.loaded}/${progress.total}` : group.entries.length}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            ) : null}
+            {expandedGroups.map(group => {
+              const progress = groupProgress?.[group.key];
+              const hasMore = Boolean(progress && progress.loaded < progress.total);
               return (
                 <View key={group.key} style={styles.group}>
                   <TouchableOpacity
                     accessibilityRole="button"
-                    accessibilityState={{expanded: !collapsed}}
+                    accessibilityState={{expanded: true}}
                     accessibilityLabel={`${group.label}, ${group.entries.length} option${group.entries.length === 1 ? '' : 's'}`}
                     style={styles.groupHeader}
                     onPress={() => toggleGroup(group.key)}>
-                    <Text style={styles.groupCaret}>{collapsed ? '▸' : '▾'}</Text>
+                    <Text style={styles.groupCaret}>▾</Text>
                     <Text style={styles.groupTitle}>{group.label}</Text>
-                    <Text style={styles.groupCount}>{group.entries.length}</Text>
+                    <Text style={styles.groupCount}>
+                      {progress ? `${progress.loaded}/${progress.total}` : group.entries.length}
+                    </Text>
                   </TouchableOpacity>
-                  {!collapsed ? (
-                    <View style={styles.optionGrid}>
-                      {group.entries.map(({option: opt, index: i}) => {
-                        const imageSize = opt.imageUri
-                          ? pixelArtImageStyle(opt.imageW ?? 160, opt.imageH ?? 60, 250, 128)
-                          : null;
-                        return (
-                          <TouchableOpacity key={i} style={styles.option} onPress={() => onSelect(i)}>
-                            <Text style={styles.optionLabel}>{opt.label}</Text>
-                            {opt.sublabel ? <Text style={styles.optionSub}>{opt.sublabel}</Text> : null}
-                            {opt.imageUri && imageSize ? (
-                              <RecipePreviewImage
-                                uri={opt.imageUri}
-                                context={opt.label}
-                                style={[imageSize, styles.optionImage, pixelated as object]}
-                                resizeMode="contain"
-                              />
-                            ) : null}
-                            {opt.inputs && opt.inputs.length > 0 ? (
-                              <View style={styles.ingredientGroup}>
-                                <Text style={styles.ingredientLabel}>Inputs</Text>
-                                <View style={styles.ingredientChips}>
-                                  {opt.inputs.map(input => (
-                                    <ItemChip
-                                      key={`input-${input.tag ?? input.key}`}
-                                      itemKey={input.key}
-                                      amount={input.amount}
-                                      variableAmount={input.variableAmount}
-                                      variants={input.variants}
-                                      tag={input.tag}
-                                      probability={input.probability}
-                                      probabilityRole="consume"
-                                      interactive={false}
-                                    />
-                                  ))}
-                                </View>
+                  <View style={styles.optionGrid}>
+                    {group.entries.map(({option: opt, index: i}) => {
+                      const imageSize = opt.imageUri
+                        ? pixelArtImageStyle(opt.imageW ?? 160, opt.imageH ?? 60, 250, 128)
+                        : null;
+                      return (
+                        <TouchableOpacity key={i} style={styles.option} onPress={() => onSelect(i)}>
+                          <Text style={styles.optionLabel}>{opt.label}</Text>
+                          {opt.sublabel ? <Text style={styles.optionSub}>{opt.sublabel}</Text> : null}
+                          {opt.imageUri && imageSize ? (
+                            <RecipePreviewImage
+                              uri={opt.imageUri}
+                              context={opt.label}
+                              style={[imageSize, styles.optionImage, pixelated as object]}
+                              resizeMode="contain"
+                            />
+                          ) : null}
+                          {opt.inputs && opt.inputs.length > 0 ? (
+                            <View style={styles.ingredientGroup}>
+                              <Text style={styles.ingredientLabel}>Inputs</Text>
+                              <View style={styles.ingredientChips}>
+                                {opt.inputs.map(input => (
+                                  <ItemChip
+                                    key={`input-${input.tag ?? input.key}`}
+                                    itemKey={input.key}
+                                    amount={input.amount}
+                                    variableAmount={input.variableAmount}
+                                    variants={input.variants}
+                                    tag={input.tag}
+                                    probability={input.probability}
+                                    probabilityRole="consume"
+                                    interactive={false}
+                                  />
+                                ))}
                               </View>
-                            ) : null}
-                            {opt.prerequisites && opt.prerequisites.length > 0 ? (
-                              <View style={styles.ingredientGroup}>
-                                <Text style={styles.ingredientLabel}>Required · not consumed</Text>
-                                <View style={styles.ingredientChips}>
-                                  {opt.prerequisites.map(input => (
-                                    <ItemChip
-                                      key={`prerequisite-${input.tag ?? input.key}`}
-                                      itemKey={input.key}
-                                      amount={input.amount}
-                                      variableAmount={input.variableAmount}
-                                      variants={input.variants}
-                                      tag={input.tag}
-                                      interactive={false}
-                                    />
-                                  ))}
-                                </View>
+                            </View>
+                          ) : null}
+                          {opt.prerequisites && opt.prerequisites.length > 0 ? (
+                            <View style={styles.ingredientGroup}>
+                              <Text style={styles.ingredientLabel}>Required · not consumed</Text>
+                              <View style={styles.ingredientChips}>
+                                {opt.prerequisites.map(input => (
+                                  <ItemChip
+                                    key={`prerequisite-${input.tag ?? input.key}`}
+                                    itemKey={input.key}
+                                    amount={input.amount}
+                                    variableAmount={input.variableAmount}
+                                    variants={input.variants}
+                                    tag={input.tag}
+                                    interactive={false}
+                                  />
+                                ))}
                               </View>
-                            ) : null}
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
+                            </View>
+                          ) : null}
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                  {hasMore && onLoadGroup ? (
+                    <TouchableOpacity
+                      accessibilityRole="button"
+                      accessibilityLabel={`Load more ${group.label} recipes`}
+                      disabled={progress?.loading}
+                      style={[
+                        styles.loadMoreGroup,
+                        progress?.loading && styles.loadMoreGroupDisabled,
+                      ]}
+                      onPress={() => onLoadGroup(group.key)}>
+                      <Text style={styles.loadMoreGroupText}>
+                        {progress?.loading
+                          ? `Loading ${group.label}…`
+                          : `Load more · ${progress!.total - progress!.loaded} remaining`}
+                      </Text>
+                    </TouchableOpacity>
                   ) : null}
                 </View>
               );
@@ -249,6 +309,25 @@ const styles = StyleSheet.create({
   rememberHint: {color: theme.textDim, fontSize: 10, marginTop: 2, lineHeight: 14},
   optionsScroll: {maxHeight: 560, flexShrink: 1},
   groupList: {gap: 8},
+  collapsedBubbles: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 7,
+  },
+  collapsedBubble: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderColor: theme.border,
+    borderWidth: 1,
+    borderRadius: 999,
+    backgroundColor: theme.panelAlt,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  collapsedBubbleCaret: {color: theme.accent, fontSize: 11},
+  collapsedBubbleText: {color: theme.text, fontSize: 11, fontWeight: '700'},
+  collapsedBubbleCount: {color: theme.textDim, fontSize: 9, fontWeight: '700'},
   groupActions: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -294,6 +373,17 @@ const styles = StyleSheet.create({
     gap: 8,
     padding: 8,
   },
+  loadMoreGroup: {
+    alignSelf: 'center',
+    borderColor: theme.borderLight,
+    borderWidth: 1,
+    borderRadius: 7,
+    marginBottom: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  loadMoreGroupDisabled: {opacity: 0.55},
+  loadMoreGroupText: {color: theme.accent, fontSize: 10, fontWeight: '700'},
   emptyText: {
     color: theme.textDim,
     fontSize: 12,
