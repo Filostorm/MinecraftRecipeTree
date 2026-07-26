@@ -57,6 +57,11 @@ import {
   persistPreferredSources,
 } from './preferredSources';
 import {automaticGraphFitScale} from './fitScale';
+import {
+  capturePanGestureOrigin,
+  transformForPanGesture,
+} from './panGesture';
+import type {GraphTransform, PanGestureOrigin} from './panGesture';
 import {recordRecipeHistory} from './recipeHistory';
 import {planRecipePickerChoices} from './recipePickerPlan';
 import {ItemTreeNode, SourceTreeNode, makeRoot} from './model';
@@ -72,12 +77,6 @@ import {
   calculateTreeTotals,
   requiredAmountFor,
 } from './treeTotals';
-
-interface Transform {
-  x: number;
-  y: number;
-  scale: number;
-}
 
 /** One way to obtain an item: craft it, kill for it, or mine for it. */
 type SourceChoice =
@@ -191,9 +190,15 @@ export function GraphScreen() {
   const preferredSourcesRef = useRef(preferredSources);
   preferredSourcesRef.current = preferredSources;
 
-  const [transform, setTransform] = useState<Transform>({x: 60, y: 60, scale: 1});
+  const [transform, setTransform] = useState<GraphTransform>({x: 60, y: 60, scale: 1});
   const transformRef = useRef(transform);
   transformRef.current = transform;
+  const applyTransform = useCallback((next: GraphTransform) => {
+    // Gesture events may arrive before React commits the preceding render. Keep
+    // the imperative reference synchronized so every event sees the newest transform.
+    transformRef.current = next;
+    setTransform(next);
+  }, []);
   const viewportRef = useRef({w: 0, h: 0});
   const needsFitRef = useRef(false);
   const wrapRef = useRef<View>(null);
@@ -915,13 +920,13 @@ export function GraphScreen() {
     const bw = Math.max(60, g.maxX - g.minX);
     const bh = Math.max(60, g.maxY - g.minY);
     const scale = automaticGraphFitScale(vp.w, vp.h, bw, bh);
-    setTransform({
+    applyTransform({
       x: vp.w / 2 - (g.minX + bw / 2) * scale,
       y: vp.h / 2 - (g.minY + bh / 2) * scale,
       scale,
     });
     return true;
-  }, []);
+  }, [applyTransform]);
 
   useEffect(() => {
     if (needsFitRef.current && fitView()) {
@@ -930,12 +935,15 @@ export function GraphScreen() {
   }, [graph, fitView]);
 
   const zoomAt = useCallback((px: number, py: number, factor: number) => {
-    setTransform(t => {
-      const scale = Math.min(4, Math.max(0.12, t.scale * factor));
-      const k = scale / t.scale;
-      return {x: px - (px - t.x) * k, y: py - (py - t.y) * k, scale};
+    const current = transformRef.current;
+    const scale = Math.min(4, Math.max(0.12, current.scale * factor));
+    const k = scale / current.scale;
+    applyTransform({
+      x: px - (px - current.x) * k,
+      y: py - (py - current.y) * k,
+      scale,
     });
-  }, []);
+  }, [applyTransform]);
 
   const toggleCompactMode = useCallback(() => {
     setCompactMode(current => {
@@ -1038,8 +1046,9 @@ export function GraphScreen() {
   );
 
   // Drag to pan, two-finger pinch to zoom.
-  const panStart = useRef({x: 0, y: 0});
+  const panOrigin = useRef<PanGestureOrigin | null>(null);
   const pinchDist = useRef(0);
+  const pinching = useRef(false);
   const clearWebSelection = useCallback(() => {
     if (Platform.OS !== 'web') return;
     try {
@@ -1057,10 +1066,15 @@ export function GraphScreen() {
           Math.abs(g.dx) + Math.abs(g.dy) > 6 || g.numberActiveTouches === 2,
         onMoveShouldSetPanResponderCapture: (_e, g) =>
           Math.abs(g.dx) + Math.abs(g.dy) > 6 || g.numberActiveTouches === 2,
-        onPanResponderGrant: () => {
+        onPanResponderGrant: (_event, gesture) => {
           clearWebSelection();
-          panStart.current = {x: transformRef.current.x, y: transformRef.current.y};
+          panOrigin.current = capturePanGestureOrigin(
+            transformRef.current,
+            gesture.dx,
+            gesture.dy,
+          );
           pinchDist.current = 0;
+          pinching.current = false;
         },
         onPanResponderMove: (e, g) => {
           const touches = e.nativeEvent.touches;
@@ -1074,14 +1088,36 @@ export function GraphScreen() {
               zoomAt(cx, cy, dist / pinchDist.current);
             }
             pinchDist.current = dist;
+            pinching.current = true;
             return;
           }
           pinchDist.current = 0;
-          setTransform(t => ({...t, x: panStart.current.x + g.dx, y: panStart.current.y + g.dy}));
+          if (pinching.current) {
+            // PanResponder's dx/dy continue across the entire gesture. Rebase
+            // after a pinch so lifting one finger cannot snap back to the old origin.
+            pinching.current = false;
+            panOrigin.current = capturePanGestureOrigin(transformRef.current, g.dx, g.dy);
+            return;
+          }
+          if (!panOrigin.current) {
+            console.error('Graph pan received movement without a gesture origin.');
+            return;
+          }
+          applyTransform(transformForPanGesture(panOrigin.current, g.dx, g.dy));
         },
         onPanResponderTerminationRequest: () => false,
+        onPanResponderRelease: () => {
+          panOrigin.current = null;
+          pinchDist.current = 0;
+          pinching.current = false;
+        },
+        onPanResponderTerminate: () => {
+          panOrigin.current = null;
+          pinchDist.current = 0;
+          pinching.current = false;
+        },
       }),
-    [clearWebSelection, zoomAt],
+    [applyTransform, clearWebSelection, zoomAt],
   );
 
   if (!graphRootKey || !root) {
