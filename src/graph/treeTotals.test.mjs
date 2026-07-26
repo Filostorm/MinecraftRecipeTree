@@ -51,6 +51,94 @@ test('byproduct credits reduce consumed inputs and leave residual outputs', () =
   assert.equal(withCredits.inputs[0].amount, 2);
   assert.equal(withCredits.byproductCredits[0].amount, 3);
   assert.deepEqual(withCredits.byproducts, []);
+  assert.deepEqual(withCredits.byproductCoverageByNode.get('root.s.0'), {
+    nodeId: 'root.s.0',
+    key: 'item|test:dust',
+    requiredAmount: 5,
+    creditedAmount: 3,
+    remainingAmount: 2,
+    allocations: [{producerSourceId: 'root.s', amount: 3}],
+  });
+});
+
+test('byproduct coverage marks an ingredient complete and preserves excess output', () => {
+  const root = item('root', 'item|test:machine', 1, {
+    source: {
+      id: 'root.s',
+      kind: 'recipe',
+      recipe: {
+        out: [
+          [['item|test:machine', 1]],
+          [['item|test:dust', 3]],
+        ],
+      },
+      inputs: [item('root.s.0', 'item|test:dust', 2)],
+    },
+  });
+
+  const totals = calculateTreeTotals(root, true);
+  assert.deepEqual(totals.inputs, []);
+  assert.equal(totals.byproductCredits[0].amount, 2);
+  assert.equal(totals.byproducts[0].amount, 1);
+  assert.deepEqual(totals.byproductCoverageByNode.get('root.s.0'), {
+    nodeId: 'root.s.0',
+    key: 'item|test:dust',
+    requiredAmount: 2,
+    creditedAmount: 2,
+    remainingAmount: 0,
+    allocations: [{producerSourceId: 'root.s', amount: 2}],
+  });
+});
+
+test('a partially credited ingredient only crafts its remaining material balance', () => {
+  const dust = item('root.s.0', 'item|test:dust', 5);
+  const root = item('root', 'item|test:machine', 1, {
+    source: {
+      id: 'root.s',
+      kind: 'recipe',
+      recipe: {
+        out: [
+          [['item|test:machine', 1]],
+          [['item|test:dust', 3]],
+        ],
+      },
+      inputs: [dust],
+    },
+  });
+
+  const initialTotals = calculateTreeTotals(root, true);
+  const initialCoverage = initialTotals.byproductCoverageByNode.get(dust.id);
+  dust.byproductFulfillment = {
+    creditedAmount: initialCoverage.creditedAmount,
+    allocations: initialCoverage.allocations,
+  };
+  dust.source = {
+    id: 'root.s.0.s',
+    kind: 'recipe',
+    recipe: {out: [[['item|test:dust', 1]]]},
+    inputs: [item('root.s.0.s.0', 'item|test:ore', 2)],
+  };
+
+  const expandedTotals = calculateTreeTotals(root, true);
+  assert.deepEqual(expandedTotals.inputs, [
+    {
+      key: 'item|test:ore',
+      amount: 4,
+      variants: 1,
+      tag: undefined,
+    },
+  ]);
+  assert.equal(expandedTotals.byproductCredits[0].amount, 3);
+  assert.deepEqual(expandedTotals.byproducts, []);
+  assert.equal(expandedTotals.requiredByNode.get(dust.id), 2);
+  assert.deepEqual(expandedTotals.byproductCoverageByNode.get(dust.id), {
+    nodeId: dust.id,
+    key: dust.key,
+    requiredAmount: 5,
+    creditedAmount: 3,
+    remainingAmount: 2,
+    allocations: [{producerSourceId: 'root.s', amount: 3}],
+  });
 });
 
 test('byproduct credits require an exact logical ingredient identity', () => {

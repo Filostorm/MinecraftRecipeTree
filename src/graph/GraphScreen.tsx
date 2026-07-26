@@ -64,18 +64,19 @@ import {
 import type {GraphTransform, PanGestureOrigin} from './panGesture';
 import {recordRecipeHistory} from './recipeHistory';
 import {planRecipePickerChoices} from './recipePickerPlan';
-import {ItemTreeNode, SourceTreeNode, makeRoot} from './model';
+import {makeRoot} from './model';
+import type {ItemTreeNode, SourceTreeNode} from './model';
 import {
   buildTreeTotalsCsv,
   downloadBlob,
   safeExportFilename,
 } from './treeExports';
-import {
+import {calculateTreeTotals, requiredAmountFor} from './treeTotals';
+import type {
+  NodeByproductCoverage,
   TreeCalculation,
   TreeTotal,
   TreeTotals,
-  calculateTreeTotals,
-  requiredAmountFor,
 } from './treeTotals';
 
 /** One way to obtain an item: craft it, kill for it, or mine for it. */
@@ -101,6 +102,7 @@ interface PickerState {
   remainingRecipeChoices: Record<string, RecipeSourceChoice[]>;
   recipeGroupProgress: Record<string, PickerGroupProgress>;
   target: ItemTreeNode;
+  byproductCoverage?: NodeByproductCoverage;
   rememberSource: boolean;
   collapsedGroupKeys: Set<string>;
 }
@@ -478,7 +480,7 @@ export function GraphScreen() {
   );
 
   const openPicker = useCallback(
-    async (target: ItemTreeNode) => {
+    async (target: ItemTreeNode, byproductCoverage?: NodeByproductCoverage) => {
       const requestId = ++pickerRequestIdRef.current;
       const currentPreferred = preferredSourcesRef.current[target.key];
       const allChoices = choicesFor(target.key);
@@ -579,6 +581,7 @@ export function GraphScreen() {
         remainingRecipeChoices,
         recipeGroupProgress,
         target,
+        byproductCoverage,
         rememberSource: true,
         collapsedGroupKeys: loadCollapsedRecipeCategories(),
       });
@@ -701,8 +704,8 @@ export function GraphScreen() {
   );
 
   const openPickerWithErrorHandling = useCallback(
-    (node: ItemTreeNode) => {
-      void openPicker(node).catch(error => {
+    (node: ItemTreeNode, byproductCoverage?: NodeByproductCoverage) => {
+      void openPicker(node, byproductCoverage).catch(error => {
         console.error('The recipe-source picker could not be opened.', error);
       });
     },
@@ -733,10 +736,59 @@ export function GraphScreen() {
     [applyOnlyChoice],
   );
 
+  const releaseByproductFulfillmentsFromSubtree = useCallback(
+    (removedNode: ItemTreeNode) => {
+      const removedSourceIds = new Set<string>();
+      const removedStack = [removedNode];
+      while (removedStack.length > 0) {
+        const current = removedStack.pop()!;
+        if (!current.source) continue;
+        removedSourceIds.add(current.source.id);
+        for (const child of current.source.inputs) removedStack.push(child);
+      }
+      if (removedSourceIds.size === 0 || !rootRef.current) return;
+
+      let releasedAmount = 0;
+      const treeStack = [rootRef.current];
+      while (treeStack.length > 0) {
+        const current = treeStack.pop()!;
+        const fulfillment = current.byproductFulfillment;
+        if (fulfillment) {
+          const retainedAllocations = fulfillment.allocations.filter(allocation => {
+            if (!removedSourceIds.has(allocation.producerSourceId)) return true;
+            releasedAmount += allocation.amount;
+            return false;
+          });
+          const retainedAmount = retainedAllocations.reduce(
+            (sum, allocation) => sum + allocation.amount,
+            0,
+          );
+          if (retainedAmount > 0) {
+            current.byproductFulfillment = {
+              creditedAmount: retainedAmount,
+              allocations: retainedAllocations,
+            };
+          } else {
+            current.byproductFulfillment = undefined;
+          }
+        }
+        for (const child of current.source?.inputs ?? []) treeStack.push(child);
+      }
+      if (releasedAmount > 0) {
+        console.info('Byproduct fulfillment was released because its producing recipe left the tree.', {
+          releasedAmount,
+          removedProducerCount: removedSourceIds.size,
+        });
+      }
+    },
+    [],
+  );
+
   const onItemTap = useCallback(
     (node: ItemTreeNode) => {
       if (node.loading) return;
       if (node.source) {
+        releaseByproductFulfillmentsFromSubtree(node);
         node.source = undefined;
         bump();
         return;
@@ -759,6 +811,7 @@ export function GraphScreen() {
       choicesFor,
       preferredSourceFor,
       applyOnlyChoiceWithErrorHandling,
+      releaseByproductFulfillmentsFromSubtree,
     ],
   );
 
@@ -819,6 +872,7 @@ export function GraphScreen() {
         byproductCredits: [],
         byproducts: [],
         requiredByNode: new Map(),
+        byproductCoverageByNode: new Map(),
       } as TreeCalculation;
     }
     const totals = calculateTreeTotals(root, useByproducts);
@@ -830,6 +884,54 @@ export function GraphScreen() {
     totals.byproducts.sort(byName);
     return totals;
   }, [root, version, data.itemsByKey, useByproducts]);
+
+  const [focusedSourceId, setFocusedSourceId] = useState<string | null>(null);
+  const focusByproductProducer = useCallback(
+    (sourceId: string) => {
+      const laidSource = graphRef.current?.nodes.find(node => node.id === sourceId);
+      const viewport = viewportRef.current;
+      if (!laidSource || viewport.w <= 0 || viewport.h <= 0) {
+        console.error('The byproduct-producing recipe could not be located in the current graph.', {
+          sourceId,
+        });
+        return;
+      }
+      const scale = transformRef.current.scale;
+      applyTransform({
+        x: viewport.w / 2 - (laidSource.x + laidSource.w / 2) * scale,
+        y: viewport.h / 2 - (laidSource.y + laidSource.h / 2) * scale,
+        scale,
+      });
+      setFocusedSourceId(sourceId);
+    },
+    [applyTransform],
+  );
+
+  const handleCollapsedIngredientTap = useCallback(
+    (node: ItemTreeNode, defaultAction: () => void) => {
+      const coverage = treeTotals.byproductCoverageByNode.get(node.id);
+      if (!coverage) {
+        defaultAction();
+        return;
+      }
+      if (coverage.remainingAmount > 0) {
+        openPickerWithErrorHandling(node, coverage);
+        return;
+      }
+      const producer = [...coverage.allocations].sort(
+        (left, right) => right.amount - left.amount,
+      )[0];
+      if (!producer) {
+        console.error('A completed byproduct ingredient has no producing recipe allocation.', {
+          nodeId: node.id,
+          itemKey: node.key,
+        });
+        return;
+      }
+      focusByproductProducer(producer.producerSourceId);
+    },
+    [focusByproductProducer, openPickerWithErrorHandling, treeTotals],
+  );
 
   const rootExportName = useMemo(
     () => {
@@ -1188,12 +1290,18 @@ export function GraphScreen() {
                 y={n.y}
                 node={n.item}
                 requiredAmount={requiredAmountFor(n.item, treeTotals)}
+                byproductCoverage={treeTotals.byproductCoverageByNode.get(n.item.id)}
                 isRoot={n.item.id === 'root'}
-                selectable={choicesFor(n.item.key).length > 0}
+                selectable={
+                  treeTotals.byproductCoverageByNode.has(n.item.id) ||
+                  choicesFor(n.item.key).length > 0
+                }
                 packed={n.packed === true}
                 branchLabel={n.compactBranch === true}
                 onTap={() =>
-                  n.packed ? onItemTap(n.item) : openPickerWithErrorHandling(n.item)
+                  handleCollapsedIngredientTap(n.item, () =>
+                    n.packed ? onItemTap(n.item) : openPickerWithErrorHandling(n.item),
+                  )
                 }
               />
             ) : n.kind === 'item' ? (
@@ -1203,9 +1311,12 @@ export function GraphScreen() {
                 y={n.y}
                 node={n.item}
                 requiredAmount={requiredAmountFor(n.item, treeTotals)}
+                byproductCoverage={treeTotals.byproductCoverageByNode.get(n.item.id)}
                 isRoot={n.item.id === 'root'}
                 expandable={choicesFor(n.item.key).length > 0}
-                onTap={() => onItemTap(n.item)}
+                onTap={() =>
+                  handleCollapsedIngredientTap(n.item, () => onItemTap(n.item))
+                }
                 onInfo={() => openItem(n.item.key)}
               />
             ) : (
@@ -1217,8 +1328,10 @@ export function GraphScreen() {
                 h={n.h}
                 item={n.item}
                 requiredAmount={requiredAmountFor(n.item, treeTotals)}
+                byproductCoverage={treeTotals.byproductCoverageByNode.get(n.item.id)}
                 source={n.source!}
                 isRoot={n.item.id === 'root'}
+                focused={n.source?.id === focusedSourceId}
                 animateMobs={animateMobs}
                 canSwap={choicesFor(n.item.key).length > 1}
                 onCollapse={() => onItemTap(n.item)}
@@ -1252,6 +1365,9 @@ export function GraphScreen() {
       )}
       <Text style={styles.hint}>
         {packedLayout ? 'root-packed inputs promote to full branches when opened · ' : ''}
+        {useByproducts
+          ? 'solid blue = completed byproduct (tap to locate source) · dashed blue = partial byproduct (tap to craft remainder) · '
+          : ''}
         {compactMode
           ? 'tap item = pick recipe/drop source · drag = pan · scroll = zoom'
           : 'tap node = expand/collapse · ⇄ = pick recipe/drop source · drag = pan · scroll = zoom'}
@@ -1305,7 +1421,18 @@ export function GraphScreen() {
               return;
             }
             setPicker(null);
+            if (p.target.source) {
+              releaseByproductFulfillmentsFromSubtree(p.target);
+            }
             p.target.source = undefined;
+            if (p.byproductCoverage && p.byproductCoverage.remainingAmount > 0) {
+              p.target.byproductFulfillment = {
+                creditedAmount: p.byproductCoverage.creditedAmount,
+                allocations: p.byproductCoverage.allocations.map(allocation => ({
+                  ...allocation,
+                })),
+              };
+            }
             setPreferredSource(p.target.key, p.rememberSource ? choice : null);
             if (p.rememberSource) {
               applyPreferredSourceAcrossTree(p.target, choice);
@@ -1365,7 +1492,11 @@ function TreeTotalsPanel({
       </View>
       {exportMessage && <Text style={[styles.exportMessage, noSelect]}>{exportMessage}</Text>}
       <ScrollView style={styles.totalsScroll} contentContainerStyle={styles.totalsContent}>
-        <TreeTotalsSection title="Inputs" totals={totals.inputs} onOpenItem={onOpenItem} />
+        <TreeTotalsSection
+          title={useByproducts ? 'Inputs still needed' : 'Inputs'}
+          totals={totals.inputs}
+          onOpenItem={onOpenItem}
+        />
         <TreeTotalsSection
           title="Required · not consumed"
           totals={totals.prerequisites}
@@ -1431,6 +1562,7 @@ function CompactItemNodeView({
   y,
   node,
   requiredAmount,
+  byproductCoverage,
   isRoot,
   selectable,
   packed = false,
@@ -1441,6 +1573,7 @@ function CompactItemNodeView({
   y: number;
   node: ItemTreeNode;
   requiredAmount: number | null;
+  byproductCoverage?: NodeByproductCoverage;
   isRoot: boolean;
   selectable: boolean;
   packed?: boolean;
@@ -1451,11 +1584,19 @@ function CompactItemNodeView({
   const [showPackedLabel, setShowPackedLabel] = useState(false);
   const item = data.itemsByKey.get(node.key);
   const name = displayIngredientName(item?.n ?? node.key, node.tag);
-  const amount = formatIngredientQuantity(node.key, requiredAmount);
+  const amount = formatIngredientQuantity(
+    node.key,
+    byproductCoverage?.remainingAmount ?? requiredAmount,
+  );
+  const byproductLabel = byproductCoverage
+    ? byproductCoverage.remainingAmount === 0
+      ? `completed by byproduct ${formatIngredientQuantity(node.key, byproductCoverage.creditedAmount)}`
+      : `${formatIngredientQuantity(node.key, byproductCoverage.creditedAmount)} supplied by byproduct, ${formatIngredientQuantity(node.key, byproductCoverage.remainingAmount)} still needed`
+    : null;
   return (
     <Pressable
       accessibilityRole={selectable ? 'button' : undefined}
-      accessibilityLabel={`${name}, quantity ${amount}${node.nonConsumed ? ', not consumed' : ''}${node.consumptionProbability !== undefined ? `, ${node.consumptionProbability == null ? 'unknown' : `${String(Math.round(node.consumptionProbability * 10_000) / 100)} percent`} consume chance` : ''}${selectable ? ', choose source' : ''}`}
+      accessibilityLabel={`${name}, quantity ${formatIngredientQuantity(node.key, requiredAmount)}${byproductLabel ? `, ${byproductLabel}` : ''}${node.nonConsumed ? ', not consumed' : ''}${node.consumptionProbability !== undefined ? `, ${node.consumptionProbability == null ? 'unknown' : `${String(Math.round(node.consumptionProbability * 10_000) / 100)} percent`} consume chance` : ''}${selectable ? byproductCoverage?.remainingAmount === 0 ? ', navigate to producing recipe' : ', choose source' : ''}`}
       disabled={!selectable || node.loading}
       onPress={onTap}
       onHoverIn={packed ? () => setShowPackedLabel(true) : undefined}
@@ -1471,15 +1612,30 @@ function CompactItemNodeView({
         node.nonConsumed && styles.nodePrerequisite,
         node.cyclic && styles.nodeCyclic,
         node.loading && styles.nodeLoading,
+        byproductCoverage?.remainingAmount === 0 && styles.nodeByproductComplete,
+        byproductCoverage &&
+          byproductCoverage.remainingAmount > 0 &&
+          styles.nodeByproductPartial,
       ]}>
       <ItemIcon item={item} itemKey={node.key} size={32} />
-      <View style={styles.compactCountBadge}>
-        <Text style={[styles.compactCountText, noSelect]}>{amount}</Text>
+      <View
+        style={[
+          styles.compactCountBadge,
+          byproductCoverage && styles.compactByproductCountBadge,
+        ]}>
+        <Text
+          style={[
+            styles.compactCountText,
+            byproductCoverage && styles.compactByproductCountText,
+            noSelect,
+          ]}>
+          {byproductCoverage?.remainingAmount === 0 ? '✓' : amount}
+        </Text>
       </View>
       {packed && showPackedLabel && (
         <View pointerEvents="none" style={styles.packedItemTooltip}>
           <Text style={[styles.packedItemTooltipText, noSelect]} numberOfLines={1}>
-            {name} · {amount}
+            {name} · {byproductLabel ?? amount}
           </Text>
         </View>
       )}
@@ -1516,6 +1672,7 @@ function ItemNodeView({
   y,
   node,
   requiredAmount,
+  byproductCoverage,
   isRoot,
   expandable,
   onTap,
@@ -1525,6 +1682,7 @@ function ItemNodeView({
   y: number;
   node: ItemTreeNode;
   requiredAmount: number | null;
+  byproductCoverage?: NodeByproductCoverage;
   isRoot: boolean;
   expandable: boolean;
   onTap: () => void;
@@ -1533,16 +1691,34 @@ function ItemNodeView({
   const data = useData();
   const item = data.itemsByKey.get(node.key);
   const name = displayIngredientName(item?.n ?? node.key, node.tag);
-  const glyph = node.loading ? '…' : expandable ? '▸' : '·';
+  const glyph =
+    node.loading
+      ? '…'
+      : byproductCoverage?.remainingAmount === 0
+        ? '↗'
+        : expandable
+          ? '▸'
+          : '·';
+  const byproductText = byproductCoverage
+    ? byproductCoverage.remainingAmount === 0
+      ? `  ✓ ${formatIngredientQuantity(node.key, byproductCoverage.creditedAmount)} byproduct`
+      : `  ${formatIngredientQuantity(node.key, byproductCoverage.remainingAmount)} needed · ${formatIngredientQuantity(node.key, byproductCoverage.creditedAmount)} byproduct`
+    : '';
   return (
     <Pressable
       onPress={onTap}
+      accessibilityRole="button"
+      accessibilityLabel={`${name}, quantity ${formatIngredientQuantity(node.key, requiredAmount)}${byproductCoverage ? byproductCoverage.remainingAmount === 0 ? ', completed by byproduct, navigate to producing recipe' : `, partially completed by byproduct, ${formatIngredientQuantity(node.key, byproductCoverage.remainingAmount)} still needed, choose source` : expandable ? ', choose source' : ''}`}
       style={[
         styles.itemNode,
         {left: x, top: y, width: ITEM_W, height: ITEM_H},
         isRoot && styles.nodeRoot,
         node.nonConsumed && styles.nodePrerequisite,
         node.cyclic && styles.nodeCyclic,
+        byproductCoverage?.remainingAmount === 0 && styles.nodeByproductComplete,
+        byproductCoverage &&
+          byproductCoverage.remainingAmount > 0 &&
+          styles.nodeByproductPartial,
       ]}>
       <ItemIcon item={item} itemKey={node.key} size={32} />
       <View style={{flex: 1, marginLeft: 7}}>
@@ -1559,6 +1735,7 @@ function ItemNodeView({
           {node.consumptionProbability !== undefined
             ? `  ${node.consumptionProbability == null ? '?' : `${String(Math.round(node.consumptionProbability * 10_000) / 100)}%`} consume`
             : ''}
+          {byproductText}
         </Text>
       </View>
       <TouchableOpacity onPress={onInfo} style={styles.infoBtn} hitSlop={6}>
@@ -1576,8 +1753,10 @@ function SourceNodeView({
   h,
   item,
   requiredAmount,
+  byproductCoverage,
   source,
   isRoot,
+  focused,
   animateMobs,
   canSwap,
   onCollapse,
@@ -1590,8 +1769,10 @@ function SourceNodeView({
   h: number;
   item: ItemTreeNode;
   requiredAmount: number | null;
+  byproductCoverage?: NodeByproductCoverage;
   source: SourceTreeNode;
   isRoot: boolean;
+  focused: boolean;
   animateMobs: boolean;
   canSwap: boolean;
   onCollapse: () => void;
@@ -1616,6 +1797,11 @@ function SourceNodeView({
         isRoot && styles.nodeRoot,
         item.nonConsumed && styles.nodePrerequisite,
         item.cyclic && styles.nodeCyclic,
+        byproductCoverage?.remainingAmount === 0 && styles.nodeByproductComplete,
+        byproductCoverage &&
+          byproductCoverage.remainingAmount > 0 &&
+          styles.nodeByproductPartial,
+        focused && styles.nodeByproductTarget,
       ]}>
       <Pressable onPress={onCollapse} style={styles.sourceHeader}>
         <ItemIcon item={catalogItem} itemKey={item.key} size={16} />
@@ -1623,6 +1809,12 @@ function SourceNodeView({
           {name}
           <Text style={[styles.sourceHeaderAmount, noSelect]}>{amountText}</Text>
           <Text style={[styles.sourceHeaderContext, noSelect]}> · {context}</Text>
+          {byproductCoverage && (
+            <Text style={[styles.sourceHeaderByproduct, noSelect]}>
+              {' · '}
+              {formatIngredientQuantity(item.key, byproductCoverage.creditedAmount)} byproduct
+            </Text>
+          )}
         </Text>
         {canSwap && (
           <TouchableOpacity onPress={onSwap} hitSlop={6} style={styles.headerBtn}>
@@ -1811,10 +2003,29 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(14,17,22,0.9)',
   },
   compactCountText: {color: theme.text, fontSize: 9, fontWeight: '700'},
+  compactByproductCountBadge: {
+    borderColor: theme.accentAlt,
+    borderWidth: 1,
+    backgroundColor: 'rgba(24,53,88,0.96)',
+  },
+  compactByproductCountText: {color: theme.accentAlt},
   nodeLoading: {opacity: 0.55},
   nodeRoot: {borderColor: theme.accent, borderWidth: 2},
   nodePrerequisite: {borderColor: theme.warn, borderStyle: 'dashed'},
   nodeCyclic: {borderColor: theme.warn},
+  nodeByproductComplete: {
+    borderColor: theme.accentAlt,
+    borderWidth: 2,
+  },
+  nodeByproductPartial: {
+    borderColor: theme.accentAlt,
+    borderWidth: 2,
+    borderStyle: 'dashed',
+  },
+  nodeByproductTarget: {
+    borderColor: theme.accentAlt,
+    borderWidth: 3,
+  },
   itemNodeName: {color: theme.text, fontSize: 11, lineHeight: 14},
   itemNodeSub: {color: theme.textDim, fontSize: 10, marginTop: 2},
   infoBtn: {paddingLeft: 4},
@@ -1837,6 +2048,7 @@ const styles = StyleSheet.create({
   sourceHeaderText: {color: theme.text, fontSize: 11, fontWeight: '600', flex: 1},
   sourceHeaderAmount: {color: theme.accent, fontWeight: '700'},
   sourceHeaderContext: {color: theme.textDim, fontWeight: '400'},
+  sourceHeaderByproduct: {color: theme.accentAlt, fontWeight: '600'},
   headerBtn: {paddingHorizontal: 2},
   dropRow: {flexDirection: 'row', alignItems: 'center', flex: 1, paddingHorizontal: 4},
   dropName: {color: theme.text, fontSize: 12},

@@ -8,6 +8,16 @@ import {DropStat, Mob, Recipe, RecipeRef} from '../types';
  */
 export type SourceKind = 'recipe' | 'mob' | 'block';
 
+export interface ByproductAllocation {
+  producerSourceId: string;
+  amount: number;
+}
+
+export interface ByproductFulfillment {
+  creditedAmount: number;
+  allocations: ByproductAllocation[];
+}
+
 export interface SourceTreeNode {
   id: string;
   kind: SourceKind;
@@ -43,6 +53,8 @@ export interface ItemTreeNode {
   nonConsumed?: boolean;
   /** Exact per-run chance that this consumed input is used; null means conflicting chances. */
   consumptionProbability?: number | null;
+  /** Byproduct quantity reserved for this ingredient before its selected source is run. */
+  byproductFulfillment?: ByproductFulfillment;
   /** Keys of item ancestors, for cycle detection */
   ancestors: string[];
   /** This item already appears up the chain */
