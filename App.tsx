@@ -221,8 +221,6 @@ function Shell() {
     Platform.OS === 'web'
       ? ({
           zoom: interfaceZoom,
-          width: `${100 / interfaceZoom}%`,
-          height: `${100 / interfaceZoom}%`,
         } as unknown as object)
       : null;
   return (
