@@ -403,47 +403,74 @@ function apportion(
 }
 
 function calculateHorizontalPositions(units: LayoutUnit[], rootIndex: number): void {
-  const postorder: number[] = [];
-  const stack: Array<{index: number; visited: boolean}> = [
-    {index: rootIndex, visited: false},
-  ];
-  while (stack.length > 0) {
-    const frame = stack.pop()!;
-    if (frame.visited) {
-      postorder.push(frame.index);
-      continue;
-    }
-    stack.push({index: frame.index, visited: true});
-    const children = units[frame.index].children;
-    for (let offset = children.length - 1; offset >= 0; offset -= 1) {
-      stack.push({index: children[offset], visited: false});
-    }
+  interface FirstWalkFrame {
+    index: number;
+    nextChildOffset: number;
+    defaultAncestor: number;
   }
 
-  for (const index of postorder) {
+  /*
+   * Buchheim's first walk must apportion each child immediately after that
+   * child's subtree has been laid out. Deferring all apportionment until a
+   * parent's children have finished lets a shifted internal child move past a
+   * later sibling whose preliminary position was calculated from the child's
+   * old position. This explicit frame stack preserves the recursive algorithm's
+   * ordering without risking a call-stack overflow on very deep recipe chains.
+   */
+  const stack: FirstWalkFrame[] = [
+    {
+      index: rootIndex,
+      nextChildOffset: 0,
+      defaultAncestor: units[rootIndex].children[0] ?? -1,
+    },
+  ];
+  while (stack.length > 0) {
+    const frame = stack.at(-1)!;
+    const index = frame.index;
     const unit = units[index];
+    if (frame.nextChildOffset < unit.children.length) {
+      const childIndex = unit.children[frame.nextChildOffset];
+      frame.nextChildOffset += 1;
+      stack.push({
+        index: childIndex,
+        nextChildOffset: 0,
+        defaultAncestor: units[childIndex].children[0] ?? -1,
+      });
+      continue;
+    }
+
     const sibling = leftSibling(units, index);
     if (unit.children.length === 0) {
       if (sibling >= 0) {
         unit.prelim =
           units[sibling].prelim + centerSeparation(units[sibling], unit);
       }
-      continue;
+    } else {
+      executeShifts(units, index);
+      const midpoint =
+        (units[unit.children[0]].prelim + units[unit.children.at(-1)!].prelim) / 2;
+      if (sibling >= 0) {
+        unit.prelim =
+          units[sibling].prelim + centerSeparation(units[sibling], unit);
+        unit.modifier = unit.prelim - midpoint;
+      } else {
+        unit.prelim = midpoint;
+      }
     }
 
-    let defaultAncestor = unit.children[0];
-    for (const childIndex of unit.children) {
-      defaultAncestor = apportion(units, childIndex, defaultAncestor);
-    }
-    executeShifts(units, index);
-    const midpoint =
-      (units[unit.children[0]].prelim + units[unit.children.at(-1)!].prelim) / 2;
-    if (sibling >= 0) {
-      unit.prelim =
-        units[sibling].prelim + centerSeparation(units[sibling], unit);
-      unit.modifier = unit.prelim - midpoint;
-    } else {
-      unit.prelim = midpoint;
+    stack.pop();
+    const parentFrame = stack.at(-1);
+    if (parentFrame) {
+      if (parentFrame.defaultAncestor < 0) {
+        throw new Error(
+          `Adaptive tree parent ${units[parentFrame.index].id} is missing its default ancestor.`,
+        );
+      }
+      parentFrame.defaultAncestor = apportion(
+        units,
+        index,
+        parentFrame.defaultAncestor,
+      );
     }
   }
 

@@ -182,6 +182,49 @@ test('keeps variable-width nodes separated on every compacted rank', () => {
   }
 });
 
+test('keeps an expanded sibling branch out of adjacent compact nodes', () => {
+  const root = sourceNode('root', [
+    sourceNode('left-chain', [
+      sourceNode('left-chain-middle', [item('left-chain-leaf')]),
+    ]),
+    sourceNode(
+      'wide-branch',
+      Array.from({length: 5}, (_, index) => item(`wide-branch-input-${index}`)),
+    ),
+    item('right-leaf-a'),
+    item('right-leaf-b'),
+    ...Array.from({length: 6}, (_, index) => item(`right-aspect-${index}`)),
+  ]);
+  const graph = layoutAdaptiveTree(root, true);
+  const rootChildren = graph.nodes.filter(node => node.depth === 1);
+
+  for (let leftIndex = 0; leftIndex < rootChildren.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < rootChildren.length; rightIndex += 1) {
+      assert.equal(
+        rectanglesOverlap(rootChildren[leftIndex], rootChildren[rightIndex]),
+        false,
+        `${rootChildren[leftIndex].id} overlaps ${rootChildren[rightIndex].id}`,
+      );
+    }
+  }
+
+  assert.deepEqual(
+    rootChildren.map(node => node.item.id),
+    [
+      'left-chain',
+      'wide-branch',
+      'right-leaf-a',
+      'right-leaf-b',
+      ...Array.from({length: 6}, (_, index) => `right-aspect-${index}`),
+    ],
+  );
+  assert.ok(
+    rootChildren.every(
+      (node, index) => index === 0 || rootChildren[index - 1].x < node.x,
+    ),
+  );
+});
+
 test('promotes an expanded fan member into an external branch without changing its identity', () => {
   const collapsed = Array.from({length: 30}, (_, index) => item(`collapsed-${index}`));
   const promoted = sourceNode('promoted', [item('promoted-leaf')]);
