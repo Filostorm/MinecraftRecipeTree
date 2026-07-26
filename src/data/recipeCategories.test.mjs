@@ -79,6 +79,9 @@ test('excludes both JEI and HEI information and description meta-categories', ()
     'jei.tag_recipes.item',
     'hei:tag_recipes/fluid',
     'hei.tag_recipes.fluid',
+    'minecraft:plugins/tag',
+    'roughlyenoughitems:plugins/tag/item',
+    'minecraft.plugins.tag',
   ]) {
     assert.equal(isMetaRecipeCategory(category(id)), true, id);
   }
@@ -88,6 +91,8 @@ test('excludes both JEI and HEI information and description meta-categories', ()
     'jei:information_processing',
     'jei:description_recipe',
     'custommod:description',
+    'custommod:plugins/tag_processor',
+    'custommod:plugins/tagged',
   ]) {
     assert.equal(isMetaRecipeCategory(category(id)), false, id);
   }

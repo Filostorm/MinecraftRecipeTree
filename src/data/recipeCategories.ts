@@ -24,6 +24,7 @@ export function isMetaRecipeCategory(category: Category | undefined): boolean {
     id === GTNH_AE2_WORLD_CRAFTING_INFORMATION_CATEGORY_ID ||
     id === GTNH_BETTERQUESTING_INFORMATION_CATEGORY_ID ||
     /(^|[.:])tag_recipes(?:[/.]|$)/i.test(id) ||
+    /(^|[.:])plugins[/.]tag(?:[/.]|$)/i.test(id) ||
     /^jei[.:](?:information|description)(?:[/.]|$)/i.test(id)
   );
 }
