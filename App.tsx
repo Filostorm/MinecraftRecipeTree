@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import {ItemDetailModal} from './src/components/ItemDetailModal';
+import {InterfaceZoomSlider} from './src/components/InterfaceZoomSlider';
 import {DatasetPicker} from './src/components/DatasetPicker';
 import {DatasetSwitcher} from './src/components/DatasetSwitcher';
 import {ItemsScreen} from './src/components/ItemsScreen';
@@ -27,9 +28,11 @@ import {theme} from './src/theme';
 import type {Manifest} from './src/types';
 import {Tab, UiProvider, useUi} from './src/ui/UiContext';
 import {
-  INTERFACE_ZOOM_LEVELS,
-  adjacentInterfaceZoom,
+  INTERFACE_ZOOM_STEP,
+  MAXIMUM_INTERFACE_ZOOM,
+  MINIMUM_INTERFACE_ZOOM,
   loadInterfaceZoom,
+  normalizeInterfaceZoom,
   persistInterfaceZoom,
 } from './src/ui/interfaceZoom';
 
@@ -204,19 +207,20 @@ function Shell() {
   useEffect(() => {
     if (Platform.OS === 'web') setInterfaceZoom(loadInterfaceZoom());
   }, []);
-  const updateInterfaceZoom = (direction: -1 | 1) => {
-    setInterfaceZoom(current => {
-      const next = adjacentInterfaceZoom(current, direction);
-      try {
-        persistInterfaceZoom(next);
-      } catch (error) {
-        console.error('Interface zoom could not be saved.', error);
-      }
-      return next;
-    });
+  const previewInterfaceZoom = (value: number) => {
+    try {
+      setInterfaceZoom(normalizeInterfaceZoom(value));
+    } catch (error) {
+      console.error('Interface zoom slider produced an invalid value.', error);
+    }
   };
-  const minimumInterfaceZoom = INTERFACE_ZOOM_LEVELS[0];
-  const maximumInterfaceZoom = INTERFACE_ZOOM_LEVELS[INTERFACE_ZOOM_LEVELS.length - 1];
+  const saveInterfaceZoom = (value: number) => {
+    try {
+      persistInterfaceZoom(normalizeInterfaceZoom(value));
+    } catch (error) {
+      console.error('Interface zoom could not be saved.', error);
+    }
+  };
   const scaledWorkspaceStyle =
     Platform.OS === 'web'
       ? ({
@@ -250,33 +254,19 @@ function Shell() {
           <View
             style={styles.interfaceZoomControls}
             accessibilityLabel="Interface zoom controls">
-            <TouchableOpacity
-              style={[
-                styles.interfaceZoomButton,
-                interfaceZoom === minimumInterfaceZoom && styles.interfaceZoomButtonDisabled,
-              ]}
-              disabled={interfaceZoom === minimumInterfaceZoom}
-              onPress={() => updateInterfaceZoom(-1)}
-              accessibilityRole="button"
-              accessibilityLabel="Decrease interface zoom">
-              <Text style={styles.interfaceZoomButtonText}>−</Text>
-            </TouchableOpacity>
             <Text
               style={styles.interfaceZoomValue}
               accessibilityLabel={`Interface zoom ${Math.round(interfaceZoom * 100)} percent`}>
               UI {Math.round(interfaceZoom * 100)}%
             </Text>
-            <TouchableOpacity
-              style={[
-                styles.interfaceZoomButton,
-                interfaceZoom === maximumInterfaceZoom && styles.interfaceZoomButtonDisabled,
-              ]}
-              disabled={interfaceZoom === maximumInterfaceZoom}
-              onPress={() => updateInterfaceZoom(1)}
-              accessibilityRole="button"
-              accessibilityLabel="Increase interface zoom">
-              <Text style={styles.interfaceZoomButtonText}>＋</Text>
-            </TouchableOpacity>
+            <InterfaceZoomSlider
+              minimumValue={MINIMUM_INTERFACE_ZOOM}
+              maximumValue={MAXIMUM_INTERFACE_ZOOM}
+              step={INTERFACE_ZOOM_STEP}
+              value={interfaceZoom}
+              onValueChange={previewInterfaceZoom}
+              onSlidingComplete={saveInterfaceZoom}
+            />
           </View>
         )}
       </View>
@@ -400,20 +390,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.borderLight,
     borderRadius: 8,
-    overflow: 'hidden',
-  },
-  interfaceZoomButton: {
-    width: 34,
-    minHeight: 34,
-    alignItems: 'center',
-    justifyContent: 'center',
+    minHeight: 38,
+    paddingHorizontal: 9,
     backgroundColor: theme.panelAlt,
   },
-  interfaceZoomButtonDisabled: {opacity: 0.35},
-  interfaceZoomButtonText: {color: theme.accent, fontSize: 18, fontWeight: '800'},
   interfaceZoomValue: {
-    minWidth: 72,
-    paddingHorizontal: 8,
+    minWidth: 60,
+    marginRight: 5,
     color: theme.text,
     fontSize: 11,
     fontWeight: '700',
