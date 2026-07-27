@@ -48,12 +48,11 @@ import {
   layoutTree,
   recipeImageDisplay,
 } from './layout';
-import type {LaidInputCluster} from './layout';
 import {
-  COMPACT_BRANCH_LABEL_WIDTH,
-  PACKED_ITEM_SIZE,
-  layoutAdaptiveTree,
-} from './adaptiveLayout';
+  RADIAL_BRANCH_LABEL_WIDTH,
+  RADIAL_ITEM_SIZE,
+  layoutRadialTree,
+} from './radialLayout';
 import {
   PreferredSource,
   PreferredSources,
@@ -136,7 +135,8 @@ function choiceMatchesPreference(choice: SourceChoice, preferred: PreferredSourc
 /** Dragging the canvas must never start a text selection (web). */
 const noSelect = Platform.OS === 'web' ? ({userSelect: 'none'} as unknown as object) : null;
 const COMPACT_MODE_KEY = 'graphCompactMode';
-const PACKED_LAYOUT_KEY = 'graphPackedLayout';
+const RADIAL_LAYOUT_KEY = 'graphRadialLayout';
+const LEGACY_PACKED_LAYOUT_KEY = 'graphPackedLayout';
 const USE_BYPRODUCTS_KEY = 'graphUseByproducts';
 const MAX_RECIPE_PICKER_CHOICES = 40;
 const RECIPE_PICKER_GROUP_PAGE = 40;
@@ -156,11 +156,20 @@ function loadCompactMode(): boolean {
   }
 }
 
-function loadPackedLayout(): boolean {
+function loadRadialLayout(): boolean {
   try {
-    return globalThis.localStorage?.getItem(PACKED_LAYOUT_KEY) !== '0';
+    const storage = globalThis.localStorage;
+    const saved = storage?.getItem(RADIAL_LAYOUT_KEY);
+    if (saved !== null && saved !== undefined) return saved !== '0';
+    const legacyPacked = storage?.getItem(LEGACY_PACKED_LAYOUT_KEY);
+    if (legacyPacked !== null && legacyPacked !== undefined) {
+      console.info('Migrating the Packed graph preference to Radial mode.');
+      storage?.setItem(RADIAL_LAYOUT_KEY, legacyPacked);
+      return legacyPacked !== '0';
+    }
+    return true;
   } catch (error) {
-    console.error('Packed graph layout could not be loaded from localStorage.', error);
+    console.error('Radial graph layout could not be loaded from localStorage.', error);
     return true;
   }
 }
@@ -189,7 +198,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
   const pickerGroupLoadsRef = useRef(new Set<string>());
   const pickerRequestIdRef = useRef(0);
   const [compactMode, setCompactMode] = useState(loadCompactMode);
-  const [packedLayout, setPackedLayout] = useState(loadPackedLayout);
+  const [radialLayout, setRadialLayout] = useState(loadRadialLayout);
   const [showTreeTotals, setShowTreeTotals] = useState(true);
   const [useByproducts, setUseByproducts] = useState(loadUseByproducts);
   const [exportingTree, setExportingTree] = useState(false);
@@ -863,11 +872,11 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
   const graph = useMemo(
     () =>
       root
-        ? packedLayout
-          ? layoutAdaptiveTree(root, compactMode)
+        ? radialLayout
+          ? layoutRadialTree(root, compactMode)
           : layoutTree(root, compactMode)
         : null,
-    [root, version, compactMode, packedLayout],
+    [root, version, compactMode, radialLayout],
   );
   const graphRef = useRef(graph);
   graphRef.current = graph;
@@ -1071,18 +1080,18 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
     });
   }, []);
 
-  const togglePackedLayout = useCallback(() => {
-    setPackedLayout(current => {
+  const toggleRadialLayout = useCallback(() => {
+    setRadialLayout(current => {
       const next = !current;
       needsFitRef.current = true;
       try {
         const storage = globalThis.localStorage;
-        if (storage) storage.setItem(PACKED_LAYOUT_KEY, next ? '1' : '0');
+        if (storage) storage.setItem(RADIAL_LAYOUT_KEY, next ? '1' : '0');
         else if (Platform.OS === 'web') {
-          console.warn('Packed graph layout is using memory only because localStorage is unavailable.');
+          console.warn('Radial graph layout is using memory only because localStorage is unavailable.');
         }
       } catch (error) {
-        console.error('Packed graph layout could not be saved to localStorage.', error);
+        console.error('Radial graph layout could not be saved to localStorage.', error);
       }
       return next;
     });
@@ -1291,19 +1300,21 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
               key={`e${i}`}
               style={[
                 styles.edge,
-                e.root && styles.rootEdge,
-                e.root && {
-                  opacity: Math.max(0.3, 0.72 - (e.rootDepth ?? 0) * 0.045),
+                {
+                  left: e.x,
+                  top: e.y,
+                  width: e.w,
+                  height: e.h,
+                  transform:
+                    e.angle === undefined
+                      ? undefined
+                      : [{rotate: `${String(e.angle)}rad`}],
                 },
-                {left: e.x, top: e.y, width: e.w, height: e.h},
               ]}
             />
           ))}
-          {graph?.clusters?.map(cluster => (
-            <PackedInputClusterView key={cluster.id} cluster={cluster} />
-          ))}
           {graph?.nodes.map(n =>
-            compactMode || n.packed ? (
+            compactMode || n.radial ? (
               <CompactItemNodeView
                 key={n.id}
                 x={n.x}
@@ -1317,11 +1328,11 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
                   choicesFor(n.item.key).length > 0
                 }
                 terminal={choicesFor(n.item.key).length === 0}
-                packed={n.packed === true}
+                radial={n.radial === true}
                 branchLabel={n.compactBranch === true}
                 onTap={() =>
                   handleCollapsedIngredientTap(n.item, () =>
-                    n.packed ? onItemTap(n.item) : openPickerWithErrorHandling(n.item),
+                    n.radial ? onItemTap(n.item) : openPickerWithErrorHandling(n.item),
                   )
                 }
               />
@@ -1366,7 +1377,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
 
       <View style={styles.controls}>
         <CtrlBtn label="Totals" active={showTreeTotals} onPress={() => setShowTreeTotals(value => !value)} />
-        <CtrlBtn label="Packed" active={packedLayout} onPress={togglePackedLayout} />
+        <CtrlBtn label="Radial" active={radialLayout} onPress={toggleRadialLayout} />
         <CtrlBtn label="Compact" active={compactMode} onPress={toggleCompactMode} />
         <CtrlBtn label="＋" onPress={() => zoomAt(viewportRef.current.w / 2, viewportRef.current.h / 2, 1.25)} />
         <CtrlBtn label="－" onPress={() => zoomAt(viewportRef.current.w / 2, viewportRef.current.h / 2, 0.8)} />
@@ -1385,7 +1396,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
         />
       )}
       <Text style={styles.hint}>
-        {packedLayout ? 'root-packed inputs promote to full branches when opened · ' : ''}
+        {radialLayout ? 'large ingredient levels stagger across radial rings · ' : ''}
         silver border = no inputs ·{' '}
         {useByproducts
           ? 'solid blue = completed byproduct (tap to locate source) · dashed blue = partial byproduct (tap to craft remainder) · '
@@ -1589,7 +1600,7 @@ function CompactItemNodeView({
   isRoot,
   selectable,
   terminal,
-  packed = false,
+  radial = false,
   branchLabel = false,
   onTap,
 }: {
@@ -1601,12 +1612,12 @@ function CompactItemNodeView({
   isRoot: boolean;
   selectable: boolean;
   terminal: boolean;
-  packed?: boolean;
+  radial?: boolean;
   branchLabel?: boolean;
   onTap: () => void;
 }) {
   const data = useData();
-  const [showPackedLabel, setShowPackedLabel] = useState(false);
+  const [showRadialLabel, setShowRadialLabel] = useState(false);
   const item = data.itemsByKey.get(node.key);
   const name = displayIngredientName(item?.n ?? node.key, node.tag);
   const amount = formatIngredientQuantity(
@@ -1624,15 +1635,15 @@ function CompactItemNodeView({
       accessibilityLabel={`${name}, quantity ${formatIngredientQuantity(node.key, requiredAmount)}${terminal ? ', no inputs' : ''}${byproductLabel ? `, ${byproductLabel}` : ''}${node.nonConsumed ? ', not consumed' : ''}${node.consumptionProbability !== undefined ? `, ${node.consumptionProbability == null ? 'unknown' : `${String(Math.round(node.consumptionProbability * 10_000) / 100)} percent`} consume chance` : ''}${selectable ? byproductCoverage?.remainingAmount === 0 ? ', navigate to producing recipe' : ', choose source' : ''}`}
       disabled={!selectable || node.loading}
       onPress={onTap}
-      onHoverIn={packed ? () => setShowPackedLabel(true) : undefined}
-      onHoverOut={packed ? () => setShowPackedLabel(false) : undefined}
-      onFocus={packed ? () => setShowPackedLabel(true) : undefined}
-      onBlur={packed ? () => setShowPackedLabel(false) : undefined}
+      onHoverIn={radial ? () => setShowRadialLabel(true) : undefined}
+      onHoverOut={radial ? () => setShowRadialLabel(false) : undefined}
+      onFocus={radial ? () => setShowRadialLabel(true) : undefined}
+      onBlur={radial ? () => setShowRadialLabel(false) : undefined}
       style={[
-        packed ? styles.packedItemNode : styles.compactItemNode,
+        radial ? styles.radialItemNode : styles.compactItemNode,
         branchLabel && styles.compactBranchNode,
         {left: x, top: y},
-        packed && showPackedLabel && styles.packedItemNodeRaised,
+        radial && showRadialLabel && styles.radialItemNodeRaised,
         isRoot && styles.nodeRoot,
         node.nonConsumed && styles.nodePrerequisite,
         node.cyclic && styles.nodeCyclic,
@@ -1658,9 +1669,9 @@ function CompactItemNodeView({
           {byproductCoverage?.remainingAmount === 0 ? '✓' : amount}
         </Text>
       </View>
-      {packed && showPackedLabel && (
-        <View pointerEvents="none" style={styles.packedItemTooltip}>
-          <Text style={[styles.packedItemTooltipText, noSelect]} numberOfLines={1}>
+      {radial && showRadialLabel && (
+        <View pointerEvents="none" style={styles.radialItemTooltip}>
+          <Text style={[styles.radialItemTooltipText, noSelect]} numberOfLines={1}>
             {name} · {byproductLabel ?? amount}
           </Text>
         </View>
@@ -1673,23 +1684,6 @@ function CompactItemNodeView({
         </View>
       )}
     </Pressable>
-  );
-}
-
-function PackedInputClusterView({cluster}: {cluster: LaidInputCluster}) {
-  return (
-    <View
-      pointerEvents="none"
-      accessibilityLabel={`${cluster.itemCount} root-packed recipe inputs`}
-      style={[
-        styles.packedRootHub,
-        {
-          left: cluster.x + cluster.hubX - 18,
-          top: cluster.y + cluster.hubY - 9,
-        },
-      ]}>
-      <Text style={[styles.packedRootHubText, noSelect]}>{cluster.itemCount}</Text>
-    </View>
   );
 }
 
@@ -1928,7 +1922,6 @@ const styles = StyleSheet.create({
   canvas: {flex: 1, overflow: 'hidden', backgroundColor: theme.bg},
   anchor: {position: 'absolute', left: 0, top: 0, width: 0, height: 0},
   edge: {position: 'absolute', backgroundColor: theme.borderLight},
-  rootEdge: {backgroundColor: theme.accent},
   itemNode: {
     position: 'absolute',
     flexDirection: 'row',
@@ -1958,8 +1951,8 @@ const styles = StyleSheet.create({
   compactBranchLabel: {
     position: 'absolute',
     top: COMPACT_ITEM_SIZE + 4,
-    left: -(COMPACT_BRANCH_LABEL_WIDTH - COMPACT_ITEM_SIZE) / 2,
-    width: COMPACT_BRANCH_LABEL_WIDTH,
+    left: -(RADIAL_BRANCH_LABEL_WIDTH - COMPACT_ITEM_SIZE) / 2,
+    width: RADIAL_BRANCH_LABEL_WIDTH,
     alignItems: 'center',
   },
   compactBranchLabelText: {
@@ -1969,25 +1962,25 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
   },
-  packedItemNode: {
+  radialItemNode: {
     position: 'absolute',
-    width: PACKED_ITEM_SIZE,
-    height: PACKED_ITEM_SIZE,
+    width: RADIAL_ITEM_SIZE,
+    height: RADIAL_ITEM_SIZE,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: theme.panel,
     borderColor: theme.border,
     borderWidth: 1,
-    borderRadius: PACKED_ITEM_SIZE / 2,
+    borderRadius: RADIAL_ITEM_SIZE / 2,
   },
-  packedItemNodeRaised: {
+  radialItemNodeRaised: {
     zIndex: 20,
     borderColor: theme.accent,
   },
-  packedItemTooltip: {
+  radialItemTooltip: {
     position: 'absolute',
-    left: PACKED_ITEM_SIZE / 2,
-    bottom: PACKED_ITEM_SIZE + 5,
+    left: RADIAL_ITEM_SIZE / 2,
+    bottom: RADIAL_ITEM_SIZE + 5,
     maxWidth: 220,
     minWidth: 96,
     paddingHorizontal: 8,
@@ -1997,26 +1990,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     backgroundColor: 'rgba(14,17,22,0.97)',
   },
-  packedItemTooltipText: {
+  radialItemTooltipText: {
     color: theme.text,
     fontSize: 10,
     fontWeight: '600',
-  },
-  packedRootHub: {
-    position: 'absolute',
-    width: 36,
-    height: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: theme.bg,
-    borderColor: theme.accent,
-    borderWidth: 1,
-    borderRadius: 9,
-  },
-  packedRootHubText: {
-    color: theme.text,
-    fontSize: 9,
-    fontWeight: '700',
   },
   compactCountBadge: {
     position: 'absolute',

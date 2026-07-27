@@ -23,9 +23,9 @@ export interface LaidNode {
   /** The tree item (owner for both kinds). */
   item: ItemTreeNode;
   source?: SourceTreeNode;
-  /** Adaptive-layout ingredient rendered as an icon inside a packed fan. */
-  packed?: boolean;
-  /** Tree rank used to keep expanded compact-mode branch context legible. */
+  /** Collapsed radial-layout ingredient rendered as an upright icon. */
+  radial?: boolean;
+  /** Tree depth used to keep expanded compact-mode branch context legible. */
   depth?: number;
   /** Expanded source node that receives a persistent compact branch label. */
   compactBranch?: boolean;
@@ -36,28 +36,13 @@ export interface EdgeRect {
   y: number;
   w: number;
   h: number;
-  /** Segment in an adaptive terminal-root network rather than the main trunk. */
-  root?: boolean;
-  /** Increasing distance from the recipe junction, used for visual tapering. */
-  rootDepth?: number;
-}
-
-export interface LaidInputCluster {
-  id: string;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  itemCount: number;
-  hubX: number;
-  hubY: number;
+  /** Optional clockwise rotation in radians around the rectangle center. */
+  angle?: number;
 }
 
 export interface GraphLayout {
   nodes: LaidNode[];
   edges: EdgeRect[];
-  /** Present only for adaptive compound-input presentation. */
-  clusters?: LaidInputCluster[];
   minX: number;
   minY: number;
   maxX: number;
