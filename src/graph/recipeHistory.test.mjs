@@ -8,12 +8,13 @@ import {
 } from './recipeHistory.ts';
 
 const scope = {slug: 'meatballcraft', publicationId: 'a'.repeat(64)};
-const entry = (index, openedAt = index + 1) => ({
+const entry = (index, openedAt = index + 1, direction = undefined) => ({
   itemKey: `item|example:item_${index}`,
   ref: [2, index],
   title: `Machine ${index}`,
   recipeId: `example:recipe_${index}`,
   openedAt,
+  ...(direction ? {direction} : {}),
 });
 
 test('isolates recipe history by pack publication', () => {
@@ -55,4 +56,21 @@ test('rejects malformed or unversioned stored history', () => {
       ),
     /storage contract/,
   );
+});
+
+test('treats legacy entries as input trees and preserves explicit output trees', () => {
+  const parsed = parseRecipeHistory(
+    JSON.stringify({
+      version: 1,
+      entries: [entry(1, 10), entry(2, 20, 'outputs')],
+    }),
+  );
+  assert.equal(parsed[0].direction, 'inputs');
+  assert.equal(parsed[1].direction, 'outputs');
+});
+
+test('keeps input- and output-directed trees as distinct history entries', () => {
+  const inputTree = entry(1, 10, 'inputs');
+  const outputTree = entry(1, 20, 'outputs');
+  assert.deepEqual(mergeRecipeHistory([inputTree], outputTree), [outputTree, inputTree]);
 });

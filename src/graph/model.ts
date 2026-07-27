@@ -1,4 +1,5 @@
 import {DropStat, Mob, Recipe, RecipeRef} from '../types';
+import type {GraphDirection} from './direction';
 
 /**
  * The flowchart is a tree rooted at the item being crafted, growing downward.
@@ -26,6 +27,8 @@ export interface SourceTreeNode {
   recipe?: Recipe;
   dir?: string;
   catTitle?: string;
+  /** Whether this source expands toward ingredients or toward recipe products. */
+  direction?: GraphDirection;
   /** mob-drop source */
   mob?: Mob;
   /** block-mining source */
@@ -53,6 +56,8 @@ export interface ItemTreeNode {
   nonConsumed?: boolean;
   /** Exact per-run chance that this consumed input is used; null means conflicting chances. */
   consumptionProbability?: number | null;
+  /** Exact per-run chance that this output is produced; null means conflicting chances. */
+  productionProbability?: number | null;
   /** Byproduct quantity reserved for this ingredient before its selected source is run. */
   byproductFulfillment?: ByproductFulfillment;
   /** Keys of item ancestors, for cycle detection */

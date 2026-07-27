@@ -28,6 +28,7 @@ export interface PickerOption {
   imageW?: number;
   imageH?: number;
   inputs?: SlotSummary[];
+  outputs?: SlotSummary[];
   prerequisites?: SlotSummary[];
 }
 
@@ -225,6 +226,26 @@ export function PickerModal({
                                     tag={input.tag}
                                     probability={input.probability}
                                     probabilityRole="consume"
+                                    interactive={false}
+                                  />
+                                ))}
+                              </View>
+                            </View>
+                          ) : null}
+                          {opt.outputs && opt.outputs.length > 0 ? (
+                            <View style={styles.ingredientGroup}>
+                              <Text style={styles.ingredientLabel}>Outputs</Text>
+                              <View style={styles.ingredientChips}>
+                                {opt.outputs.map(output => (
+                                  <ItemChip
+                                    key={`output-${output.tag ?? output.key}`}
+                                    itemKey={output.key}
+                                    amount={output.amount}
+                                    variableAmount={output.variableAmount}
+                                    variants={output.variants}
+                                    tag={output.tag}
+                                    probability={output.probability}
+                                    probabilityRole="produce"
                                     interactive={false}
                                   />
                                 ))}

@@ -1,5 +1,6 @@
 import type {DatasetDescriptor} from '../data/datasetCatalog';
 import type {RecipeRef} from '../types';
+import type {GraphDirection} from './direction';
 
 const RECIPE_HISTORY_VERSION = 1;
 export const MAX_RECIPE_HISTORY_ENTRIES = 50;
@@ -10,6 +11,8 @@ export interface RecipeHistoryEntry {
   title: string;
   recipeId: string | null;
   openedAt: number;
+  /** Missing on legacy entries, which are input-directed. */
+  direction?: GraphDirection;
 }
 
 interface StoredRecipeHistory {
@@ -41,6 +44,9 @@ function requireHistoryEntry(value: unknown, index: number): RecipeHistoryEntry 
     ref[1] < 0 ||
     !isBoundedString(entry.title, 240) ||
     (entry.recipeId !== null && entry.recipeId !== undefined && !isBoundedString(entry.recipeId, 512)) ||
+    (entry.direction !== undefined &&
+      entry.direction !== 'inputs' &&
+      entry.direction !== 'outputs') ||
     typeof openedAt !== 'number' ||
     !Number.isSafeInteger(openedAt) ||
     openedAt <= 0
@@ -53,6 +59,7 @@ function requireHistoryEntry(value: unknown, index: number): RecipeHistoryEntry 
     title: entry.title,
     recipeId: entry.recipeId ?? null,
     openedAt,
+    direction: entry.direction ?? 'inputs',
   };
 }
 
@@ -84,7 +91,8 @@ export function mergeRecipeHistory(
   const duplicate = (entry: RecipeHistoryEntry) =>
     entry.itemKey === next.itemKey &&
     entry.ref[0] === next.ref[0] &&
-    entry.ref[1] === next.ref[1];
+    entry.ref[1] === next.ref[1] &&
+    (entry.direction ?? 'inputs') === (next.direction ?? 'inputs');
   return [next, ...entries.filter(entry => !duplicate(entry))].slice(
     0,
     MAX_RECIPE_HISTORY_ENTRIES,

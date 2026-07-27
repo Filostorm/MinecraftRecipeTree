@@ -23,7 +23,11 @@ import {
   toggleCollapsedRecipeCategory,
 } from '../data/recipeCategoryPreferences';
 import {isFluidContainerTransferRecipe} from '../data/recipeVisibility';
-import {slotSummary} from '../data/slotSummary';
+import {
+  recipeProducesItem,
+  recipeUsesItem,
+} from '../graph/direction';
+import type {GraphDirection} from '../graph/direction';
 import {theme} from '../theme';
 import {Recipe, RecipeRef} from '../types';
 import {useUi} from '../ui/UiContext';
@@ -228,6 +232,7 @@ export function ItemDetailModal() {
                 itemKey={key}
                 refs={refs}
                 informational={side === 'i'}
+                graphDirection={side === 'u' ? 'outputs' : 'inputs'}
               />
             )}
           </ScrollView>
@@ -250,10 +255,12 @@ function RefsList({
   itemKey,
   refs,
   informational = false,
+  graphDirection,
 }: {
   itemKey: string;
   refs: RecipeRef[];
   informational?: boolean;
+  graphDirection: GraphDirection;
 }) {
   const data = useData();
   const {openRecipeInGraph} = useUi();
@@ -460,6 +467,11 @@ function RefsList({
         );
       }}>
       <View style={styles.recipeFilters}>
+        {!informational && graphDirection === 'outputs' && (
+          <Text style={styles.usageTreeNotice}>
+            Tap a usage to trace what {data.itemsByKey.get(itemKey)?.n ?? itemKey} can produce.
+          </Text>
+        )}
         {informational && (
           <Text style={styles.informationNotice}>
             {hasBetterQuestingPages
@@ -582,7 +594,14 @@ function RefsList({
               accessibilityState={{expanded: !collapsed}}
               style={[styles.categoryHeader, collapsed && styles.categoryHeaderCollapsed]}
               onPress={() => toggleCategory(category.id)}>
-              <Text style={styles.categoryChevron}>{collapsed ? '▸' : '▾'}</Text>
+              <Text
+                accessibilityElementsHidden
+                style={[
+                  styles.categoryVisibilityIcon,
+                  collapsed && styles.categoryVisibilityIconHidden,
+                ]}>
+                👁
+              </Text>
               <Text style={styles.categoryTitle} numberOfLines={1}>
                 {category.title}
               </Text>
@@ -594,13 +613,12 @@ function RefsList({
               <View style={styles.categoryRecipes}>
                 {categoryRefs.map(([catIdx, recipeIdx]) => {
                   const recipe = recipesByRef.get(recipeRefKey([catIdx, recipeIdx]));
-                  const selectedOutput = recipe
-                    ? slotSummary(recipe.out).find(
-                        output =>
-                          output.key === itemKey || output.alternatives.includes(itemKey),
-                      )
-                    : undefined;
-                  const outputKey = selectedOutput ? itemKey : undefined;
+                  const canStartTree =
+                    recipe &&
+                    (graphDirection === 'outputs'
+                      ? recipeUsesItem(recipe, itemKey)
+                      : recipeProducesItem(recipe, itemKey));
+                  const actionSubject = data.itemsByKey.get(itemKey)?.n ?? itemKey;
                   return (
                     <View key={`${catIdx}-${recipeIdx}`}>
                       {recipe && availableCardWidth !== null ? (
@@ -609,9 +627,16 @@ function RefsList({
                           dir={category.dir}
                           catTitle={category.title}
                           availableCardWidth={availableCardWidth}
+                          graphDirection={graphDirection}
+                          actionSubject={actionSubject}
                           onPress={
-                            outputKey && !informational
-                              ? () => openRecipeInGraph(outputKey, [catIdx, recipeIdx])
+                            canStartTree && !informational
+                              ? () =>
+                                  openRecipeInGraph(
+                                    itemKey,
+                                    [catIdx, recipeIdx],
+                                    graphDirection,
+                                  )
                               : undefined
                           }
                         />
@@ -721,11 +746,13 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   categoryHeaderCollapsed: {borderColor: theme.border},
-  categoryChevron: {color: theme.accent, fontSize: 13, width: 12},
+  categoryVisibilityIcon: {fontSize: 13, width: 18, opacity: 1},
+  categoryVisibilityIconHidden: {opacity: 0.35},
   categoryTitle: {color: theme.text, fontSize: 12, fontWeight: '700', flex: 1},
   categoryCount: {color: theme.textDim, fontSize: 9},
   categoryRecipes: {paddingTop: 9},
   informationNotice: {color: theme.textDim, fontSize: 12, lineHeight: 17},
+  usageTreeNotice: {color: theme.accent, fontSize: 12, lineHeight: 17, fontWeight: '700'},
   filterHeader: {
     flexDirection: 'row',
     alignItems: 'center',

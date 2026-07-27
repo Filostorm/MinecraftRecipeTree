@@ -67,11 +67,15 @@ export function RecipeHistoryModal({visible, onClose}: {visible: boolean; onClos
                   <TouchableOpacity
                     key={`${entry.itemKey}:${entry.ref[0]}:${entry.ref[1]}`}
                     accessibilityRole="button"
-                    accessibilityLabel={`Reopen ${entry.title} recipe for ${itemName}`}
+                    accessibilityLabel={`Reopen ${entry.title} ${entry.direction === 'outputs' ? 'output' : 'ingredient'} tree for ${itemName}`}
                     style={styles.row}
                     onPress={() => {
                       onClose();
-                      openRecipeInGraph(entry.itemKey, entry.ref);
+                      openRecipeInGraph(
+                        entry.itemKey,
+                        entry.ref,
+                        entry.direction ?? 'inputs',
+                      );
                     }}>
                     <ItemIcon
                       item={item}
@@ -84,6 +88,7 @@ export function RecipeHistoryModal({visible, onClose}: {visible: boolean; onClos
                       </Text>
                       <Text style={styles.itemName} numberOfLines={1}>
                         {itemName}
+                        {entry.direction === 'outputs' ? ' · output tree' : ''}
                         {entry.recipeId ? ` · ${entry.recipeId}` : ''}
                       </Text>
                     </View>

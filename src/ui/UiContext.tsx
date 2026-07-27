@@ -1,5 +1,6 @@
 import React, {createContext, useCallback, useContext, useMemo, useState} from 'react';
 import {RecipeRef} from '../types';
+import type {GraphDirection} from '../graph/direction';
 
 export type Tab = 'items' | 'graph' | 'mobs';
 
@@ -25,7 +26,9 @@ interface Ui {
   graphRequestId: number;
   /** Exact recipe requested from an item-detail recipe card. */
   graphRecipeRef: RecipeRef | null;
-  openRecipeInGraph(key: string, ref: RecipeRef): void;
+  /** Active traversal direction for the current graph. */
+  graphDirection: GraphDirection;
+  openRecipeInGraph(key: string, ref: RecipeRef, direction?: GraphDirection): void;
   /** Mob sprite animation on/off (persisted). */
   animateMobs: boolean;
   toggleAnimateMobs(): void;
@@ -39,6 +42,7 @@ export function UiProvider({children}: {children: React.ReactNode}) {
   const [graphRootKey, setGraphRootKey] = useState<string | null>(null);
   const [graphRequestId, setGraphRequestId] = useState(0);
   const [graphRecipeRef, setGraphRecipeRef] = useState<RecipeRef | null>(null);
+  const [graphDirection, setGraphDirection] = useState<GraphDirection>('inputs');
   const [animateMobs, setAnimateMobs] = useState<boolean>(loadAnimateMobs);
 
   const toggleAnimateMobs = useCallback(() => {
@@ -57,10 +61,15 @@ export function UiProvider({children}: {children: React.ReactNode}) {
   }, []);
   const popItem = useCallback(() => setItemStack(s => s.slice(0, -1)), []);
   const closeItems = useCallback(() => setItemStack([]), []);
-  const openRecipeInGraph = useCallback((key: string, ref: RecipeRef) => {
+  const openRecipeInGraph = useCallback((
+    key: string,
+    ref: RecipeRef,
+    direction: GraphDirection = 'inputs',
+  ) => {
     setItemStack([]);
     setGraphRootKey(key);
     setGraphRecipeRef(ref);
+    setGraphDirection(direction);
     setGraphRequestId(requestId => requestId + 1);
     setTab('graph');
   }, []);
@@ -76,6 +85,7 @@ export function UiProvider({children}: {children: React.ReactNode}) {
       graphRootKey,
       graphRequestId,
       graphRecipeRef,
+      graphDirection,
       openRecipeInGraph,
       animateMobs,
       toggleAnimateMobs,
@@ -86,6 +96,7 @@ export function UiProvider({children}: {children: React.ReactNode}) {
       graphRootKey,
       graphRequestId,
       graphRecipeRef,
+      graphDirection,
       animateMobs,
       openItem,
       popItem,

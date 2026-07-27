@@ -16,6 +16,7 @@ import {
 } from '../data/slotSummary';
 import {Recipe} from '../types';
 import {useUi} from '../ui/UiContext';
+import type {GraphDirection} from '../graph/direction';
 import {ItemIcon, pixelated} from './ItemIcon';
 import {RecipePreviewImage} from './RecipePreviewImage';
 import {
@@ -29,12 +30,17 @@ export function RecipeCard({
   dir,
   catTitle,
   onPress,
+  graphDirection = 'inputs',
+  actionSubject,
   availableCardWidth,
 }: {
   recipe: Recipe;
   dir: string;
   catTitle?: string;
   onPress?: () => void;
+  graphDirection?: GraphDirection;
+  /** Item name anchoring the graph request, used by the visible action hint. */
+  actionSubject?: string;
   /** Measured width of the full-width recipe-list container in CSS/layout pixels. */
   availableCardWidth: number;
 }) {
@@ -60,7 +66,13 @@ export function RecipeCard({
   return (
     <TouchableOpacity
       accessibilityRole={onPress ? 'button' : undefined}
-      accessibilityLabel={onPress ? `Open ${displayTitle ?? 'recipe'} in graph` : undefined}
+      accessibilityLabel={
+        onPress
+          ? graphDirection === 'outputs'
+            ? `Trace outputs from ${actionSubject ?? 'this item'} through ${displayTitle ?? 'this recipe'}`
+            : `Start an ingredient tree for ${actionSubject ?? 'this item'} with ${displayTitle ?? 'this recipe'}`
+          : undefined
+      }
       activeOpacity={onPress ? 0.72 : 1}
       disabled={!onPress}
       onPress={onPress}
@@ -135,6 +147,13 @@ export function RecipeCard({
       {recipe.id ? (
         <Text style={styles.recipeId} numberOfLines={1}>
           {recipe.id}
+        </Text>
+      ) : null}
+      {onPress ? (
+        <Text style={styles.cardActionHint}>
+          {graphDirection === 'outputs'
+            ? `Tap to trace outputs from ${actionSubject ?? 'this item'}`
+            : `Tap to build ingredients for ${actionSubject ?? 'this item'}`}
         </Text>
       ) : null}
     </TouchableOpacity>
@@ -219,6 +238,12 @@ const styles = StyleSheet.create({
     maxWidth: '100%',
   },
   cardAction: {borderColor: theme.borderLight},
+  cardActionHint: {
+    color: theme.accent,
+    fontSize: 10,
+    fontWeight: '700',
+    marginTop: 8,
+  },
   catTitle: {color: theme.textDim, fontSize: 11, marginBottom: 6},
   recipeImage: {borderRadius: 4},
   previewUnavailable: {
