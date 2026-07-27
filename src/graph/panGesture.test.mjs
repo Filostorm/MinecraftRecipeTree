@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   capturePanGestureOrigin,
+  graphPinchZoomFactor,
   graphViewportPointFromClient,
   graphWheelZoomFactor,
   transformForPanGesture,
@@ -25,6 +26,20 @@ test('wheel zoom is continuous and normalizes browser delta modes', () => {
   assert.ok(graphWheelZoomFactor(8, 0) < 1);
   assert.equal(graphWheelZoomFactor(10, 1), graphWheelZoomFactor(160, 0));
   assert.throws(() => graphWheelZoomFactor(10, 3), /invalid/);
+});
+
+test('pinch zoom amplifies finger travel without frame-dependent accumulation', () => {
+  assert.equal(graphPinchZoomFactor(100, 100), 1);
+  assert.ok(graphPinchZoomFactor(110, 100) > 1.2);
+  assert.ok(graphPinchZoomFactor(90, 100) < 0.8);
+  assert.ok(
+    Math.abs(
+      graphPinchZoomFactor(110, 100) *
+        graphPinchZoomFactor(100, 110) -
+        1,
+    ) < Number.EPSILON * 4,
+  );
+  assert.throws(() => graphPinchZoomFactor(0, 100), /positive finite numbers/);
 });
 
 test('delayed responder grant does not reapply the activation movement', () => {

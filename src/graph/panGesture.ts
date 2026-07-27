@@ -51,6 +51,26 @@ export function graphWheelZoomFactor(deltaY: number, deltaMode: number): number 
   return Math.exp(-boundedDelta * 0.0015);
 }
 
+const GRAPH_PINCH_ZOOM_SENSITIVITY = 2.25;
+
+/**
+ * Amplify pinch distance logarithmically. Raising each incremental ratio to a
+ * constant power remains gesture-frame independent while requiring less travel.
+ */
+export function graphPinchZoomFactor(
+  currentDistance: number,
+  previousDistance: number,
+): number {
+  if (
+    ![currentDistance, previousDistance].every(Number.isFinite) ||
+    currentDistance <= 0 ||
+    previousDistance <= 0
+  ) {
+    throw new Error('Graph pinch distances must be positive finite numbers.');
+  }
+  return Math.pow(currentDistance / previousDistance, GRAPH_PINCH_ZOOM_SENSITIVITY);
+}
+
 /**
  * Captures both coordinate systems at the same instant. PanResponder may grant
  * control after a movement threshold, so its dx/dy values are not necessarily zero.

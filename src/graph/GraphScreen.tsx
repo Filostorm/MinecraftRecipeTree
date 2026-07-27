@@ -63,6 +63,7 @@ import {
 import {automaticGraphFitScale} from './fitScale';
 import {
   capturePanGestureOrigin,
+  graphPinchZoomFactor,
   graphViewportPointFromClient,
   graphWheelZoomFactor,
   transformForPanGesture,
@@ -1206,7 +1207,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
             if (pinchDist.current > 0) {
               const cx = (touches[0].locationX + touches[1].locationX) / 2;
               const cy = (touches[0].locationY + touches[1].locationY) / 2;
-              zoomAt(cx, cy, dist / pinchDist.current);
+              zoomAt(cx, cy, graphPinchZoomFactor(dist, pinchDist.current));
             }
             pinchDist.current = dist;
             pinching.current = true;
