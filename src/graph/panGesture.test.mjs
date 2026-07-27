@@ -2,8 +2,30 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   capturePanGestureOrigin,
+  graphViewportPointFromClient,
+  graphWheelZoomFactor,
   transformForPanGesture,
 } from './panGesture.ts';
+
+test('wheel coordinates compensate for interface-level CSS zoom', () => {
+  assert.deepEqual(
+    graphViewportPointFromClient(
+      450,
+      300,
+      {left: 150, top: 75, width: 900, height: 600},
+      {width: 600, height: 400},
+    ),
+    {x: 200, y: 150},
+  );
+});
+
+test('wheel zoom is continuous and normalizes browser delta modes', () => {
+  assert.equal(graphWheelZoomFactor(0, 0), 1);
+  assert.ok(graphWheelZoomFactor(-8, 0) > 1);
+  assert.ok(graphWheelZoomFactor(8, 0) < 1);
+  assert.equal(graphWheelZoomFactor(10, 1), graphWheelZoomFactor(160, 0));
+  assert.throws(() => graphWheelZoomFactor(10, 3), /invalid/);
+});
 
 test('delayed responder grant does not reapply the activation movement', () => {
   const transform = {x: 240, y: 130, scale: 0.75};

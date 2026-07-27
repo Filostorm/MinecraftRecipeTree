@@ -4,7 +4,7 @@ import {
   DEFAULT_INTERFACE_ZOOM,
   INTERFACE_ZOOM_LEVELS,
   adjacentInterfaceZoom,
-  webModalZoomStyle,
+  scaledPickerRecipePreviewSize,
 } from './interfaceZoom.ts';
 
 test('interface zoom advances through bounded layout-safe levels', () => {
@@ -23,19 +23,21 @@ test('interface zoom rejects invalid current values instead of silently approxim
   assert.throws(() => adjacentInterfaceZoom(Number.NaN, 1), /finite number/);
 });
 
-test('portal modal zoom scales its contents without exceeding its visual bounds', () => {
-  assert.deepEqual(webModalZoomStyle(1, 920, 92), {
-    zoom: 1,
-    width: '100%',
-    maxWidth: 920,
-    maxHeight: '92%',
+test('picker zoom enlarges recipe imagery without shrinking the modal viewport', () => {
+  assert.deepEqual(scaledPickerRecipePreviewSize(160, 60, 1), {
+    width: 160,
+    height: 60,
   });
-  assert.deepEqual(webModalZoomStyle(1.5, 920, 92), {
-    zoom: 1.5,
-    width: `${100 / 1.5}%`,
-    maxWidth: 920 / 1.5,
-    maxHeight: `${92 / 1.5}%`,
+  assert.deepEqual(scaledPickerRecipePreviewSize(160, 60, 1.5), {
+    width: 240,
+    height: 90,
   });
-  assert.throws(() => webModalZoomStyle(1.09, 920, 92), /not a supported zoom level/);
-  assert.throws(() => webModalZoomStyle(1.5, 920, 101), /within 0–100 percent/);
+  assert.throws(
+    () => scaledPickerRecipePreviewSize(160, 60, 1.09),
+    /not a supported zoom level/,
+  );
+  assert.throws(
+    () => scaledPickerRecipePreviewSize(0, 60, 1.5),
+    /positive finite numbers/,
+  );
 });

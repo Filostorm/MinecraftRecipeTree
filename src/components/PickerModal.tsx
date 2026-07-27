@@ -1,7 +1,6 @@
 import React, {useMemo} from 'react';
 import {
   Modal,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,7 +12,7 @@ import {
 import {pixelArtImageStyle} from '../data/pixelArtSizing';
 import type {SlotSummary} from '../data/slotSummary';
 import {theme} from '../theme';
-import {webModalZoomStyle} from '../ui/interfaceZoom';
+import {scaledPickerRecipePreviewSize} from '../ui/interfaceZoom';
 import {pixelated} from './ItemIcon';
 import {ItemChip} from './RecipeCard';
 import {RecipePreviewImage} from './RecipePreviewImage';
@@ -73,7 +72,7 @@ export function PickerModal({
   onLoadGroup?: (groupKey: string) => void;
   onSelect: (index: number) => void;
   onClose: () => void;
-  /** The web UI scale; Modal renders through a portal outside the scaled workspace. */
+  /** The web UI scale applied to recipe imagery without shrinking the modal viewport. */
   interfaceZoom?: number;
 }) {
   const groups = useMemo(() => groupPickerOptions(options), [options]);
@@ -90,15 +89,11 @@ export function PickerModal({
   const totalOptionCount =
     stagedProgress.reduce((sum, progress) => sum + progress.total, 0) +
     immediateGroups.reduce((sum, group) => sum + group.entries.length, 0);
-  const scaledCardStyle =
-    Platform.OS === 'web'
-      ? (webModalZoomStyle(interfaceZoom, 920, 92) as unknown as object)
-      : null;
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={[styles.card, scaledCardStyle]} onPress={() => {}}>
+        <Pressable style={styles.card} onPress={() => {}}>
           <Text style={styles.title}>{title}</Text>
           {onRememberSourceChange && (
             <View style={styles.rememberRow}>
@@ -198,8 +193,15 @@ export function PickerModal({
                   </TouchableOpacity>
                   <View style={styles.optionGrid}>
                     {group.entries.map(({option: opt, index: i}) => {
-                      const imageSize = opt.imageUri
+                      const baseImageSize = opt.imageUri
                         ? pixelArtImageStyle(opt.imageW ?? 160, opt.imageH ?? 60, 250, 128)
+                        : null;
+                      const imageSize = baseImageSize
+                        ? scaledPickerRecipePreviewSize(
+                            baseImageSize.width,
+                            baseImageSize.height,
+                            interfaceZoom,
+                          )
                         : null;
                       return (
                         <TouchableOpacity key={i} style={styles.option} onPress={() => onSelect(i)}>

@@ -63,6 +63,8 @@ import {
 import {automaticGraphFitScale} from './fitScale';
 import {
   capturePanGestureOrigin,
+  graphViewportPointFromClient,
+  graphWheelZoomFactor,
   transformForPanGesture,
 } from './panGesture';
 import type {GraphTransform, PanGestureOrigin} from './panGesture';
@@ -1112,7 +1114,20 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
         const onWheel = (e: WheelEvent) => {
           e.preventDefault();
           const rect = el.getBoundingClientRect();
-          zoomAt(e.clientX - rect.left, e.clientY - rect.top, e.deltaY < 0 ? 1.12 : 1 / 1.12);
+          const viewport = viewportRef.current;
+          if (viewport.w <= 0 || viewport.h <= 0) {
+            console.error('Graph wheel zoom was ignored because the viewport is not measurable.', {
+              viewport,
+            });
+            return;
+          }
+          const point = graphViewportPointFromClient(
+            e.clientX,
+            e.clientY,
+            rect,
+            {width: viewport.w, height: viewport.h},
+          );
+          zoomAt(point.x, point.y, graphWheelZoomFactor(e.deltaY, e.deltaMode));
         };
         const preventNativeDrag = (e: Event) => e.preventDefault();
         const preventPagePinch = (event: Event) => {
@@ -1300,6 +1315,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
                   treeTotals.byproductCoverageByNode.has(n.item.id) ||
                   choicesFor(n.item.key).length > 0
                 }
+                terminal={choicesFor(n.item.key).length === 0}
                 packed={n.packed === true}
                 branchLabel={n.compactBranch === true}
                 onTap={() =>
@@ -1369,6 +1385,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
       )}
       <Text style={styles.hint}>
         {packedLayout ? 'root-packed inputs promote to full branches when opened · ' : ''}
+        silver border = no inputs ·{' '}
         {useByproducts
           ? 'solid blue = completed byproduct (tap to locate source) · dashed blue = partial byproduct (tap to craft remainder) · '
           : ''}
@@ -1570,6 +1587,7 @@ function CompactItemNodeView({
   byproductCoverage,
   isRoot,
   selectable,
+  terminal,
   packed = false,
   branchLabel = false,
   onTap,
@@ -1581,6 +1599,7 @@ function CompactItemNodeView({
   byproductCoverage?: NodeByproductCoverage;
   isRoot: boolean;
   selectable: boolean;
+  terminal: boolean;
   packed?: boolean;
   branchLabel?: boolean;
   onTap: () => void;
@@ -1601,7 +1620,7 @@ function CompactItemNodeView({
   return (
     <Pressable
       accessibilityRole={selectable ? 'button' : undefined}
-      accessibilityLabel={`${name}, quantity ${formatIngredientQuantity(node.key, requiredAmount)}${byproductLabel ? `, ${byproductLabel}` : ''}${node.nonConsumed ? ', not consumed' : ''}${node.consumptionProbability !== undefined ? `, ${node.consumptionProbability == null ? 'unknown' : `${String(Math.round(node.consumptionProbability * 10_000) / 100)} percent`} consume chance` : ''}${selectable ? byproductCoverage?.remainingAmount === 0 ? ', navigate to producing recipe' : ', choose source' : ''}`}
+      accessibilityLabel={`${name}, quantity ${formatIngredientQuantity(node.key, requiredAmount)}${terminal ? ', no inputs' : ''}${byproductLabel ? `, ${byproductLabel}` : ''}${node.nonConsumed ? ', not consumed' : ''}${node.consumptionProbability !== undefined ? `, ${node.consumptionProbability == null ? 'unknown' : `${String(Math.round(node.consumptionProbability * 10_000) / 100)} percent`} consume chance` : ''}${selectable ? byproductCoverage?.remainingAmount === 0 ? ', navigate to producing recipe' : ', choose source' : ''}`}
       disabled={!selectable || node.loading}
       onPress={onTap}
       onHoverIn={packed ? () => setShowPackedLabel(true) : undefined}
@@ -1616,6 +1635,7 @@ function CompactItemNodeView({
         isRoot && styles.nodeRoot,
         node.nonConsumed && styles.nodePrerequisite,
         node.cyclic && styles.nodeCyclic,
+        terminal && styles.nodeTerminal,
         node.loading && styles.nodeLoading,
         byproductCoverage?.remainingAmount === 0 && styles.nodeByproductComplete,
         byproductCoverage &&
@@ -1713,13 +1733,14 @@ function ItemNodeView({
     <Pressable
       onPress={onTap}
       accessibilityRole="button"
-      accessibilityLabel={`${name}, quantity ${formatIngredientQuantity(node.key, requiredAmount)}${byproductCoverage ? byproductCoverage.remainingAmount === 0 ? ', completed by byproduct, navigate to producing recipe' : `, partially completed by byproduct, ${formatIngredientQuantity(node.key, byproductCoverage.remainingAmount)} still needed, choose source` : expandable ? ', choose source' : ''}`}
+      accessibilityLabel={`${name}, quantity ${formatIngredientQuantity(node.key, requiredAmount)}${!expandable ? ', no inputs' : ''}${byproductCoverage ? byproductCoverage.remainingAmount === 0 ? ', completed by byproduct, navigate to producing recipe' : `, partially completed by byproduct, ${formatIngredientQuantity(node.key, byproductCoverage.remainingAmount)} still needed, choose source` : expandable ? ', choose source' : ''}`}
       style={[
         styles.itemNode,
         {left: x, top: y, width: ITEM_W, height: ITEM_H},
         isRoot && styles.nodeRoot,
         node.nonConsumed && styles.nodePrerequisite,
         node.cyclic && styles.nodeCyclic,
+        !expandable && styles.nodeTerminal,
         byproductCoverage?.remainingAmount === 0 && styles.nodeByproductComplete,
         byproductCoverage &&
           byproductCoverage.remainingAmount > 0 &&
@@ -1802,6 +1823,7 @@ function SourceNodeView({
         isRoot && styles.nodeRoot,
         item.nonConsumed && styles.nodePrerequisite,
         item.cyclic && styles.nodeCyclic,
+        source.inputs.length === 0 && styles.nodeTerminal,
         byproductCoverage?.remainingAmount === 0 && styles.nodeByproductComplete,
         byproductCoverage &&
           byproductCoverage.remainingAmount > 0 &&
@@ -2018,6 +2040,7 @@ const styles = StyleSheet.create({
   nodeRoot: {borderColor: theme.accent, borderWidth: 2},
   nodePrerequisite: {borderColor: theme.warn, borderStyle: 'dashed'},
   nodeCyclic: {borderColor: theme.warn},
+  nodeTerminal: {borderColor: theme.textDim, borderWidth: 2},
   nodeByproductComplete: {
     borderColor: theme.accentAlt,
     borderWidth: 2,
