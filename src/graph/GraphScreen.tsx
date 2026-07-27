@@ -171,7 +171,7 @@ function loadUseByproducts(): boolean {
   }
 }
 
-export function GraphScreen() {
+export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
   const data = useData();
   const {graphRootKey, graphRequestId, graphRecipeRef, openItem, setTab, animateMobs} = useUi();
 
@@ -1380,6 +1380,7 @@ export function GraphScreen() {
       {picker && (
         <PickerModal
           visible
+          interfaceZoom={interfaceZoom}
           title={picker.title}
           options={(picker.showFluidTransfers
             ? [...picker.standardEntries, ...picker.fluidTransferEntries]

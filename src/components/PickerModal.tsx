@@ -1,6 +1,7 @@
 import React, {useMemo} from 'react';
 import {
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -12,6 +13,7 @@ import {
 import {pixelArtImageStyle} from '../data/pixelArtSizing';
 import type {SlotSummary} from '../data/slotSummary';
 import {theme} from '../theme';
+import {webModalZoomStyle} from '../ui/interfaceZoom';
 import {pixelated} from './ItemIcon';
 import {ItemChip} from './RecipeCard';
 import {RecipePreviewImage} from './RecipePreviewImage';
@@ -54,6 +56,7 @@ export function PickerModal({
   onLoadGroup,
   onSelect,
   onClose,
+  interfaceZoom = 1,
 }: {
   visible: boolean;
   title: string;
@@ -70,6 +73,8 @@ export function PickerModal({
   onLoadGroup?: (groupKey: string) => void;
   onSelect: (index: number) => void;
   onClose: () => void;
+  /** The web UI scale; Modal renders through a portal outside the scaled workspace. */
+  interfaceZoom?: number;
 }) {
   const groups = useMemo(() => groupPickerOptions(options), [options]);
   const collapsedGroups = groups.filter(group => collapsedGroupKeys?.has(group.key));
@@ -85,11 +90,15 @@ export function PickerModal({
   const totalOptionCount =
     stagedProgress.reduce((sum, progress) => sum + progress.total, 0) +
     immediateGroups.reduce((sum, group) => sum + group.entries.length, 0);
+  const scaledCardStyle =
+    Platform.OS === 'web'
+      ? (webModalZoomStyle(interfaceZoom, 920, 92) as unknown as object)
+      : null;
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.card} onPress={() => {}}>
+        <Pressable style={[styles.card, scaledCardStyle]} onPress={() => {}}>
           <Text style={styles.title}>{title}</Text>
           {onRememberSourceChange && (
             <View style={styles.rememberRow}>

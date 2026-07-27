@@ -288,7 +288,7 @@ function Shell() {
           </View>
           <View style={[styles.body, tab !== 'graph' && styles.hidden]}>
             {data.indexStatus === 'ready' ? (
-              <GraphScreen />
+              <GraphScreen interfaceZoom={interfaceZoom} />
             ) : (
               <View style={styles.center}>
                 {data.indexStatus !== 'error' && (

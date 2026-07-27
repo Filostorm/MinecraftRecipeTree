@@ -3,6 +3,44 @@ export const DEFAULT_INTERFACE_ZOOM = 1;
 
 const INTERFACE_ZOOM_STORAGE_KEY = 'interfaceZoom';
 
+export interface WebModalZoomStyle {
+  zoom: number;
+  width: `${number}%`;
+  maxWidth: number;
+  maxHeight: `${number}%`;
+}
+
+/**
+ * Scale portal-rendered modal content while keeping its visual bounds inside
+ * the viewport. CSS zoom enlarges the descendants too, including raster recipe
+ * previews; the inverse layout dimensions prevent the scaled card overflowing.
+ */
+export function webModalZoomStyle(
+  interfaceZoom: number,
+  visualMaxWidth: number,
+  visualMaxHeightPercent: number,
+): WebModalZoomStyle {
+  if (!INTERFACE_ZOOM_LEVELS.some(level => level === interfaceZoom)) {
+    throw new Error(`Interface zoom ${interfaceZoom} is not a supported zoom level.`);
+  }
+  if (!Number.isFinite(visualMaxWidth) || visualMaxWidth <= 0) {
+    throw new Error('Modal visual maximum width must be a positive finite number.');
+  }
+  if (
+    !Number.isFinite(visualMaxHeightPercent) ||
+    visualMaxHeightPercent <= 0 ||
+    visualMaxHeightPercent > 100
+  ) {
+    throw new Error('Modal visual maximum height must be within 0–100 percent.');
+  }
+  return {
+    zoom: interfaceZoom,
+    width: `${100 / interfaceZoom}%`,
+    maxWidth: visualMaxWidth / interfaceZoom,
+    maxHeight: `${visualMaxHeightPercent / interfaceZoom}%`,
+  };
+}
+
 export function adjacentInterfaceZoom(
   current: number,
   direction: -1 | 1,
