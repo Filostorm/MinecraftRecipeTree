@@ -7,20 +7,33 @@ const INTERFACE_ZOOM_STORAGE_KEY = 'interfaceZoom';
  * Scale only a picker recipe preview. Scaling the entire portal modal reduces
  * its logical viewport and makes controls wrap aggressively at larger UI zooms.
  */
-export function scaledPickerRecipePreviewSize(
-  width: number,
-  height: number,
+export function uniformPickerRecipePreviewSize(
+  logicalWidth: number,
+  logicalHeight: number,
   interfaceZoom: number,
+  maxWidth = 375,
+  maxHeight = 192,
 ): {width: number; height: number} {
   if (!INTERFACE_ZOOM_LEVELS.some(level => level === interfaceZoom)) {
     throw new Error(`Interface zoom ${interfaceZoom} is not a supported zoom level.`);
   }
-  if (![width, height].every(Number.isFinite) || width <= 0 || height <= 0) {
-    throw new Error('Picker recipe preview dimensions must be positive finite numbers.');
+  if (
+    ![logicalWidth, logicalHeight, maxWidth, maxHeight].every(Number.isFinite) ||
+    logicalWidth <= 0 ||
+    logicalHeight <= 0 ||
+    maxWidth <= 0 ||
+    maxHeight <= 0
+  ) {
+    throw new Error('Picker recipe preview dimensions and bounds must be positive finite numbers.');
   }
+  const scale = Math.min(
+    interfaceZoom,
+    maxWidth / logicalWidth,
+    maxHeight / logicalHeight,
+  );
   return {
-    width: Math.max(1, Math.round(width * interfaceZoom)),
-    height: Math.max(1, Math.round(height * interfaceZoom)),
+    width: Math.max(1, Math.round(logicalWidth * scale)),
+    height: Math.max(1, Math.round(logicalHeight * scale)),
   };
 }
 

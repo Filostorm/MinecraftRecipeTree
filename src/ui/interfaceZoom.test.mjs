@@ -4,7 +4,7 @@ import {
   DEFAULT_INTERFACE_ZOOM,
   INTERFACE_ZOOM_LEVELS,
   adjacentInterfaceZoom,
-  scaledPickerRecipePreviewSize,
+  uniformPickerRecipePreviewSize,
 } from './interfaceZoom.ts';
 
 test('interface zoom advances through bounded layout-safe levels', () => {
@@ -23,21 +23,29 @@ test('interface zoom rejects invalid current values instead of silently approxim
   assert.throws(() => adjacentInterfaceZoom(Number.NaN, 1), /finite number/);
 });
 
-test('picker zoom enlarges recipe imagery without shrinking the modal viewport', () => {
-  assert.deepEqual(scaledPickerRecipePreviewSize(160, 60, 1), {
+test('picker applies one uniform recipe scale before proportional fit constraints', () => {
+  assert.deepEqual(uniformPickerRecipePreviewSize(160, 60, 1), {
     width: 160,
     height: 60,
   });
-  assert.deepEqual(scaledPickerRecipePreviewSize(160, 60, 1.5), {
+  assert.deepEqual(uniformPickerRecipePreviewSize(80, 40, 1.5), {
+    width: 120,
+    height: 60,
+  });
+  assert.deepEqual(uniformPickerRecipePreviewSize(160, 60, 1.5), {
     width: 240,
     height: 90,
   });
+  assert.deepEqual(uniformPickerRecipePreviewSize(300, 100, 1.5), {
+    width: 375,
+    height: 125,
+  });
   assert.throws(
-    () => scaledPickerRecipePreviewSize(160, 60, 1.09),
+    () => uniformPickerRecipePreviewSize(160, 60, 1.09),
     /not a supported zoom level/,
   );
   assert.throws(
-    () => scaledPickerRecipePreviewSize(0, 60, 1.5),
+    () => uniformPickerRecipePreviewSize(0, 60, 1.5),
     /positive finite numbers/,
   );
 });

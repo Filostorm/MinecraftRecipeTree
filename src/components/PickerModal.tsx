@@ -9,10 +9,9 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import {pixelArtImageStyle} from '../data/pixelArtSizing';
 import type {SlotSummary} from '../data/slotSummary';
 import {theme} from '../theme';
-import {scaledPickerRecipePreviewSize} from '../ui/interfaceZoom';
+import {uniformPickerRecipePreviewSize} from '../ui/interfaceZoom';
 import {pixelated} from './ItemIcon';
 import {ItemChip} from './RecipeCard';
 import {RecipePreviewImage} from './RecipePreviewImage';
@@ -185,7 +184,7 @@ export function PickerModal({
                     accessibilityLabel={`${group.label}, ${group.entries.length} option${group.entries.length === 1 ? '' : 's'}`}
                     style={styles.groupHeader}
                     onPress={() => toggleGroup(group.key)}>
-                    <Text style={styles.groupCaret}>▾</Text>
+                    <Text style={styles.groupVisibilityIcon}>👁</Text>
                     <Text style={styles.groupTitle}>{group.label}</Text>
                     <Text style={styles.groupCount}>
                       {progress ? `${progress.loaded}/${progress.total}` : group.entries.length}
@@ -193,13 +192,10 @@ export function PickerModal({
                   </TouchableOpacity>
                   <View style={styles.optionGrid}>
                     {group.entries.map(({option: opt, index: i}) => {
-                      const baseImageSize = opt.imageUri
-                        ? pixelArtImageStyle(opt.imageW ?? 160, opt.imageH ?? 60, 250, 128)
-                        : null;
-                      const imageSize = baseImageSize
-                        ? scaledPickerRecipePreviewSize(
-                            baseImageSize.width,
-                            baseImageSize.height,
+                      const imageSize = opt.imageUri
+                        ? uniformPickerRecipePreviewSize(
+                            opt.imageW ?? 160,
+                            opt.imageH ?? 60,
                             interfaceZoom,
                           )
                         : null;
@@ -368,7 +364,7 @@ const styles = StyleSheet.create({
     gap: 7,
     paddingHorizontal: 10,
   },
-  groupCaret: {color: theme.accent, fontSize: 13, width: 13},
+  groupVisibilityIcon: {fontSize: 12, width: 18},
   groupTitle: {color: theme.text, fontSize: 12, fontWeight: '700', flex: 1},
   groupCount: {
     color: theme.textDim,
