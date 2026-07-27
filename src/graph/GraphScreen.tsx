@@ -17,7 +17,11 @@ import {
   PickerModal,
   PickerOption,
 } from '../components/PickerModal';
-import {prerequisiteSummary, slotSummary} from '../data/slotSummary';
+import {
+  inputSlotSummary,
+  prerequisiteSummary,
+  slotSummary,
+} from '../data/slotSummary';
 import {RecipePreviewImage} from '../components/RecipePreviewImage';
 import {recipeImagePath, useData} from '../data/DataContext';
 import {
@@ -312,7 +316,7 @@ export function GraphScreen() {
         }
         const sourceId = `${node.id}.s`;
         const inputSpecs = [
-          ...slotSummary(recipe.in).map(spec => ({...spec, nonConsumed: false})),
+          ...inputSlotSummary(recipe.in).map(spec => ({...spec, nonConsumed: false})),
           ...prerequisiteSummary(recipe.cat).map(spec => ({...spec, nonConsumed: true})),
         ];
         const inputs = inputSpecs.map((spec, i) => {
@@ -450,7 +454,7 @@ export function GraphScreen() {
                 : undefined,
             imageW: recipe?.w,
             imageH: recipe?.h,
-            inputs: recipe ? slotSummary(recipe.in) : undefined,
+            inputs: recipe ? inputSlotSummary(recipe.in) : undefined,
             prerequisites: recipe ? prerequisiteSummary(recipe.cat) : undefined,
           },
         };

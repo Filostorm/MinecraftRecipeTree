@@ -1,5 +1,8 @@
 import {inferIngredientTag} from './ingredientTags.ts';
-import {normalizeIngredientAmount} from './ingredientQuantities.ts';
+import {
+  normalizeIngredientAmount,
+  normalizeRecipeInputAmount,
+} from './ingredientQuantities.ts';
 import type {SlotEntry} from '../types';
 
 export interface SlotSummary {
@@ -18,20 +21,32 @@ export interface SlotSummary {
 let warnedVariableAlternativeAmounts = false;
 let warnedVariableAlternativeProbabilities = false;
 let warnedMergedStochasticSlots = false;
+let reportedEnderIoEnergyInput = false;
 
-function normalizedEntryAmount([key, rawAmount]: SlotEntry, consumed: boolean): number | null {
-  return consumed
+type SlotSummaryMode = 'standard' | 'input' | 'prerequisite';
+
+function isEnderIoEnergyPseudoInput(key: string): boolean {
+  return (
+    key.startsWith(
+      'custom_crazypants.enderio.base.integration.jei.energy.energyingredient_',
+    ) && key.endsWith('|enderio:energy')
+  );
+}
+
+function normalizedEntryAmount(
+  [key, rawAmount]: SlotEntry,
+  mode: SlotSummaryMode,
+): number | null {
+  return mode === 'standard'
     ? normalizeIngredientAmount(key, rawAmount)
-    : Number.isFinite(rawAmount) && rawAmount > 0
-      ? rawAmount
-      : null;
+    : normalizeRecipeInputAmount(key, rawAmount);
 }
 
 function slotAmount(
   slot: SlotEntry[],
-  consumed: boolean,
+  mode: SlotSummaryMode,
 ): {amount: number | null; variableAmount: boolean} {
-  const amounts = slot.map(entry => normalizedEntryAmount(entry, consumed));
+  const amounts = slot.map(entry => normalizedEntryAmount(entry, mode));
   const amount = amounts[0] ?? null;
   const variableAmount = amounts.some(candidate => candidate !== amount);
   if (variableAmount && !warnedVariableAlternativeAmounts) {
@@ -64,25 +79,41 @@ function slotProbability(slot: SlotEntry[]): number | null | undefined {
   return variableProbability ? null : probability;
 }
 
-/** Logical consumed ingredients with amounts, preserving tag-resolved alternatives. */
+/** Generic recipe slots with exact exported quantities. */
 export function slotSummary(slots: SlotEntry[][] | undefined): SlotSummary[] {
-  return summarizeSlots(slots, true);
+  return summarizeSlots(slots, 'standard');
+}
+
+/** Consumed inputs with discrete items rounded up and JEI pseudo-resources removed. */
+export function inputSlotSummary(slots: SlotEntry[][] | undefined): SlotSummary[] {
+  return summarizeSlots(slots, 'input');
 }
 
 /** Prerequisite/catalyst slots are graph edges but never material consumption. */
 export function prerequisiteSummary(slots: SlotEntry[][] | undefined): SlotSummary[] {
-  return summarizeSlots(slots, false);
+  return summarizeSlots(slots, 'prerequisite');
 }
 
 function summarizeSlots(
   slots: SlotEntry[][] | undefined,
-  consumed: boolean,
+  mode: SlotSummaryMode,
 ): SlotSummary[] {
   const out = new Map<string, SlotSummary>();
-  for (const slot of slots ?? []) {
+  for (const exportedSlot of slots ?? []) {
+    const slot =
+      mode === 'standard'
+        ? exportedSlot
+        : exportedSlot.filter(([key]) => !isEnderIoEnergyPseudoInput(key));
+    if (slot.length !== exportedSlot.length && !reportedEnderIoEnergyInput) {
+      reportedEnderIoEnergyInput = true;
+      console.info(
+        'An Ender IO JEI energy pseudo-input was excluded from recipe material inputs.',
+        {exampleKey: exportedSlot.find(([key]) => isEnderIoEnergyPseudoInput(key))?.[0]},
+      );
+    }
     if (!slot.length) continue;
     const [key] = slot[0];
-    const {amount, variableAmount} = slotAmount(slot, consumed);
+    const {amount, variableAmount} = slotAmount(slot, mode);
     const probability = slotProbability(slot);
     const alternatives = [...new Set(slot.map(([entryKey]) => entryKey))];
     const tag = inferIngredientTag(slot);

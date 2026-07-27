@@ -1,6 +1,31 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {slotSummary} from './slotSummary.ts';
+import {inputSlotSummary, prerequisiteSummary, slotSummary} from './slotSummary.ts';
+
+const ENDER_IO_ENERGY =
+  'custom_crazypants.enderio.base.integration.jei.energy.energyingredient_4926a629|enderio:energy';
+
+test('input summaries exclude Ender IO JEI energy pseudo-resources without hiding outputs', () => {
+  const infos = [];
+  const originalInfo = console.info;
+  console.info = (...parts) => infos.push(parts);
+  try {
+    assert.deepEqual(inputSlotSummary([[[ENDER_IO_ENERGY, 2000]]]), []);
+  } finally {
+    console.info = originalInfo;
+  }
+  assert.equal(infos.length, 1);
+  assert.match(String(infos[0][0]), /excluded from recipe material inputs/);
+  assert.equal(slotSummary([[[ENDER_IO_ENERGY, 2000]]])[0].amount, 2000);
+});
+
+test('input summaries ceil discrete counts to at least one while preserving bulk quantities', () => {
+  assert.equal(inputSlotSummary([[['item|example:dust', 0.01]]])[0].amount, 1);
+  assert.equal(inputSlotSummary([[['item|example:dust', 1.01]]])[0].amount, 2);
+  assert.equal(inputSlotSummary([[['fluid|example:water', 0.25]]])[0].amount, 0.25);
+  assert.equal(prerequisiteSummary([[['item|example:mold', 0.01]]])[0].amount, 1);
+  assert.equal(slotSummary([[['item|example:result', 0.01]]])[0].amount, 0.01);
+});
 
 test('preserves one exact quantity when every slot alternative agrees', () => {
   assert.deepEqual(

@@ -36,6 +36,17 @@ export function normalizeIngredientAmount(key: string, raw: number): number | nu
   return null;
 }
 
+/**
+ * Minecraft item stacks are discrete. Recipe exporters can expose fractional
+ * item counts, so consumed inputs are rounded upward while bulk resources keep
+ * their continuous quantities.
+ */
+export function normalizeRecipeInputAmount(key: string, raw: number): number | null {
+  const amount = normalizeIngredientAmount(key, raw);
+  if (amount == null || isBulkIngredient(key)) return amount;
+  return Math.max(1, Math.ceil(amount));
+}
+
 export function formatAmount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 10_000) return `${Math.round(n / 1000)}k`;

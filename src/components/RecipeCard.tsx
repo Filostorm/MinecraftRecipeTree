@@ -9,7 +9,11 @@ import {
 } from '../data/ingredientQuantities';
 import {recipeDisplayTitle} from '../data/recipeTitles';
 import {theme} from '../theme';
-import {prerequisiteSummary, slotSummary} from '../data/slotSummary';
+import {
+  inputSlotSummary,
+  prerequisiteSummary,
+  slotSummary,
+} from '../data/slotSummary';
 import {Recipe} from '../types';
 import {useUi} from '../ui/UiContext';
 import {ItemIcon, pixelated} from './ItemIcon';
@@ -49,7 +53,7 @@ export function RecipeCard({
     data.manifest.settings.recipeScale,
     availableCardWidth,
   );
-  const inputs = slotSummary(recipe.in);
+  const inputs = inputSlotSummary(recipe.in);
   const outputs = slotSummary(recipe.out);
   const prerequisites = prerequisiteSummary(recipe.cat);
   const displayTitle = catTitle ? recipeDisplayTitle(catTitle, recipe) : undefined;
