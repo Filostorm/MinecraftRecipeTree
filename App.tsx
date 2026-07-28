@@ -406,6 +406,8 @@ function Shell({
         <GraphGuideModal
           visible
           onClose={() => setShowGraphGuide(false)}
+          packSlug={data.descriptor.slug}
+          packName={data.descriptor.displayName}
         />
       )}
     </View>

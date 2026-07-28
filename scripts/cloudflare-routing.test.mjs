@@ -16,6 +16,7 @@ const environmentExample = await readFile(new URL('../.env.example', import.meta
 const d1Migrations = await Promise.all([
   readFile(new URL('../drizzle/0000_yummy_impossible_man.sql', import.meta.url), 'utf8'),
   readFile(new URL('../drizzle/0001_wide_the_hand.sql', import.meta.url), 'utf8'),
+  readFile(new URL('../drizzle/0002_shiny_sunfire.sql', import.meta.url), 'utf8'),
 ]);
 
 test('Cloudflare routes catalog, immutable datasets, and administration through the Worker', () => {
@@ -49,6 +50,7 @@ test('Cloudflare routes catalog, immutable datasets, and administration through 
     '/api/admin/core-datasets/*',
     '/api/admin/dataset-channels/*',
     '/api/datasets',
+    '/api/feedback',
     '/api/modpacks*',
     '/dataset/publications/*',
     '/dataset/preview-sets/*',

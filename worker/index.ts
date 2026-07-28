@@ -19,6 +19,7 @@ import {
   PREVIEW_UPLOAD_BASE_PATH,
   handlePreviewAssetUpload,
 } from './previewAssetUpload.ts';
+import {FEEDBACK_ROUTE, handleFeedback} from './feedback.ts';
 
 interface LegacyModpackRow {
   id: string;
@@ -113,6 +114,9 @@ const worker = {
       }
       if (url.pathname === '/api/datasets') {
         return await handleDatasetCatalog(request, runtime);
+      }
+      if (url.pathname === FEEDBACK_ROUTE) {
+        return await handleFeedback(request, runtime, url);
       }
       if (url.pathname === '/api/modpacks' || url.pathname.startsWith('/api/modpacks/')) {
         return await handleLegacyModpackApi(request, runtime, url.pathname);
