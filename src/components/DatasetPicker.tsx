@@ -267,6 +267,7 @@ const styles = StyleSheet.create({
     flexBasis: 260,
     minWidth: 0,
     minHeight: 44,
+    fontSize: 16,
     color: theme.text,
     backgroundColor: theme.bg,
     borderColor: theme.border,
