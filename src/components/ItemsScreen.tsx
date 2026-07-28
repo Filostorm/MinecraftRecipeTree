@@ -15,7 +15,6 @@ export function ItemsScreen() {
   const {openItem} = useUi();
   const [query, setQuery] = useState('');
   const [mod, setMod] = useState<string | null>(null);
-  const [mobileControlsExpanded, setMobileControlsExpanded] = useState(false);
   const {width} = useWindowDimensions();
 
   const filtered = useMemo(() => {
@@ -34,51 +33,27 @@ export function ItemsScreen() {
   const shown = truncated ? filtered.slice(0, MAX_RESULTS) : filtered;
   const columns = Math.max(3, Math.min(12, Math.floor(width / CELL_W)));
   const compactControls = width < 640;
-  const controlsVisible = !compactControls || mobileControlsExpanded;
-  const resultLabel = truncated
-    ? `${MAX_RESULTS}+ results`
-    : `${shown.length} ${shown.length === 1 ? 'item' : 'items'}`;
 
   return (
     <View style={styles.root}>
       <View style={styles.stickyControls}>
-        {compactControls && (
-          <TouchableOpacity
-            style={[
-              styles.mobileControlsButton,
-              (mobileControlsExpanded || query.length > 0 || mod !== null) &&
-                styles.mobileControlsButtonActive,
-            ]}
-            onPress={() => setMobileControlsExpanded(value => !value)}
-            accessibilityRole="button"
-            accessibilityState={{expanded: mobileControlsExpanded}}
-            accessibilityLabel={
-              mobileControlsExpanded ? 'Collapse item search and filters' : 'Expand item search and filters'
-            }>
-            <Text
-              style={[
-                styles.mobileControlsButtonText,
-                (mobileControlsExpanded || query.length > 0 || mod !== null) &&
-                  styles.mobileControlsButtonTextActive,
-              ]}
-              numberOfLines={1}>
-              ⌕ {query || (mod ? data.mods.find(entry => entry.id === mod)?.name : 'Search & filters')}
-            </Text>
-            <Text style={styles.mobileResultText}>{resultLabel}</Text>
-            <Text style={styles.mobileControlsChevron}>
-              {mobileControlsExpanded ? '⌃' : '⌄'}
-            </Text>
-          </TouchableOpacity>
-        )}
-        {controlsVisible && (
-          <View style={styles.expandedControls}>
-            <SearchBar value={query} onChange={setQuery} placeholder={`Search ${data.items.length} items…`} />
-            <ModFilter mods={data.mods} selected={mod} onSelect={setMod} />
-            <Text style={styles.countLine}>
-              {truncated ? `showing first ${MAX_RESULTS} — refine your search` : `${shown.length} items`}
-            </Text>
-          </View>
-        )}
+        <View style={styles.controlsRow}>
+          <SearchBar
+            value={query}
+            onChange={setQuery}
+            placeholder={`Search ${data.items.length} items…`}
+            style={styles.searchControl}
+          />
+          <ModFilter
+            mods={data.mods}
+            selected={mod}
+            onSelect={setMod}
+            style={[styles.modControl, compactControls && styles.modControlCompact]}
+          />
+        </View>
+        <Text style={styles.countLine}>
+          {truncated ? `showing first ${MAX_RESULTS} — refine your search` : `${shown.length} items`}
+        </Text>
       </View>
       <FlatList
         style={styles.grid}
@@ -116,29 +91,23 @@ const styles = StyleSheet.create({
     paddingTop: 6,
     zIndex: 2,
   },
-  expandedControls: {gap: 6},
-  mobileControlsButton: {
-    minHeight: 40,
+  controlsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 7,
-    paddingHorizontal: 11,
-    borderRadius: 9,
-    borderWidth: 1,
-    borderColor: theme.borderLight,
-    backgroundColor: theme.panelAlt,
+    gap: 6,
   },
-  mobileControlsButtonActive: {borderColor: theme.accent},
-  mobileControlsButtonText: {
+  searchControl: {
     flex: 1,
     minWidth: 0,
-    color: theme.text,
-    fontSize: 12,
-    fontWeight: '700',
+    marginHorizontal: 0,
+    marginTop: 0,
   },
-  mobileControlsButtonTextActive: {color: theme.accent},
-  mobileResultText: {color: theme.textDim, fontSize: 10},
-  mobileControlsChevron: {color: theme.accent, fontSize: 14, fontWeight: '800'},
+  modControl: {
+    width: 220,
+    marginHorizontal: 0,
+    marginTop: 0,
+  },
+  modControlCompact: {width: 132},
   grid: {flex: 1, minHeight: 0},
   countLine: {color: theme.textDim, fontSize: 11, paddingHorizontal: 12, paddingTop: 6},
   gridContent: {paddingHorizontal: 6, paddingTop: 4, paddingBottom: 24},

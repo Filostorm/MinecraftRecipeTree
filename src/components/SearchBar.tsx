@@ -4,10 +4,12 @@ import {
   Modal,
   Pressable,
   StyleSheet,
+  StyleProp,
   Text,
   TextInput,
   TouchableOpacity,
   View,
+  ViewStyle,
 } from 'react-native';
 import {ModInfo} from '../data/DataContext';
 import {theme} from '../theme';
@@ -16,13 +18,15 @@ export function SearchBar({
   value,
   onChange,
   placeholder,
+  style,
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder: string;
+  style?: StyleProp<ViewStyle>;
 }) {
   return (
-    <View style={styles.searchWrap}>
+    <View style={[styles.searchWrap, style]}>
       <Text style={styles.searchIcon}>⌕</Text>
       <TextInput
         accessibilityLabel={placeholder}
@@ -52,10 +56,12 @@ export function ModFilter({
   mods,
   selected,
   onSelect,
+  style,
 }: {
   mods: ModInfo[];
   selected: string | null;
   onSelect: (modId: string | null) => void;
+  style?: StyleProp<ViewStyle>;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -91,7 +97,7 @@ export function ModFilter({
     : `${selectedMod?.name ?? selected}${selectedMod ? ` (${selectedMod.itemCount})` : ''}`;
 
   return (
-    <View style={styles.filterWrap}>
+    <View style={[styles.filterWrap, style]}>
       <TouchableOpacity
         accessibilityHint="Opens a searchable list of mods"
         accessibilityLabel={`Mod filter, ${triggerLabel}`}
