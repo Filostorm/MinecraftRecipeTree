@@ -1041,10 +1041,16 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
     () =>
       root
         ? radialLayout
-          ? layoutRadialTree(root, compactMode)
+          ? layoutRadialTree(
+              root,
+              compactMode,
+              graphDirection === 'outputs'
+                ? item => usagesFor(item.key).length === 0
+                : undefined,
+            )
           : layoutTree(root, compactMode)
         : null,
-    [root, version, compactMode, radialLayout],
+    [root, version, compactMode, radialLayout, graphDirection, usagesFor],
   );
   const graphRef = useRef(graph);
   graphRef.current = graph;

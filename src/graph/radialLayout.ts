@@ -9,6 +9,8 @@ const FULL_TURN = Math.PI * 2;
 const EDGE_THICKNESS = 2;
 const RADIAL_DEPTH_GAP = 64;
 const RADIAL_NODE_GAP = 20;
+const RADIAL_TERMINAL_GAP = RADIAL_NODE_GAP;
+const RADIAL_TERMINAL_PLACEMENT_STEP = 12;
 const MAX_STAGGERED_ROWS = 8;
 
 export const RADIAL_ITEM_SIZE = 52;
@@ -128,10 +130,12 @@ export function planStaggeredRadialRows(
 interface RadialUnit {
   item: ItemTreeNode;
   children: number[];
+  parentIndex: number | null;
   depth: number;
   visualW: number;
   visualH: number;
   collisionDiameter: number;
+  terminal: boolean;
   leafCount: number;
   leafStart: number;
   leafEnd: number;
@@ -140,7 +144,12 @@ interface RadialUnit {
   centerY: number;
 }
 
-function makeRadialUnit(item: ItemTreeNode, depth: number): RadialUnit {
+function makeRadialUnit(
+  item: ItemTreeNode,
+  depth: number,
+  parentIndex: number | null,
+  terminal: boolean,
+): RadialUnit {
   const visualSize = item.source
     ? sourceNodeSize(item.source)
     : {w: RADIAL_ITEM_SIZE, h: RADIAL_ITEM_SIZE};
@@ -150,10 +159,12 @@ function makeRadialUnit(item: ItemTreeNode, depth: number): RadialUnit {
   return {
     item,
     children: [],
+    parentIndex,
     depth,
     visualW: visualSize.w,
     visualH: visualSize.h,
     collisionDiameter: Math.hypot(collisionSize.w, collisionSize.h),
+    terminal,
     leafCount: 0,
     leafStart: 0,
     leafEnd: 0,
@@ -163,8 +174,12 @@ function makeRadialUnit(item: ItemTreeNode, depth: number): RadialUnit {
   };
 }
 
-function flattenRadialTree(root: ItemTreeNode, compact: boolean): RadialUnit[] {
-  const rootUnit = makeRadialUnit(root, 0);
+function flattenRadialTree(
+  root: ItemTreeNode,
+  compact: boolean,
+  isTerminal: (item: ItemTreeNode) => boolean,
+): RadialUnit[] {
+  const rootUnit = makeRadialUnit(root, 0, null, false);
   if (compact) {
     rootUnit.visualW = RADIAL_ROOT_SIZE;
     rootUnit.visualH = RADIAL_ROOT_SIZE;
@@ -185,7 +200,12 @@ function flattenRadialTree(root: ItemTreeNode, compact: boolean): RadialUnit[] {
     const parent = units[parentIndex];
     const inputs = parent.item.source?.inputs ?? [];
     for (const input of inputs) {
-      const child = makeRadialUnit(input, parent.depth + 1);
+      const child = makeRadialUnit(
+        input,
+        parent.depth + 1,
+        parentIndex,
+        input.source === undefined && isTerminal(input),
+      );
       if (compact) {
         child.visualW = COMPACT_ITEM_SIZE;
         child.visualH = COMPACT_ITEM_SIZE;
@@ -239,6 +259,127 @@ function calculateLeafSpans(units: RadialUnit[]): number {
   return totalLeaves;
 }
 
+interface SpatialEntry {
+  x: number;
+  y: number;
+  radius: number;
+  cells: string[];
+}
+
+function compactTerminalNodes(units: RadialUnit[]): void {
+  const terminalIndices = units
+    .map((unit, index) => ({unit, index}))
+    .filter(({unit}) => unit.terminal && unit.children.length === 0 && unit.parentIndex !== null)
+    .map(({index}) => index);
+  if (terminalIndices.length === 0) return;
+
+  let maximumCollisionDiameter = 0;
+  for (const unit of units) {
+    maximumCollisionDiameter = Math.max(maximumCollisionDiameter, unit.collisionDiameter);
+  }
+  const cellSize = Math.max(96, maximumCollisionDiameter + RADIAL_NODE_GAP);
+  const cells = new Map<string, Set<number>>();
+  const entries = new Map<number, SpatialEntry>();
+
+  const cellKeysFor = (x: number, y: number, radius: number): string[] => {
+    const keys: string[] = [];
+    const minColumn = Math.floor((x - radius) / cellSize);
+    const maxColumn = Math.floor((x + radius) / cellSize);
+    const minRow = Math.floor((y - radius) / cellSize);
+    const maxRow = Math.floor((y + radius) / cellSize);
+    for (let column = minColumn; column <= maxColumn; column += 1) {
+      for (let row = minRow; row <= maxRow; row += 1) {
+        keys.push(`${column}:${row}`);
+      }
+    }
+    return keys;
+  };
+
+  const insert = (index: number, x: number, y: number): void => {
+    const radius = units[index].collisionDiameter / 2;
+    const entry = {x, y, radius, cells: cellKeysFor(x, y, radius + RADIAL_NODE_GAP)};
+    entries.set(index, entry);
+    for (const key of entry.cells) {
+      const bucket = cells.get(key) ?? new Set<number>();
+      bucket.add(index);
+      cells.set(key, bucket);
+    }
+  };
+
+  const remove = (index: number): void => {
+    const entry = entries.get(index);
+    if (!entry) {
+      throw new Error(`Radial terminal compaction could not remove missing node ${index}.`);
+    }
+    for (const key of entry.cells) {
+      const bucket = cells.get(key);
+      bucket?.delete(index);
+      if (bucket?.size === 0) cells.delete(key);
+    }
+    entries.delete(index);
+  };
+
+  const collides = (index: number, x: number, y: number): boolean => {
+    const radius = units[index].collisionDiameter / 2;
+    const candidates = new Set<number>();
+    for (const key of cellKeysFor(x, y, radius + RADIAL_NODE_GAP)) {
+      for (const candidate of cells.get(key) ?? []) candidates.add(candidate);
+    }
+    for (const candidate of candidates) {
+      const entry = entries.get(candidate);
+      if (!entry) {
+        throw new Error(`Radial terminal compaction lost spatial node ${candidate}.`);
+      }
+      const minimumDistance = radius + entry.radius + RADIAL_NODE_GAP;
+      if ((x - entry.x) ** 2 + (y - entry.y) ** 2 < minimumDistance ** 2 - 0.001) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  units.forEach((unit, index) => insert(index, unit.centerX, unit.centerY));
+
+  for (const index of terminalIndices) {
+    const unit = units[index];
+    const parent = units[unit.parentIndex!];
+    const originalX = unit.centerX;
+    const originalY = unit.centerY;
+    const dx = originalX - parent.centerX;
+    const dy = originalY - parent.centerY;
+    const originalDistance = Math.hypot(dx, dy);
+    if (!(originalDistance > 0) || !Number.isFinite(originalDistance)) {
+      throw new Error('Radial terminal output must have a distinct finite parent distance.');
+    }
+
+    remove(index);
+    const ux = dx / originalDistance;
+    const uy = dy / originalDistance;
+    const minimumDistance =
+      parent.collisionDiameter / 2 +
+      unit.collisionDiameter / 2 +
+      RADIAL_TERMINAL_GAP;
+    let chosenDistance = originalDistance;
+
+    for (
+      let distance = Math.min(minimumDistance, originalDistance);
+      distance < originalDistance;
+      distance = Math.min(distance + RADIAL_TERMINAL_PLACEMENT_STEP, originalDistance)
+    ) {
+      const x = parent.centerX + ux * distance;
+      const y = parent.centerY + uy * distance;
+      if (!collides(index, x, y)) {
+        chosenDistance = distance;
+        break;
+      }
+    }
+
+    unit.centerX = parent.centerX + ux * chosenDistance;
+    unit.centerY = parent.centerY + uy * chosenDistance;
+    insert(index, unit.centerX, unit.centerY);
+  }
+}
+
 function clipDistanceToRect(width: number, height: number, ux: number, uy: number): number {
   const horizontal = Math.abs(ux) > 1e-9 ? width / 2 / Math.abs(ux) : Infinity;
   const vertical = Math.abs(uy) > 1e-9 ? height / 2 / Math.abs(uy) : Infinity;
@@ -281,8 +422,12 @@ function addRadialEdge(edges: EdgeRect[], parent: RadialUnit, child: RadialUnit)
  * automatically staggered concentric rows. Node views themselves are never
  * rotated, so item icons and recipe previews remain upright.
  */
-export function layoutRadialTree(root: ItemTreeNode, compact = false): GraphLayout {
-  const units = flattenRadialTree(root, compact);
+export function layoutRadialTree(
+  root: ItemTreeNode,
+  compact = false,
+  isTerminal: (item: ItemTreeNode) => boolean = () => false,
+): GraphLayout {
+  const units = flattenRadialTree(root, compact, isTerminal);
   calculateLeafSpans(units);
 
   const levels: number[][] = [];
@@ -313,6 +458,8 @@ export function layoutRadialTree(root: ItemTreeNode, compact = false): GraphLayo
     });
     previousOuterRadius = rowPlan.outerRadius;
   }
+
+  compactTerminalNodes(units);
 
   const nodes: LaidNode[] = units.map(unit => ({
     id: unit.item.source?.id ?? unit.item.id,

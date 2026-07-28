@@ -53,6 +53,32 @@ function rectanglesOverlap(left, right) {
   );
 }
 
+function nodeCenter(node) {
+  return {x: node.x + node.w / 2, y: node.y + node.h / 2};
+}
+
+function distanceBetween(graph, leftId, rightId) {
+  const left = graph.nodes.find(node => node.id === leftId);
+  const right = graph.nodes.find(node => node.id === rightId);
+  assert.ok(left, `missing radial node ${leftId}`);
+  assert.ok(right, `missing radial node ${rightId}`);
+  const leftCenter = nodeCenter(left);
+  const rightCenter = nodeCenter(right);
+  return Math.hypot(leftCenter.x - rightCenter.x, leftCenter.y - rightCenter.y);
+}
+
+function assertNoNodeOverlaps(graph) {
+  for (let leftIndex = 0; leftIndex < graph.nodes.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < graph.nodes.length; rightIndex += 1) {
+      assert.equal(
+        rectanglesOverlap(graph.nodes[leftIndex], graph.nodes[rightIndex]),
+        false,
+        `${graph.nodes[leftIndex].id} overlaps ${graph.nodes[rightIndex].id}`,
+      );
+    }
+  }
+}
+
 test('stagger planner uses multiple concentric rows for high-cardinality levels', () => {
   const itemCount = 112;
   const angles = Array.from({length: itemCount}, (_, index) =>
@@ -90,15 +116,7 @@ test('places a large initial ingredient set around the centered recipe without o
   assert.ok(ingredients.some(node => node.y < 0));
   assert.ok(ingredients.some(node => node.y > 0));
 
-  for (let leftIndex = 0; leftIndex < graph.nodes.length; leftIndex += 1) {
-    for (let rightIndex = leftIndex + 1; rightIndex < graph.nodes.length; rightIndex += 1) {
-      assert.equal(
-        rectanglesOverlap(graph.nodes[leftIndex], graph.nodes[rightIndex]),
-        false,
-        `${graph.nodes[leftIndex].id} overlaps ${graph.nodes[rightIndex].id}`,
-      );
-    }
-  }
+  assertNoNodeOverlaps(graph);
 });
 
 test('gives the compact radial root a larger collision-safe footprint than its ingredients', () => {
@@ -145,6 +163,61 @@ test('preserves hierarchy while dependency generations move outward', () => {
       [edge.x, edge.y, edge.w, edge.h, edge.angle].every(Number.isFinite),
     ),
   );
+});
+
+test('pulls terminal outputs toward their parent without moving expandable branches', () => {
+  const root = sourceNode('root', [
+    item('terminal-left'),
+    sourceNode('branch', [item('terminal-deep')]),
+    item('expandable-collapsed'),
+    item('terminal-right'),
+  ]);
+  const baseline = layoutRadialTree(root);
+  const compacted = layoutRadialTree(
+    root,
+    false,
+    node => node.id.startsWith('terminal-'),
+  );
+  const terminalPairs = [
+    ['terminal-left', 'root.source'],
+    ['terminal-right', 'root.source'],
+    ['terminal-deep', 'branch.source'],
+  ];
+  const reductions = terminalPairs.map(([terminalId, parentId]) =>
+    distanceBetween(baseline, terminalId, parentId) -
+    distanceBetween(compacted, terminalId, parentId),
+  );
+
+  assert.ok(reductions.every(reduction => reduction >= -0.001));
+  assert.ok(reductions.some(reduction => reduction >= 24));
+  assert.deepEqual(
+    compacted.nodes.find(node => node.id === 'branch.source'),
+    baseline.nodes.find(node => node.id === 'branch.source'),
+  );
+  assert.deepEqual(
+    compacted.nodes.find(node => node.id === 'expandable-collapsed'),
+    baseline.nodes.find(node => node.id === 'expandable-collapsed'),
+  );
+  assertNoNodeOverlaps(compacted);
+  assert.ok(compacted.edges.every(edge => edge.w > 0));
+});
+
+test('compacts a dense terminal-output fan without introducing collisions', () => {
+  const root = highFanout(112);
+  const baseline = layoutRadialTree(root);
+  const first = layoutRadialTree(root, false, () => true);
+  const second = layoutRadialTree(root, false, () => true);
+  const meanRadius = graph => {
+    const outputs = graph.nodes.filter(node => node.depth === 1);
+    return outputs.reduce((sum, node) => {
+      const center = nodeCenter(node);
+      return sum + Math.hypot(center.x, center.y);
+    }, 0) / outputs.length;
+  };
+
+  assert.ok(meanRadius(first) < meanRadius(baseline) - 40);
+  assertNoNodeOverlaps(first);
+  assert.deepEqual(second, first);
 });
 
 test('lays out a 10,000-node radial chain without recursion or non-finite geometry', () => {
