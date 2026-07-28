@@ -68,16 +68,18 @@ function DatasetRoot() {
         onOpenPicker={() => setShowDatasetPicker(true)}
         details={details}
       />
-      <DatasetPicker
-        visible={showDatasetPicker}
-        datasets={datasets}
-        selectedSlug={selectedSlug}
-        onSelect={slug => {
-          catalog.select(slug);
-          setShowDatasetPicker(false);
-        }}
-        onClose={() => setShowDatasetPicker(false)}
-      />
+      {showDatasetPicker && (
+        <DatasetPicker
+          visible
+          datasets={datasets}
+          selectedSlug={selectedSlug}
+          onSelect={slug => {
+            catalog.select(slug);
+            setShowDatasetPicker(false);
+          }}
+          onClose={() => setShowDatasetPicker(false)}
+        />
+      )}
     </>
   );
 
@@ -384,10 +386,12 @@ function Shell({
         </View>
       </View>
       <ItemDetailModal />
-      <RecipeHistoryModal
-        visible={showRecipeHistory}
-        onClose={() => setShowRecipeHistory(false)}
-      />
+      {showRecipeHistory && (
+        <RecipeHistoryModal
+          visible
+          onClose={() => setShowRecipeHistory(false)}
+        />
+      )}
     </View>
   );
 }
