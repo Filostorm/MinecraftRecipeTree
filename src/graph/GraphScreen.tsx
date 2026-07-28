@@ -1671,25 +1671,6 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
           onOpenItem={openItem}
         />
       )}
-      <Text style={styles.hint}>
-        {graphDirection === 'outputs'
-          ? 'output tree · tap item = choose a usage recipe · '
-          : radialLayout
-            ? 'large ingredient levels stagger across radial rings · '
-            : ''}
-        silver border = {graphDirection === 'outputs' ? 'no outputs' : 'no inputs'} ·{' '}
-        {graphDirection === 'inputs' && useByproducts
-          ? 'solid blue = completed byproduct (tap to locate source) · dashed blue = partial byproduct (tap to craft remainder) · '
-          : ''}
-        {compactMode
-          ? graphDirection === 'outputs'
-            ? 'tap item = pick usage recipe · drag = pan · scroll = zoom'
-            : 'tap item = pick recipe/drop source · drag = pan · scroll = zoom'
-          : graphDirection === 'outputs'
-            ? 'tap node = expand/collapse · ⇄ = pick usage recipe · drag = pan · scroll = zoom'
-            : 'tap node = expand/collapse · ⇄ = pick recipe/drop source · drag = pan · scroll = zoom'}
-      </Text>
-
       {picker && (
         <PickerModal
           visible
@@ -2569,13 +2550,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     lineHeight: 18,
     fontWeight: '800',
-  },
-  hint: {
-    position: 'absolute',
-    left: 12,
-    bottom: 10,
-    color: theme.textDim,
-    fontSize: 11,
   },
   emptyWrap: {flex: 1, alignItems: 'center', justifyContent: 'center', padding: 30},
   emptyTitle: {color: theme.text, fontSize: 17, fontWeight: '700'},

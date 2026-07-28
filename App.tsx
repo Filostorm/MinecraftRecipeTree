@@ -14,6 +14,7 @@ import {ItemDetailModal} from './src/components/ItemDetailModal';
 import {InterfaceZoomSlider} from './src/components/InterfaceZoomSlider';
 import {DatasetPicker} from './src/components/DatasetPicker';
 import {DatasetSwitcher} from './src/components/DatasetSwitcher';
+import {GraphGuideModal} from './src/components/GraphGuideModal';
 import {ItemsScreen} from './src/components/ItemsScreen';
 import {MobsScreen} from './src/components/MobsScreen';
 import {RecipeHistoryModal} from './src/components/RecipeHistoryModal';
@@ -231,6 +232,7 @@ function Shell({
   const [hasHydrated, setHasHydrated] = useState(Platform.OS !== 'web');
   const compactHeader = hasHydrated && width < 720;
   const [showRecipeHistory, setShowRecipeHistory] = useState(false);
+  const [showGraphGuide, setShowGraphGuide] = useState(false);
   const [showDatasetDetails, setShowDatasetDetails] = useState(false);
   const [interfaceZoom, setInterfaceZoom] = useState(1);
   useEffect(() => {
@@ -324,18 +326,36 @@ function Shell({
       )}
     </View>
   );
-  const historyAction = (
-    <TouchableOpacity
-      style={styles.historyHeaderButton}
-      onPress={() => setShowRecipeHistory(true)}
-      accessibilityRole="button"
-      accessibilityLabel={`Open recipe history for ${data.descriptor.displayName}`}>
-      <Text style={styles.historyHeaderIcon}>◷</Text>
-    </TouchableOpacity>
+  const headerActions = (
+    <View style={styles.headerUtilityRow}>
+      <TouchableOpacity
+        style={styles.headerUtilityButton}
+        onPress={() => setShowRecipeHistory(true)}
+        accessibilityRole="button"
+        accessibilityLabel={`Open recipe history for ${data.descriptor.displayName}`}>
+        <Text style={styles.historyHeaderIcon}>◷</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[
+          styles.headerUtilityButton,
+          showGraphGuide && styles.headerUtilityButtonActive,
+        ]}
+        onPress={() => setShowGraphGuide(true)}
+        accessibilityRole="button"
+        accessibilityLabel="Open graph guide">
+        <Text
+          style={[
+            styles.guideHeaderIcon,
+            showGraphGuide && styles.guideHeaderIconActive,
+          ]}>
+          ?
+        </Text>
+      </TouchableOpacity>
+    </View>
   );
   return (
     <View style={styles.shell}>
-      {renderControls(data.manifest, headerDetails, historyAction)}
+      {renderControls(data.manifest, headerDetails, headerActions)}
       <View style={styles.workspaceViewport}>
         <View style={styles.workspace}>
           {/* All tabs stay mounted so graph expansion state survives tab switches. */}
@@ -380,6 +400,12 @@ function Shell({
         <RecipeHistoryModal
           visible
           onClose={() => setShowRecipeHistory(false)}
+        />
+      )}
+      {showGraphGuide && (
+        <GraphGuideModal
+          visible
+          onClose={() => setShowGraphGuide(false)}
         />
       )}
     </View>
@@ -450,7 +476,13 @@ const styles = StyleSheet.create({
   headerDetailBtnActive: {borderColor: theme.accent, backgroundColor: theme.panelAlt},
   headerDetailBtnText: {color: theme.text, fontSize: 11, fontWeight: '700'},
   headerDetailBtnTextActive: {color: theme.accent},
-  historyHeaderButton: {
+  headerUtilityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexShrink: 0,
+  },
+  headerUtilityButton: {
     width: 34,
     minHeight: 34,
     flexShrink: 0,
@@ -461,7 +493,10 @@ const styles = StyleSheet.create({
     borderColor: theme.borderLight,
     backgroundColor: theme.panelAlt,
   },
+  headerUtilityButtonActive: {borderColor: theme.accent},
   historyHeaderIcon: {color: theme.text, fontSize: 17, fontWeight: '700'},
+  guideHeaderIcon: {color: theme.text, fontSize: 16, fontWeight: '800'},
+  guideHeaderIconActive: {color: theme.accent},
   interfaceZoomControls: {
     flexDirection: 'row',
     alignItems: 'center',
