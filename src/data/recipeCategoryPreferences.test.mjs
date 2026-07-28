@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  keepAtLeastOneRecipeCategoryExpanded,
   parseCollapsedRecipeCategories,
   toggleCollapsedRecipeCategory,
 } from './recipeCategoryPreferences.ts';
@@ -27,18 +26,5 @@ test('rejects malformed and unversioned category settings', () => {
   assert.throws(
     () => parseCollapsedRecipeCategories(JSON.stringify({version: 1, collapsed: ['']})),
     /storage contract/,
-  );
-});
-
-test('keeps one available recipe category expanded', () => {
-  const allCollapsed = new Set(['jei:a', 'jei:b', 'unrelated']);
-  const normalized = keepAtLeastOneRecipeCategoryExpanded(allCollapsed, ['jei:a', 'jei:b']);
-  assert.deepEqual([...normalized], ['jei:b', 'unrelated']);
-  assert.deepEqual([...allCollapsed], ['jei:a', 'jei:b', 'unrelated']);
-
-  const alreadyExpanded = new Set(['jei:b']);
-  assert.equal(
-    keepAtLeastOneRecipeCategoryExpanded(alreadyExpanded, ['jei:a', 'jei:b']),
-    alreadyExpanded,
   );
 });

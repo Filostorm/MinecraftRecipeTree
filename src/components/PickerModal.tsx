@@ -1,4 +1,4 @@
-import React, {useEffect, useMemo} from 'react';
+import React, {useMemo} from 'react';
 import {
   Modal,
   Pressable,
@@ -73,7 +73,7 @@ export function PickerModal({
   filterValue?: boolean;
   onFilterValueChange?: (show: boolean) => void;
   collapsedGroupKeys?: ReadonlySet<string>;
-  onToggleGroup?: (groupKey: string, availableGroupKeys: readonly string[]) => void;
+  onToggleGroup?: (groupKey: string) => void;
   groupProgress?: Readonly<Record<string, PickerGroupProgress>>;
   onLoadGroup?: (groupKey: string) => void;
   onSelect: (index: number) => void;
@@ -85,8 +85,7 @@ export function PickerModal({
   const collapsedGroups = groups.filter(group => collapsedGroupKeys?.has(group.key));
   const expandedGroups = groups.filter(group => !collapsedGroupKeys?.has(group.key));
   const allCollapsed = groups.length > 0 && collapsedGroups.length === groups.length;
-  const groupKeys = useMemo(() => groups.map(group => group.key), [groups]);
-  const toggleGroup = (key: string) => onToggleGroup?.(key, groupKeys);
+  const toggleGroup = (key: string) => onToggleGroup?.(key);
   const stagedProgress = Object.values(groupProgress ?? {});
   const immediateGroups = groups.filter(group => !groupProgress?.[group.key]);
   const sourceTypeCount = stagedProgress.length + immediateGroups.length;
@@ -96,11 +95,6 @@ export function PickerModal({
   const totalOptionCount =
     stagedProgress.reduce((sum, progress) => sum + progress.total, 0) +
     immediateGroups.reduce((sum, group) => sum + group.entries.length, 0);
-
-  useEffect(() => {
-    if (!allCollapsed || !onToggleGroup || groupKeys.length === 0) return;
-    onToggleGroup(groupKeys[0], groupKeys);
-  }, [allCollapsed, groupKeys, onToggleGroup]);
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -185,7 +179,7 @@ export function PickerModal({
                   }
                 }}>
                 <Text style={styles.groupActionText}>
-                  {allCollapsed ? 'Expand all' : 'Collapse others'}
+                  {allCollapsed ? 'Expand all' : 'Collapse all'}
                 </Text>
               </TouchableOpacity>
             </View>

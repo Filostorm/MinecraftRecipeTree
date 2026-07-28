@@ -32,7 +32,6 @@ import {
 import {displayIngredientName} from '../data/ingredientTags';
 import {isDefaultDisabledRecipeCategory} from '../data/recipeCategories';
 import {
-  keepAtLeastOneRecipeCategoryExpanded,
   loadCollapsedRecipeCategories,
   persistCollapsedRecipeCategories,
   toggleCollapsedRecipeCategory,
@@ -80,6 +79,13 @@ import {
   usageGraphStart,
   type GraphDirection,
 } from './direction';
+import {
+  clearGraphSession,
+  loadGraphSession,
+  persistGraphSession,
+  type GraphSession,
+  type StoredGraphSelection,
+} from './graphSession';
 import {isRecursiveItemNode, makeRoot} from './model';
 import type {ItemTreeNode, SourceTreeNode} from './model';
 import {
@@ -222,6 +228,29 @@ function recipeRefKey([categoryIndex, recipeIndex]: RecipeRef): string {
   return `${categoryIndex}:${recipeIndex}`;
 }
 
+function nodeForStoredSelection(
+  root: ItemTreeNode,
+  selection: StoredGraphSelection,
+): ItemTreeNode {
+  let node = root;
+  for (const childIndex of selection.path) {
+    const child = node.source?.inputs[childIndex];
+    if (!child) {
+      throw new Error(
+        `Saved graph path ${selection.path.join('.')} does not exist in the reconstructed tree.`,
+      );
+    }
+    node = child;
+  }
+  if (node.key !== selection.itemKey) {
+    throw new Error(
+      `Saved graph path ${selection.path.join('.')} resolved to ${JSON.stringify(node.key)} ` +
+        `instead of ${JSON.stringify(selection.itemKey)}.`,
+    );
+  }
+  return node;
+}
+
 function loadCompactMode(): boolean {
   try {
     return globalThis.localStorage?.getItem(COMPACT_MODE_KEY) === '1';
@@ -267,6 +296,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
     graphDirection,
     changeGraphDirection,
     openRecipeInGraph,
+    restoreGraph,
     openItem,
     setTab,
     animateMobs,
@@ -287,6 +317,9 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
     direction: GraphDirection;
     choice: SourceChoice;
   } | null>(null);
+  const pendingGraphSessionRef = useRef<GraphSession | null>(null);
+  const graphSessionRestoreAttemptedRef = useRef(false);
+  const restoringGraphSessionRef = useRef(false);
   const [compactMode, setCompactMode] = useState(loadCompactMode);
   const [radialLayout, setRadialLayout] = useState(loadRadialLayout);
   const [showTreeTotals, setShowTreeTotals] = useState(true);
@@ -420,7 +453,19 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
   const applyChoiceRef = useRef<((node: ItemTreeNode, choice: SourceChoice) => void) | null>(null);
 
   const expandRecipe = useCallback(
-    async (node: ItemTreeNode, ref: RecipeRef, allowFluidTransfer = false) => {
+    async (
+      node: ItemTreeNode,
+      ref: RecipeRef,
+      {
+        allowFluidTransfer = false,
+        expandPreferredChildren = true,
+        recordHistory = true,
+      }: {
+        allowFluidTransfer?: boolean;
+        expandPreferredChildren?: boolean;
+        recordHistory?: boolean;
+      } = {},
+    ): Promise<boolean> => {
       node.loading = true;
       bump();
       try {
@@ -434,7 +479,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
             categoryLoaded: !!cat,
             recipeError: recipe?.err,
           });
-          return;
+          return false;
         }
         if (
           !allowFluidTransfer &&
@@ -456,7 +501,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
             persistPreferredSources(next);
             setPreferredSources(next);
           }
-          return;
+          return false;
         }
         if (graphDirection === 'outputs') {
           const anchor = [
@@ -471,7 +516,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
               itemKey: node.key,
               recipeRef: ref,
             });
-            return;
+            return false;
           }
           node.amount = anchor.amount;
         } else if (node.id === 'root') {
@@ -484,7 +529,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
               itemKey: node.key,
               recipeRef: ref,
             });
-            return;
+            return false;
           }
           node.amount = output.amount;
         }
@@ -518,9 +563,10 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
           dir: cat.dir,
           catTitle: recipeDisplayTitle(cat.title, recipe),
           direction: graphDirection,
+          allowFluidTransfer: allowFluidTransfer || undefined,
           inputs: children,
         };
-        if (node.id === 'root') {
+        if (node.id === 'root' && recordHistory) {
           recordRecipeHistory(data.descriptor, {
             itemKey: node.key,
             ref,
@@ -530,14 +576,18 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
             direction: graphDirection,
           });
         }
-        for (const child of children) {
-          if (child.cyclic) continue;
-          const preferred =
-            graphDirection === 'inputs' ? preferredSourceFor(child.key) : null;
-          if (preferred) applyChoiceRef.current?.(child, preferred);
+        if (expandPreferredChildren) {
+          for (const child of children) {
+            if (child.cyclic) continue;
+            const preferred =
+              graphDirection === 'inputs' ? preferredSourceFor(child.key) : null;
+            if (preferred) applyChoiceRef.current?.(child, preferred);
+          }
         }
+        return true;
       } catch (error) {
         console.error('The selected graph recipe could not be expanded.', error);
+        return false;
       } finally {
         node.loading = false;
         bump();
@@ -566,7 +616,9 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
     (node: ItemTreeNode, choice: SourceChoice) => {
       if (blockRecursiveExpansion(node, 'apply source choice')) return;
       if (choice.t === 'recipe') {
-        void expandRecipe(node, choice.ref, choice.allowFluidTransfer === true);
+        void expandRecipe(node, choice.ref, {
+          allowFluidTransfer: choice.allowFluidTransfer === true,
+        });
         return;
       }
       const sourceId = `${node.id}.s`;
@@ -579,6 +631,63 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
     [expandRecipe, bump],
   );
   applyChoiceRef.current = applyChoice;
+
+  const restoreExpandedGraph = useCallback(
+    async (newRoot: ItemTreeNode, session: GraphSession) => {
+      try {
+        if (session.direction !== graphDirection) {
+          throw new Error(
+            `Saved graph direction ${session.direction} does not match active direction ${graphDirection}.`,
+          );
+        }
+        for (const selection of session.selections) {
+          const node = nodeForStoredSelection(newRoot, selection);
+          if (isRecursiveItemNode(node)) {
+            throw new Error(
+              `Saved graph tries to expand recursive item ${JSON.stringify(node.key)}.`,
+            );
+          }
+          if (selection.source.kind === 'recipe') {
+            const expanded = await expandRecipe(node, selection.source.ref, {
+              allowFluidTransfer: selection.source.allowFluidTransfer === true,
+              expandPreferredChildren: false,
+              recordHistory: false,
+            });
+            if (!expanded) {
+              throw new Error(
+                `Saved recipe ${selection.source.ref.join(':')} could not be reconstructed.`,
+              );
+            }
+            continue;
+          }
+          const storedSource = selection.source;
+          const sourceChoice = choicesFor(node.key, session.direction).find(choice =>
+            storedSource.kind === 'mob'
+              ? choice.t === 'mob' && choice.mob.id === storedSource.mobId
+              : choice.t === 'block' && choice.blockKey === storedSource.blockKey,
+          );
+          if (!sourceChoice) {
+            throw new Error(
+              `Saved ${selection.source.kind} source for ${JSON.stringify(node.key)} is unavailable.`,
+            );
+          }
+          applyChoice(node, sourceChoice);
+        }
+        needsFitRef.current = true;
+      } catch (error) {
+        console.error('The saved graph could not be reconstructed; its snapshot was discarded.', error);
+        clearGraphSession(data.descriptor);
+        const cleanRoot = makeRoot(session.rootKey);
+        rootRef.current = cleanRoot;
+        setRoot(cleanRoot);
+        needsFitRef.current = true;
+      } finally {
+        restoringGraphSessionRef.current = false;
+        bump();
+      }
+    },
+    [applyChoice, bump, choicesFor, data.descriptor, expandRecipe, graphDirection],
+  );
 
   const pickerEntryFor = useCallback(
     (
@@ -896,16 +1005,12 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
   );
 
   const togglePickerGroup = useCallback(
-    (groupKey: string, availableGroupKeys: readonly string[]) => {
+    (groupKey: string) => {
       setPicker(current => {
         if (!current) return current;
-        const toggled = toggleCollapsedRecipeCategory(
+        const nextCollapsed = toggleCollapsedRecipeCategory(
           current.collapsedGroupKeys,
           groupKey,
-        );
-        const nextCollapsed = keepAtLeastOneRecipeCategoryExpanded(
-          toggled,
-          availableGroupKeys,
         );
         if (data.categories.some(category => category.id === groupKey)) {
           const categoryIds = new Set(data.categories.map(category => category.id));
@@ -913,7 +1018,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
             new Set([...nextCollapsed].filter(id => categoryIds.has(id))),
           );
         }
-        return {...current, collapsedGroupKeys: new Set(nextCollapsed)};
+        return {...current, collapsedGroupKeys: nextCollapsed};
       });
     },
     [data.categories],
@@ -1002,6 +1107,17 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
     ],
   );
 
+  useEffect(() => {
+    if (graphSessionRestoreAttemptedRef.current) return;
+    graphSessionRestoreAttemptedRef.current = true;
+    if (graphRootKey) return;
+    const session = loadGraphSession(data.descriptor);
+    if (!session) return;
+    pendingGraphSessionRef.current = session;
+    restoringGraphSessionRef.current = true;
+    restoreGraph(session.rootKey, session.direction);
+  }, [data.descriptor, graphRootKey, restoreGraph]);
+
   // (Re)build and refit for every request. The request id is intentionally
   // included so selecting the same item again still resets an off-screen or
   // previously expanded chart.
@@ -1011,6 +1127,26 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
     rootRef.current = newRoot;
     setRoot(newRoot);
     needsFitRef.current = true;
+    const pendingGraphSession = pendingGraphSessionRef.current;
+    if (pendingGraphSession) {
+      pendingGraphSessionRef.current = null;
+      if (
+        pendingGraphSession.rootKey !== graphRootKey ||
+        pendingGraphSession.direction !== graphDirection
+      ) {
+        console.error('The saved graph did not match the requested restoration root.', {
+          savedRootKey: pendingGraphSession.rootKey,
+          graphRootKey,
+          savedDirection: pendingGraphSession.direction,
+          graphDirection,
+        });
+        restoringGraphSessionRef.current = false;
+        clearGraphSession(data.descriptor);
+      } else {
+        void restoreExpandedGraph(newRoot, pendingGraphSession);
+        return;
+      }
+    }
     const pendingRootChoice = pendingRootChoiceRef.current;
     if (pendingRootChoice) {
       pendingRootChoiceRef.current = null;
@@ -1057,9 +1193,16 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
     applyChoice,
     choicesFor,
     preferredSourceFor,
+    data.descriptor,
+    restoreExpandedGraph,
     setPreferredSource,
     applyOnlyChoiceWithErrorHandling,
   ]);
+
+  useEffect(() => {
+    if (!root || restoringGraphSessionRef.current) return;
+    persistGraphSession(data.descriptor, root, graphDirection);
+  }, [data.descriptor, graphDirection, root, version]);
 
   const graph = useMemo(
     () =>

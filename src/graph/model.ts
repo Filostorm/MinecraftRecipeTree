@@ -29,6 +29,8 @@ export interface SourceTreeNode {
   catTitle?: string;
   /** Whether this source expands toward ingredients or toward recipe products. */
   direction?: GraphDirection;
+  /** Recipe was explicitly allowed through the default fluid-transfer filter. */
+  allowFluidTransfer?: boolean;
   /** mob-drop source */
   mob?: Mob;
   /** block-mining source */
