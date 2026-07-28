@@ -66,14 +66,9 @@ export function DatasetPicker({
           onPress={() => {}}
           accessible={false}>
           <View style={styles.header}>
-            <View style={styles.headerCopy}>
-              <Text style={styles.title} accessibilityRole="header">
-                Choose a recipe dataset
-              </Text>
-              <Text style={styles.subtitle}>
-                Each pack is an immutable export with its own items, recipes, and layout previews.
-              </Text>
-            </View>
+            <Text style={styles.title} accessibilityRole="header">
+              Choose a modpack
+            </Text>
             <TouchableOpacity
               onPress={onClose}
               style={styles.closeButton}
@@ -189,9 +184,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: theme.border,
   },
-  headerCopy: {flex: 1},
-  title: {color: theme.text, fontSize: 19, fontWeight: '800'},
-  subtitle: {color: theme.textDim, fontSize: 12, lineHeight: 18, marginTop: 5},
+  title: {flex: 1, color: theme.text, fontSize: 19, fontWeight: '800'},
   closeButton: {
     width: 44,
     height: 44,
