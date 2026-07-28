@@ -156,7 +156,7 @@ export function RecipeCard({
         <Text style={styles.cardActionHint}>
           {graphDirection === 'outputs'
             ? `Tap to make ${usageOutputSubject ?? 'the primary product'} the new root`
-            : `Tap to build ingredients for ${actionSubject ?? 'this item'}`}
+            : 'Tap to add recipe to the graph'}
         </Text>
       ) : null}
     </TouchableOpacity>
