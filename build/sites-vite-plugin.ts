@@ -1,4 +1,4 @@
-import {access, appendFile, copyFile, cp, lstat, mkdir, readdir, rm} from 'node:fs/promises';
+import {access, appendFile, copyFile, cp, lstat, mkdir, readFile, readdir, rm} from 'node:fs/promises';
 import {basename, resolve} from 'node:path';
 import type {Plugin} from 'vite';
 
@@ -17,6 +17,20 @@ async function exists(path: string): Promise<boolean> {
 const MAX_EXPORTER_RELEASE_FILE_BYTES = 64 * 1024 * 1024;
 const MAX_EXPORTER_RELEASE_DIRECTORY_BYTES = 128 * 1024 * 1024;
 const MAX_FAVICON_BYTES = 64 * 1024;
+const MAX_PACK_ICON_BYTES = 256 * 1024;
+const PACK_ICON_FILES = Object.freeze([
+  'gt-new-horizons.webp',
+  'meatballcraft.webp',
+  'multiblock-madness-2.webp',
+  'multiblock-madness.webp',
+]);
+
+async function appendHeaderBlock(root: string, block: string): Promise<void> {
+  const headersPath = resolve(root, 'dist', 'client', '_headers');
+  const existing = (await exists(headersPath)) ? await readFile(headersPath, 'utf8') : '';
+  if (existing.includes(block.trim())) return;
+  await appendFile(headersPath, `\n${block.trim()}\n`, 'utf8');
+}
 
 async function copyFavicon(root: string): Promise<void> {
   const source = resolve(root, 'public', 'favicon.svg');
@@ -27,10 +41,52 @@ async function copyFavicon(root: string): Promise<void> {
     throw new Error('Application favicon violates its deployment contract');
   }
   await copyFile(source, destination);
-  await appendFile(
-    resolve(root, 'dist', 'client', '_headers'),
-    '\n/favicon.svg\n  Content-Type: image/svg+xml\n  Cache-Control: public, max-age=86400\n',
-    'utf8',
+  await appendHeaderBlock(
+    root,
+    '/favicon.svg\n  Content-Type: image/svg+xml\n  Cache-Control: public, max-age=86400',
+  );
+}
+
+async function copyPackIcons(root: string): Promise<void> {
+  const sourceDirectory = resolve(root, 'public', 'pack-icons');
+  const destinationDirectory = resolve(root, 'dist', 'client', 'pack-icons');
+  const entries = await readdir(sourceDirectory, {withFileTypes: true});
+  const deployableEntries = entries.filter(entry => entry.name !== 'README.md');
+  const names = deployableEntries.map(entry => entry.name).sort();
+  if (
+    names.length !== PACK_ICON_FILES.length ||
+    names.some((name, index) => name !== PACK_ICON_FILES[index])
+  ) {
+    console.error('Sites build failed: pack icon directory does not match its exact manifest.', {
+      sourceDirectory,
+      expected: PACK_ICON_FILES,
+      actual: names,
+    });
+    throw new Error('Pack icon directory violates its deployment contract');
+  }
+
+  await rm(destinationDirectory, {recursive: true, force: true});
+  await mkdir(destinationDirectory, {recursive: true});
+  for (const entry of deployableEntries) {
+    const source = resolve(sourceDirectory, entry.name);
+    const metadata = await lstat(source);
+    if (
+      basename(source) !== entry.name ||
+      !entry.isFile() ||
+      !metadata.isFile() ||
+      metadata.nlink !== 1 ||
+      metadata.size <= 0 ||
+      metadata.size > MAX_PACK_ICON_BYTES
+    ) {
+      console.error(`Sites build failed: pack icon is not a bounded single-link file: ${source}`);
+      throw new Error('Pack icon violates its deployment contract');
+    }
+    await copyFile(source, resolve(destinationDirectory, entry.name));
+  }
+
+  await appendHeaderBlock(
+    root,
+    '/pack-icons/*\n  Content-Type: image/webp\n  Cache-Control: public, max-age=86400',
   );
 }
 
@@ -107,6 +163,7 @@ export function sites(): Plugin {
 
       await copyExporterReleases(root);
       await copyFavicon(root);
+      await copyPackIcons(root);
 
       const outputDirectory = resolve(root, 'dist', '.openai');
       const hostingConfig = resolve(root, '.openai', 'hosting.json');

@@ -34,6 +34,11 @@ test('Cloudflare routes catalog, immutable datasets, and administration through 
     /resolve\(root, ['"]public['"], ['"]exporters['"]\)[\s\S]*?resolve\(root, ['"]dist['"], ['"]client['"], ['"]exporters['"]\)[\s\S]*?lstat\(source\)[\s\S]*?metadata\.nlink !== 1[\s\S]*?copyFile/,
     'only bounded single-link exporter release files may be copied into the deployable client',
   );
+  assert.match(
+    sitesVitePlugin,
+    /resolve\(root, ['"]public['"], ['"]pack-icons['"]\)[\s\S]*?resolve\(root, ['"]dist['"], ['"]client['"], ['"]pack-icons['"]\)[\s\S]*?metadata\.nlink !== 1[\s\S]*?MAX_PACK_ICON_BYTES[\s\S]*?copyFile/,
+    'only the exact bounded pack icon set may be copied into the deployable client',
+  );
   const workerFirstSource = /run_worker_first:\s*\[([\s\S]*?)\]/.exec(viteConfig)?.[1];
   assert.ok(workerFirstSource, 'vite.config.ts must define an explicit run_worker_first route list');
   const workerFirstRoutes = [...workerFirstSource.matchAll(/['"]([^'"]+)['"]/g)].map(
