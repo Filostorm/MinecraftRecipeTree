@@ -88,6 +88,10 @@ import type {
   TreeTotal,
   TreeTotals,
 } from './treeTotals';
+import {
+  findTreeTotalTarget,
+  type TreeTotalTargetKind,
+} from './treeTotalTargets';
 
 /** One way to obtain an item: craft it, kill for it, or mine for it. */
 type SourceChoice =
@@ -1121,6 +1125,34 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
     [focusByproductProducer, openPickerWithErrorHandling, treeTotals],
   );
 
+  const handleTreeTotalIngredientTap = useCallback(
+    (total: TreeTotal, kind: TreeTotalTargetKind) => {
+      const node = findTreeTotalTarget(rootRef.current, total, kind);
+      if (!node) {
+        console.error('A tree-total ingredient could not be resolved to a graph node.', {
+          itemKey: total.key,
+          tag: total.tag,
+          totalKind: kind,
+        });
+        return;
+      }
+      handleCollapsedIngredientTap(node, () => {
+        if (compactMode && !radialLayout) {
+          openPickerWithErrorHandling(node);
+          return;
+        }
+        onItemTap(node);
+      });
+    },
+    [
+      compactMode,
+      handleCollapsedIngredientTap,
+      onItemTap,
+      openPickerWithErrorHandling,
+      radialLayout,
+    ],
+  );
+
   const rootExportName = useMemo(
     () => {
       const rootKey = root?.key ?? 'recipe-tree';
@@ -1570,6 +1602,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
           onUseByproductsChange={updateUseByproducts}
           onExportTotals={exportTotals}
           onExportTree={() => void exportTreeImage()}
+          onIngredientTap={handleTreeTotalIngredientTap}
           onOpenItem={openItem}
         />
       )}
@@ -1735,6 +1768,7 @@ function TreeTotalsPanel({
   onUseByproductsChange,
   onExportTotals,
   onExportTree,
+  onIngredientTap,
   onOpenItem,
 }: {
   totals: TreeTotals;
@@ -1744,6 +1778,7 @@ function TreeTotalsPanel({
   onUseByproductsChange: (value: boolean) => void;
   onExportTotals: () => void;
   onExportTree: () => void;
+  onIngredientTap: (total: TreeTotal, kind: TreeTotalTargetKind) => void;
   onOpenItem: (key: string) => void;
 }) {
   return (
@@ -1776,24 +1811,24 @@ function TreeTotalsPanel({
         <TreeTotalsSection
           title={useByproducts ? 'Inputs still needed' : 'Inputs'}
           totals={totals.inputs}
-          onOpenItem={onOpenItem}
+          onPress={total => onIngredientTap(total, 'input')}
         />
         <TreeTotalsSection
           title="Required · not consumed"
           totals={totals.prerequisites}
-          onOpenItem={onOpenItem}
+          onPress={total => onIngredientTap(total, 'prerequisite')}
         />
         {useByproducts && (
           <TreeTotalsSection
             title="Byproducts used"
             totals={totals.byproductCredits}
-            onOpenItem={onOpenItem}
+            onPress={total => onIngredientTap(total, 'input')}
           />
         )}
         <TreeTotalsSection
           title={useByproducts ? 'Byproducts remaining' : 'Byproducts'}
           totals={totals.byproducts}
-          onOpenItem={onOpenItem}
+          onPress={total => onOpenItem(total.key)}
         />
       </ScrollView>
     </View>
@@ -1803,11 +1838,11 @@ function TreeTotalsPanel({
 function TreeTotalsSection({
   title,
   totals,
-  onOpenItem,
+  onPress,
 }: {
   title: string;
   totals: TreeTotal[];
-  onOpenItem: (key: string) => void;
+  onPress: (total: TreeTotal) => void;
 }) {
   const data = useData();
   return (
@@ -1820,9 +1855,10 @@ function TreeTotalsSection({
           const item = data.itemsByKey.get(total.key);
           return (
             <TouchableOpacity
-              key={total.key}
+              key={`${total.key}:${total.tag ?? ''}`}
               style={styles.totalRow}
-              onPress={() => onOpenItem(total.key)}>
+              accessibilityRole="button"
+              onPress={() => onPress(total)}>
               <ItemIcon item={item} itemKey={total.key} size={16} />
               <Text style={[styles.totalName, noSelect]} numberOfLines={1}>
                 {displayIngredientName(item?.n ?? total.key, total.tag)}
