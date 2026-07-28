@@ -19,7 +19,13 @@ function request(payload, headers = {}) {
   });
 }
 
-function database({recentCount = 0} = {}) {
+function inboxRequest(token) {
+  return new Request(`${ORIGIN}${FEEDBACK_ROUTE}`, {
+    headers: token ? {Authorization: `Bearer ${token}`} : {},
+  });
+}
+
+function database({recentCount = 0, reports = []} = {}) {
   const calls = [];
   return {
     calls,
@@ -34,6 +40,9 @@ function database({recentCount = 0} = {}) {
         async first() {
           return {count: recentCount};
         },
+        async all() {
+          return {success: true, results: reports};
+        },
         async run() {
           return {success: true, meta: {changes: 1}};
         },
@@ -41,6 +50,64 @@ function database({recentCount = 0} = {}) {
     },
   };
 }
+
+test('feedback inbox rejects unauthenticated reads before accessing storage', async () => {
+  const DB = database();
+  const response = await handleFeedback(
+    inboxRequest(),
+    {DB, FEEDBACK_ADMIN_TOKEN: 'a'.repeat(32)},
+    new URL(`${ORIGIN}${FEEDBACK_ROUTE}`),
+  );
+
+  assert.equal(response.status, 401);
+  assert.equal(response.headers.get('www-authenticate'), 'Bearer realm="feedback-inbox"');
+  assert.equal(DB.calls.length, 0);
+});
+
+test('feedback inbox returns recent reports without client fingerprints', async () => {
+  const token = 'b'.repeat(32);
+  const DB = database({
+    reports: [
+      {
+        id: 'report-1',
+        kind: 'bug',
+        message: 'A branch does not expand.',
+        contact: 'player@example.com',
+        pack_slug: 'meatballcraft',
+        pack_name: 'MeatballCraft',
+        page_url: '/?pack=meatballcraft',
+        user_agent: 'Safari',
+        fingerprint_hash: 'must-not-leak',
+        created_at: 1234,
+      },
+    ],
+  });
+  const response = await handleFeedback(
+    inboxRequest(token),
+    {DB, FEEDBACK_ADMIN_TOKEN: token},
+    new URL(`${ORIGIN}${FEEDBACK_ROUTE}`),
+  );
+
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.deepEqual(body, {
+    reports: [
+      {
+        id: 'report-1',
+        kind: 'bug',
+        message: 'A branch does not expand.',
+        contact: 'player@example.com',
+        packSlug: 'meatballcraft',
+        packName: 'MeatballCraft',
+        page: '/?pack=meatballcraft',
+        userAgent: 'Safari',
+        createdAt: 1234,
+      },
+    ],
+  });
+  assert.equal(JSON.stringify(body).includes('fingerprint'), false);
+  assert.match(DB.calls[0].sql, /ORDER BY created_at DESC/);
+});
 
 test('feedback submissions store validated context without a raw client address', async () => {
   const DB = database();

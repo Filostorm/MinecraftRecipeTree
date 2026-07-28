@@ -104,12 +104,15 @@ test('the environment template exposes only the current server-side operator con
     'PREVIEW_UPLOAD_ENABLED',
     'PREVIEW_UPLOAD_ASSET_SET_ID',
     'PREVIEW_UPLOAD_TOKEN',
+    'FEEDBACK_ADMIN_TOKEN',
   ]);
   assert.equal(values.DATASET_ADMIN_ENABLED, 'false');
   assert.equal(values.PREVIEW_UPLOAD_ENABLED, 'false');
   assert.ok(values.CORE_DATASET_UPLOAD_TOKEN.length >= 32);
   assert.doesNotMatch(values.CORE_DATASET_UPLOAD_TOKEN, /[\s\u0000-\u001f\u007f]/);
   assert.ok(values.PREVIEW_UPLOAD_TOKEN.length >= 32);
+  assert.ok(values.FEEDBACK_ADMIN_TOKEN.length >= 32);
+  assert.doesNotMatch(values.FEEDBACK_ADMIN_TOKEN, /[\s\u0000-\u001f\u007f]/);
   assert.doesNotMatch(environmentExample, /^PREVIEW_ASSET_SET_ID=/m);
   assert.doesNotMatch(environmentExample, /^EXPO_PUBLIC_.*TOKEN=/m);
 });

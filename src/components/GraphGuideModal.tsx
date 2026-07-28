@@ -1,4 +1,4 @@
-import React, {useState} from 'react';
+import React, {useRef, useState} from 'react';
 import {
   Modal,
   Platform,
@@ -73,6 +73,8 @@ export function GraphGuideModal({
   packSlug: string;
   packName: string;
 }) {
+  const scrollRef = useRef<ScrollView>(null);
+  const revealFeedbackFormRef = useRef(false);
   const [feedbackKind, setFeedbackKind] = useState<FeedbackKind | null>(null);
   const [message, setMessage] = useState('');
   const [contact, setContact] = useState('');
@@ -81,6 +83,12 @@ export function GraphGuideModal({
     'idle' | 'submitting' | 'submitted' | 'error'
   >('idle');
   const [submissionError, setSubmissionError] = useState('');
+
+  const selectFeedbackKind = (kind: FeedbackKind) => {
+    revealFeedbackFormRef.current = true;
+    setFeedbackKind(kind);
+    setSubmissionState('idle');
+  };
 
   const submitFeedback = async () => {
     if (!feedbackKind || message.trim().length < 10 || submissionState === 'submitting') return;
@@ -136,7 +144,15 @@ export function GraphGuideModal({
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
+          <ScrollView
+            ref={scrollRef}
+            style={styles.scroll}
+            contentContainerStyle={styles.content}
+            onContentSizeChange={() => {
+              if (!revealFeedbackFormRef.current) return;
+              revealFeedbackFormRef.current = false;
+              scrollRef.current?.scrollToEnd({animated: true});
+            }}>
             <Text style={styles.sectionTitle}>Controls</Text>
             <View style={styles.controlList}>
               {controls.map(control => (
@@ -182,10 +198,7 @@ export function GraphGuideModal({
                   styles.feedbackChoice,
                   feedbackKind === 'bug' && styles.feedbackChoiceActive,
                 ]}
-                onPress={() => {
-                  setFeedbackKind('bug');
-                  setSubmissionState('idle');
-                }}
+                onPress={() => selectFeedbackKind('bug')}
                 accessibilityRole="button"
                 accessibilityState={{selected: feedbackKind === 'bug'}}>
                 <Text
@@ -201,10 +214,7 @@ export function GraphGuideModal({
                   styles.feedbackChoice,
                   feedbackKind === 'feature' && styles.feedbackChoiceActive,
                 ]}
-                onPress={() => {
-                  setFeedbackKind('feature');
-                  setSubmissionState('idle');
-                }}
+                onPress={() => selectFeedbackKind('feature')}
                 accessibilityRole="button"
                 accessibilityState={{selected: feedbackKind === 'feature'}}>
                 <Text

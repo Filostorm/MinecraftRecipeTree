@@ -1,4 +1,9 @@
-import {methodNotAllowed, noStoreJson, type DatasetRuntime} from './datasetRuntime.ts';
+import {
+  methodNotAllowed,
+  noStoreJson,
+  tokensEqual,
+  type DatasetRuntime,
+} from './datasetRuntime.ts';
 
 export const FEEDBACK_ROUTE = '/api/feedback';
 
@@ -24,6 +29,18 @@ interface FeedbackPayload {
   packName?: unknown;
   page?: unknown;
   website?: unknown;
+}
+
+interface FeedbackReportRecord {
+  id: string;
+  kind: FeedbackKind;
+  message: string;
+  contact: string | null;
+  pack_slug: string | null;
+  pack_name: string | null;
+  page_url: string | null;
+  user_agent: string | null;
+  created_at: number;
 }
 
 function textField(value: unknown, maximumLength: number): string | null {
@@ -59,12 +76,92 @@ function isSameOrigin(request: Request, requestUrl: URL): boolean {
   return origin === requestUrl.origin || (origin !== null && PRODUCTION_ORIGINS.has(origin));
 }
 
+async function authorizeFeedbackInbox(
+  request: Request,
+  configuredToken: string | undefined,
+): Promise<Response | null> {
+  if (
+    !configuredToken ||
+    configuredToken.length < 32 ||
+    new TextEncoder().encode(configuredToken).byteLength > 8192 ||
+    /[\s\u0000-\u001f\u007f]/.test(configuredToken)
+  ) {
+    console.error('Feedback inbox access is disabled because FEEDBACK_ADMIN_TOKEN is misconfigured.');
+    return noStoreJson({error: 'Feedback inbox access is unavailable.'}, 503);
+  }
+  const authorization = request.headers.get('authorization');
+  const candidate = authorization?.startsWith('Bearer ') ? authorization.slice(7) : '';
+  if (
+    !candidate ||
+    candidate.length > 8192 ||
+    /[\s\u0000-\u001f\u007f]/.test(candidate) ||
+    !(await tokensEqual(candidate, configuredToken))
+  ) {
+    console.warn('A feedback inbox request failed bearer-token authentication.', {
+      path: new URL(request.url).pathname,
+    });
+    return new Response(`${JSON.stringify({error: 'Feedback inbox authentication failed.'})}\n`, {
+      status: 401,
+      headers: {
+        'Cache-Control': 'no-store',
+        'Content-Type': 'application/json; charset=utf-8',
+        'WWW-Authenticate': 'Bearer realm="feedback-inbox"',
+        'X-Content-Type-Options': 'nosniff',
+      },
+    });
+  }
+  return null;
+}
+
+async function listFeedback(
+  request: Request,
+  runtime: DatasetRuntime,
+): Promise<Response> {
+  const authorizationFailure = await authorizeFeedbackInbox(
+    request,
+    runtime.FEEDBACK_ADMIN_TOKEN,
+  );
+  if (authorizationFailure) return authorizationFailure;
+  if (!runtime.DB) {
+    console.error('Feedback reports cannot be read because the DB binding is unavailable.');
+    return noStoreJson({error: 'Feedback storage is unavailable.'}, 503);
+  }
+  try {
+    const result = await runtime.DB
+      .prepare(
+        `SELECT id, kind, message, contact, pack_slug, pack_name, page_url, user_agent, created_at
+         FROM feedback_reports
+         ORDER BY created_at DESC
+         LIMIT 200`,
+      )
+      .all<FeedbackReportRecord>();
+    if (!result.success) throw new Error('D1 reported an unsuccessful feedback query.');
+    const reports = (result.results ?? []).map(report => ({
+      id: report.id,
+      kind: report.kind,
+      message: report.message,
+      contact: report.contact,
+      packSlug: report.pack_slug,
+      packName: report.pack_name,
+      page: report.page_url,
+      userAgent: report.user_agent,
+      createdAt: report.created_at,
+    }));
+    console.log('Feedback inbox reports loaded.', {count: reports.length});
+    return noStoreJson({reports});
+  } catch (error) {
+    console.error('Feedback reports could not be read.', error);
+    return noStoreJson({error: 'Feedback storage is unavailable.'}, 503);
+  }
+}
+
 export async function handleFeedback(
   request: Request,
   runtime: DatasetRuntime,
   requestUrl: URL,
 ): Promise<Response> {
-  if (request.method !== 'POST') return methodNotAllowed('POST');
+  if (request.method === 'GET') return listFeedback(request, runtime);
+  if (request.method !== 'POST') return methodNotAllowed('GET, POST');
   if (!isSameOrigin(request, requestUrl)) {
     console.warn('A cross-origin feedback submission was refused.', {
       origin: request.headers.get('origin'),
