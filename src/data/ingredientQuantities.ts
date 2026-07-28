@@ -67,13 +67,17 @@ export function formatAmount(n: number): string {
 /** Graph/totals notation: item counts are ×N; bulk quantities are N mB. */
 export function formatIngredientQuantity(key: string, amount: number | null): string {
   if (isBulkIngredient(key)) return `${amount == null ? '?' : formatAmount(amount)} mB`;
-  return amount == null ? '×?' : `×${formatAmount(amount)}`;
+  return amount == null
+    ? '×?'
+    : `×${formatAmount(amount > 0 ? Math.ceil(amount) : amount)}`;
 }
 
 /** Recipe-chip notation places the item multiplier before the ingredient name. */
 export function formatIngredientQuantityPrefix(key: string, amount: number | null): string {
   if (isBulkIngredient(key)) return `${amount == null ? '?' : formatAmount(amount)} mB`;
-  return amount == null ? '?×' : `${formatAmount(amount)}×`;
+  return amount == null
+    ? '?×'
+    : `${formatAmount(amount > 0 ? Math.ceil(amount) : amount)}×`;
 }
 
 export function shouldShowIngredientQuantity(key: string, amount: number | null): boolean {

@@ -13,8 +13,9 @@ test('never formats a positive sub-hundredth quantity as zero', () => {
   assert.equal(formatAmount(0.0000004), '<0.000001');
 });
 
-test('preserves nonzero small quantities in item, bulk, and prefix notation', () => {
-  assert.equal(formatIngredientQuantity('item|test:dust', 0.004), '×0.004');
+test('rounds fractional items upward while preserving bulk precision', () => {
+  assert.equal(formatIngredientQuantity('item|test:dust', 0.004), '×1');
+  assert.equal(formatIngredientQuantity('item|test:dust', 1.2), '×2');
   assert.equal(formatIngredientQuantity('fluid|test:essence', 0.004), '0.004 mB');
-  assert.equal(formatIngredientQuantityPrefix('item|test:dust', 0.004), '0.004×');
+  assert.equal(formatIngredientQuantityPrefix('item|test:dust', 0.004), '1×');
 });
