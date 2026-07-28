@@ -20,6 +20,7 @@ export function DatasetSwitcher({
   selectedSlug,
   loadedManifest,
   onOpenPicker,
+  leadingAction,
   details,
 }: {
   status: CatalogStatus;
@@ -27,6 +28,7 @@ export function DatasetSwitcher({
   selectedSlug: string | null;
   loadedManifest: Manifest | null;
   onOpenPicker(): void;
+  leadingAction?: React.ReactNode;
   details?: React.ReactNode;
 }) {
   const {width} = useWindowDimensions();
@@ -53,7 +55,7 @@ export function DatasetSwitcher({
   return (
     <View style={[styles.bar, compact && styles.barCompact]}>
       <View style={styles.topRow}>
-        <View style={styles.brand}>
+        <View style={[styles.brand, compact && styles.brandCompact]}>
           <Text style={styles.title}>⛏ Recipe Tree</Text>
           {!compact && (
             <Text style={styles.catalogSummary}>
@@ -66,6 +68,7 @@ export function DatasetSwitcher({
           )}
           {loadedAttribution && <DatasetDisclaimer attribution={loadedAttribution} />}
         </View>
+        {leadingAction}
         <TouchableOpacity
           style={[styles.compactDatasetButton, !canOpen && styles.disabled]}
           disabled={!canOpen}
@@ -128,6 +131,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   brand: {flexGrow: 1, flexShrink: 1, minWidth: 140},
+  brandCompact: {minWidth: 96},
   title: {color: theme.text, fontSize: 17, fontWeight: '800'},
   catalogSummary: {color: theme.textDim, fontSize: 10, marginTop: 2},
   expandedContent: {gap: 8, paddingTop: 8},

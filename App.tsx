@@ -57,6 +57,7 @@ function DatasetRoot() {
   const datasetControls = (
     loadedManifest: Manifest | null,
     details?: React.ReactNode,
+    leadingAction?: React.ReactNode,
   ) => (
     <>
       <DatasetSwitcher
@@ -65,6 +66,7 @@ function DatasetRoot() {
         selectedSlug={selectedSlug}
         loadedManifest={loadedManifest}
         onOpenPicker={() => setShowDatasetPicker(true)}
+        leadingAction={leadingAction}
         details={details}
       />
       {showDatasetPicker && (
@@ -138,6 +140,7 @@ function LoadedDatasetLayout({
   renderControls(
     manifest: Manifest | null,
     details?: React.ReactNode,
+    leadingAction?: React.ReactNode,
   ): React.ReactNode;
 }) {
   return (
@@ -158,6 +161,7 @@ function Root({
   renderControls(
     manifest: Manifest | null,
     details?: React.ReactNode,
+    leadingAction?: React.ReactNode,
   ): React.ReactNode;
 }) {
   const state = useLoadState();
@@ -218,6 +222,7 @@ function Shell({
   renderControls(
     manifest: Manifest | null,
     details?: React.ReactNode,
+    leadingAction?: React.ReactNode,
   ): React.ReactNode;
 }) {
   const data = useData();
@@ -266,13 +271,6 @@ function Shell({
         <TabBtn tab="items" label="Items" />
         <TabBtn tab="graph" label="Graph" />
         {data.capabilities.mobs && <TabBtn tab="mobs" label="Mobs" />}
-        <TouchableOpacity
-          style={styles.headerDetailBtn}
-          onPress={() => setShowRecipeHistory(true)}
-          accessibilityRole="button"
-          accessibilityLabel={`Open recipe history for ${data.descriptor.displayName}`}>
-          <Text style={styles.headerDetailBtnText}>↶ History</Text>
-        </TouchableOpacity>
         {compactHeader && (
           <TouchableOpacity
             style={[
@@ -326,9 +324,18 @@ function Shell({
       )}
     </View>
   );
+  const historyAction = (
+    <TouchableOpacity
+      style={styles.historyHeaderButton}
+      onPress={() => setShowRecipeHistory(true)}
+      accessibilityRole="button"
+      accessibilityLabel={`Open recipe history for ${data.descriptor.displayName}`}>
+      <Text style={styles.historyHeaderIcon}>◷</Text>
+    </TouchableOpacity>
+  );
   return (
     <View style={styles.shell}>
-      {renderControls(data.manifest, headerDetails)}
+      {renderControls(data.manifest, headerDetails, historyAction)}
       <View style={styles.workspaceViewport}>
         <View style={[styles.workspace, scaledWorkspaceStyle]}>
           {/* All tabs stay mounted so graph expansion state survives tab switches. */}
@@ -443,6 +450,18 @@ const styles = StyleSheet.create({
   headerDetailBtnActive: {borderColor: theme.accent, backgroundColor: theme.panelAlt},
   headerDetailBtnText: {color: theme.text, fontSize: 11, fontWeight: '700'},
   headerDetailBtnTextActive: {color: theme.accent},
+  historyHeaderButton: {
+    width: 34,
+    minHeight: 34,
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: theme.borderLight,
+    backgroundColor: theme.panelAlt,
+  },
+  historyHeaderIcon: {color: theme.text, fontSize: 17, fontWeight: '700'},
   interfaceZoomControls: {
     flexDirection: 'row',
     alignItems: 'center',
