@@ -120,11 +120,11 @@ const worker = {
 
       const coreMatch = CORE_PUBLIC_ROUTE.exec(url.pathname);
       if (coreMatch) {
-        return await handleCoreDatasetRead(request, runtime, url, coreMatch, ctx);
+        return await handleCoreDatasetRead(request, runtime, url, coreMatch);
       }
       const previewMatch = PREVIEW_PUBLIC_ROUTE.exec(url.pathname);
       if (previewMatch) {
-        return await handlePreviewDatasetRead(request, runtime, url, previewMatch, ctx);
+        return await handlePreviewDatasetRead(request, runtime, url, previewMatch);
       }
 
       // These paths depended on a process-global PREVIEW_ASSET_SET_ID/static snapshot. Keeping an

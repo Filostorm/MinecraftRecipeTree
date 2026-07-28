@@ -551,7 +551,6 @@ function seedPreview(bucket, fixture) {
 }
 
 function environment() {
-  edgeCache.clear();
   return {
     DB: new MemoryD1(),
     PREVIEW_ASSETS: new MemoryR2(),
@@ -561,17 +560,13 @@ function environment() {
   };
 }
 
-const edgeCache = new Map();
-globalThis.caches = {
-  default: {
-    async match(request) {
-      return edgeCache.get(new Request(request).url)?.clone() ?? undefined;
-    },
-    async put(request, response) {
-      edgeCache.set(new Request(request).url, response.clone());
-    },
+let workerCacheApiAccesses = 0;
+globalThis.caches = new Proxy({}, {
+  get() {
+    workerCacheApiAccesses += 1;
+    throw new Error('Sites does not permit this Worker to access the default Cache API.');
   },
-};
+});
 
 async function send(env, path, init) {
   const pending = [];
@@ -754,6 +749,7 @@ test('immutable core reads require exact publication queries and MRPI-authorized
   const items = await send(env, `${base}/items.json?dataset=${PUBLICATION}`);
   assert.equal(items.status, 200);
   assert.match(items.headers.get('cache-control'), /immutable/);
+  assert.equal(workerCacheApiAccesses, 0, 'immutable delivery must not access the unauthorized Cache API');
   assert.equal(items.headers.get('x-mrt-stored-bytes'), items.headers.get('content-length'));
   assert.equal((await items.json()).items[0].k, 'item|minecraft:stone');
 
@@ -792,7 +788,6 @@ test('a pre-commit read is not negatively cached and corrupted R2 metadata fails
   const afterCommit = await send(env, `${base}/manifest.json?dataset=${PUBLICATION}`);
   assert.equal(afterCommit.status, 200, 'a negative lookup must not survive the commit marker');
 
-  edgeCache.clear();
   const itemKey = `core/${PUBLICATION}/items.json`;
   env.PREVIEW_ASSETS.objects.get(itemKey).customMetadata['mrt-sha256'] = 'f'.repeat(64);
   const corrupted = await send(env, `${base}/items.json?dataset=${PUBLICATION}`);

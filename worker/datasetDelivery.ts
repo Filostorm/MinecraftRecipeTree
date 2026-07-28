@@ -66,10 +66,6 @@ interface LoadedPreviewPublication {
   state: ValidatedPreviewManifest;
 }
 
-interface DeliveryExecutionContext {
-  waitUntil(operation: Promise<unknown>): void;
-}
-
 interface IndexCacheEntry {
   bytes: number;
   promise: Promise<AuthorizationIndex>;
@@ -481,54 +477,6 @@ async function previewAuthorizationIndex(
   return entry.promise;
 }
 
-let cacheUnavailableLogged = false;
-
-function edgeCache(): Cache | null {
-  const cache = (globalThis.caches as (CacheStorage & {default?: Cache}) | undefined)?.default;
-  if (!cache && !cacheUnavailableLogged) {
-    cacheUnavailableLogged = true;
-    console.error('Workers Cache API is unavailable; immutable R2 delivery will continue uncached.');
-  }
-  return cache ?? null;
-}
-
-async function cachedResponse(request: Request, storedBytes: number): Promise<Response | null> {
-  const cache = edgeCache();
-  if (!cache) return null;
-  try {
-    const result = await cache.match(new Request(request.url, {method: 'GET'}));
-    if (!result) return null;
-    const headers = new Headers(result.headers);
-    headers.set('X-MRT-R2-Cache', 'HIT');
-    headers.set(STORED_BYTES_HEADER, String(storedBytes));
-    return new Response(request.method === 'HEAD' ? null : result.body, {
-      status: result.status,
-      headers,
-    });
-  } catch (error) {
-    console.error('Immutable dataset edge-cache lookup failed; continuing from validated R2.', error);
-    return null;
-  }
-}
-
-function storeResponse(
-  request: Request,
-  response: Response,
-  ctx: DeliveryExecutionContext | undefined,
-): void {
-  if (request.method !== 'GET' || response.status !== 200) return;
-  const cache = edgeCache();
-  if (!cache) return;
-  const operation = cache
-    .put(new Request(request.url, {method: 'GET'}), response.clone())
-    .catch(error => console.error('Immutable R2 response edge-cache write failed.', error));
-  if (ctx?.waitUntil) ctx.waitUntil(operation);
-  else {
-    console.error('Worker execution context lacks waitUntil; edge-cache persistence may be incomplete.');
-    void operation;
-  }
-}
-
 function requestResponse(request: Request, response: Response): Response {
   return request.method === 'GET'
     ? response
@@ -541,10 +489,7 @@ async function serveWholeObject(
   objectKey: string,
   record: {path: string; bytes: number; sha256: string},
   validatesMetadata: (object: DatasetR2Object) => boolean,
-  ctx: DeliveryExecutionContext | undefined,
 ): Promise<Response> {
-  const cached = await cachedResponse(request, record.bytes);
-  if (cached) return cached;
   const object = await bucket.get(objectKey);
   if (!object || object.key !== objectKey || !validatesMetadata(object)) {
     console.error('Committed immutable object is missing or has invalid R2 metadata.', {objectKey});
@@ -562,11 +507,9 @@ async function serveWholeObject(
       'Content-Length': String(bytes.byteLength),
       'Content-Type': 'application/json; charset=utf-8',
       [STORED_BYTES_HEADER]: String(bytes.byteLength),
-      'X-MRT-R2-Cache': 'MISS',
       'X-Content-Type-Options': 'nosniff',
     },
   });
-  storeResponse(request, response, ctx);
   return requestResponse(request, response);
 }
 
@@ -577,10 +520,7 @@ async function serveRange(
   packBytes: number,
   coordinate: PackedCoordinate,
   validatesMetadata: (object: DatasetR2Object) => boolean,
-  ctx: DeliveryExecutionContext | undefined,
 ): Promise<Response> {
-  const cached = await cachedResponse(request, coordinate.length);
-  if (cached) return cached;
   const object = await bucket.get(objectKey, {
     range: {offset: coordinate.offset, length: coordinate.length},
   });
@@ -608,11 +548,9 @@ async function serveRange(
       'Content-Length': String(bytes.byteLength),
       'Content-Type': 'image/webp',
       [STORED_BYTES_HEADER]: String(bytes.byteLength),
-      'X-MRT-R2-Cache': 'MISS',
       'X-Content-Type-Options': 'nosniff',
     },
   });
-  storeResponse(request, response, ctx);
   return requestResponse(request, response);
 }
 
@@ -621,7 +559,6 @@ export async function handleCoreDatasetRead(
   runtime: DatasetRuntime,
   url: URL,
   match: RegExpExecArray,
-  ctx?: DeliveryExecutionContext,
 ): Promise<Response> {
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     return new Response('Method not allowed', {status: 405, headers: {Allow: 'GET, HEAD', 'Cache-Control': 'no-store'}});
@@ -658,7 +595,6 @@ export async function handleCoreDatasetRead(
       coreObjectKey(publicationId, path),
       record,
       object => coreObjectMatches(object, publicationId, record),
-      ctx,
     );
   }
   const coordinate = parseCoordinate(path, MAX_CORE_PACK_BYTES);
@@ -699,7 +635,6 @@ export async function handleCoreDatasetRead(
     pack.bytes,
     coordinate,
     object => coreObjectMatches(object, publicationId, pack),
-    ctx,
   );
 }
 
@@ -708,7 +643,6 @@ export async function handlePreviewDatasetRead(
   runtime: DatasetRuntime,
   url: URL,
   match: RegExpExecArray,
-  ctx?: DeliveryExecutionContext,
 ): Promise<Response> {
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     return new Response('Method not allowed', {status: 405, headers: {Allow: 'GET, HEAD', 'Cache-Control': 'no-store'}});
@@ -750,7 +684,6 @@ export async function handlePreviewDatasetRead(
       previewObjectKey(assetSetId, path),
       record,
       object => previewObjectMatches(object, assetSetId, publicationId, record),
-      ctx,
     );
   }
   const record = publication.state.categoryDocumentsByPath.get(path);
@@ -761,7 +694,6 @@ export async function handlePreviewDatasetRead(
       previewObjectKey(assetSetId, path),
       record,
       object => previewObjectMatches(object, assetSetId, publicationId, record),
-      ctx,
     );
   }
   const coordinate = parseCoordinate(path, MAX_PREVIEW_PACK_BYTES);
@@ -798,6 +730,5 @@ export async function handlePreviewDatasetRead(
     pack.bytes,
     coordinate,
     object => previewObjectMatches(object, assetSetId, publicationId, pack),
-    ctx,
   );
 }
