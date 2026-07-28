@@ -17,7 +17,50 @@ export interface InterfaceZoomSliderProps {
   onSlidingComplete: (value: number) => void;
 }
 
-export function InterfaceZoomSlider({
+function WebInterfaceZoomSlider({
+  value,
+  minimumValue,
+  maximumValue,
+  step,
+  onValueChange,
+  onSlidingComplete,
+}: InterfaceZoomSliderProps) {
+  const handleChange = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      const next = Number(event.currentTarget.value);
+      if (!Number.isFinite(next)) {
+        console.error(
+          'Interface zoom slider received a non-finite browser input value.',
+        );
+        return;
+      }
+      onValueChange(next);
+      onSlidingComplete(next);
+    },
+    [onSlidingComplete, onValueChange],
+  );
+
+  return React.createElement('input', {
+    'aria-label': 'Interface zoom',
+    'aria-valuetext': `${String(Math.round(value * 100))} percent`,
+    'data-testid': 'interface-zoom-slider',
+    max: maximumValue,
+    min: minimumValue,
+    onChange: handleChange,
+    step,
+    style: {
+      accentColor: theme.accent,
+      cursor: 'pointer',
+      height: 34,
+      margin: 0,
+      width: 128,
+    },
+    type: 'range',
+    value,
+  });
+}
+
+function NativeInterfaceZoomSlider({
   value,
   minimumValue,
   maximumValue,
@@ -142,6 +185,14 @@ export function InterfaceZoomSlider({
         style={[styles.thumb, {left: Math.max(0, fraction * trackWidth - 8)}]}
       />
     </Pressable>
+  );
+}
+
+export function InterfaceZoomSlider(props: InterfaceZoomSliderProps) {
+  return Platform.OS === 'web' ? (
+    <WebInterfaceZoomSlider {...props} />
+  ) : (
+    <NativeInterfaceZoomSlider {...props} />
   );
 }
 
