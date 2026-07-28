@@ -32,9 +32,13 @@ export function DatasetSwitcher({
   details?: React.ReactNode;
 }) {
   const {width} = useWindowDimensions();
-  const compact = width < 720;
+  const [hasHydrated, setHasHydrated] = useState(false);
+  const compact = hasHydrated && width < 720;
   const [expanded, setExpanded] = useState(!compact);
   const priorCompact = useRef(compact);
+  useEffect(() => {
+    setHasHydrated(true);
+  }, []);
   useEffect(() => {
     if (priorCompact.current === compact) return;
     priorCompact.current = compact;

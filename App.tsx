@@ -224,11 +224,15 @@ function Shell({
   const data = useData();
   const {tab} = useUi();
   const {width} = useWindowDimensions();
-  const compactHeader = width < 720;
+  const [hasHydrated, setHasHydrated] = useState(Platform.OS !== 'web');
+  const compactHeader = hasHydrated && width < 720;
   const [showRecipeHistory, setShowRecipeHistory] = useState(false);
   const [showDatasetDetails, setShowDatasetDetails] = useState(false);
   const [showDisplayControls, setShowDisplayControls] = useState(false);
   const [interfaceZoom, setInterfaceZoom] = useState(1);
+  useEffect(() => {
+    if (Platform.OS === 'web') setHasHydrated(true);
+  }, []);
   useEffect(() => {
     if (tab !== 'graph' || data.indexStatus === 'ready' || data.indexStatus === 'loading') return;
     void data.ensureIndex().catch(() => {
