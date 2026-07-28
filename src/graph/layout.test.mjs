@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {layoutTree} from './layout.ts';
+import {COMPACT_ROOT_SIZE, layoutTree} from './layout.ts';
 
 function deepChain(nodeCount) {
   let root = {
@@ -31,7 +31,7 @@ test('lays out a 10,000-node dependency chain without recursive call-stack growt
   const graph = layoutTree(deepChain(10_000), true);
   assert.equal(graph.nodes.length, 10_000);
   assert.equal(graph.edges.length, 29_997);
-  assert.equal(graph.maxX - graph.minX, 52);
+  assert.equal(graph.maxX - graph.minX, COMPACT_ROOT_SIZE);
   assert.ok(graph.maxY > 900_000);
 });
 
@@ -57,6 +57,20 @@ test('preserves left-to-right preorder placement and child-to-parent edge orderi
   );
   assert.equal(graph.edges.length, 6);
   assert.ok(graph.nodes[1].x < graph.nodes[2].x);
+});
+
+test('reserves a larger collision-safe footprint for the compact starting item', () => {
+  const root = {
+    id: 'root',
+    key: 'fluid|test:root',
+    ancestors: [],
+  };
+
+  const graph = layoutTree(root, true);
+  assert.equal(graph.nodes[0].w, COMPACT_ROOT_SIZE);
+  assert.equal(graph.nodes[0].h, COMPACT_ROOT_SIZE);
+  assert.equal(graph.maxX - graph.minX, COMPACT_ROOT_SIZE);
+  assert.equal(graph.maxY - graph.minY, COMPACT_ROOT_SIZE);
 });
 
 test('keeps immediate compact inputs close when one sibling owns a wide descendant fan', () => {

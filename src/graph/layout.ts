@@ -5,6 +5,7 @@ import type {ItemTreeNode, SourceTreeNode} from './model.ts';
 export const ITEM_W = 172;
 export const ITEM_H = 58;
 export const COMPACT_ITEM_SIZE = 52;
+export const COMPACT_ROOT_SIZE = 72;
 /** Header strip on source nodes: icon + "Name ×N · Category". */
 export const SOURCE_HEADER = 22;
 /** Vertical gap between tree levels (rows). */
@@ -66,8 +67,15 @@ export function sourceNodeSize(source: SourceTreeNode): {w: number; h: number} {
   return {w: 210, h: SOURCE_HEADER + 44};
 }
 
-function treeNodeSize(node: ItemTreeNode, compact: boolean): {w: number; h: number} {
+function treeNodeSize(
+  node: ItemTreeNode,
+  compact: boolean,
+  isRoot = false,
+): {w: number; h: number} {
   if (compact) {
+    if (isRoot) {
+      return {w: COMPACT_ROOT_SIZE, h: COMPACT_ROOT_SIZE};
+    }
     return {w: COMPACT_ITEM_SIZE, h: COMPACT_ITEM_SIZE};
   }
   return node.source ? sourceNodeSize(node.source) : {w: ITEM_W, h: ITEM_H};
@@ -92,12 +100,12 @@ export function layoutTree(root: ItemTreeNode, compact = false): GraphLayout {
   while (rowStack.length > 0) {
     const {node, depth} = rowStack.pop()!;
     if (node.source) {
-      seeH(depth, compact ? COMPACT_ITEM_SIZE : sourceNodeSize(node.source).h);
+      seeH(depth, treeNodeSize(node, compact, depth === 0).h);
       for (let index = node.source.inputs.length - 1; index >= 0; index -= 1) {
         rowStack.push({node: node.source.inputs[index], depth: depth + 1});
       }
     } else {
-      seeH(depth, compact ? COMPACT_ITEM_SIZE : ITEM_H);
+      seeH(depth, treeNodeSize(node, compact, depth === 0).h);
     }
   }
 
@@ -133,7 +141,7 @@ export function layoutTree(root: ItemTreeNode, compact = false): GraphLayout {
   ): LayoutRecord => {
     const record = {
       node,
-      size: treeNodeSize(node, compact),
+      size: treeNodeSize(node, compact, parent === undefined),
       parent,
       children: [],
       index,

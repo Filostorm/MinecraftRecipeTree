@@ -43,6 +43,7 @@ import {DropStat, Mob, Recipe, RecipeRef} from '../types';
 import {useUi} from '../ui/UiContext';
 import {
   COMPACT_ITEM_SIZE,
+  COMPACT_ROOT_SIZE,
   ITEM_H,
   ITEM_W,
   SOURCE_HEADER,
@@ -2334,6 +2335,8 @@ const styles = StyleSheet.create({
     borderRadius: COMPACT_ITEM_SIZE / 2,
   },
   compactRootNode: {
+    width: COMPACT_ROOT_SIZE,
+    height: COMPACT_ROOT_SIZE,
     borderWidth: 0,
     borderRadius: 0,
     backgroundColor: 'transparent',
@@ -2347,9 +2350,9 @@ const styles = StyleSheet.create({
   },
   radialRootDiamond: {
     position: 'absolute',
-    width: 56,
-    height: 56,
-    borderRadius: 13,
+    width: 72,
+    height: 72,
+    borderRadius: 17,
     borderColor: theme.radialRoot,
     borderWidth: 3,
     backgroundColor: theme.radialRootPanel,
@@ -2357,9 +2360,9 @@ const styles = StyleSheet.create({
   },
   compactRootDiamond: {
     position: 'absolute',
-    width: 30,
-    height: 30,
-    borderRadius: 8,
+    width: 48,
+    height: 48,
+    borderRadius: 12,
     borderColor: theme.radialRoot,
     borderWidth: 3,
     backgroundColor: theme.radialRootPanel,
