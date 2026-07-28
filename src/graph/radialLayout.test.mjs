@@ -201,6 +201,22 @@ test('keeps a sparse branch near the center when another branch needs a dense an
   assertNoNodeOverlaps(graph);
 });
 
+test('keeps a recipe input fan approximately equidistant from its own recipe', () => {
+  const branchInputs = Array.from({length: 10}, (_, index) => item(`branch-input-${index}`));
+  const root = sourceNode('root', [
+    sourceNode('branch', branchInputs),
+    sourceNode('side-branch', [item('side-input')]),
+    item('root-input'),
+  ]);
+  const graph = layoutRadialTree(root);
+  const distances = branchInputs.map(input =>
+    distanceBetween(graph, 'branch.source', input.id),
+  );
+
+  assert.ok(Math.max(...distances) - Math.min(...distances) < 1);
+  assertNoNodeOverlaps(graph);
+});
+
 test('pulls terminal outputs toward their parent without moving expandable branches', () => {
   const root = sourceNode('root', [
     item('terminal-left'),
@@ -238,7 +254,7 @@ test('pulls terminal outputs toward their parent without moving expandable branc
   assert.ok(compacted.edges.every(edge => edge.w > 0));
 });
 
-test('compacts a dense terminal-output fan without introducing collisions', () => {
+test('keeps a collision-bound dense terminal fan no farther out than the standard fan', () => {
   const root = highFanout(112);
   const baseline = layoutRadialTree(root);
   const first = layoutRadialTree(root, false, () => true);
@@ -251,7 +267,7 @@ test('compacts a dense terminal-output fan without introducing collisions', () =
     }, 0) / outputs.length;
   };
 
-  assert.ok(meanRadius(first) < meanRadius(baseline) - 40);
+  assert.ok(meanRadius(first) <= meanRadius(baseline) + 0.001);
   assertNoNodeOverlaps(first);
   assert.deepEqual(second, first);
 });

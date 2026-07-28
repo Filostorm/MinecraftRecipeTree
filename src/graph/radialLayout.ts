@@ -10,7 +10,6 @@ const EDGE_THICKNESS = 2;
 const RADIAL_DEPTH_GAP = 64;
 const RADIAL_NODE_GAP = 20;
 const RADIAL_TERMINAL_GAP = RADIAL_NODE_GAP;
-const RADIAL_TERMINAL_PLACEMENT_STEP = 12;
 const RADIAL_COLLISION_PLACEMENT_STEP = 12;
 const MAX_COLLISION_PLACEMENT_ATTEMPTS = 100_000;
 const MAX_STAGGERED_ROWS = 8;
@@ -361,9 +360,10 @@ class RadialSpatialIndex {
 }
 
 /**
- * Place each sibling group on its own annulus instead of forcing an entire
- * dependency generation onto the radius required by its densest branch.
- * A spatial index then moves only colliding nodes farther outward.
+ * Place every sibling group on parent-centered annuli. A shared collision
+ * offset moves the complete group together, preserving approximately equal
+ * parent-to-child edge lengths instead of aligning descendants to root-centered
+ * depth rings.
  */
 function placeBranchLocalRings(units: RadialUnit[], levels: number[][]): void {
   const spatialIndex = new RadialSpatialIndex(units);
@@ -375,8 +375,11 @@ function placeBranchLocalRings(units: RadialUnit[], levels: number[][]): void {
       throw new Error(`Radial graph layout is missing tree depth ${depth}.`);
     }
 
-    const plannedRadius = new Map<number, number>();
-    const parentIndices = [...new Set(indices.map(index => units[index].parentIndex))];
+    const parentIndices = [...new Set(indices.map(index => units[index].parentIndex))]
+      .sort((left, right) => {
+        if (left === null || right === null) return Number(left === null) - Number(right === null);
+        return units[left].angle - units[right].angle || left - right;
+      });
     for (const parentIndex of parentIndices) {
       if (parentIndex === null) {
         throw new Error(`Radial graph depth ${depth} contains a parentless node.`);
@@ -387,99 +390,50 @@ function placeBranchLocalRings(units: RadialUnit[], levels: number[][]): void {
       const diameters = childIndices.map(index => units[index].collisionDiameter);
       let maximumDiameter = 0;
       for (const diameter of diameters) maximumDiameter = Math.max(maximumDiameter, diameter);
-      const parentRadius = Math.hypot(parent.centerX, parent.centerY);
-      const minimumRadius =
-        parentRadius +
+      const allTerminal = childIndices.every(index => units[index].terminal);
+      const minimumParentDistance =
         parent.collisionDiameter / 2 +
         maximumDiameter / 2 +
-        RADIAL_DEPTH_GAP;
-      const rowPlan = planStaggeredRadialRows(angles, diameters, minimumRadius);
-      childIndices.forEach((index, offset) => {
-        plannedRadius.set(index, rowPlan.radiusByIndex[offset]);
-      });
-    }
+        (allTerminal ? RADIAL_TERMINAL_GAP : RADIAL_DEPTH_GAP);
+      const rowPlan = planStaggeredRadialRows(
+        angles,
+        diameters,
+        minimumParentDistance,
+      );
 
-    const placementOrder = [...indices].sort(
-      (left, right) => units[left].angle - units[right].angle || left - right,
-    );
-    for (const index of placementOrder) {
-      const unit = units[index];
-      const displayAngle = unit.angle - Math.PI / 2;
-      let radius = plannedRadius.get(index);
-      if (radius === undefined || !Number.isFinite(radius)) {
-        throw new Error(`Radial graph node ${index} is missing a planned branch radius.`);
-      }
-
-      let attempts = 0;
-      while (true) {
-        const centerX = Math.cos(displayAngle) * radius;
-        const centerY = Math.sin(displayAngle) * radius;
-        if (!spatialIndex.collides(index, centerX, centerY)) {
-          unit.centerX = centerX;
-          unit.centerY = centerY;
-          spatialIndex.insert(index, centerX, centerY);
+      let collisionOffset = 0;
+      for (let attempts = 0; ; attempts += 1) {
+        const candidates = childIndices.map((index, offset) => {
+          const unit = units[index];
+          const displayAngle = unit.angle - Math.PI / 2;
+          const parentDistance = rowPlan.radiusByIndex[offset] + collisionOffset;
+          return {
+            index,
+            centerX: parent.centerX + Math.cos(displayAngle) * parentDistance,
+            centerY: parent.centerY + Math.sin(displayAngle) * parentDistance,
+          };
+        });
+        if (
+          candidates.every(candidate =>
+            !spatialIndex.collides(candidate.index, candidate.centerX, candidate.centerY),
+          )
+        ) {
+          for (const candidate of candidates) {
+            const unit = units[candidate.index];
+            unit.centerX = candidate.centerX;
+            unit.centerY = candidate.centerY;
+            spatialIndex.insert(candidate.index, candidate.centerX, candidate.centerY);
+          }
           break;
         }
-        radius += RADIAL_COLLISION_PLACEMENT_STEP;
-        attempts += 1;
+        collisionOffset += RADIAL_COLLISION_PLACEMENT_STEP;
         if (attempts > MAX_COLLISION_PLACEMENT_ATTEMPTS) {
           throw new Error(
-            `Radial graph node ${index} could not find collision-free branch placement.`,
+            `Radial graph branch ${parentIndex} could not find collision-free placement.`,
           );
         }
       }
     }
-  }
-}
-
-function compactTerminalNodes(units: RadialUnit[]): void {
-  const terminalIndices = units
-    .map((unit, index) => ({unit, index}))
-    .filter(({unit}) => unit.terminal && unit.children.length === 0 && unit.parentIndex !== null)
-    .map(({index}) => index);
-  if (terminalIndices.length === 0) return;
-
-  const spatialIndex = new RadialSpatialIndex(units);
-
-  units.forEach((unit, index) => spatialIndex.insert(index, unit.centerX, unit.centerY));
-
-  for (const index of terminalIndices) {
-    const unit = units[index];
-    const parent = units[unit.parentIndex!];
-    const originalX = unit.centerX;
-    const originalY = unit.centerY;
-    const dx = originalX - parent.centerX;
-    const dy = originalY - parent.centerY;
-    const originalDistance = Math.hypot(dx, dy);
-    if (!(originalDistance > 0) || !Number.isFinite(originalDistance)) {
-      throw new Error('Radial terminal output must have a distinct finite parent distance.');
-    }
-
-    spatialIndex.remove(index);
-    const ux = dx / originalDistance;
-    const uy = dy / originalDistance;
-    const minimumDistance =
-      parent.collisionDiameter / 2 +
-      unit.collisionDiameter / 2 +
-      RADIAL_TERMINAL_GAP;
-    let chosenDistance = originalDistance;
-
-    for (
-      let distance = Math.min(minimumDistance, originalDistance);
-      distance < originalDistance;
-      distance = Math.min(distance + RADIAL_TERMINAL_PLACEMENT_STEP, originalDistance)
-    ) {
-      const x = parent.centerX + ux * distance;
-      const y = parent.centerY + uy * distance;
-      if (!spatialIndex.collides(index, x, y)) {
-        chosenDistance = distance;
-        break;
-      }
-    }
-
-    unit.centerX = parent.centerX + ux * chosenDistance;
-    unit.centerY = parent.centerY + uy * chosenDistance;
-    spatialIndex.insert(index, unit.centerX, unit.centerY);
   }
 }
 
@@ -522,10 +476,10 @@ function addRadialEdge(edges: EdgeRect[], parent: RadialUnit, child: RadialUnit)
  *
  * The selected output is centered, dependency subtrees receive contiguous
  * angular sectors with sublinear leaf weighting so sparse deep branches retain
- * usable interior clearance. Sibling groups expand through branch-local
- * staggered annuli, and a global spatial index resolves cross-branch collisions
- * without making sparse branches inherit the densest branch's radius. Node
- * views themselves are never rotated, so item icons and recipe previews remain upright.
+ * usable interior clearance. Sibling groups expand through parent-centered,
+ * staggered annuli, and a global spatial index moves complete sibling groups
+ * together when cross-branch collisions require more clearance. Node views
+ * themselves are never rotated, so item icons and recipe previews remain upright.
  */
 export function layoutRadialTree(
   root: ItemTreeNode,
@@ -541,8 +495,6 @@ export function layoutRadialTree(
   });
 
   placeBranchLocalRings(units, levels);
-
-  compactTerminalNodes(units);
 
   const nodes: LaidNode[] = units.map(unit => ({
     id: unit.item.source?.id ?? unit.item.id,
