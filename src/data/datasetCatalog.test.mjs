@@ -137,15 +137,15 @@ test('pack query writes preserve unrelated state and mount keys change with eith
 });
 
 test('maps every published modpack to a first-party picker icon', () => {
-  assert.equal(datasetPackIconPath('meatballcraft'), '/pack-icons/meatballcraft.webp');
-  assert.equal(datasetPackIconPath('gt-new-horizons'), '/pack-icons/gt-new-horizons.webp');
+  assert.equal(datasetPackIconPath('meatballcraft'), '/pack-icons/meatballcraft.webp?v=1');
+  assert.equal(datasetPackIconPath('gt-new-horizons'), '/pack-icons/gt-new-horizons.webp?v=1');
   assert.equal(
     datasetPackIconPath('multiblock-madness'),
-    '/pack-icons/multiblock-madness.webp',
+    '/pack-icons/multiblock-madness.webp?v=1',
   );
   assert.equal(
     datasetPackIconPath('multiblock-madness-2'),
-    '/pack-icons/multiblock-madness-2.webp',
+    '/pack-icons/multiblock-madness-2.webp?v=1',
   );
   assert.equal(datasetPackIconPath('unconfigured-pack'), null);
 });
