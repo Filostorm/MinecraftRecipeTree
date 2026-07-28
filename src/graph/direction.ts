@@ -49,3 +49,20 @@ export function recipeProducesItem(recipe: Recipe, itemKey: string): boolean {
     output => output.key === itemKey || output.alternatives.includes(itemKey),
   );
 }
+
+export interface UsageGraphStart {
+  rootKey: string;
+  direction: 'inputs';
+}
+
+/**
+ * Converts a selected usage into a new ingredient-tree root.
+ *
+ * Recipe output order is authoritative: later slots may be secondary products or byproducts.
+ */
+export function usageGraphStart(recipe: Recipe): UsageGraphStart | null {
+  const primaryOutput = slotSummary(recipe.out)[0];
+  return primaryOutput
+    ? {rootKey: primaryOutput.key, direction: 'inputs'}
+    : null;
+}

@@ -26,6 +26,7 @@ import {isFluidContainerTransferRecipe} from '../data/recipeVisibility';
 import {
   recipeProducesItem,
   recipeUsesItem,
+  usageGraphStart,
 } from '../graph/direction';
 import type {GraphDirection} from '../graph/direction';
 import {theme} from '../theme';
@@ -613,12 +614,19 @@ function RefsList({
               <View style={styles.categoryRecipes}>
                 {categoryRefs.map(([catIdx, recipeIdx]) => {
                   const recipe = recipesByRef.get(recipeRefKey([catIdx, recipeIdx]));
+                  const usageStart =
+                    graphDirection === 'outputs' && recipe
+                      ? usageGraphStart(recipe)
+                      : null;
                   const canStartTree =
                     recipe &&
                     (graphDirection === 'outputs'
-                      ? recipeUsesItem(recipe, itemKey)
+                      ? recipeUsesItem(recipe, itemKey) && usageStart !== null
                       : recipeProducesItem(recipe, itemKey));
                   const actionSubject = data.itemsByKey.get(itemKey)?.n ?? itemKey;
+                  const usageOutputSubject = usageStart
+                    ? data.itemsByKey.get(usageStart.rootKey)?.n ?? usageStart.rootKey
+                    : undefined;
                   return (
                     <View key={`${catIdx}-${recipeIdx}`}>
                       {recipe && availableCardWidth !== null ? (
@@ -629,13 +637,14 @@ function RefsList({
                           availableCardWidth={availableCardWidth}
                           graphDirection={graphDirection}
                           actionSubject={actionSubject}
+                          usageOutputSubject={usageOutputSubject}
                           onPress={
                             canStartTree && !informational
                               ? () =>
                                   openRecipeInGraph(
-                                    itemKey,
+                                    usageStart?.rootKey ?? itemKey,
                                     [catIdx, recipeIdx],
-                                    graphDirection,
+                                    usageStart?.direction ?? graphDirection,
                                   )
                               : undefined
                           }

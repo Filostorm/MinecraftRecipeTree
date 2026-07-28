@@ -4,6 +4,7 @@ import {
   recipeChildrenForDirection,
   recipeProducesItem,
   recipeUsesItem,
+  usageGraphStart,
 } from './direction.ts';
 
 const recipe = {
@@ -84,4 +85,15 @@ test('detects whether the modal item participates on either recipe side', () => 
   assert.equal(recipeUsesItem(recipe, 'item|test:result'), false);
   assert.equal(recipeProducesItem(recipe, 'item|test:result'), true);
   assert.equal(recipeProducesItem(recipe, 'item|test:anchor'), false);
+});
+
+test('promotes the primary usage product instead of a later byproduct', () => {
+  assert.deepEqual(
+    usageGraphStart(recipe),
+    {
+      rootKey: 'item|test:result',
+      direction: 'inputs',
+    },
+  );
+  assert.equal(usageGraphStart({...recipe, out: []}), null);
 });

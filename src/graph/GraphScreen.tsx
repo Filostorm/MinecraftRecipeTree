@@ -72,7 +72,7 @@ import {
 import type {GraphTransform, PanGestureOrigin} from './panGesture';
 import {recordRecipeHistory} from './recipeHistory';
 import {planRecipePickerChoices} from './recipePickerPlan';
-import {recipeChildrenForDirection} from './direction';
+import {recipeChildrenForDirection, usageGraphStart} from './direction';
 import {makeRoot} from './model';
 import type {ItemTreeNode, SourceTreeNode} from './model';
 import {
@@ -97,6 +97,7 @@ type SourceChoice =
 interface PickerEntry {
   option: PickerOption;
   choice: SourceChoice;
+  recipe?: Recipe;
 }
 
 type RecipeSourceChoice = Extract<SourceChoice, {t: 'recipe'}>;
@@ -195,6 +196,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
     graphRecipeRef,
     graphDirection,
     changeGraphDirection,
+    openRecipeInGraph,
     openItem,
     setTab,
     animateMobs,
@@ -401,6 +403,19 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
             return;
           }
           node.amount = anchor.amount;
+        } else if (node.id === 'root') {
+          const output = slotSummary(recipe.out).find(
+            candidate =>
+              candidate.key === node.key || candidate.alternatives.includes(node.key),
+          );
+          if (!output) {
+            console.error('An ingredient-directed root recipe does not produce its graph root item.', {
+              itemKey: node.key,
+              recipeRef: ref,
+            });
+            return;
+          }
+          node.amount = output.amount;
         }
         const sourceId = `${node.id}.s`;
         const childSpecs = recipeChildrenForDirection(recipe, graphDirection);
@@ -532,6 +547,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
             : category?.title;
         return {
           choice,
+          recipe,
           option: {
             label: `${favoritePrefix}${title ?? `category ${categoryIndex}`}`,
             groupKey: category?.id ?? `recipe-category:${categoryIndex}`,
@@ -1641,12 +1657,34 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
             const entries = p.showFluidTransfers
               ? [...p.standardEntries, ...p.fluidTransferEntries]
               : p.standardEntries;
-            const choice = entries[i]?.choice;
+            const selectedEntry = entries[i];
+            const choice = selectedEntry?.choice;
             if (!choice) {
               console.error('The selected source index was not present in the picker.', {
                 selectedIndex: i,
                 optionCount: entries.length,
               });
+              return;
+            }
+            if (p.target.id === 'root' && p.direction === 'outputs') {
+              if (choice.t !== 'recipe' || !selectedEntry.recipe) {
+                console.error('A root usage selection was missing its loaded recipe.', {
+                  itemKey: p.target.key,
+                  selectedIndex: i,
+                  recipeRef: choice.t === 'recipe' ? choice.ref : undefined,
+                });
+                return;
+              }
+              const usageStart = usageGraphStart(selectedEntry.recipe);
+              if (!usageStart) {
+                console.error('A root usage recipe has no product to promote to the graph root.', {
+                  itemKey: p.target.key,
+                  recipeRef: choice.ref,
+                });
+                return;
+              }
+              setPicker(null);
+              openRecipeInGraph(usageStart.rootKey, choice.ref, usageStart.direction);
               return;
             }
             setPicker(null);

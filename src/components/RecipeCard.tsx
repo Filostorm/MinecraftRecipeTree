@@ -32,6 +32,7 @@ export function RecipeCard({
   onPress,
   graphDirection = 'inputs',
   actionSubject,
+  usageOutputSubject,
   availableCardWidth,
 }: {
   recipe: Recipe;
@@ -41,6 +42,8 @@ export function RecipeCard({
   graphDirection?: GraphDirection;
   /** Item name anchoring the graph request, used by the visible action hint. */
   actionSubject?: string;
+  /** Primary recipe product that will replace the usage anchor as the graph root. */
+  usageOutputSubject?: string;
   /** Measured width of the full-width recipe-list container in CSS/layout pixels. */
   availableCardWidth: number;
 }) {
@@ -69,7 +72,7 @@ export function RecipeCard({
       accessibilityLabel={
         onPress
           ? graphDirection === 'outputs'
-            ? `Trace outputs from ${actionSubject ?? 'this item'} through ${displayTitle ?? 'this recipe'}`
+            ? `Make ${usageOutputSubject ?? 'the primary product'} the tree root using ${actionSubject ?? 'this item'} through ${displayTitle ?? 'this recipe'}`
             : `Start an ingredient tree for ${actionSubject ?? 'this item'} with ${displayTitle ?? 'this recipe'}`
           : undefined
       }
@@ -152,7 +155,7 @@ export function RecipeCard({
       {onPress ? (
         <Text style={styles.cardActionHint}>
           {graphDirection === 'outputs'
-            ? `Tap to trace outputs from ${actionSubject ?? 'this item'}`
+            ? `Tap to make ${usageOutputSubject ?? 'the primary product'} the new root`
             : `Tap to build ingredients for ${actionSubject ?? 'this item'}`}
         </Text>
       ) : null}
