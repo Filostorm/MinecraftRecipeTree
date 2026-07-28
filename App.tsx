@@ -64,7 +64,6 @@ function DatasetRoot() {
         datasets={datasets}
         selectedSlug={selectedSlug}
         loadedManifest={loadedManifest}
-        onSelect={catalog.select}
         onOpenPicker={() => setShowDatasetPicker(true)}
         details={details}
       />
@@ -228,7 +227,6 @@ function Shell({
   const compactHeader = hasHydrated && width < 720;
   const [showRecipeHistory, setShowRecipeHistory] = useState(false);
   const [showDatasetDetails, setShowDatasetDetails] = useState(false);
-  const [showDisplayControls, setShowDisplayControls] = useState(false);
   const [interfaceZoom, setInterfaceZoom] = useState(1);
   useEffect(() => {
     if (Platform.OS === 'web') setHasHydrated(true);
@@ -294,25 +292,6 @@ function Shell({
             </Text>
           </TouchableOpacity>
         )}
-        {Platform.OS === 'web' && compactHeader && (
-          <TouchableOpacity
-            style={[
-              styles.headerDetailBtn,
-              showDisplayControls && styles.headerDetailBtnActive,
-            ]}
-            onPress={() => setShowDisplayControls(value => !value)}
-            accessibilityRole="button"
-            accessibilityState={{expanded: showDisplayControls}}
-            accessibilityLabel="Display controls">
-            <Text
-              style={[
-                styles.headerDetailBtnText,
-                showDisplayControls && styles.headerDetailBtnTextActive,
-              ]}>
-              ◐ UI {Math.round(interfaceZoom * 100)}%
-            </Text>
-          </TouchableOpacity>
-        )}
       </View>
       {(!compactHeader || showDatasetDetails) && (
         <Text style={styles.subtitle}>
@@ -326,7 +305,7 @@ function Shell({
             : ' · JEI layout previews unavailable'}
         </Text>
       )}
-      {Platform.OS === 'web' && (!compactHeader || showDisplayControls) && (
+      {Platform.OS === 'web' && (
         <View
           style={styles.interfaceZoomControls}
           accessibilityLabel="Interface zoom controls">

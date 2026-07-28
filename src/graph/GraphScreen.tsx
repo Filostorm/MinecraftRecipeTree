@@ -273,6 +273,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
   const [compactMode, setCompactMode] = useState(loadCompactMode);
   const [radialLayout, setRadialLayout] = useState(loadRadialLayout);
   const [showTreeTotals, setShowTreeTotals] = useState(true);
+  const [showGraphControls, setShowGraphControls] = useState(false);
   const [useByproducts, setUseByproducts] = useState(loadUseByproducts);
   const [exportingTree, setExportingTree] = useState(false);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
@@ -1584,14 +1585,35 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
       </View>
 
       <View style={styles.controls}>
-        {graphDirection === 'inputs' && (
-          <CtrlBtn label="Totals" active={showTreeTotals} onPress={() => setShowTreeTotals(value => !value)} />
+        {showGraphControls && (
+          <View style={styles.controlOptions}>
+            {graphDirection === 'inputs' && (
+              <CtrlBtn
+                label="Totals"
+                active={showTreeTotals}
+                onPress={() => setShowTreeTotals(value => !value)}
+              />
+            )}
+            <CtrlBtn label="Radial" active={radialLayout} onPress={toggleRadialLayout} />
+            <CtrlBtn label="Compact" active={compactMode} onPress={toggleCompactMode} />
+            <CtrlBtn label="Fit" onPress={fitView} />
+          </View>
         )}
-        <CtrlBtn label="Radial" active={radialLayout} onPress={toggleRadialLayout} />
-        <CtrlBtn label="Compact" active={compactMode} onPress={toggleCompactMode} />
-        <CtrlBtn label="＋" onPress={() => zoomAt(viewportRef.current.w / 2, viewportRef.current.h / 2, 1.25)} />
-        <CtrlBtn label="－" onPress={() => zoomAt(viewportRef.current.w / 2, viewportRef.current.h / 2, 0.8)} />
-        <CtrlBtn label="fit" onPress={fitView} />
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel={showGraphControls ? 'Collapse graph controls' : 'Expand graph controls'}
+          accessibilityState={{expanded: showGraphControls}}
+          style={[styles.ctrlBtn, styles.controlMenuBtn, showGraphControls && styles.ctrlBtnActive]}
+          onPress={() => setShowGraphControls(value => !value)}>
+          <Text
+            style={[
+              styles.ctrlBtnText,
+              styles.controlMenuBtnText,
+              showGraphControls && styles.ctrlBtnTextActive,
+            ]}>
+            {showGraphControls ? '›' : '‹'}
+          </Text>
+        </TouchableOpacity>
       </View>
       {graphDirection === 'inputs' && showTreeTotals && (
         <TreeTotalsPanel
@@ -2405,6 +2427,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 6,
   },
+  controlOptions: {
+    flexDirection: 'row',
+    gap: 6,
+  },
   totalsPanel: {
     position: 'absolute',
     top: 54,
@@ -2488,6 +2514,15 @@ const styles = StyleSheet.create({
   ctrlBtnActive: {borderColor: theme.accent, backgroundColor: '#173724'},
   ctrlBtnText: {color: theme.text, fontSize: 13},
   ctrlBtnTextActive: {color: theme.accent, fontWeight: '700'},
+  controlMenuBtn: {
+    width: 40,
+    paddingHorizontal: 0,
+  },
+  controlMenuBtnText: {
+    fontSize: 18,
+    lineHeight: 18,
+    fontWeight: '800',
+  },
   hint: {
     position: 'absolute',
     left: 12,
