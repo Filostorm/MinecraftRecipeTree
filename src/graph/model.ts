@@ -1,4 +1,4 @@
-import {DropStat, Mob, Recipe, RecipeRef} from '../types';
+import type {DropStat, Mob, Recipe, RecipeRef} from '../types';
 import type {GraphDirection} from './direction';
 
 /**
@@ -71,4 +71,9 @@ export interface ItemTreeNode {
 
 export function makeRoot(key: string): ItemTreeNode {
   return {id: 'root', key, ancestors: []};
+}
+
+/** A node is a recursion boundary when its item already exists in its own path. */
+export function isRecursiveItemNode(node: ItemTreeNode): boolean {
+  return node.cyclic === true || node.ancestors.includes(node.key);
 }

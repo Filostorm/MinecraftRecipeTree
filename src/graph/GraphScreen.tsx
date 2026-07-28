@@ -74,7 +74,7 @@ import type {GraphTransform, PanGestureOrigin} from './panGesture';
 import {recordRecipeHistory} from './recipeHistory';
 import {planRecipePickerChoices} from './recipePickerPlan';
 import {recipeChildrenForDirection, usageGraphStart} from './direction';
-import {makeRoot} from './model';
+import {isRecursiveItemNode, makeRoot} from './model';
 import type {ItemTreeNode, SourceTreeNode} from './model';
 import {
   buildTreeTotalsCsv,
@@ -200,6 +200,17 @@ const MAX_RECIPE_PICKER_CHOICES = 40;
 const RECIPE_PICKER_GROUP_PAGE = 40;
 const GRAPH_EXPORT_PADDING = 48;
 const GRAPH_EXPORT_PIXEL_RATIO = 3;
+
+function blockRecursiveExpansion(node: ItemTreeNode, interaction: string): boolean {
+  if (!isRecursiveItemNode(node)) return false;
+  console.info('Recursive graph input expansion was blocked.', {
+    nodeId: node.id,
+    itemKey: node.key,
+    interaction,
+    ancestorDepth: node.ancestors.length,
+  });
+  return true;
+}
 
 function recipeRefKey([categoryIndex, recipeIndex]: RecipeRef): string {
   return `${categoryIndex}:${recipeIndex}`;
@@ -547,6 +558,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
 
   const applyChoice = useCallback(
     (node: ItemTreeNode, choice: SourceChoice) => {
+      if (blockRecursiveExpansion(node, 'apply source choice')) return;
       if (choice.t === 'recipe') {
         void expandRecipe(node, choice.ref, choice.allowFluidTransfer === true);
         return;
@@ -653,6 +665,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
       byproductCoverage?: NodeByproductCoverage,
       direction: GraphDirection = graphDirection,
     ) => {
+      if (blockRecursiveExpansion(target, 'open source picker')) return;
       const requestId = ++pickerRequestIdRef.current;
       const currentPreferred =
         direction === 'inputs' ? preferredSourcesRef.current[target.key] : undefined;
@@ -950,6 +963,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
   const onItemTap = useCallback(
     (node: ItemTreeNode) => {
       if (node.loading) return;
+      if (blockRecursiveExpansion(node, 'tap graph node')) return;
       if (node.source) {
         releaseByproductFulfillmentsFromSubtree(node);
         node.source = undefined;
@@ -1108,6 +1122,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
 
   const handleCollapsedIngredientTap = useCallback(
     (node: ItemTreeNode, defaultAction: () => void) => {
+      if (blockRecursiveExpansion(node, 'tap collapsed ingredient')) return;
       const coverage = treeTotals.byproductCoverageByNode.get(node.id);
       if (!coverage) {
         defaultAction();
@@ -1535,11 +1550,21 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
                 byproductCoverage={treeTotals.byproductCoverageByNode.get(n.item.id)}
                 isRoot={n.item.id === 'root'}
                 selectable={
-                  treeTotals.byproductCoverageByNode.has(n.item.id) ||
-                  choicesFor(n.item.key).length > 0
+                  !isRecursiveItemNode(n.item) &&
+                  (treeTotals.byproductCoverageByNode.has(n.item.id) ||
+                    choicesFor(n.item.key).length > 0)
                 }
-                terminal={choicesFor(n.item.key).length === 0}
-                terminalLabel={graphDirection === 'outputs' ? 'no outputs' : 'no inputs'}
+                terminal={
+                  isRecursiveItemNode(n.item) ||
+                  choicesFor(n.item.key).length === 0
+                }
+                terminalLabel={
+                  isRecursiveItemNode(n.item)
+                    ? 'recursive input, expansion disabled'
+                    : graphDirection === 'outputs'
+                      ? 'no outputs'
+                      : 'no inputs'
+                }
                 radial={n.radial === true}
                 radialRoot={radialLayout && n.item.id === 'root'}
                 branchLabel={n.compactBranch === true}
@@ -1558,8 +1583,17 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
                 requiredAmount={displayedAmountFor(n.item)}
                 byproductCoverage={treeTotals.byproductCoverageByNode.get(n.item.id)}
                 isRoot={n.item.id === 'root'}
-                expandable={choicesFor(n.item.key).length > 0}
-                terminalLabel={graphDirection === 'outputs' ? 'no outputs' : 'no inputs'}
+                expandable={
+                  !isRecursiveItemNode(n.item) &&
+                  choicesFor(n.item.key).length > 0
+                }
+                terminalLabel={
+                  isRecursiveItemNode(n.item)
+                    ? 'recursive input, expansion disabled'
+                    : graphDirection === 'outputs'
+                      ? 'no outputs'
+                      : 'no inputs'
+                }
                 onTap={() =>
                   handleCollapsedIngredientTap(n.item, () => onItemTap(n.item))
                 }
@@ -1580,7 +1614,10 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
                 radialRoot={radialLayout && n.item.id === 'root'}
                 focused={n.source?.id === focusedSourceId}
                 animateMobs={animateMobs}
-                canSwap={choicesFor(n.item.key).length > 1}
+                canSwap={
+                  !isRecursiveItemNode(n.item) &&
+                  choicesFor(n.item.key).length > 1
+                }
                 onCollapse={() => onItemTap(n.item)}
                 onSwap={() => openPickerWithErrorHandling(n.item)}
                 onInfo={() => openItem(n.item.key)}
@@ -1722,6 +1759,10 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
                 selectedIndex: i,
                 optionCount: entries.length,
               });
+              return;
+            }
+            if (blockRecursiveExpansion(p.target, 'select picker source')) {
+              setPicker(null);
               return;
             }
             if (p.target.id === 'root' && p.direction === 'outputs') {
@@ -1962,8 +2003,8 @@ function CompactItemNodeView({
         radial && showRadialLabel && styles.radialItemNodeRaised,
         isRoot && !radialRoot && styles.nodeRoot,
         node.nonConsumed && styles.nodePrerequisite,
-        node.cyclic && styles.nodeCyclic,
-        terminal && styles.nodeTerminal,
+        isRecursiveItemNode(node) && styles.nodeCyclic,
+        terminal && !isRecursiveItemNode(node) && styles.nodeTerminal,
         node.loading && styles.nodeLoading,
         byproductCoverage?.remainingAmount === 0 && styles.nodeByproductComplete,
         byproductCoverage &&
@@ -2062,8 +2103,8 @@ function ItemNodeView({
         {left: x, top: y, width: ITEM_W, height: ITEM_H},
         isRoot && styles.nodeRoot,
         node.nonConsumed && styles.nodePrerequisite,
-        node.cyclic && styles.nodeCyclic,
-        !expandable && styles.nodeTerminal,
+        isRecursiveItemNode(node) && styles.nodeCyclic,
+        !expandable && !isRecursiveItemNode(node) && styles.nodeTerminal,
         byproductCoverage?.remainingAmount === 0 && styles.nodeByproductComplete,
         byproductCoverage &&
           byproductCoverage.remainingAmount > 0 &&
@@ -2079,7 +2120,7 @@ function ItemNodeView({
           {shouldShowIngredientQuantity(node.key, requiredAmount)
             ? `  ${formatIngredientQuantity(node.key, requiredAmount)}`
             : ''}
-          {node.cyclic ? '  ↻' : ''}
+          {isRecursiveItemNode(node) ? '  ↻' : ''}
           {node.nonConsumed ? '  retained' : ''}
           {node.consumptionProbability !== undefined
             ? `  ${node.consumptionProbability == null ? '?' : `${String(Math.round(node.consumptionProbability * 10_000) / 100)}%`} consume`
@@ -2157,8 +2198,8 @@ function SourceNodeView({
         isRoot && !radialRoot && styles.nodeRoot,
         radialRoot && styles.radialExpandedRootNode,
         item.nonConsumed && styles.nodePrerequisite,
-        item.cyclic && styles.nodeCyclic,
-        source.inputs.length === 0 && styles.nodeTerminal,
+        isRecursiveItemNode(item) && styles.nodeCyclic,
+        source.inputs.length === 0 && !isRecursiveItemNode(item) && styles.nodeTerminal,
         byproductCoverage?.remainingAmount === 0 && styles.nodeByproductComplete,
         byproductCoverage &&
           byproductCoverage.remainingAmount > 0 &&
