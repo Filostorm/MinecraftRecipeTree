@@ -29,6 +29,7 @@ interface Ui {
   /** Active traversal direction for the current graph. */
   graphDirection: GraphDirection;
   openRecipeInGraph(key: string, ref: RecipeRef, direction?: GraphDirection): void;
+  changeGraphDirection(direction: GraphDirection): void;
   /** Mob sprite animation on/off (persisted). */
   animateMobs: boolean;
   toggleAnimateMobs(): void;
@@ -73,6 +74,11 @@ export function UiProvider({children}: {children: React.ReactNode}) {
     setGraphRequestId(requestId => requestId + 1);
     setTab('graph');
   }, []);
+  const changeGraphDirection = useCallback((direction: GraphDirection) => {
+    setGraphRecipeRef(null);
+    setGraphDirection(direction);
+    setGraphRequestId(requestId => requestId + 1);
+  }, []);
 
   const value = useMemo<Ui>(
     () => ({
@@ -87,6 +93,7 @@ export function UiProvider({children}: {children: React.ReactNode}) {
       graphRecipeRef,
       graphDirection,
       openRecipeInGraph,
+      changeGraphDirection,
       animateMobs,
       toggleAnimateMobs,
     }),
@@ -97,6 +104,7 @@ export function UiProvider({children}: {children: React.ReactNode}) {
       graphRequestId,
       graphRecipeRef,
       graphDirection,
+      changeGraphDirection,
       animateMobs,
       openItem,
       popItem,

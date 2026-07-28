@@ -102,6 +102,7 @@ type RecipeSourceChoice = Extract<SourceChoice, {t: 'recipe'}>;
 
 interface PickerState {
   requestId: number;
+  direction: GraphDirection;
   title: string;
   standardEntries: PickerEntry[];
   fluidTransferEntries: PickerEntry[];
@@ -192,6 +193,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
     graphRequestId,
     graphRecipeRef,
     graphDirection,
+    changeGraphDirection,
     openItem,
     setTab,
     animateMobs,
@@ -207,6 +209,11 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
   pickerRef.current = picker;
   const pickerGroupLoadsRef = useRef(new Set<string>());
   const pickerRequestIdRef = useRef(0);
+  const pendingRootChoiceRef = useRef<{
+    key: string;
+    direction: GraphDirection;
+    choice: SourceChoice;
+  } | null>(null);
   const [compactMode, setCompactMode] = useState(loadCompactMode);
   const [radialLayout, setRadialLayout] = useState(loadRadialLayout);
   const [showTreeTotals, setShowTreeTotals] = useState(true);
@@ -276,18 +283,18 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
   );
 
   const recipeRefsFor = useCallback(
-    (key: string): RecipeRef[] =>
-      graphDirection === 'outputs' ? usagesFor(key) : recipesFor(key),
+    (key: string, direction: GraphDirection = graphDirection): RecipeRef[] =>
+      direction === 'outputs' ? usagesFor(key) : recipesFor(key),
     [graphDirection, recipesFor, usagesFor],
   );
 
   /** Direction-appropriate recipe choices, plus physical sources for ingredient trees. */
   const choicesFor = useCallback(
-    (key: string): SourceChoice[] => {
-      const recipes = recipeRefsFor(key).map(
+    (key: string, direction: GraphDirection = graphDirection): SourceChoice[] => {
+      const recipes = recipeRefsFor(key, direction).map(
         ref => ({t: 'recipe', ref}) as SourceChoice,
       );
-      if (graphDirection === 'outputs') return recipes;
+      if (direction === 'outputs') return recipes;
       return [
         ...recipes,
         ...(data.minedFrom.get(key) ?? []).map(
@@ -501,9 +508,10 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
       targetKey: string,
       choice: SourceChoice,
       recipe?: Recipe,
+      direction: GraphDirection = graphDirection,
     ): PickerEntry => {
       const currentPreferred =
-        graphDirection === 'inputs' ? preferredSourcesRef.current[targetKey] : undefined;
+        direction === 'inputs' ? preferredSourcesRef.current[targetKey] : undefined;
       const favoritePrefix =
         currentPreferred && choiceMatchesPreference(choice, currentPreferred) ? '★ ' : '';
       const itemName = (key: string) => data.itemsByKey.get(key)?.n ?? key;
@@ -541,15 +549,15 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
             imageW: recipe?.w,
             imageH: recipe?.h,
             inputs:
-              recipe && graphDirection === 'inputs'
+              recipe && direction === 'inputs'
                 ? inputSlotSummary(recipe.in)
                 : undefined,
             outputs:
-              recipe && graphDirection === 'outputs'
+              recipe && direction === 'outputs'
                 ? slotSummary(recipe.out)
                 : undefined,
             prerequisites:
-              recipe && graphDirection === 'inputs'
+              recipe && direction === 'inputs'
                 ? prerequisiteSummary(recipe.cat)
                 : undefined,
           },
@@ -580,11 +588,15 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
   );
 
   const openPicker = useCallback(
-    async (target: ItemTreeNode, byproductCoverage?: NodeByproductCoverage) => {
+    async (
+      target: ItemTreeNode,
+      byproductCoverage?: NodeByproductCoverage,
+      direction: GraphDirection = graphDirection,
+    ) => {
       const requestId = ++pickerRequestIdRef.current;
       const currentPreferred =
-        graphDirection === 'inputs' ? preferredSourcesRef.current[target.key] : undefined;
-      const allChoices = choicesFor(target.key);
+        direction === 'inputs' ? preferredSourcesRef.current[target.key] : undefined;
+      const allChoices = choicesFor(target.key, direction);
       const physicalChoices = allChoices.filter(choice => choice.t !== 'recipe');
       const recipeChoices = allChoices.filter(
         (choice): choice is RecipeSourceChoice => choice.t === 'recipe',
@@ -659,17 +671,21 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
       }
       setPicker({
         requestId,
+        direction,
         title:
-          graphDirection === 'outputs'
+          direction === 'outputs'
             ? `Use ${itemName} to produce`
             : `Obtain ${itemName}`,
         standardEntries: [
-          ...physicalChoices.map(choice => pickerEntryFor(target.key, choice)),
+          ...physicalChoices.map(choice =>
+            pickerEntryFor(target.key, choice, undefined, direction),
+          ),
           ...standardRecipeChoices.map(choice =>
             pickerEntryFor(
               target.key,
               choice,
               recipesByRef.get(recipeRefKey(choice.ref)),
+              direction,
             ),
           ),
         ],
@@ -678,6 +694,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
             target.key,
             choice,
             recipesByRef.get(recipeRefKey(choice.ref)),
+            direction,
           ),
         ),
         showFluidTransfers: false,
@@ -686,7 +703,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
         recipeGroupProgress,
         target,
         byproductCoverage,
-        rememberSource: graphDirection === 'inputs',
+        rememberSource: direction === 'inputs',
         collapsedGroupKeys: loadCollapsedRecipeCategories(),
       });
     },
@@ -723,10 +740,22 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
             identifiedFluidTransferCount += 1;
             const explicitChoice = {...choice, allowFluidTransfer: true as const};
             fluidTransferEntries.push(
-              pickerEntryFor(snapshot.target.key, explicitChoice, recipe),
+              pickerEntryFor(
+                snapshot.target.key,
+                explicitChoice,
+                recipe,
+                snapshot.direction,
+              ),
             );
           } else {
-            standardEntries.push(pickerEntryFor(snapshot.target.key, choice, recipe));
+            standardEntries.push(
+              pickerEntryFor(
+                snapshot.target.key,
+                choice,
+                recipe,
+                snapshot.direction,
+              ),
+            );
           }
         });
         setPicker(current => {
@@ -939,6 +968,24 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
     rootRef.current = newRoot;
     setRoot(newRoot);
     needsFitRef.current = true;
+    const pendingRootChoice = pendingRootChoiceRef.current;
+    if (pendingRootChoice) {
+      pendingRootChoiceRef.current = null;
+      if (
+        pendingRootChoice.key !== graphRootKey ||
+        pendingRootChoice.direction !== graphDirection
+      ) {
+        console.error('A pending root recipe selection did not match the rebuilt graph.', {
+          pendingItemKey: pendingRootChoice.key,
+          graphRootKey,
+          pendingDirection: pendingRootChoice.direction,
+          graphDirection,
+        });
+      } else {
+        applyChoice(newRoot, pendingRootChoice.choice);
+        return;
+      }
+    }
     if (graphRecipeRef) {
       const requestedChoice: SourceChoice = {
         t: 'recipe',
@@ -1536,13 +1583,32 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
           visible
           interfaceZoom={interfaceZoom}
           title={picker.title}
+          direction={picker.target.id === 'root' ? picker.direction : undefined}
+          onDirectionChange={
+            picker.target.id === 'root'
+              ? direction => {
+                  if (direction === picker.direction) return;
+                  void openPicker(
+                    picker.target,
+                    picker.byproductCoverage,
+                    direction,
+                  ).catch(error => {
+                    console.error('The root recipe direction could not be changed.', {
+                      itemKey: picker.target.key,
+                      direction,
+                      error,
+                    });
+                  });
+                }
+              : undefined
+          }
           options={(picker.showFluidTransfers
             ? [...picker.standardEntries, ...picker.fluidTransferEntries]
             : picker.standardEntries
           ).map(entry => entry.option)}
           rememberSource={picker.rememberSource}
           onRememberSourceChange={
-            graphDirection === 'inputs'
+            picker.direction === 'inputs'
               ? rememberSource =>
                   setPicker(current => (current ? {...current, rememberSource} : current))
               : undefined
@@ -1583,7 +1649,19 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
               return;
             }
             setPicker(null);
-            if (graphDirection === 'outputs') {
+            if (p.target.id === 'root' && p.direction !== graphDirection) {
+              if (p.direction === 'inputs') {
+                setPreferredSource(p.target.key, p.rememberSource ? choice : null);
+              }
+              pendingRootChoiceRef.current = {
+                key: p.target.key,
+                direction: p.direction,
+                choice,
+              };
+              changeGraphDirection(p.direction);
+              return;
+            }
+            if (p.direction === 'outputs') {
               p.target.source = undefined;
               applyChoice(p.target, choice);
               return;

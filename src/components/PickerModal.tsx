@@ -12,6 +12,7 @@ import {
 import type {SlotSummary} from '../data/slotSummary';
 import {theme} from '../theme';
 import {uniformPickerRecipePreviewSize} from '../ui/interfaceZoom';
+import type {GraphDirection} from '../graph/direction';
 import {pixelated} from './ItemIcon';
 import {ItemChip} from './RecipeCard';
 import {RecipePreviewImage} from './RecipePreviewImage';
@@ -43,6 +44,8 @@ export function PickerModal({
   visible,
   title,
   options,
+  direction,
+  onDirectionChange,
   rememberSource,
   onRememberSourceChange,
   filterLabel,
@@ -60,6 +63,8 @@ export function PickerModal({
   visible: boolean;
   title: string;
   options: PickerOption[];
+  direction?: GraphDirection;
+  onDirectionChange?: (direction: GraphDirection) => void;
   rememberSource?: boolean;
   onRememberSourceChange?: (remember: boolean) => void;
   filterLabel?: string;
@@ -95,6 +100,38 @@ export function PickerModal({
       <Pressable style={styles.backdrop} onPress={onClose}>
         <Pressable style={styles.card} onPress={() => {}}>
           <Text style={styles.title}>{title}</Text>
+          {direction && onDirectionChange ? (
+            <View
+              accessibilityLabel="Tree direction"
+              style={styles.directionTabs}>
+              {([
+                ['inputs', 'Recipes'],
+                ['outputs', 'Usages'],
+              ] as const).map(([value, label]) => {
+                const selected = direction === value;
+                return (
+                  <TouchableOpacity
+                    key={value}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${label}, build tree ${value === 'inputs' ? 'toward ingredients' : 'toward products'}`}
+                    accessibilityState={{selected}}
+                    style={[
+                      styles.directionTab,
+                      selected && styles.directionTabSelected,
+                    ]}
+                    onPress={() => onDirectionChange(value)}>
+                    <Text
+                      style={[
+                        styles.directionTabText,
+                        selected && styles.directionTabTextSelected,
+                      ]}>
+                      {label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          ) : null}
           {onRememberSourceChange && (
             <View style={styles.rememberRow}>
               <View style={styles.rememberCopy}>
@@ -320,6 +357,33 @@ const styles = StyleSheet.create({
     padding: 14,
   },
   title: {color: theme.text, fontSize: 15, fontWeight: '700', marginBottom: 10},
+  directionTabs: {
+    flexDirection: 'row',
+    alignSelf: 'flex-start',
+    gap: 6,
+    marginBottom: 10,
+    padding: 3,
+    borderRadius: 9,
+    backgroundColor: theme.panelAlt,
+  },
+  directionTab: {
+    minWidth: 94,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 7,
+    alignItems: 'center',
+  },
+  directionTabSelected: {
+    backgroundColor: theme.radialRootPanel,
+    borderColor: theme.radialRoot,
+    borderWidth: 1,
+  },
+  directionTabText: {
+    color: theme.textDim,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  directionTabTextSelected: {color: theme.radialRoot},
   rememberRow: {
     flexDirection: 'row',
     alignItems: 'center',
