@@ -12,8 +12,11 @@ const RADIAL_NODE_GAP = 20;
 const MAX_STAGGERED_ROWS = 8;
 
 export const RADIAL_ITEM_SIZE = 52;
+export const RADIAL_ROOT_SIZE = 76;
 export const RADIAL_BRANCH_LABEL_WIDTH = 96;
 const RADIAL_BRANCH_LABEL_HEIGHT = 72;
+const RADIAL_EXPANDED_ROOT_HORIZONTAL_GROWTH = 24;
+const RADIAL_EXPANDED_ROOT_VERTICAL_GROWTH = 18;
 
 export interface StaggeredRadialRows {
   rowCount: number;
@@ -163,12 +166,16 @@ function makeRadialUnit(item: ItemTreeNode, depth: number): RadialUnit {
 function flattenRadialTree(root: ItemTreeNode, compact: boolean): RadialUnit[] {
   const rootUnit = makeRadialUnit(root, 0);
   if (compact) {
-    rootUnit.visualW = COMPACT_ITEM_SIZE;
-    rootUnit.visualH = COMPACT_ITEM_SIZE;
+    rootUnit.visualW = RADIAL_ROOT_SIZE;
+    rootUnit.visualH = RADIAL_ROOT_SIZE;
     rootUnit.collisionDiameter = Math.hypot(
-      root.source ? RADIAL_BRANCH_LABEL_WIDTH : COMPACT_ITEM_SIZE,
-      root.source ? RADIAL_BRANCH_LABEL_HEIGHT : COMPACT_ITEM_SIZE,
+      root.source ? Math.max(RADIAL_BRANCH_LABEL_WIDTH, RADIAL_ROOT_SIZE) : RADIAL_ROOT_SIZE,
+      root.source ? Math.max(RADIAL_BRANCH_LABEL_HEIGHT, RADIAL_ROOT_SIZE) : RADIAL_ROOT_SIZE,
     );
+  } else {
+    rootUnit.visualW += RADIAL_EXPANDED_ROOT_HORIZONTAL_GROWTH;
+    rootUnit.visualH += RADIAL_EXPANDED_ROOT_VERTICAL_GROWTH;
+    rootUnit.collisionDiameter = Math.hypot(rootUnit.visualW, rootUnit.visualH);
   }
   const units = [rootUnit];
   const expansionStack = [0];

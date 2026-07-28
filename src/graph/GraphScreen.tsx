@@ -51,6 +51,7 @@ import {
 import {
   RADIAL_BRANCH_LABEL_WIDTH,
   RADIAL_ITEM_SIZE,
+  RADIAL_ROOT_SIZE,
   layoutRadialTree,
 } from './radialLayout';
 import {
@@ -1440,6 +1441,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
                 terminal={choicesFor(n.item.key).length === 0}
                 terminalLabel={graphDirection === 'outputs' ? 'no outputs' : 'no inputs'}
                 radial={n.radial === true}
+                radialRoot={radialLayout && n.item.id === 'root'}
                 branchLabel={n.compactBranch === true}
                 onTap={() =>
                   handleCollapsedIngredientTap(n.item, () =>
@@ -1475,6 +1477,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
                 byproductCoverage={treeTotals.byproductCoverageByNode.get(n.item.id)}
                 source={n.source!}
                 isRoot={n.item.id === 'root'}
+                radialRoot={radialLayout && n.item.id === 'root'}
                 focused={n.source?.id === focusedSourceId}
                 animateMobs={animateMobs}
                 canSwap={choicesFor(n.item.key).length > 1}
@@ -1732,6 +1735,7 @@ function CompactItemNodeView({
   terminal,
   terminalLabel,
   radial = false,
+  radialRoot = false,
   branchLabel = false,
   onTap,
 }: {
@@ -1745,6 +1749,7 @@ function CompactItemNodeView({
   terminal: boolean;
   terminalLabel: string;
   radial?: boolean;
+  radialRoot?: boolean;
   branchLabel?: boolean;
   onTap: () => void;
 }) {
@@ -1774,9 +1779,10 @@ function CompactItemNodeView({
       style={[
         radial ? styles.radialItemNode : styles.compactItemNode,
         branchLabel && styles.compactBranchNode,
+        radialRoot && styles.radialRootNode,
         {left: x, top: y},
         radial && showRadialLabel && styles.radialItemNodeRaised,
-        isRoot && styles.nodeRoot,
+        isRoot && !radialRoot && styles.nodeRoot,
         node.nonConsumed && styles.nodePrerequisite,
         node.cyclic && styles.nodeCyclic,
         terminal && styles.nodeTerminal,
@@ -1786,7 +1792,8 @@ function CompactItemNodeView({
           byproductCoverage.remainingAmount > 0 &&
           styles.nodeByproductPartial,
       ]}>
-      <ItemIcon item={item} itemKey={node.key} size={32} />
+      {radialRoot && <View pointerEvents="none" style={styles.radialRootDiamond} />}
+      <ItemIcon item={item} itemKey={node.key} size={radialRoot ? 40 : 32} />
       <View
         style={[
           styles.compactCountBadge,
@@ -1809,7 +1816,12 @@ function CompactItemNodeView({
         </View>
       )}
       {branchLabel && (
-        <View pointerEvents="none" style={styles.compactBranchLabel}>
+        <View
+          pointerEvents="none"
+          style={[
+            styles.compactBranchLabel,
+            radialRoot && styles.radialRootBranchLabel,
+          ]}>
           <Text style={[styles.compactBranchLabelText, noSelect]} numberOfLines={1}>
             {name}
           </Text>
@@ -1914,6 +1926,7 @@ function SourceNodeView({
   byproductCoverage,
   source,
   isRoot,
+  radialRoot,
   focused,
   animateMobs,
   canSwap,
@@ -1930,6 +1943,7 @@ function SourceNodeView({
   byproductCoverage?: NodeByproductCoverage;
   source: SourceTreeNode;
   isRoot: boolean;
+  radialRoot: boolean;
   focused: boolean;
   animateMobs: boolean;
   canSwap: boolean;
@@ -1958,7 +1972,8 @@ function SourceNodeView({
       style={[
         styles.sourceNode,
         {left: x, top: y, width: w, height: h},
-        isRoot && styles.nodeRoot,
+        isRoot && !radialRoot && styles.nodeRoot,
+        radialRoot && styles.radialExpandedRootNode,
         item.nonConsumed && styles.nodePrerequisite,
         item.cyclic && styles.nodeCyclic,
         source.inputs.length === 0 && styles.nodeTerminal,
@@ -2091,6 +2106,27 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderRadius: COMPACT_ITEM_SIZE / 2,
   },
+  radialRootNode: {
+    width: RADIAL_ROOT_SIZE,
+    height: RADIAL_ROOT_SIZE,
+    borderWidth: 0,
+    borderRadius: 0,
+    backgroundColor: 'transparent',
+  },
+  radialRootDiamond: {
+    position: 'absolute',
+    width: 56,
+    height: 56,
+    borderRadius: 13,
+    borderColor: theme.radialRoot,
+    borderWidth: 3,
+    backgroundColor: theme.radialRootPanel,
+    transform: [{rotate: '45deg'}],
+  },
+  radialRootBranchLabel: {
+    top: RADIAL_ROOT_SIZE + 4,
+    left: -(RADIAL_BRANCH_LABEL_WIDTH - RADIAL_ROOT_SIZE) / 2,
+  },
   compactBranchLabel: {
     position: 'absolute',
     top: COMPACT_ITEM_SIZE + 4,
@@ -2159,6 +2195,12 @@ const styles = StyleSheet.create({
   compactByproductCountText: {color: theme.accentAlt},
   nodeLoading: {opacity: 0.55},
   nodeRoot: {borderColor: theme.accent, borderWidth: 2},
+  radialExpandedRootNode: {
+    backgroundColor: theme.radialRootPanel,
+    borderColor: theme.radialRoot,
+    borderWidth: 3,
+    borderRadius: 22,
+  },
   nodePrerequisite: {borderColor: theme.warn, borderStyle: 'dashed'},
   nodeCyclic: {borderColor: theme.warn},
   nodeTerminal: {borderColor: theme.textDim, borderWidth: 2},

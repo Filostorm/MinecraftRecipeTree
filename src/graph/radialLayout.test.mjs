@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   RADIAL_ITEM_SIZE,
+  RADIAL_ROOT_SIZE,
   layoutRadialTree,
   planStaggeredRadialRows,
 } from './radialLayout.ts';
@@ -98,6 +99,24 @@ test('places a large initial ingredient set around the centered recipe without o
       );
     }
   }
+});
+
+test('gives the compact radial root a larger collision-safe footprint than its ingredients', () => {
+  const graph = layoutRadialTree(highFanout(12), true);
+  const root = graph.nodes.find(node => node.item.id === 'root');
+  const ingredients = graph.nodes.filter(node => node.depth === 1);
+
+  assert.ok(root);
+  assert.equal(root.w, RADIAL_ROOT_SIZE);
+  assert.equal(root.h, RADIAL_ROOT_SIZE);
+  assert.ok(ingredients.every(node => node.w === RADIAL_ITEM_SIZE));
+  assert.ok(ingredients.every(node => node.h === RADIAL_ITEM_SIZE));
+  assert.ok(
+    ingredients.every(node =>
+      Math.hypot(node.x + node.w / 2, node.y + node.h / 2) >
+        Math.hypot(root.w, root.h) / 2,
+    ),
+  );
 });
 
 test('preserves hierarchy while dependency generations move outward', () => {
