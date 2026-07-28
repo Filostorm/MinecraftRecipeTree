@@ -23,30 +23,6 @@ const controls = [
     title: 'Swap recipe  ⇄',
     description: 'Choose a different source for an expanded item.',
   },
-  {
-    title: 'Drag empty space',
-    description: 'Pan across the recipe tree.',
-  },
-  {
-    title: 'Pinch or scroll',
-    description: 'Zoom smoothly around the gesture or pointer.',
-  },
-  {
-    title: 'Fit',
-    description: 'Center the complete tree and scale it to the available view.',
-  },
-  {
-    title: 'Radial',
-    description: 'Arrange dependencies outward from the starting item.',
-  },
-  {
-    title: 'Compact',
-    description: 'Hide recipe preview cards and show item nodes only.',
-  },
-  {
-    title: 'Totals',
-    description: 'Show the resources required by the current ingredient tree.',
-  },
 ] as const;
 
 type KeyVariant = 'root' | 'terminal' | 'recursive' | 'complete' | 'partial';
