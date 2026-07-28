@@ -61,6 +61,7 @@ import {
   loadPreferredSources,
   persistPreferredSources,
 } from './preferredSources';
+import {preferredSourceTargets} from './preferencePropagation';
 import {automaticGraphFitScale} from './fitScale';
 import {
   capturePanGestureOrigin,
@@ -135,6 +136,54 @@ function choiceMatchesPreference(choice: SourceChoice, preferred: PreferredSourc
   }
   if (choice.t === 'mob' && preferred.t === 'mob') return choice.mob.id === preferred.mobId;
   return choice.t === 'block' && preferred.t === 'block' && choice.blockKey === preferred.blockKey;
+}
+
+function releaseByproductFulfillments(
+  root: ItemTreeNode | null,
+  removedNode: ItemTreeNode,
+): void {
+  const removedSourceIds = new Set<string>();
+  const removedStack = [removedNode];
+  while (removedStack.length > 0) {
+    const current = removedStack.pop()!;
+    if (!current.source) continue;
+    removedSourceIds.add(current.source.id);
+    for (const child of current.source.inputs) removedStack.push(child);
+  }
+  if (removedSourceIds.size === 0 || !root) return;
+
+  let releasedAmount = 0;
+  const treeStack = [root];
+  while (treeStack.length > 0) {
+    const current = treeStack.pop()!;
+    const fulfillment = current.byproductFulfillment;
+    if (fulfillment) {
+      const retainedAllocations = fulfillment.allocations.filter(allocation => {
+        if (!removedSourceIds.has(allocation.producerSourceId)) return true;
+        releasedAmount += allocation.amount;
+        return false;
+      });
+      const retainedAmount = retainedAllocations.reduce(
+        (sum, allocation) => sum + allocation.amount,
+        0,
+      );
+      if (retainedAmount > 0) {
+        current.byproductFulfillment = {
+          creditedAmount: retainedAmount,
+          allocations: retainedAllocations,
+        };
+      } else {
+        current.byproductFulfillment = undefined;
+      }
+    }
+    for (const child of current.source?.inputs ?? []) treeStack.push(child);
+  }
+  if (releasedAmount > 0) {
+    console.info('Byproduct fulfillment was released because its producing recipe left the tree.', {
+      releasedAmount,
+      removedProducerCount: removedSourceIds.size,
+    });
+  }
 }
 
 /** Dragging the canvas must never start a text selection (web). */
@@ -475,28 +524,17 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
     [data, bump, graphDirection, preferredSourceFor],
   );
 
-  /**
-   * Expand every currently collapsed occurrence of an item with its newly
-   * preferred source. Existing expanded nodes keep their explicit selection.
-   */
+  /** Replace every eligible occurrence with the newly preferred source. */
   const applyPreferredSourceAcrossTree = useCallback(
     (target: ItemTreeNode, choice: SourceChoice) => {
-      const matches = new Set<ItemTreeNode>([target]);
-      const traversal = rootRef.current ? [rootRef.current] : [];
-      while (traversal.length > 0) {
-        const node = traversal.pop()!;
-        if (node.key === target.key && !node.source && !node.loading && !node.cyclic) {
-          matches.add(node);
-        }
-        const children = node.source?.inputs ?? [];
-        for (let index = children.length - 1; index >= 0; index -= 1) {
-          traversal.push(children[index]);
-        }
+      const currentRoot = rootRef.current;
+      const matches = preferredSourceTargets(currentRoot, target);
+      for (const match of matches) {
+        if (match.source) releaseByproductFulfillments(currentRoot, match);
+        match.source = undefined;
       }
       for (const match of matches) {
-        if (!match.cyclic && !match.loading && !match.source) {
-          applyChoiceRef.current?.(match, choice);
-        }
+        applyChoiceRef.current?.(match, choice);
       }
     },
     [],
@@ -899,48 +937,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
 
   const releaseByproductFulfillmentsFromSubtree = useCallback(
     (removedNode: ItemTreeNode) => {
-      const removedSourceIds = new Set<string>();
-      const removedStack = [removedNode];
-      while (removedStack.length > 0) {
-        const current = removedStack.pop()!;
-        if (!current.source) continue;
-        removedSourceIds.add(current.source.id);
-        for (const child of current.source.inputs) removedStack.push(child);
-      }
-      if (removedSourceIds.size === 0 || !rootRef.current) return;
-
-      let releasedAmount = 0;
-      const treeStack = [rootRef.current];
-      while (treeStack.length > 0) {
-        const current = treeStack.pop()!;
-        const fulfillment = current.byproductFulfillment;
-        if (fulfillment) {
-          const retainedAllocations = fulfillment.allocations.filter(allocation => {
-            if (!removedSourceIds.has(allocation.producerSourceId)) return true;
-            releasedAmount += allocation.amount;
-            return false;
-          });
-          const retainedAmount = retainedAllocations.reduce(
-            (sum, allocation) => sum + allocation.amount,
-            0,
-          );
-          if (retainedAmount > 0) {
-            current.byproductFulfillment = {
-              creditedAmount: retainedAmount,
-              allocations: retainedAllocations,
-            };
-          } else {
-            current.byproductFulfillment = undefined;
-          }
-        }
-        for (const child of current.source?.inputs ?? []) treeStack.push(child);
-      }
-      if (releasedAmount > 0) {
-        console.info('Byproduct fulfillment was released because its producing recipe left the tree.', {
-          releasedAmount,
-          removedProducerCount: removedSourceIds.size,
-        });
-      }
+      releaseByproductFulfillments(rootRef.current, removedNode);
     },
     [],
   );
