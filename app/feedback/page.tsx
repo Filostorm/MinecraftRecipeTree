@@ -6,6 +6,7 @@ import styles from './feedback.module.css';
 interface FeedbackReport {
   id: string;
   kind: 'bug' | 'feature';
+  title: string;
   message: string;
   contact: string | null;
   packSlug: string | null;
@@ -143,6 +144,9 @@ export default function FeedbackPage() {
                         {formatDate(report.createdAt)}
                       </time>
                     </div>
+                    <h2 className={styles.reportTitle}>
+                      {report.title || 'Legacy report without a title'}
+                    </h2>
                     <p className={styles.message}>{report.message}</p>
                     <dl className={styles.metadata}>
                       <div>

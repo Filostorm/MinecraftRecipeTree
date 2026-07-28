@@ -8,6 +8,7 @@ import {
 export const FEEDBACK_ROUTE = '/api/feedback';
 
 const MAX_REQUEST_BYTES = 8192;
+const MAX_TITLE_LENGTH = 120;
 const MAX_MESSAGE_LENGTH = 2000;
 const MAX_CONTACT_LENGTH = 254;
 const MAX_CONTEXT_LENGTH = 160;
@@ -23,6 +24,7 @@ type FeedbackKind = 'bug' | 'feature';
 
 interface FeedbackPayload {
   kind?: unknown;
+  title?: unknown;
   message?: unknown;
   contact?: unknown;
   packSlug?: unknown;
@@ -34,6 +36,7 @@ interface FeedbackPayload {
 interface FeedbackReportRecord {
   id: string;
   kind: FeedbackKind;
+  title: string;
   message: string;
   contact: string | null;
   pack_slug: string | null;
@@ -129,7 +132,7 @@ async function listFeedback(
   try {
     const result = await runtime.DB
       .prepare(
-        `SELECT id, kind, message, contact, pack_slug, pack_name, page_url, user_agent, created_at
+        `SELECT id, kind, title, message, contact, pack_slug, pack_name, page_url, user_agent, created_at
          FROM feedback_reports
          ORDER BY created_at DESC
          LIMIT 200`,
@@ -139,6 +142,7 @@ async function listFeedback(
     const reports = (result.results ?? []).map(report => ({
       id: report.id,
       kind: report.kind,
+      title: report.title,
       message: report.message,
       contact: report.contact,
       packSlug: report.pack_slug,
@@ -198,6 +202,7 @@ export async function handleFeedback(
 
   const kind: FeedbackKind | null =
     payload.kind === 'bug' || payload.kind === 'feature' ? payload.kind : null;
+  const title = textField(payload.title, MAX_TITLE_LENGTH);
   const message = textField(payload.message, MAX_MESSAGE_LENGTH);
   const contact = textField(payload.contact, MAX_CONTACT_LENGTH);
   const packSlug = textField(payload.packSlug, MAX_CONTEXT_LENGTH);
@@ -205,6 +210,8 @@ export async function handleFeedback(
   const page = textField(payload.page, MAX_PAGE_LENGTH);
   if (
     !kind ||
+    title === null ||
+    title.length < 3 ||
     message === null ||
     message.length < 10 ||
     contact === null ||
@@ -260,13 +267,14 @@ export async function handleFeedback(
     const result = await db
       .prepare(
         `INSERT INTO feedback_reports
-          (id, kind, message, contact, pack_slug, pack_name, page_url, user_agent,
+          (id, kind, title, message, contact, pack_slug, pack_name, page_url, user_agent,
            fingerprint_hash, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         id,
         kind,
+        title,
         message,
         contact || null,
         packSlug || null,

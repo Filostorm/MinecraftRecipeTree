@@ -14,6 +14,7 @@ import {ItemDetailModal} from './src/components/ItemDetailModal';
 import {InterfaceZoomSlider} from './src/components/InterfaceZoomSlider';
 import {DatasetPicker} from './src/components/DatasetPicker';
 import {DatasetSwitcher} from './src/components/DatasetSwitcher';
+import {FeedbackModal, type FeedbackKind} from './src/components/FeedbackModal';
 import {GraphGuideModal} from './src/components/GraphGuideModal';
 import {ItemsScreen} from './src/components/ItemsScreen';
 import {MobsScreen} from './src/components/MobsScreen';
@@ -233,6 +234,7 @@ function Shell({
   const compactHeader = hasHydrated && width < 720;
   const [showRecipeHistory, setShowRecipeHistory] = useState(false);
   const [showGraphGuide, setShowGraphGuide] = useState(false);
+  const [feedbackKind, setFeedbackKind] = useState<FeedbackKind | null>(null);
   const [showDatasetDetails, setShowDatasetDetails] = useState(false);
   const [interfaceZoom, setInterfaceZoom] = useState(1);
   useEffect(() => {
@@ -406,6 +408,16 @@ function Shell({
         <GraphGuideModal
           visible
           onClose={() => setShowGraphGuide(false)}
+          onOpenFeedback={kind => {
+            setShowGraphGuide(false);
+            setFeedbackKind(kind);
+          }}
+        />
+      )}
+      {feedbackKind && (
+        <FeedbackModal
+          kind={feedbackKind}
+          onClose={() => setFeedbackKind(null)}
           packSlug={data.descriptor.slug}
           packName={data.descriptor.displayName}
         />

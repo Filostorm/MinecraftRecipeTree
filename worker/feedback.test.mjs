@@ -71,6 +71,7 @@ test('feedback inbox returns recent reports without client fingerprints', async 
       {
         id: 'report-1',
         kind: 'bug',
+        title: 'Branch does not expand',
         message: 'A branch does not expand.',
         contact: 'player@example.com',
         pack_slug: 'meatballcraft',
@@ -95,6 +96,7 @@ test('feedback inbox returns recent reports without client fingerprints', async 
       {
         id: 'report-1',
         kind: 'bug',
+        title: 'Branch does not expand',
         message: 'A branch does not expand.',
         contact: 'player@example.com',
         packSlug: 'meatballcraft',
@@ -114,6 +116,7 @@ test('feedback submissions store validated context without a raw client address'
   const response = await handleFeedback(
     request({
       kind: 'bug',
+      title: 'Recipe expansion fails',
       message: 'The selected recipe does not expand.',
       contact: 'player@example.com',
       packSlug: 'multiblock-madness',
@@ -131,8 +134,9 @@ test('feedback submissions store validated context without a raw client address'
   assert.match(DB.calls[0].sql, /SELECT COUNT/);
   assert.match(DB.calls[1].sql, /INSERT INTO feedback_reports/);
   assert.equal(DB.calls[1].values[1], 'bug');
-  assert.equal(DB.calls[1].values[2], 'The selected recipe does not expand.');
-  assert.equal(DB.calls[1].values[8].length, 64);
+  assert.equal(DB.calls[1].values[2], 'Recipe expansion fails');
+  assert.equal(DB.calls[1].values[3], 'The selected recipe does not expand.');
+  assert.equal(DB.calls[1].values[9].length, 64);
   assert.equal(DB.calls[1].values.includes('192.0.2.10'), false);
 });
 
@@ -140,7 +144,12 @@ test('feedback endpoint rejects cross-origin writes before accessing storage', a
   const DB = database();
   const response = await handleFeedback(
     request(
-      {kind: 'feature', message: 'Please add another graph layout.', website: ''},
+      {
+        kind: 'feature',
+        title: 'Another graph layout',
+        message: 'Please add another graph layout.',
+        website: '',
+      },
       {Origin: 'https://example.com'},
     ),
     {DB},
@@ -156,6 +165,7 @@ test('feedback endpoint accepts the canonical origin through the Sites proxy', a
   const response = await handleFeedback(
     request({
       kind: 'feature',
+      title: 'Another graph layout',
       message: 'Please add another graph layout.',
       contact: '',
       packSlug: 'multiblock-madness',
@@ -174,7 +184,11 @@ test('feedback endpoint accepts the canonical origin through the Sites proxy', a
 test('feedback endpoint rejects malformed fields', async () => {
   const DB = database();
   const response = await handleFeedback(
-    request({kind: 'bug', message: 'Too short', website: ''}),
+    request({
+      kind: 'bug',
+      message: 'This report is missing its required title.',
+      website: '',
+    }),
     {DB},
     new URL(`${ORIGIN}${FEEDBACK_ROUTE}`),
   );
@@ -188,6 +202,7 @@ test('feedback endpoint enforces the hashed-client cooldown', async () => {
   const response = await handleFeedback(
     request({
       kind: 'feature',
+      title: 'Another graph layout',
       message: 'Please add another graph layout.',
       contact: '',
       packSlug: '',

@@ -48,6 +48,7 @@ export const feedbackReports = sqliteTable(
   {
     id: text('id').primaryKey(),
     kind: text('kind', {enum: ['bug', 'feature']}).notNull(),
+    title: text('title').notNull().default(''),
     message: text('message').notNull(),
     contact: text('contact'),
     packSlug: text('pack_slug'),
