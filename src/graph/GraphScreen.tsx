@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import {formatDropStat} from '../components/DropList';
 import {ItemIcon, pixelated} from '../components/ItemIcon';
+import {RADIAL_ROOT_ITEM_ICON_SIZE} from '../components/itemIconSizing';
 import {MobSprite} from '../components/MobSprite';
 import {
   PickerGroupProgress,
@@ -1871,7 +1872,11 @@ function CompactItemNodeView({
           styles.nodeByproductPartial,
       ]}>
       {radialRoot && <View pointerEvents="none" style={styles.radialRootDiamond} />}
-      <ItemIcon item={item} itemKey={node.key} size={radialRoot ? 40 : 32} />
+      <ItemIcon
+        item={item}
+        itemKey={node.key}
+        size={radialRoot ? RADIAL_ROOT_ITEM_ICON_SIZE : 32}
+      />
       <View
         style={[
           styles.compactCountBadge,
