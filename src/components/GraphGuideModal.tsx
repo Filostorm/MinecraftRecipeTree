@@ -35,7 +35,7 @@ const visualKey: ReadonlyArray<{
   {
     variant: 'root',
     title: 'Purple diamond',
-    description: 'The starting item in every graph layout.',
+    description: 'The starting item.',
   },
   {
     variant: 'terminal',
@@ -45,7 +45,7 @@ const visualKey: ReadonlyArray<{
   {
     variant: 'recursive',
     title: 'Amber outline',
-    description: 'A recursive input; expansion is stopped to prevent a cycle.',
+    description: 'A recursive input.',
   },
   {
     variant: 'complete',
