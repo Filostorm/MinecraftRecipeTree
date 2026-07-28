@@ -49,7 +49,7 @@ const controls = [
   },
 ] as const;
 
-type KeyVariant = 'root' | 'terminal' | 'prerequisite' | 'recursive' | 'complete' | 'partial';
+type KeyVariant = 'root' | 'terminal' | 'recursive' | 'complete' | 'partial';
 
 const visualKey: ReadonlyArray<{
   variant: KeyVariant;
@@ -59,7 +59,7 @@ const visualKey: ReadonlyArray<{
   {
     variant: 'root',
     title: 'Purple diamond',
-    description: 'The starting item in Radial mode.',
+    description: 'The starting item in every graph layout.',
   },
   {
     variant: 'terminal',
@@ -67,14 +67,9 @@ const visualKey: ReadonlyArray<{
     description: 'No further recipe is available in the current tree direction.',
   },
   {
-    variant: 'prerequisite',
-    title: 'Dashed amber outline',
-    description: 'Required by the recipe but not consumed.',
-  },
-  {
     variant: 'recursive',
     title: 'Amber outline',
-    description: 'Expansion stopped because it would create a recursive cycle.',
+    description: 'A recursive input; expansion is stopped to prevent a cycle.',
   },
   {
     variant: 'complete',
@@ -134,7 +129,6 @@ export function GraphGuideModal({
                         styles.swatch,
                         entry.variant === 'root' && styles.swatchRoot,
                         entry.variant === 'terminal' && styles.swatchTerminal,
-                        entry.variant === 'prerequisite' && styles.swatchPrerequisite,
                         entry.variant === 'recursive' && styles.swatchRecursive,
                         entry.variant === 'complete' && styles.swatchComplete,
                         entry.variant === 'partial' && styles.swatchPartial,
@@ -234,7 +228,6 @@ const styles = StyleSheet.create({
     transform: [{rotate: '45deg'}],
   },
   swatchTerminal: {borderColor: theme.textDim},
-  swatchPrerequisite: {borderColor: theme.warn, borderStyle: 'dashed'},
   swatchRecursive: {borderColor: theme.warn},
   swatchComplete: {borderColor: theme.accentAlt},
   swatchPartial: {borderColor: theme.accentAlt, borderStyle: 'dashed'},

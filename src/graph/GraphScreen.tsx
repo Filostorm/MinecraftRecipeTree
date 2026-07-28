@@ -1979,10 +1979,8 @@ function CompactItemNodeView({
       style={[
         radial ? styles.radialItemNode : styles.compactItemNode,
         branchLabel && styles.compactBranchNode,
-        radialRoot && styles.radialRootNode,
         {left: x, top: y},
         radial && showRadialLabel && styles.radialItemNodeRaised,
-        isRoot && !radialRoot && styles.nodeRoot,
         node.nonConsumed && styles.nodePrerequisite,
         isRecursiveItemNode(node) && styles.nodeCyclic,
         terminal && !isRecursiveItemNode(node) && styles.nodeTerminal,
@@ -1991,12 +1989,19 @@ function CompactItemNodeView({
         byproductCoverage &&
           byproductCoverage.remainingAmount > 0 &&
           styles.nodeByproductPartial,
+        isRoot && !radialRoot && styles.compactRootNode,
+        radialRoot && styles.radialRootNode,
       ]}>
-      {radialRoot && <View pointerEvents="none" style={styles.radialRootDiamond} />}
+      {isRoot && (
+        <View
+          pointerEvents="none"
+          style={radialRoot ? styles.radialRootDiamond : styles.compactRootDiamond}
+        />
+      )}
       <ItemIcon
         item={item}
         itemKey={node.key}
-        size={radialRoot ? RADIAL_ROOT_ITEM_ICON_SIZE : 32}
+        size={radialRoot ? RADIAL_ROOT_ITEM_ICON_SIZE : isRoot ? 24 : 32}
       />
       <View
         style={[
@@ -2082,7 +2087,6 @@ function ItemNodeView({
       style={[
         styles.itemNode,
         {left: x, top: y, width: ITEM_W, height: ITEM_H},
-        isRoot && styles.nodeRoot,
         node.nonConsumed && styles.nodePrerequisite,
         isRecursiveItemNode(node) && styles.nodeCyclic,
         !expandable && !isRecursiveItemNode(node) && styles.nodeTerminal,
@@ -2090,8 +2094,16 @@ function ItemNodeView({
         byproductCoverage &&
           byproductCoverage.remainingAmount > 0 &&
           styles.nodeByproductPartial,
+        isRoot && styles.nodeRoot,
       ]}>
-      <ItemIcon item={item} itemKey={node.key} size={32} />
+      {isRoot ? (
+        <View style={styles.rootItemIconFrame}>
+          <View pointerEvents="none" style={styles.rootItemIconDiamond} />
+          <ItemIcon item={item} itemKey={node.key} size={26} />
+        </View>
+      ) : (
+        <ItemIcon item={item} itemKey={node.key} size={32} />
+      )}
       <View style={{flex: 1, marginLeft: 7}}>
         <Text style={[styles.itemNodeName, noSelect]} numberOfLines={2}>
           {name}
@@ -2176,8 +2188,6 @@ function SourceNodeView({
       style={[
         styles.sourceNode,
         {left: x, top: y, width: w, height: h},
-        isRoot && !radialRoot && styles.nodeRoot,
-        radialRoot && styles.radialExpandedRootNode,
         item.nonConsumed && styles.nodePrerequisite,
         isRecursiveItemNode(item) && styles.nodeCyclic,
         source.inputs.length === 0 && !isRecursiveItemNode(item) && styles.nodeTerminal,
@@ -2186,9 +2196,18 @@ function SourceNodeView({
           byproductCoverage.remainingAmount > 0 &&
           styles.nodeByproductPartial,
         focused && styles.nodeByproductTarget,
+        isRoot && !radialRoot && styles.nodeRoot,
+        radialRoot && styles.radialExpandedRootNode,
       ]}>
       <Pressable onPress={onCollapse} style={styles.sourceHeader}>
-        <ItemIcon item={catalogItem} itemKey={item.key} size={16} />
+        {isRoot ? (
+          <View style={styles.rootSourceIconFrame}>
+            <View pointerEvents="none" style={styles.rootSourceIconDiamond} />
+            <ItemIcon item={catalogItem} itemKey={item.key} size={14} />
+          </View>
+        ) : (
+          <ItemIcon item={catalogItem} itemKey={item.key} size={16} />
+        )}
         <Text style={[styles.sourceHeaderText, noSelect]} numberOfLines={1}>
           {name}
           <Text style={[styles.sourceHeaderAmount, noSelect]}>{amountText}</Text>
@@ -2310,6 +2329,11 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderRadius: COMPACT_ITEM_SIZE / 2,
   },
+  compactRootNode: {
+    borderWidth: 0,
+    borderRadius: 0,
+    backgroundColor: 'transparent',
+  },
   radialRootNode: {
     width: RADIAL_ROOT_SIZE,
     height: RADIAL_ROOT_SIZE,
@@ -2322,6 +2346,16 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 13,
+    borderColor: theme.radialRoot,
+    borderWidth: 3,
+    backgroundColor: theme.radialRootPanel,
+    transform: [{rotate: '45deg'}],
+  },
+  compactRootDiamond: {
+    position: 'absolute',
+    width: 30,
+    height: 30,
+    borderRadius: 8,
     borderColor: theme.radialRoot,
     borderWidth: 3,
     backgroundColor: theme.radialRootPanel,
@@ -2398,14 +2432,18 @@ const styles = StyleSheet.create({
   },
   compactByproductCountText: {color: theme.accentAlt},
   nodeLoading: {opacity: 0.55},
-  nodeRoot: {borderColor: theme.accent, borderWidth: 2},
+  nodeRoot: {
+    borderColor: theme.radialRoot,
+    borderWidth: 2,
+    backgroundColor: theme.radialRootPanel,
+  },
   radialExpandedRootNode: {
     backgroundColor: theme.radialRootPanel,
     borderColor: theme.radialRoot,
     borderWidth: 3,
     borderRadius: 22,
   },
-  nodePrerequisite: {borderColor: theme.warn, borderStyle: 'dashed'},
+  nodePrerequisite: {borderColor: theme.borderLight, borderStyle: 'dashed'},
   nodeCyclic: {borderColor: theme.warn},
   nodeTerminal: {borderColor: theme.textDim, borderWidth: 2},
   nodeByproductComplete: {
@@ -2420,6 +2458,38 @@ const styles = StyleSheet.create({
   nodeByproductTarget: {
     borderColor: theme.accentAlt,
     borderWidth: 3,
+  },
+  rootItemIconFrame: {
+    width: 38,
+    height: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rootItemIconDiamond: {
+    position: 'absolute',
+    width: 31,
+    height: 31,
+    borderRadius: 8,
+    borderColor: theme.radialRoot,
+    borderWidth: 2,
+    backgroundColor: theme.radialRootPanel,
+    transform: [{rotate: '45deg'}],
+  },
+  rootSourceIconFrame: {
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rootSourceIconDiamond: {
+    position: 'absolute',
+    width: 19,
+    height: 19,
+    borderRadius: 5,
+    borderColor: theme.radialRoot,
+    borderWidth: 2,
+    backgroundColor: theme.radialRootPanel,
+    transform: [{rotate: '45deg'}],
   },
   itemNodeName: {color: theme.text, fontSize: 11, lineHeight: 14},
   itemNodeSub: {color: theme.textDim, fontSize: 10, marginTop: 2},
