@@ -2001,7 +2001,7 @@ function CompactItemNodeView({
       <ItemIcon
         item={item}
         itemKey={node.key}
-        size={radialRoot ? RADIAL_ROOT_ITEM_ICON_SIZE : isRoot ? 24 : 32}
+        size={radialRoot ? RADIAL_ROOT_ITEM_ICON_SIZE : 32}
       />
       <View
         style={[
@@ -2097,9 +2097,9 @@ function ItemNodeView({
         isRoot && styles.nodeRoot,
       ]}>
       {isRoot ? (
-        <View style={styles.rootItemIconFrame}>
-          <View pointerEvents="none" style={styles.rootItemIconDiamond} />
-          <ItemIcon item={item} itemKey={node.key} size={26} />
+          <View style={styles.rootItemIconFrame}>
+            <View pointerEvents="none" style={styles.rootItemIconDiamond} />
+            <ItemIcon item={item} itemKey={node.key} size={32} />
         </View>
       ) : (
         <ItemIcon item={item} itemKey={node.key} size={32} />
@@ -2203,7 +2203,7 @@ function SourceNodeView({
         {isRoot ? (
           <View style={styles.rootSourceIconFrame}>
             <View pointerEvents="none" style={styles.rootSourceIconDiamond} />
-            <ItemIcon item={catalogItem} itemKey={item.key} size={14} />
+            <ItemIcon item={catalogItem} itemKey={item.key} size={16} />
           </View>
         ) : (
           <ItemIcon item={catalogItem} itemKey={item.key} size={16} />
