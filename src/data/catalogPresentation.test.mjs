@@ -31,6 +31,29 @@ test('excludes synthetic Immersive Technology multiblock render models from the 
   );
 });
 
+test('excludes Ender IO JEI energy while retaining other energy resources', () => {
+  assert.equal(
+    isItemCatalogEligible(item({
+      k: 'custom_crazypants.enderio.base.integration.jei.energy.energyingredient_4926a629|enderio:energy',
+      id: 'enderio:energy',
+      n: '0 µI',
+      m: 'enderio',
+      t: 'custom_crazypants.enderio.base.integration.jei.energy.energyingredient_4926a629',
+    })),
+    false,
+  );
+  assert.equal(
+    isItemCatalogEligible(item({
+      k: 'custom_requious.compat.jei.ingredient.energy_21ab14a6|energy',
+      id: 'requious:energy',
+      n: 'Energy',
+      m: 'requious',
+      t: 'custom_requious.compat.jei.ingredient.energy_21ab14a6',
+    })),
+    true,
+  );
+});
+
 test('uses concise labels for Multiblock Madness custom ingredient types', () => {
   assert.deepEqual(
     catalogTypePresentation('custom_thaumcraft.api.aspects.aspectlist_0409b2e6'),

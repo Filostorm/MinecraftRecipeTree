@@ -51,43 +51,64 @@ export function DatasetSwitcher({
   const selectedLabel = selected?.displayName ?? (
     status === 'loading' ? 'Loading catalog…' : 'Choose a modpack'
   );
+  const brand = (
+    <View style={[styles.brand, compact && styles.brandCompact]}>
+      <Text style={styles.title}>⛏ Recipe Tree</Text>
+      {loadedAttribution && <DatasetDisclaimer attribution={loadedAttribution} />}
+    </View>
+  );
+  const datasetButton = (
+    <TouchableOpacity
+      style={[
+        styles.compactDatasetButton,
+        compact && styles.compactDatasetButtonExpanded,
+        !canOpen && styles.disabled,
+      ]}
+      disabled={!canOpen}
+      onPress={onOpenPicker}
+      accessibilityRole="button"
+      accessibilityLabel={
+        selected
+          ? `Change modpack. Current pack is ${selected.displayName}`
+          : 'Choose a published modpack'
+      }>
+      <Text style={styles.compactDatasetText} numberOfLines={1}>
+        {selectedLabel}
+      </Text>
+      <Text style={styles.compactDatasetChevron}>⌄</Text>
+    </TouchableOpacity>
+  );
+  const expandButton = compact ? (
+    <TouchableOpacity
+      style={[styles.expandButton, expanded && styles.expandButtonActive]}
+      onPress={() => setExpanded(value => !value)}
+      accessibilityRole="button"
+      accessibilityLabel={expanded ? 'Collapse site header' : 'Expand site header'}
+      accessibilityState={{expanded}}>
+      <Text style={[styles.expandButtonText, expanded && styles.expandButtonTextActive]}>
+        {expanded ? '⌃' : '☰'}
+      </Text>
+    </TouchableOpacity>
+  ) : null;
 
   return (
     <View style={[styles.bar, compact && styles.barCompact]}>
-      <View style={styles.topRow}>
-        <View style={[styles.brand, compact && styles.brandCompact]}>
-          <Text style={styles.title}>⛏ Recipe Tree</Text>
-          {loadedAttribution && <DatasetDisclaimer attribution={loadedAttribution} />}
+      {compact ? (
+        <View style={styles.compactRows}>
+          <View style={styles.compactTitleRow}>{brand}</View>
+          <View style={styles.compactControlRow}>
+            {leadingAction}
+            {datasetButton}
+            {expandButton}
+          </View>
         </View>
-        {leadingAction}
-        <TouchableOpacity
-          style={[styles.compactDatasetButton, !canOpen && styles.disabled]}
-          disabled={!canOpen}
-          onPress={onOpenPicker}
-          accessibilityRole="button"
-          accessibilityLabel={
-            selected
-              ? `Change modpack. Current pack is ${selected.displayName}`
-              : 'Choose a published modpack'
-          }>
-          <Text style={styles.compactDatasetText} numberOfLines={1}>
-            {selectedLabel}
-          </Text>
-          <Text style={styles.compactDatasetChevron}>⌄</Text>
-        </TouchableOpacity>
-        {compact && (
-            <TouchableOpacity
-              style={[styles.expandButton, expanded && styles.expandButtonActive]}
-              onPress={() => setExpanded(value => !value)}
-              accessibilityRole="button"
-              accessibilityLabel={expanded ? 'Collapse site header' : 'Expand site header'}
-              accessibilityState={{expanded}}>
-              <Text style={[styles.expandButtonText, expanded && styles.expandButtonTextActive]}>
-                {expanded ? '⌃' : '☰'}
-              </Text>
-            </TouchableOpacity>
-        )}
-      </View>
+      ) : (
+        <View style={styles.topRow}>
+          {brand}
+          {leadingAction}
+          {datasetButton}
+        </View>
+      )}
 
       {(!compact || expanded) && (
         <View style={styles.expandedContent}>
@@ -113,8 +134,19 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   brand: {flexGrow: 1, flexShrink: 1, minWidth: 140},
-  brandCompact: {minWidth: 96},
+  brandCompact: {minWidth: 0},
   title: {color: theme.text, fontSize: 17, fontWeight: '800'},
+  compactRows: {gap: 7},
+  compactTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 26,
+  },
+  compactControlRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   expandedContent: {gap: 8, paddingTop: 8},
   compactDatasetButton: {
     minWidth: 0,
@@ -129,6 +161,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.borderLight,
     backgroundColor: theme.panelAlt,
+  },
+  compactDatasetButtonExpanded: {
+    flex: 1,
+    maxWidth: '100%',
   },
   compactDatasetText: {
     minWidth: 0,

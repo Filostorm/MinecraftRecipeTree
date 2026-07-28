@@ -3,6 +3,8 @@ import type {CatalogItem} from '../types';
 const CUSTOM_TYPE_PREFIX = 'custom_';
 const EXPORTER_HASH_SUFFIX = /_[0-9a-f]{8}$/i;
 const SYNTHETIC_MULTIBLOCK_TYPE = 'genericmultiblockingredient';
+const SYNTHETIC_ENDER_IO_ENERGY_TYPE =
+  'crazypants.enderio.base.integration.jei.energy.energyingredient';
 
 const CUSTOM_TYPE_LABELS: ReadonlyArray<readonly [needle: string, label: string]> = [
   ['energyingredient', 'Energy'],
@@ -27,7 +29,15 @@ function normalizedCustomType(type: string): string {
  * independently obtainable inventory entries, so they do not belong in the item browser.
  */
 export function isItemCatalogEligible(item: CatalogItem): boolean {
-  return !normalizedCustomType(item.t ?? '').includes(SYNTHETIC_MULTIBLOCK_TYPE);
+  const normalizedType = normalizedCustomType(item.t ?? '');
+  const isSyntheticEnderIoEnergy =
+    item.m === 'enderio' &&
+    item.id === 'enderio:energy' &&
+    normalizedType.includes(SYNTHETIC_ENDER_IO_ENERGY_TYPE);
+  return (
+    !normalizedType.includes(SYNTHETIC_MULTIBLOCK_TYPE) &&
+    !isSyntheticEnderIoEnergy
+  );
 }
 
 export interface CatalogTypePresentation {
