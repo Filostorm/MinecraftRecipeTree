@@ -1615,7 +1615,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
           </Text>
         </TouchableOpacity>
       </View>
-      {graphDirection === 'inputs' && showTreeTotals && (
+      {showGraphControls && graphDirection === 'inputs' && showTreeTotals && (
         <TreeTotalsPanel
           totals={treeTotals}
           useByproducts={useByproducts}
