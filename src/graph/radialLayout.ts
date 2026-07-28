@@ -11,6 +11,8 @@ const RADIAL_DEPTH_GAP = 64;
 const RADIAL_NODE_GAP = 20;
 const RADIAL_TERMINAL_GAP = RADIAL_NODE_GAP;
 const RADIAL_TERMINAL_PLACEMENT_STEP = 12;
+const RADIAL_COLLISION_PLACEMENT_STEP = 12;
+const MAX_COLLISION_PLACEMENT_ATTEMPTS = 100_000;
 const MAX_STAGGERED_ROWS = 8;
 
 export const RADIAL_ITEM_SIZE = 52;
@@ -225,7 +227,7 @@ function flattenRadialTree(
   return units;
 }
 
-function calculateLeafSpans(units: RadialUnit[]): number {
+function calculateAngularSectors(units: RadialUnit[]): void {
   for (let index = units.length - 1; index >= 0; index -= 1) {
     const unit = units[index];
     unit.leafCount =
@@ -239,24 +241,34 @@ function calculateLeafSpans(units: RadialUnit[]): number {
   }
 
   units[0].leafStart = 0;
-  units[0].leafEnd = totalLeaves;
+  units[0].leafEnd = FULL_TURN;
   const spanStack = [0];
   while (spanStack.length > 0) {
     const index = spanStack.pop()!;
     const unit = units[index];
+    const angularSpan = unit.leafEnd - unit.leafStart;
+    let totalAngularWeight = 0;
+    for (const childIndex of unit.children) {
+      totalAngularWeight += Math.sqrt(units[childIndex].leafCount);
+    }
+    if (unit.children.length > 0 && !(totalAngularWeight > 0)) {
+      throw new Error(`Radial graph branch ${index} has invalid angular weight.`);
+    }
+
     let cursor = unit.leafStart;
     for (const childIndex of unit.children) {
       const child = units[childIndex];
+      const childAngularSpan =
+        angularSpan * (Math.sqrt(child.leafCount) / totalAngularWeight);
       child.leafStart = cursor;
-      child.leafEnd = cursor + child.leafCount;
-      child.angle = FULL_TURN * ((child.leafStart + child.leafEnd) / 2 / totalLeaves);
+      child.leafEnd = cursor + childAngularSpan;
+      child.angle = (child.leafStart + child.leafEnd) / 2;
       cursor = child.leafEnd;
     }
     for (let offset = unit.children.length - 1; offset >= 0; offset -= 1) {
       spanStack.push(unit.children[offset]);
     }
   }
-  return totalLeaves;
 }
 
 interface SpatialEntry {
@@ -266,69 +278,78 @@ interface SpatialEntry {
   cells: string[];
 }
 
-function compactTerminalNodes(units: RadialUnit[]): void {
-  const terminalIndices = units
-    .map((unit, index) => ({unit, index}))
-    .filter(({unit}) => unit.terminal && unit.children.length === 0 && unit.parentIndex !== null)
-    .map(({index}) => index);
-  if (terminalIndices.length === 0) return;
+class RadialSpatialIndex {
+  private readonly units: RadialUnit[];
+  private readonly cellSize: number;
+  private readonly cells = new Map<string, Set<number>>();
+  private readonly entries = new Map<number, SpatialEntry>();
 
-  let maximumCollisionDiameter = 0;
-  for (const unit of units) {
-    maximumCollisionDiameter = Math.max(maximumCollisionDiameter, unit.collisionDiameter);
+  constructor(units: RadialUnit[]) {
+    this.units = units;
+    let maximumCollisionDiameter = 0;
+    for (const unit of units) {
+      maximumCollisionDiameter = Math.max(maximumCollisionDiameter, unit.collisionDiameter);
+    }
+    this.cellSize = Math.max(96, maximumCollisionDiameter + RADIAL_NODE_GAP);
   }
-  const cellSize = Math.max(96, maximumCollisionDiameter + RADIAL_NODE_GAP);
-  const cells = new Map<string, Set<number>>();
-  const entries = new Map<number, SpatialEntry>();
 
-  const cellKeysFor = (x: number, y: number, radius: number): string[] => {
+  private cellKeysFor(x: number, y: number, radius: number): string[] {
     const keys: string[] = [];
-    const minColumn = Math.floor((x - radius) / cellSize);
-    const maxColumn = Math.floor((x + radius) / cellSize);
-    const minRow = Math.floor((y - radius) / cellSize);
-    const maxRow = Math.floor((y + radius) / cellSize);
+    const minColumn = Math.floor((x - radius) / this.cellSize);
+    const maxColumn = Math.floor((x + radius) / this.cellSize);
+    const minRow = Math.floor((y - radius) / this.cellSize);
+    const maxRow = Math.floor((y + radius) / this.cellSize);
     for (let column = minColumn; column <= maxColumn; column += 1) {
       for (let row = minRow; row <= maxRow; row += 1) {
         keys.push(`${column}:${row}`);
       }
     }
     return keys;
-  };
+  }
 
-  const insert = (index: number, x: number, y: number): void => {
-    const radius = units[index].collisionDiameter / 2;
-    const entry = {x, y, radius, cells: cellKeysFor(x, y, radius + RADIAL_NODE_GAP)};
-    entries.set(index, entry);
+  insert(index: number, x: number, y: number): void {
+    if (this.entries.has(index)) {
+      throw new Error(`Radial spatial index cannot insert duplicate node ${index}.`);
+    }
+    const radius = this.units[index].collisionDiameter / 2;
+    const entry = {
+      x,
+      y,
+      radius,
+      cells: this.cellKeysFor(x, y, radius + RADIAL_NODE_GAP),
+    };
+    this.entries.set(index, entry);
     for (const key of entry.cells) {
-      const bucket = cells.get(key) ?? new Set<number>();
+      const bucket = this.cells.get(key) ?? new Set<number>();
       bucket.add(index);
-      cells.set(key, bucket);
+      this.cells.set(key, bucket);
     }
-  };
+  }
 
-  const remove = (index: number): void => {
-    const entry = entries.get(index);
+  remove(index: number): void {
+    const entry = this.entries.get(index);
     if (!entry) {
-      throw new Error(`Radial terminal compaction could not remove missing node ${index}.`);
+      throw new Error(`Radial spatial index cannot remove missing node ${index}.`);
     }
     for (const key of entry.cells) {
-      const bucket = cells.get(key);
+      const bucket = this.cells.get(key);
       bucket?.delete(index);
-      if (bucket?.size === 0) cells.delete(key);
+      if (bucket?.size === 0) this.cells.delete(key);
     }
-    entries.delete(index);
-  };
+    this.entries.delete(index);
+  }
 
-  const collides = (index: number, x: number, y: number): boolean => {
-    const radius = units[index].collisionDiameter / 2;
+  collides(index: number, x: number, y: number): boolean {
+    const radius = this.units[index].collisionDiameter / 2;
     const candidates = new Set<number>();
-    for (const key of cellKeysFor(x, y, radius + RADIAL_NODE_GAP)) {
-      for (const candidate of cells.get(key) ?? []) candidates.add(candidate);
+    for (const key of this.cellKeysFor(x, y, radius + RADIAL_NODE_GAP)) {
+      for (const candidate of this.cells.get(key) ?? []) candidates.add(candidate);
     }
     for (const candidate of candidates) {
-      const entry = entries.get(candidate);
+      if (candidate === index) continue;
+      const entry = this.entries.get(candidate);
       if (!entry) {
-        throw new Error(`Radial terminal compaction lost spatial node ${candidate}.`);
+        throw new Error(`Radial spatial index lost node ${candidate}.`);
       }
       const minimumDistance = radius + entry.radius + RADIAL_NODE_GAP;
       if ((x - entry.x) ** 2 + (y - entry.y) ** 2 < minimumDistance ** 2 - 0.001) {
@@ -336,9 +357,91 @@ function compactTerminalNodes(units: RadialUnit[]): void {
       }
     }
     return false;
-  };
+  }
+}
 
-  units.forEach((unit, index) => insert(index, unit.centerX, unit.centerY));
+/**
+ * Place each sibling group on its own annulus instead of forcing an entire
+ * dependency generation onto the radius required by its densest branch.
+ * A spatial index then moves only colliding nodes farther outward.
+ */
+function placeBranchLocalRings(units: RadialUnit[], levels: number[][]): void {
+  const spatialIndex = new RadialSpatialIndex(units);
+  spatialIndex.insert(0, units[0].centerX, units[0].centerY);
+
+  for (let depth = 1; depth < levels.length; depth += 1) {
+    const indices = levels[depth];
+    if (!indices || indices.length === 0) {
+      throw new Error(`Radial graph layout is missing tree depth ${depth}.`);
+    }
+
+    const plannedRadius = new Map<number, number>();
+    const parentIndices = [...new Set(indices.map(index => units[index].parentIndex))];
+    for (const parentIndex of parentIndices) {
+      if (parentIndex === null) {
+        throw new Error(`Radial graph depth ${depth} contains a parentless node.`);
+      }
+      const parent = units[parentIndex];
+      const childIndices = parent.children;
+      const angles = childIndices.map(index => units[index].angle);
+      const diameters = childIndices.map(index => units[index].collisionDiameter);
+      let maximumDiameter = 0;
+      for (const diameter of diameters) maximumDiameter = Math.max(maximumDiameter, diameter);
+      const parentRadius = Math.hypot(parent.centerX, parent.centerY);
+      const minimumRadius =
+        parentRadius +
+        parent.collisionDiameter / 2 +
+        maximumDiameter / 2 +
+        RADIAL_DEPTH_GAP;
+      const rowPlan = planStaggeredRadialRows(angles, diameters, minimumRadius);
+      childIndices.forEach((index, offset) => {
+        plannedRadius.set(index, rowPlan.radiusByIndex[offset]);
+      });
+    }
+
+    const placementOrder = [...indices].sort(
+      (left, right) => units[left].angle - units[right].angle || left - right,
+    );
+    for (const index of placementOrder) {
+      const unit = units[index];
+      const displayAngle = unit.angle - Math.PI / 2;
+      let radius = plannedRadius.get(index);
+      if (radius === undefined || !Number.isFinite(radius)) {
+        throw new Error(`Radial graph node ${index} is missing a planned branch radius.`);
+      }
+
+      let attempts = 0;
+      while (true) {
+        const centerX = Math.cos(displayAngle) * radius;
+        const centerY = Math.sin(displayAngle) * radius;
+        if (!spatialIndex.collides(index, centerX, centerY)) {
+          unit.centerX = centerX;
+          unit.centerY = centerY;
+          spatialIndex.insert(index, centerX, centerY);
+          break;
+        }
+        radius += RADIAL_COLLISION_PLACEMENT_STEP;
+        attempts += 1;
+        if (attempts > MAX_COLLISION_PLACEMENT_ATTEMPTS) {
+          throw new Error(
+            `Radial graph node ${index} could not find collision-free branch placement.`,
+          );
+        }
+      }
+    }
+  }
+}
+
+function compactTerminalNodes(units: RadialUnit[]): void {
+  const terminalIndices = units
+    .map((unit, index) => ({unit, index}))
+    .filter(({unit}) => unit.terminal && unit.children.length === 0 && unit.parentIndex !== null)
+    .map(({index}) => index);
+  if (terminalIndices.length === 0) return;
+
+  const spatialIndex = new RadialSpatialIndex(units);
+
+  units.forEach((unit, index) => spatialIndex.insert(index, unit.centerX, unit.centerY));
 
   for (const index of terminalIndices) {
     const unit = units[index];
@@ -352,7 +455,7 @@ function compactTerminalNodes(units: RadialUnit[]): void {
       throw new Error('Radial terminal output must have a distinct finite parent distance.');
     }
 
-    remove(index);
+    spatialIndex.remove(index);
     const ux = dx / originalDistance;
     const uy = dy / originalDistance;
     const minimumDistance =
@@ -368,7 +471,7 @@ function compactTerminalNodes(units: RadialUnit[]): void {
     ) {
       const x = parent.centerX + ux * distance;
       const y = parent.centerY + uy * distance;
-      if (!collides(index, x, y)) {
+      if (!spatialIndex.collides(index, x, y)) {
         chosenDistance = distance;
         break;
       }
@@ -376,7 +479,7 @@ function compactTerminalNodes(units: RadialUnit[]): void {
 
     unit.centerX = parent.centerX + ux * chosenDistance;
     unit.centerY = parent.centerY + uy * chosenDistance;
-    insert(index, unit.centerX, unit.centerY);
+    spatialIndex.insert(index, unit.centerX, unit.centerY);
   }
 }
 
@@ -418,9 +521,11 @@ function addRadialEdge(edges: EdgeRect[], parent: RadialUnit, child: RadialUnit)
  * Deterministic radial tree layout.
  *
  * The selected output is centered, dependency subtrees receive contiguous
- * angular sectors, and every depth expands outward through one or more
- * automatically staggered concentric rows. Node views themselves are never
- * rotated, so item icons and recipe previews remain upright.
+ * angular sectors with sublinear leaf weighting so sparse deep branches retain
+ * usable interior clearance. Sibling groups expand through branch-local
+ * staggered annuli, and a global spatial index resolves cross-branch collisions
+ * without making sparse branches inherit the densest branch's radius. Node
+ * views themselves are never rotated, so item icons and recipe previews remain upright.
  */
 export function layoutRadialTree(
   root: ItemTreeNode,
@@ -428,36 +533,14 @@ export function layoutRadialTree(
   isTerminal: (item: ItemTreeNode) => boolean = () => false,
 ): GraphLayout {
   const units = flattenRadialTree(root, compact, isTerminal);
-  calculateLeafSpans(units);
+  calculateAngularSectors(units);
 
   const levels: number[][] = [];
   units.forEach((unit, index) => {
     (levels[unit.depth] ??= []).push(index);
   });
 
-  let previousOuterRadius = units[0].collisionDiameter / 2;
-  for (let depth = 1; depth < levels.length; depth += 1) {
-    const indices = levels[depth];
-    if (!indices || indices.length === 0) {
-      throw new Error(`Radial graph layout is missing tree depth ${depth}.`);
-    }
-    const angles = indices.map(index => units[index].angle);
-    const diameters = indices.map(index => units[index].collisionDiameter);
-    let maximumDiameter = 0;
-    for (const diameter of diameters) maximumDiameter = Math.max(maximumDiameter, diameter);
-    const minimumRadius =
-      previousOuterRadius + maximumDiameter / 2 + RADIAL_DEPTH_GAP;
-    const rowPlan = planStaggeredRadialRows(angles, diameters, minimumRadius);
-
-    indices.forEach((index, offset) => {
-      const unit = units[index];
-      const displayAngle = unit.angle - Math.PI / 2;
-      const radius = rowPlan.radiusByIndex[offset];
-      unit.centerX = Math.cos(displayAngle) * radius;
-      unit.centerY = Math.sin(displayAngle) * radius;
-    });
-    previousOuterRadius = rowPlan.outerRadius;
-  }
+  placeBranchLocalRings(units, levels);
 
   compactTerminalNodes(units);
 

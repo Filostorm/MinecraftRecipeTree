@@ -137,25 +137,34 @@ test('gives the compact radial root a larger collision-safe footprint than its i
   );
 });
 
-test('preserves hierarchy while dependency generations move outward', () => {
+test('preserves hierarchy while each dependency moves outward from its parent', () => {
   const root = sourceNode('root', [
     sourceNode('left', [item('left-a'), item('left-b')]),
     sourceNode('middle', [item('middle-a'), item('middle-b'), item('middle-c')]),
     sourceNode('right', [sourceNode('right-deep', [item('right-leaf')])]),
   ]);
   const graph = layoutRadialTree(root);
-  const radiiByDepth = new Map();
-  graph.nodes.forEach(node => {
-    const radius = Math.hypot(node.x + node.w / 2, node.y + node.h / 2);
-    const radii = radiiByDepth.get(node.depth) ?? [];
-    radii.push(radius);
-    radiiByDepth.set(node.depth, radii);
-  });
+  const radiusById = new Map(
+    graph.nodes.map(node => {
+      const center = nodeCenter(node);
+      return [node.id, Math.hypot(center.x, center.y)];
+    }),
+  );
+  const dependencyEdges = [
+    ['root.source', 'left.source'],
+    ['root.source', 'middle.source'],
+    ['root.source', 'right.source'],
+    ['left.source', 'left-a'],
+    ['left.source', 'left-b'],
+    ['middle.source', 'middle-a'],
+    ['middle.source', 'middle-b'],
+    ['middle.source', 'middle-c'],
+    ['right.source', 'right-deep.source'],
+    ['right-deep.source', 'right-leaf'],
+  ];
 
-  for (let depth = 1; depth < radiiByDepth.size; depth += 1) {
-    assert.ok(
-      Math.min(...radiiByDepth.get(depth)) > Math.max(...radiiByDepth.get(depth - 1)),
-    );
+  for (const [parentId, childId] of dependencyEdges) {
+    assert.ok(radiusById.get(childId) > radiusById.get(parentId));
   }
   assert.equal(graph.edges.length, graph.nodes.length - 1);
   assert.ok(
@@ -163,6 +172,33 @@ test('preserves hierarchy while dependency generations move outward', () => {
       [edge.x, edge.y, edge.w, edge.h, edge.angle].every(Number.isFinite),
     ),
   );
+  assertNoNodeOverlaps(graph);
+});
+
+test('keeps a sparse branch near the center when another branch needs a dense annulus', () => {
+  const denseInputs = Array.from({length: 112}, (_, index) => item(`dense-${index}`));
+  const root = sourceNode('root', [
+    sourceNode('dense-branch', denseInputs),
+    sourceNode('sparse-branch', [
+      sourceNode('sparse-middle', [
+        sourceNode('sparse-inner', [item('sparse-leaf')]),
+      ]),
+    ]),
+  ]);
+  const graph = layoutRadialTree(root);
+  const sparseMiddleRadius = distanceBetween(graph, 'root.source', 'sparse-middle.source');
+  const denseRadii = denseInputs.map(input =>
+    distanceBetween(graph, 'root.source', input.id),
+  );
+
+  assert.ok(sparseMiddleRadius < Math.max(...denseRadii));
+  assert.ok(
+    distanceBetween(graph, 'sparse-branch.source', 'sparse-middle.source') < 320,
+  );
+  assert.ok(
+    distanceBetween(graph, 'sparse-middle.source', 'sparse-inner.source') < 320,
+  );
+  assertNoNodeOverlaps(graph);
 });
 
 test('pulls terminal outputs toward their parent without moving expandable branches', () => {
