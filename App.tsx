@@ -337,12 +337,12 @@ function Shell({
     <View style={styles.shell}>
       {renderControls(data.manifest, headerDetails, historyAction)}
       <View style={styles.workspaceViewport}>
-        <View style={[styles.workspace, scaledWorkspaceStyle]}>
+        <View style={styles.workspace}>
           {/* All tabs stay mounted so graph expansion state survives tab switches. */}
           <View style={[styles.body, tab !== 'items' && styles.hidden]}>
-            <ItemsScreen />
+            <ItemsScreen interfaceZoom={interfaceZoom} />
           </View>
-          <View style={[styles.body, tab !== 'graph' && styles.hidden]}>
+          <View style={[styles.body, scaledWorkspaceStyle, tab !== 'graph' && styles.hidden]}>
             {data.indexStatus === 'ready' ? (
               <GraphScreen interfaceZoom={interfaceZoom} />
             ) : (
@@ -369,7 +369,7 @@ function Shell({
             )}
           </View>
           {data.capabilities.mobs && (
-            <View style={[styles.body, tab !== 'mobs' && styles.hidden]}>
+            <View style={[styles.body, scaledWorkspaceStyle, tab !== 'mobs' && styles.hidden]}>
               <MobsScreen />
             </View>
           )}

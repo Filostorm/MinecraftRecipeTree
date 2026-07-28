@@ -256,7 +256,7 @@ const styles = StyleSheet.create({
     flex: 1,
     color: theme.text,
     paddingVertical: 8,
-    fontSize: 14,
+    fontSize: 16,
     outlineWidth: 0,
   },
   clear: {color: theme.textDim, fontSize: 14, padding: 4},
@@ -321,7 +321,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingHorizontal: 10,
   },
-  selectorInput: {flex: 1, color: theme.text, fontSize: 14, paddingVertical: 8, outlineWidth: 0},
+  selectorInput: {flex: 1, color: theme.text, fontSize: 16, paddingVertical: 8, outlineWidth: 0},
   resultCount: {color: theme.textDim, fontSize: 10, minHeight: 26, paddingHorizontal: 2, paddingTop: 7},
   modList: {flex: 1, minHeight: 0},
   modOption: {

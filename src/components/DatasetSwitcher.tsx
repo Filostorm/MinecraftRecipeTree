@@ -57,15 +57,6 @@ export function DatasetSwitcher({
       <View style={styles.topRow}>
         <View style={[styles.brand, compact && styles.brandCompact]}>
           <Text style={styles.title}>⛏ Recipe Tree</Text>
-          {!compact && (
-            <Text style={styles.catalogSummary}>
-              {datasets.length > 0
-                ? `${datasets.length} published ${datasets.length === 1 ? 'pack' : 'packs'}`
-                : status === 'loading'
-                  ? 'Loading published packs'
-                  : 'Published pack catalog unavailable'}
-            </Text>
-          )}
           {loadedAttribution && <DatasetDisclaimer attribution={loadedAttribution} />}
         </View>
         {leadingAction}
@@ -101,15 +92,6 @@ export function DatasetSwitcher({
       {(!compact || expanded) && (
         <View style={styles.expandedContent}>
           {details}
-          {compact && (
-            <Text style={styles.catalogSummary}>
-              {datasets.length > 0
-                ? `${datasets.length} published ${datasets.length === 1 ? 'pack' : 'packs'}`
-                : status === 'loading'
-                  ? 'Loading published packs'
-                  : 'Published pack catalog unavailable'}
-            </Text>
-          )}
         </View>
       )}
     </View>
@@ -133,7 +115,6 @@ const styles = StyleSheet.create({
   brand: {flexGrow: 1, flexShrink: 1, minWidth: 140},
   brandCompact: {minWidth: 96},
   title: {color: theme.text, fontSize: 17, fontWeight: '800'},
-  catalogSummary: {color: theme.textDim, fontSize: 10, marginTop: 2},
   expandedContent: {gap: 8, paddingTop: 8},
   compactDatasetButton: {
     minWidth: 0,
