@@ -36,6 +36,7 @@ import {DropList, DropRow, formatDropStat} from './DropList';
 import {ItemIcon} from './ItemIcon';
 import {MobSprite} from './MobSprite';
 import {ItemChip, RecipeCard} from './RecipeCard';
+import {VisibilityOffIcon} from './VisibilityOffIcon';
 
 const PAGE = 15;
 const MAX_DEFAULT_FILTER_SCAN = 400;
@@ -595,14 +596,9 @@ function RefsList({
               accessibilityState={{expanded: !collapsed}}
               style={[styles.categoryHeader, collapsed && styles.categoryHeaderCollapsed]}
               onPress={() => toggleCategory(category.id)}>
-              <Text
-                accessibilityElementsHidden
-                style={[
-                  styles.categoryVisibilityIcon,
-                  collapsed && styles.categoryVisibilityIconHidden,
-                ]}>
-                👁
-              </Text>
+              <View accessibilityElementsHidden style={styles.categoryVisibilityIcon}>
+                <VisibilityOffIcon size={14} />
+              </View>
               <Text style={styles.categoryTitle} numberOfLines={1}>
                 {category.title}
               </Text>
@@ -755,8 +751,7 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   categoryHeaderCollapsed: {borderColor: theme.border},
-  categoryVisibilityIcon: {fontSize: 13, width: 18, opacity: 1},
-  categoryVisibilityIconHidden: {opacity: 0.35},
+  categoryVisibilityIcon: {width: 18},
   categoryTitle: {color: theme.text, fontSize: 12, fontWeight: '700', flex: 1},
   categoryCount: {color: theme.textDim, fontSize: 9},
   categoryRecipes: {paddingTop: 9},

@@ -16,6 +16,7 @@ import type {GraphDirection} from '../graph/direction';
 import {pixelated} from './ItemIcon';
 import {ItemChip} from './RecipeCard';
 import {RecipePreviewImage} from './RecipePreviewImage';
+import {VisibilityOffIcon} from './VisibilityOffIcon';
 import {groupPickerOptions} from './pickerGroups';
 
 export interface PickerOption {
@@ -222,7 +223,9 @@ export function PickerModal({
                     accessibilityLabel={`${group.label}, ${group.entries.length} option${group.entries.length === 1 ? '' : 's'}`}
                     style={styles.groupHeader}
                     onPress={() => toggleGroup(group.key)}>
-                    <Text style={styles.groupVisibilityIcon}>👁</Text>
+                    <View accessibilityElementsHidden style={styles.groupVisibilityIcon}>
+                      <VisibilityOffIcon size={14} />
+                    </View>
                     <Text style={styles.groupTitle}>{group.label}</Text>
                     <Text style={styles.groupCount}>
                       {progress ? `${progress.loaded}/${progress.total}` : group.entries.length}
@@ -449,7 +452,7 @@ const styles = StyleSheet.create({
     gap: 7,
     paddingHorizontal: 10,
   },
-  groupVisibilityIcon: {fontSize: 12, width: 18},
+  groupVisibilityIcon: {width: 18},
   groupTitle: {color: theme.text, fontSize: 12, fontWeight: '700', flex: 1},
   groupCount: {
     color: theme.textDim,
