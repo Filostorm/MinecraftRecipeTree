@@ -18,6 +18,7 @@ import {
   isDefaultDisabledRecipeCategory,
 } from '../data/recipeCategories';
 import {
+  keepAtLeastOneRecipeCategoryExpanded,
   loadCollapsedRecipeCategories,
   persistCollapsedRecipeCategories,
   toggleCollapsedRecipeCategory,
@@ -334,6 +335,15 @@ function RefsList({
       ? [...visible].sort((a, b) => a.firstIndex - b.firstIndex)
       : visible;
   }, [visibleCategoryGroups, categoryFilter, sortMode]);
+  const sectionCategoryIds = useMemo(
+    () => sectionGroups.map(group => group.category!.id),
+    [sectionGroups],
+  );
+  const expandedSectionCategoryCount = sectionCategoryIds.reduce(
+    (count, categoryId) =>
+      count + (collapsedCategoryIds.has(categoryId) ? 0 : 1),
+    0,
+  );
   const refsToLoad = useMemo(
     () =>
       filteredRefs.slice(
@@ -393,13 +403,32 @@ function RefsList({
     setScanLimit(PAGE);
   }, [categoryFilter, showAutomatedShaped, showFluidTransfers, sortMode, collapsedCategoryIds]);
 
-  const toggleCategory = useCallback((categoryId: string) => {
+  useEffect(() => {
     setCollapsedCategoryIds(current => {
-      const next = toggleCollapsedRecipeCategory(current, categoryId);
-      persistCollapsedRecipeCategories(next);
-      return next;
+      const normalized = keepAtLeastOneRecipeCategoryExpanded(
+        current,
+        sectionCategoryIds,
+      );
+      if (normalized === current) return current;
+      persistCollapsedRecipeCategories(normalized);
+      return new Set(normalized);
     });
-  }, []);
+  }, [sectionCategoryIds]);
+
+  const toggleCategory = useCallback(
+    (categoryId: string) => {
+      setCollapsedCategoryIds(current => {
+        const toggled = toggleCollapsedRecipeCategory(current, categoryId);
+        const normalized = keepAtLeastOneRecipeCategoryExpanded(
+          toggled,
+          sectionCategoryIds,
+        );
+        persistCollapsedRecipeCategories(normalized);
+        return new Set(normalized);
+      });
+    },
+    [sectionCategoryIds],
+  );
 
   useEffect(() => {
     if (
@@ -587,6 +616,7 @@ function RefsList({
       {sectionGroups.map(group => {
         const category = group.category!;
         const collapsed = collapsedCategoryIds.has(category.id);
+        const isOnlyExpandedCategory = !collapsed && expandedSectionCategoryCount === 1;
         const categoryRefs = shownByCategory.get(group.catIdx) ?? [];
         return (
           <View
@@ -598,13 +628,17 @@ function RefsList({
             <TouchableOpacity
               accessibilityRole="button"
               accessibilityLabel={`${collapsed ? 'Expand' : 'Collapse'} ${category.title} recipes`}
-              accessibilityState={{expanded: !collapsed}}
+              accessibilityState={{
+                expanded: !collapsed,
+                disabled: isOnlyExpandedCategory,
+              }}
               style={[
                 styles.categoryHeader,
                 collapsed
                   ? styles.categoryHeaderCollapsed
                   : styles.categoryHeaderExpanded,
               ]}
+              disabled={isOnlyExpandedCategory}
               onPress={() => toggleCategory(category.id)}>
               <View accessibilityElementsHidden style={styles.categoryVisibilityIcon}>
                 <VisibilityIcon visible={!collapsed} size={14} />

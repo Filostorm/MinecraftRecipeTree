@@ -84,3 +84,19 @@ export function toggleCollapsedRecipeCategory(
   else next.add(categoryId);
   return next;
 }
+
+export function keepAtLeastOneRecipeCategoryExpanded(
+  collapsed: ReadonlySet<string>,
+  availableCategoryIds: readonly string[],
+): ReadonlySet<string> {
+  const firstAvailable = availableCategoryIds[0];
+  if (
+    firstAvailable === undefined ||
+    availableCategoryIds.some(categoryId => !collapsed.has(categoryId))
+  ) {
+    return collapsed;
+  }
+  const next = new Set(collapsed);
+  next.delete(firstAvailable);
+  return next;
+}

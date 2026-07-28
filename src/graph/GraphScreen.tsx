@@ -32,6 +32,7 @@ import {
 import {displayIngredientName} from '../data/ingredientTags';
 import {isDefaultDisabledRecipeCategory} from '../data/recipeCategories';
 import {
+  keepAtLeastOneRecipeCategoryExpanded,
   loadCollapsedRecipeCategories,
   persistCollapsedRecipeCategories,
   toggleCollapsedRecipeCategory,
@@ -895,12 +896,16 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
   );
 
   const togglePickerGroup = useCallback(
-    (groupKey: string) => {
+    (groupKey: string, availableGroupKeys: readonly string[]) => {
       setPicker(current => {
         if (!current) return current;
-        const nextCollapsed = toggleCollapsedRecipeCategory(
+        const toggled = toggleCollapsedRecipeCategory(
           current.collapsedGroupKeys,
           groupKey,
+        );
+        const nextCollapsed = keepAtLeastOneRecipeCategoryExpanded(
+          toggled,
+          availableGroupKeys,
         );
         if (data.categories.some(category => category.id === groupKey)) {
           const categoryIds = new Set(data.categories.map(category => category.id));
@@ -908,7 +913,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
             new Set([...nextCollapsed].filter(id => categoryIds.has(id))),
           );
         }
-        return {...current, collapsedGroupKeys: nextCollapsed};
+        return {...current, collapsedGroupKeys: new Set(nextCollapsed)};
       });
     },
     [data.categories],
