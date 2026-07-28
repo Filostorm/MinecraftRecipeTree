@@ -36,7 +36,10 @@ function chunkTypeBytes(type: string): Uint8Array {
   ]);
 }
 
-function pngChunk(type: string, data = new Uint8Array()): Uint8Array {
+function pngChunk(
+  type: string,
+  data: Uint8Array<ArrayBufferLike> = new Uint8Array(),
+): Uint8Array<ArrayBuffer> {
   const typeBytes = chunkTypeBytes(type);
   const output = new Uint8Array(data.length + 12);
   writeUint32(output, 0, data.length);
@@ -53,7 +56,7 @@ function pngChunk(type: string, data = new Uint8Array()): Uint8Array {
 export class PngRgbaRowEncoder {
   readonly width: number;
   readonly height: number;
-  private readonly parts: Uint8Array[];
+  private readonly parts: Uint8Array<ArrayBuffer>[];
   private readonly compressor: Zlib;
   private rows = 0;
   private compressionFinished = false;

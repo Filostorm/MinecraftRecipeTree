@@ -73,7 +73,11 @@ import {
 import type {GraphTransform, PanGestureOrigin} from './panGesture';
 import {recordRecipeHistory} from './recipeHistory';
 import {planRecipePickerChoices} from './recipePickerPlan';
-import {recipeChildrenForDirection, usageGraphStart} from './direction';
+import {
+  recipeChildrenForDirection,
+  usageGraphStart,
+  type GraphDirection,
+} from './direction';
 import {isRecursiveItemNode, makeRoot} from './model';
 import type {ItemTreeNode, SourceTreeNode} from './model';
 import {
