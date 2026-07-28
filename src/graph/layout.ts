@@ -66,10 +66,18 @@ export function sourceNodeSize(source: SourceTreeNode): {w: number; h: number} {
   return {w: 210, h: SOURCE_HEADER + 44};
 }
 
+function treeNodeSize(node: ItemTreeNode, compact: boolean): {w: number; h: number} {
+  if (compact) {
+    return {w: COMPACT_ITEM_SIZE, h: COMPACT_ITEM_SIZE};
+  }
+  return node.source ? sourceNodeSize(node.source) : {w: ITEM_W, h: ITEM_H};
+}
+
 /**
  * Tidy top-down tree layout. Expanded items are drawn as a single source node in
- * their item's place; collapsed items are small item nodes. Siblings stack
- * horizontally, parents center over their subtree, edges run child-top -> parent-bottom.
+ * their item's place; collapsed items are small item nodes. Descendant bands
+ * remain disjoint, while immediate inputs anchor into a compact parent-centered
+ * row whenever those bands allow it. Edges run child-top -> parent-bottom.
  */
 export function layoutTree(root: ItemTreeNode, compact = false): GraphLayout {
   const nodes: LaidNode[] = [];
@@ -98,42 +106,216 @@ export function layoutTree(root: ItemTreeNode, compact = false): GraphLayout {
     rowTop[d] = rowTop[d - 1] + rowH[d - 1] + LEVEL_GAP;
   }
 
-  // Pass 2: subtree widths.
-  const wMemo = new Map<string, number>();
-  const widthStack: Array<{node: ItemTreeNode; visited: boolean}> = [
-    {node: root, visited: false},
-  ];
-  while (widthStack.length > 0) {
-    const frame = widthStack.pop()!;
-    if (!frame.visited && frame.node.source?.inputs.length) {
-      widthStack.push({node: frame.node, visited: true});
-      for (let index = frame.node.source.inputs.length - 1; index >= 0; index -= 1) {
-        widthStack.push({node: frame.node.source.inputs[index], visited: false});
-      }
-      continue;
-    }
-
-    let width = compact ? COMPACT_ITEM_SIZE : ITEM_W;
-    if (frame.node.source) {
-      const own = compact ? COMPACT_ITEM_SIZE : sourceNodeSize(frame.node.source).w;
-      const kids = frame.node.source.inputs;
-      const kidsWidth =
-        kids.length === 0
-          ? 0
-          : kids.reduce((sum, child) => {
-              const childWidth = wMemo.get(child.id);
-              if (childWidth === undefined) {
-                throw new Error(`Graph layout width is missing for child node ${child.id}.`);
-              }
-              return sum + childWidth;
-            }, 0) +
-            SIBLING_GAP * (kids.length - 1);
-      width = Math.max(own, kidsWidth);
-    }
-    wMemo.set(frame.node.id, width);
+  // Pass 2: Buchheim's linear-time tidy-tree algorithm. Contour apportionment
+  // separates only rows that actually overlap, so a wide descendant fan does
+  // not create unnecessary space between its parent and leaf siblings.
+  interface LayoutRecord {
+    node: ItemTreeNode;
+    size: {w: number; h: number};
+    parent?: LayoutRecord;
+    children: LayoutRecord[];
+    index: number;
+    depth: number;
+    prelim: number;
+    mod: number;
+    shift: number;
+    change: number;
+    thread?: LayoutRecord;
+    ancestor: LayoutRecord;
+    defaultAncestor?: LayoutRecord;
+    center: number;
   }
 
-  // Pass 3: placement + edges (child top-center up to parent bottom-center).
+  const createRecord = (
+    node: ItemTreeNode,
+    parent: LayoutRecord | undefined,
+    index: number,
+  ): LayoutRecord => {
+    const record = {
+      node,
+      size: treeNodeSize(node, compact),
+      parent,
+      children: [],
+      index,
+      depth: parent ? parent.depth + 1 : 0,
+      prelim: 0,
+      mod: 0,
+      shift: 0,
+      change: 0,
+      ancestor: undefined as unknown as LayoutRecord,
+      center: 0,
+    };
+    record.ancestor = record;
+    return record;
+  };
+
+  const rootRecord = createRecord(root, undefined, 0);
+  const traversal: LayoutRecord[] = [];
+  const flattenStack = [rootRecord];
+  while (flattenStack.length > 0) {
+    const record = flattenStack.pop()!;
+    traversal.push(record);
+    const inputs = record.node.source?.inputs ?? [];
+    record.children = inputs.map((input, index) => createRecord(input, record, index));
+    for (let index = record.children.length - 1; index >= 0; index -= 1) {
+      flattenStack.push(record.children[index]);
+    }
+  }
+  const postorder: LayoutRecord[] = [];
+  const postorderStack: Array<{record: LayoutRecord; visited: boolean}> = [
+    {record: rootRecord, visited: false},
+  ];
+  while (postorderStack.length > 0) {
+    const frame = postorderStack.pop()!;
+    if (frame.visited) {
+      postorder.push(frame.record);
+      continue;
+    }
+    postorderStack.push({record: frame.record, visited: true});
+    for (let index = frame.record.children.length - 1; index >= 0; index -= 1) {
+      postorderStack.push({record: frame.record.children[index], visited: false});
+    }
+  }
+
+  const leftSibling = (record: LayoutRecord): LayoutRecord | undefined =>
+    record.index > 0 ? record.parent?.children[record.index - 1] : undefined;
+  const leftmostSibling = (record: LayoutRecord): LayoutRecord | undefined =>
+    record.index > 0 ? record.parent?.children[0] : undefined;
+  const nextLeft = (record: LayoutRecord): LayoutRecord | undefined =>
+    record.children[0] ?? record.thread;
+  const nextRight = (record: LayoutRecord): LayoutRecord | undefined =>
+    record.children[record.children.length - 1] ?? record.thread;
+  const separation = (left: LayoutRecord, right: LayoutRecord): number =>
+    left.size.w / 2 + SIBLING_GAP + right.size.w / 2;
+
+  const moveSubtree = (left: LayoutRecord, right: LayoutRecord, shift: number) => {
+    const subtreeCount = right.index - left.index;
+    if (subtreeCount <= 0) {
+      throw new Error('Graph contour apportionment received an invalid sibling order.');
+    }
+    right.change -= shift / subtreeCount;
+    right.shift += shift;
+    left.change += shift / subtreeCount;
+    right.prelim += shift;
+    right.mod += shift;
+  };
+
+  const executeShifts = (record: LayoutRecord) => {
+    let shift = 0;
+    let change = 0;
+    for (let index = record.children.length - 1; index >= 0; index -= 1) {
+      const child = record.children[index];
+      child.prelim += shift;
+      child.mod += shift;
+      change += child.change;
+      shift += child.shift + change;
+    }
+  };
+
+  const apportion = (
+    record: LayoutRecord,
+    defaultAncestor: LayoutRecord,
+  ): LayoutRecord => {
+    const left = leftSibling(record);
+    if (!left) return defaultAncestor;
+
+    let innerRight = record;
+    let outerRight = record;
+    let innerLeft = left;
+    let outerLeft = leftmostSibling(record);
+    if (!outerLeft) {
+      throw new Error('Graph contour apportionment could not find the leftmost sibling.');
+    }
+    let innerRightMod = innerRight.mod;
+    let outerRightMod = outerRight.mod;
+    let innerLeftMod = innerLeft.mod;
+    let outerLeftMod = outerLeft.mod;
+
+    while (nextRight(innerLeft) && nextLeft(innerRight)) {
+      innerLeft = nextRight(innerLeft)!;
+      innerRight = nextLeft(innerRight)!;
+      const followingOuterLeft = nextLeft(outerLeft);
+      const followingOuterRight = nextRight(outerRight);
+      if (!followingOuterLeft || !followingOuterRight) {
+        throw new Error('Graph contour traversal ended before its inner contour.');
+      }
+      outerLeft = followingOuterLeft;
+      outerRight = followingOuterRight;
+      outerRight.ancestor = record;
+
+      const contourShift =
+        innerLeft.prelim +
+        innerLeftMod -
+        (innerRight.prelim + innerRightMod) +
+        separation(innerLeft, innerRight);
+      if (contourShift > 0) {
+        const ancestor =
+          innerLeft.ancestor.parent === record.parent
+            ? innerLeft.ancestor
+            : defaultAncestor;
+        moveSubtree(ancestor, record, contourShift);
+        innerRightMod += contourShift;
+        outerRightMod += contourShift;
+      }
+
+      innerLeftMod += innerLeft.mod;
+      innerRightMod += innerRight.mod;
+      outerLeftMod += outerLeft.mod;
+      outerRightMod += outerRight.mod;
+    }
+
+    if (nextRight(innerLeft) && !nextRight(outerRight)) {
+      outerRight.thread = nextRight(innerLeft);
+      outerRight.mod += innerLeftMod - outerRightMod;
+    } else if (nextLeft(innerRight) && !nextLeft(outerLeft)) {
+      outerLeft.thread = nextLeft(innerRight);
+      outerLeft.mod += innerRightMod - outerLeftMod;
+      return record;
+    }
+    return defaultAncestor;
+  };
+
+  for (const record of postorder) {
+    if (record.children.length === 0) {
+      const left = leftSibling(record);
+      if (left) record.prelim = left.prelim + separation(left, record);
+    } else {
+      executeShifts(record);
+      const first = record.children[0];
+      const last = record.children[record.children.length - 1];
+      const midpoint = (first.prelim + last.prelim) / 2;
+      const left = leftSibling(record);
+      if (left) {
+        record.prelim = left.prelim + separation(left, record);
+        record.mod = record.prelim - midpoint;
+      } else {
+        record.prelim = midpoint;
+      }
+    }
+
+    if (record.parent) {
+      record.parent.defaultAncestor = apportion(
+        record,
+        record.parent.defaultAncestor ?? record.parent.children[0],
+      );
+    }
+  }
+
+  const modifierByRecord = new Map<LayoutRecord, number>([
+    [rootRecord, -rootRecord.prelim],
+  ]);
+  for (const record of traversal) {
+    const modifier = modifierByRecord.get(record);
+    if (modifier === undefined) {
+      throw new Error(`Graph layout modifier is missing for node ${record.node.id}.`);
+    }
+    record.center = record.prelim + modifier;
+    for (const child of record.children) {
+      modifierByRecord.set(child, modifier + record.mod);
+    }
+  }
+
+  // Pass 3: emit nodes and edges (child top-center up to parent bottom-center).
   const elbow = (x1: number, y1: number, x2: number, y2: number) => {
     const midY = Math.round((y1 + y2) / 2);
     edges.push({x: x1 - EDGE_T / 2, y: Math.min(y1, midY), w: EDGE_T, h: Math.abs(midY - y1)});
@@ -146,44 +328,22 @@ export function layoutTree(root: ItemTreeNode, compact = false): GraphLayout {
     edges.push({x: x2 - EDGE_T / 2, y: Math.min(midY, y2), w: EDGE_T, h: Math.abs(y2 - midY)});
   };
 
-  type PlacementAction =
-    | {kind: 'node'; node: ItemTreeNode; depth: number; left: number; band: number}
-    | {kind: 'edge'; x1: number; y1: number; x2: number; y2: number};
-  const rootWidth = wMemo.get(root.id);
-  if (rootWidth === undefined) {
-    throw new Error('Graph layout did not calculate a width for the root node.');
-  }
-  const placementStack: PlacementAction[] = [
-    {kind: 'node', node: root, depth: 0, left: 0, band: rootWidth},
-  ];
-  while (placementStack.length > 0) {
-    const action = placementStack.pop()!;
-    if (action.kind === 'edge') {
-      elbow(action.x1, action.y1, action.x2, action.y2);
-      continue;
-    }
-
-    const {node, depth, left, band} = action;
+  for (const record of traversal) {
+    const {node, depth, center, size} = record;
+    const x = center - size.w / 2;
+    const y = rowTop[depth];
     if (!node.source) {
-      const size = compact ? COMPACT_ITEM_SIZE : ITEM_W;
-      const height = compact ? COMPACT_ITEM_SIZE : ITEM_H;
-      const x = left + (band - size) / 2;
       nodes.push({
         id: node.id,
         kind: 'item',
         x,
-        y: rowTop[depth],
-        w: size,
-        h: height,
+        y,
+        w: size.w,
+        h: size.h,
         item: node,
       });
       continue;
     }
-    const size = compact
-      ? {w: COMPACT_ITEM_SIZE, h: COMPACT_ITEM_SIZE}
-      : sourceNodeSize(node.source);
-    const x = left + (band - size.w) / 2;
-    const y = rowTop[depth];
     nodes.push({
       id: node.source.id,
       kind: 'source',
@@ -195,43 +355,13 @@ export function layoutTree(root: ItemTreeNode, compact = false): GraphLayout {
       source: node.source,
     });
 
-    const kids = node.source.inputs;
-    if (kids.length) {
-      let kidsWidth = SIBLING_GAP * (kids.length - 1);
-      for (const child of kids) {
-        const childWidth = wMemo.get(child.id);
-        if (childWidth === undefined) {
-          throw new Error(`Graph placement width is missing for child node ${child.id}.`);
-        }
-        kidsWidth += childWidth;
-      }
-      let childLeft = left + (band - kidsWidth) / 2;
-      const childPlacements: Array<{node: ItemTreeNode; left: number; width: number}> = [];
-      for (const kid of kids) {
-        const childWidth = wMemo.get(kid.id);
-        if (childWidth === undefined) {
-          throw new Error(`Graph placement width is missing for child node ${kid.id}.`);
-        }
-        childPlacements.push({node: kid, left: childLeft, width: childWidth});
-        childLeft += childWidth + SIBLING_GAP;
-      }
-      for (let index = childPlacements.length - 1; index >= 0; index -= 1) {
-        const child = childPlacements[index];
-        placementStack.push({
-          kind: 'edge',
-          x1: child.left + child.width / 2,
-          y1: rowTop[depth + 1],
-          x2: x + size.w / 2,
-          y2: y + size.h,
-        });
-        placementStack.push({
-          kind: 'node',
-          node: child.node,
-          depth: depth + 1,
-          left: child.left,
-          band: child.width,
-        });
-      }
+    for (const child of record.children) {
+      elbow(
+        child.center,
+        rowTop[depth + 1],
+        center,
+        y + size.h,
+      );
     }
   }
 

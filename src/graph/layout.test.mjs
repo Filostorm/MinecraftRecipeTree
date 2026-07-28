@@ -58,3 +58,59 @@ test('preserves left-to-right preorder placement and child-to-parent edge orderi
   assert.equal(graph.edges.length, 6);
   assert.ok(graph.nodes[1].x < graph.nodes[2].x);
 });
+
+test('keeps immediate compact inputs close when one sibling owns a wide descendant fan', () => {
+  const leaf = id => ({id, key: `item|test:${id}`, ancestors: []});
+  const wideBranch = {
+    id: 'wide-branch',
+    key: 'item|test:wide-branch',
+    ancestors: [],
+    source: {
+      id: 'wide-branch.source',
+      kind: 'recipe',
+      recipe: {out: [[['item|test:wide-branch', 1]]]},
+      inputs: Array.from({length: 10}, (_, index) => leaf(`wide-leaf-${index}`)),
+    },
+  };
+  const root = {
+    id: 'root',
+    key: 'item|test:root',
+    ancestors: [],
+    source: {
+      id: 'root.source',
+      kind: 'recipe',
+      recipe: {out: [[['item|test:root', 1]]]},
+      inputs: [leaf('left'), wideBranch, leaf('right')],
+    },
+  };
+
+  const graph = layoutTree(root, true);
+  const immediateCenters = ['left', 'wide-branch', 'right'].map(id => {
+    const node = graph.nodes.find(candidate => candidate.item.id === id);
+    assert.ok(node, `Missing laid node ${id}`);
+    return node.x + node.w / 2;
+  });
+
+  assert.deepEqual(
+    immediateCenters.slice().sort((a, b) => a - b),
+    immediateCenters,
+  );
+  assert.ok(immediateCenters[1] - immediateCenters[0] <= 70);
+  assert.ok(immediateCenters[2] - immediateCenters[1] <= 70);
+
+  const rows = new Map();
+  for (const node of graph.nodes) {
+    const row = rows.get(node.y) ?? [];
+    row.push(node);
+    rows.set(node.y, row);
+  }
+  for (const row of rows.values()) {
+    const ordered = row.slice().sort((a, b) => a.x - b.x);
+    for (let index = 1; index < ordered.length; index += 1) {
+      assert.ok(
+        ordered[index - 1].x + ordered[index - 1].w <= ordered[index].x,
+        `${ordered[index - 1].id} overlaps ${ordered[index].id}`,
+      );
+    }
+  }
+});
