@@ -36,7 +36,7 @@ import {DropList, DropRow, formatDropStat} from './DropList';
 import {ItemIcon} from './ItemIcon';
 import {MobSprite} from './MobSprite';
 import {ItemChip, RecipeCard} from './RecipeCard';
-import {VisibilityOffIcon} from './VisibilityOffIcon';
+import {VisibilityIcon} from './VisibilityIcon';
 
 const PAGE = 15;
 const MAX_DEFAULT_FILTER_SCAN = 400;
@@ -589,15 +589,25 @@ function RefsList({
         const collapsed = collapsedCategoryIds.has(category.id);
         const categoryRefs = shownByCategory.get(group.catIdx) ?? [];
         return (
-          <View key={category.id} style={styles.categorySection}>
+          <View
+            key={category.id}
+            style={[
+              styles.categorySection,
+              !collapsed && styles.categorySectionExpanded,
+            ]}>
             <TouchableOpacity
               accessibilityRole="button"
               accessibilityLabel={`${collapsed ? 'Expand' : 'Collapse'} ${category.title} recipes`}
               accessibilityState={{expanded: !collapsed}}
-              style={[styles.categoryHeader, collapsed && styles.categoryHeaderCollapsed]}
+              style={[
+                styles.categoryHeader,
+                collapsed
+                  ? styles.categoryHeaderCollapsed
+                  : styles.categoryHeaderExpanded,
+              ]}
               onPress={() => toggleCategory(category.id)}>
               <View accessibilityElementsHidden style={styles.categoryVisibilityIcon}>
-                <VisibilityOffIcon size={14} />
+                <VisibilityIcon visible={!collapsed} size={14} />
               </View>
               <Text style={styles.categoryTitle} numberOfLines={1}>
                 {category.title}
@@ -608,7 +618,7 @@ function RefsList({
             </TouchableOpacity>
             {!collapsed && categoryRefs.length > 0 ? (
               <View style={styles.categoryRecipes}>
-                {categoryRefs.map(([catIdx, recipeIdx]) => {
+                {categoryRefs.map(([catIdx, recipeIdx], recipePosition) => {
                   const recipe = recipesByRef.get(recipeRefKey([catIdx, recipeIdx]));
                   const usageStart =
                     graphDirection === 'outputs' && recipe
@@ -624,7 +634,12 @@ function RefsList({
                     ? data.itemsByKey.get(usageStart.rootKey)?.n ?? usageStart.rootKey
                     : undefined;
                   return (
-                    <View key={`${catIdx}-${recipeIdx}`}>
+                    <View
+                      key={`${catIdx}-${recipeIdx}`}
+                      style={[
+                        styles.categoryRecipe,
+                        recipePosition > 0 && styles.categoryRecipeSeparated,
+                      ]}>
                       {recipe && availableCardWidth !== null ? (
                         <RecipeCard
                           recipe={recipe}
@@ -634,6 +649,7 @@ function RefsList({
                           graphDirection={graphDirection}
                           actionSubject={actionSubject}
                           usageOutputSubject={usageOutputSubject}
+                          grouped
                           onPress={
                             canStartTree && !informational
                               ? () =>
@@ -738,6 +754,13 @@ const styles = StyleSheet.create({
   },
   recipeList: {width: '100%'},
   categorySection: {marginBottom: 10},
+  categorySectionExpanded: {
+    overflow: 'hidden',
+    backgroundColor: theme.panelAlt,
+    borderColor: theme.borderLight,
+    borderWidth: 1,
+    borderRadius: 8,
+  },
   categoryHeader: {
     minHeight: 38,
     flexDirection: 'row',
@@ -751,10 +774,18 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   categoryHeaderCollapsed: {borderColor: theme.border},
+  categoryHeaderExpanded: {
+    borderWidth: 0,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.border,
+    borderRadius: 0,
+  },
   categoryVisibilityIcon: {width: 18},
   categoryTitle: {color: theme.text, fontSize: 12, fontWeight: '700', flex: 1},
   categoryCount: {color: theme.textDim, fontSize: 9},
-  categoryRecipes: {paddingTop: 9},
+  categoryRecipes: {paddingTop: 0},
+  categoryRecipe: {width: '100%'},
+  categoryRecipeSeparated: {borderTopColor: theme.border, borderTopWidth: 1},
   informationNotice: {color: theme.textDim, fontSize: 12, lineHeight: 17},
   usageTreeNotice: {color: theme.accent, fontSize: 12, lineHeight: 17, fontWeight: '700'},
   filterHeader: {

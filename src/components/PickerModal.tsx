@@ -16,7 +16,7 @@ import type {GraphDirection} from '../graph/direction';
 import {pixelated} from './ItemIcon';
 import {ItemChip} from './RecipeCard';
 import {RecipePreviewImage} from './RecipePreviewImage';
-import {VisibilityOffIcon} from './VisibilityOffIcon';
+import {VisibilityIcon} from './VisibilityIcon';
 import {groupPickerOptions} from './pickerGroups';
 
 export interface PickerOption {
@@ -224,7 +224,7 @@ export function PickerModal({
                     style={styles.groupHeader}
                     onPress={() => toggleGroup(group.key)}>
                     <View accessibilityElementsHidden style={styles.groupVisibilityIcon}>
-                      <VisibilityOffIcon size={14} />
+                      <VisibilityIcon visible size={14} />
                     </View>
                     <Text style={styles.groupTitle}>{group.label}</Text>
                     <Text style={styles.groupCount}>

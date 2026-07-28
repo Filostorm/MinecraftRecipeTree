@@ -1,7 +1,14 @@
 import React from 'react';
 import {theme} from '../theme';
 
-export function VisibilityOffIcon({size = 16}: {size?: number}) {
+export function VisibilityIcon({
+  visible,
+  size = 16,
+}: {
+  visible: boolean;
+  size?: number;
+}) {
+  const color = visible ? theme.accentAlt : theme.textDim;
   return React.createElement(
     'svg',
     {
@@ -14,7 +21,7 @@ export function VisibilityOffIcon({size = 16}: {size?: number}) {
     },
     React.createElement('path', {
       d: 'M2.5 12s3.4-6 9.5-6 9.5 6 9.5 6-3.4 6-9.5 6-9.5-6-9.5-6Z',
-      stroke: theme.textDim,
+      stroke: color,
       strokeLinecap: 'round',
       strokeLinejoin: 'round',
       strokeWidth: 1.8,
@@ -23,17 +30,19 @@ export function VisibilityOffIcon({size = 16}: {size?: number}) {
       cx: 12,
       cy: 12,
       r: 2.7,
-      stroke: theme.textDim,
+      stroke: color,
       strokeWidth: 1.8,
     }),
-    React.createElement('line', {
-      x1: 4,
-      x2: 20,
-      y1: 4,
-      y2: 20,
-      stroke: theme.textDim,
-      strokeLinecap: 'round',
-      strokeWidth: 2.2,
-    }),
+    !visible
+      ? React.createElement('line', {
+          x1: 4,
+          x2: 20,
+          y1: 4,
+          y2: 20,
+          stroke: color,
+          strokeLinecap: 'round',
+          strokeWidth: 2.2,
+        })
+      : null,
   );
 }

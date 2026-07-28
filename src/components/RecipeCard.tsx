@@ -34,6 +34,7 @@ export function RecipeCard({
   actionSubject,
   usageOutputSubject,
   availableCardWidth,
+  grouped = false,
 }: {
   recipe: Recipe;
   dir: string;
@@ -46,6 +47,8 @@ export function RecipeCard({
   usageOutputSubject?: string;
   /** Measured width of the full-width recipe-list container in CSS/layout pixels. */
   availableCardWidth: number;
+  /** Render inside a category frame that supplies the outer border and corner radius. */
+  grouped?: boolean;
 }) {
   const data = useData();
   const presentation = recipePresentationKind(recipe);
@@ -79,7 +82,11 @@ export function RecipeCard({
       activeOpacity={onPress ? 0.72 : 1}
       disabled={!onPress}
       onPress={onPress}
-      style={[styles.card, onPress && styles.cardAction]}>
+      style={[
+        styles.card,
+        onPress && styles.cardAction,
+        grouped && styles.cardGrouped,
+      ]}>
       {displayTitle ? <Text style={styles.catTitle}>{displayTitle}</Text> : null}
       {presentation === 'image' && recipe.img ? (
         <RecipePreviewImage
@@ -241,6 +248,13 @@ const styles = StyleSheet.create({
     maxWidth: '100%',
   },
   cardAction: {borderColor: theme.borderLight},
+  cardGrouped: {
+    alignSelf: 'stretch',
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+    borderRadius: 0,
+    marginBottom: 0,
+  },
   cardActionHint: {
     color: theme.accent,
     fontSize: 10,
