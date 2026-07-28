@@ -1,4 +1,4 @@
-import React, {useMemo, useState} from 'react';
+import React, {useEffect, useMemo, useState} from 'react';
 import {
   FlatList,
   Platform,
@@ -9,6 +9,10 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import {useData} from '../data/DataContext';
+import {
+  catalogTypePresentation,
+  isItemCatalogEligible,
+} from '../data/catalogPresentation';
 import {theme} from '../theme';
 import {CatalogItem} from '../types';
 import {useUi} from '../ui/UiContext';
@@ -25,17 +29,47 @@ export function ItemsScreen({interfaceZoom}: {interfaceZoom: number}) {
   const [mod, setMod] = useState<string | null>(null);
   const {width} = useWindowDimensions();
 
+  const catalogItems = useMemo(
+    () => data.items.filter(isItemCatalogEligible),
+    [data.items],
+  );
+  const unknownCatalogTypes = useMemo(() => {
+    const unknown = new Set<string>();
+    for (const item of catalogItems) {
+      const presentation = catalogTypePresentation(item.t);
+      if (presentation && !presentation.recognized) unknown.add(item.t!);
+    }
+    return [...unknown].sort();
+  }, [catalogItems]);
+
+  useEffect(() => {
+    if (unknownCatalogTypes.length === 0) return;
+    console.warn(
+      '[ItemsScreen] Some exporter ingredient types have no specific presentation label; ' +
+        'rendering them as generic custom ingredients.',
+      {dataset: data.descriptor.slug, types: unknownCatalogTypes},
+    );
+  }, [data.descriptor.slug, unknownCatalogTypes]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     const out: CatalogItem[] = [];
-    for (const item of data.items) {
+    for (const item of catalogItems) {
       if (mod && item.m !== mod) continue;
-      if (q && !item.n.toLowerCase().includes(q) && !item.id.toLowerCase().includes(q)) continue;
+      const typeLabel = catalogTypePresentation(item.t)?.label.toLowerCase() ?? '';
+      if (
+        q &&
+        !item.n.toLowerCase().includes(q) &&
+        !item.id.toLowerCase().includes(q) &&
+        !typeLabel.includes(q)
+      ) {
+        continue;
+      }
       out.push(item);
       if (out.length >= MAX_RESULTS + 1) break;
     }
     return out;
-  }, [data.items, query, mod]);
+  }, [catalogItems, query, mod]);
 
   const truncated = filtered.length > MAX_RESULTS;
   const shown = truncated ? filtered.slice(0, MAX_RESULTS) : filtered;
@@ -55,7 +89,7 @@ export function ItemsScreen({interfaceZoom}: {interfaceZoom: number}) {
           <SearchBar
             value={query}
             onChange={setQuery}
-            placeholder={`Search ${data.items.length} items…`}
+            placeholder={`Search ${catalogItems.length} items…`}
             style={styles.searchControl}
           />
           <ModFilter
@@ -76,15 +110,24 @@ export function ItemsScreen({interfaceZoom}: {interfaceZoom: number}) {
         initialNumToRender={60}
         maxToRenderPerBatch={60}
         contentContainerStyle={styles.gridContent}
-        renderItem={({item}) => (
-          <TouchableOpacity style={[styles.cell, {width: `${100 / columns}%` as never}]} onPress={() => openItem(item.k)}>
-            <ItemIcon item={item} size={48} />
-            <Text style={styles.cellName} numberOfLines={2}>
-              {item.n}
-            </Text>
-            {item.t && <Text style={styles.typeBadge}>{item.t}</Text>}
-          </TouchableOpacity>
-        )}
+        renderItem={({item}) => {
+          const typeLabel = catalogTypePresentation(item.t)?.label;
+          return (
+            <TouchableOpacity
+              style={[styles.cell, {width: `${100 / columns}%` as never}]}
+              onPress={() => openItem(item.k)}>
+              <ItemIcon item={item} size={48} />
+              <Text style={styles.cellName} numberOfLines={2}>
+                {item.n}
+              </Text>
+              {typeLabel && (
+                <Text style={styles.typeBadge} numberOfLines={1}>
+                  {typeLabel}
+                </Text>
+              )}
+            </TouchableOpacity>
+          );
+        }}
       />
     </View>
   );
