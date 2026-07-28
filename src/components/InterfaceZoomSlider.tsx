@@ -25,8 +25,8 @@ function WebInterfaceZoomSlider({
   onValueChange,
   onSlidingComplete,
 }: InterfaceZoomSliderProps) {
-  const handleChange = useCallback(
-    (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleInput = useCallback(
+    (event: React.FormEvent<HTMLInputElement>) => {
       const next = Number(event.currentTarget.value);
       if (!Number.isFinite(next)) {
         console.error(
@@ -46,7 +46,7 @@ function WebInterfaceZoomSlider({
     'data-testid': 'interface-zoom-slider',
     max: maximumValue,
     min: minimumValue,
-    onChange: handleChange,
+    onInput: handleInput,
     step,
     style: {
       accentColor: theme.accent,
