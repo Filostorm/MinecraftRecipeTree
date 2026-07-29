@@ -90,6 +90,7 @@ import {
   type StoredGraphSelection,
 } from './graphSession';
 import {
+  createDeferredRecipeSourceResolver,
   deferredRecipeExpansionNodes,
   duplicateRecipeExpansions,
   findRecipeExpansionOwner,
@@ -1509,7 +1510,11 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
         byproductCoverageByNode: new Map(),
       } as TreeCalculation;
     }
-    const totals = calculateTreeTotals(root, useByproducts);
+    const totals = calculateTreeTotals(root, useByproducts, {
+      resolveDeferredRecipeSource: expandRecipesOnce
+        ? createDeferredRecipeSourceResolver(root, graphDirection)
+        : undefined,
+    });
     const byName = (a: TreeTotal, b: TreeTotal) =>
       (data.itemsByKey.get(a.key)?.n ?? a.key).localeCompare(data.itemsByKey.get(b.key)?.n ?? b.key);
     totals.inputs.sort(byName);
@@ -1517,7 +1522,14 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
     totals.byproductCredits.sort(byName);
     totals.byproducts.sort(byName);
     return totals;
-  }, [root, version, data.itemsByKey, graphDirection, useByproducts]);
+  }, [
+    root,
+    version,
+    data.itemsByKey,
+    graphDirection,
+    useByproducts,
+    expandRecipesOnce,
+  ]);
   const displayedAmountFor = useCallback(
     (node: ItemTreeNode) =>
       graphDirection === 'outputs'

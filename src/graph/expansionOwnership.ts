@@ -103,3 +103,55 @@ export function deferredRecipeExpansionNodes(root: ItemTreeNode | null): ItemTre
   }
   return deferred;
 }
+
+export type DeferredRecipeSourceResolver = (
+  node: ItemTreeNode,
+) => SourceTreeNode | undefined;
+
+/**
+ * Resolve a deferred expand-once occurrence to the visible recipe subtree that
+ * owns the same expansion. Consumers can traverse that subtree virtually
+ * without adding duplicate nodes to the rendered graph.
+ */
+export function createDeferredRecipeSourceResolver(
+  root: ItemTreeNode | null,
+  direction: GraphDirection,
+): DeferredRecipeSourceResolver {
+  const sourcesByIdentity = new Map<string, SourceTreeNode>();
+  const stack = root ? [root] : [];
+  while (stack.length > 0) {
+    const node = stack.pop()!;
+    const expansion = recipeExpansionFromSource(node.source);
+    if (expansion && node.source) {
+      const identity = recipeExpansionIdentity(node.key, direction, expansion);
+      if (!sourcesByIdentity.has(identity)) {
+        sourcesByIdentity.set(identity, node.source);
+      }
+    }
+    const children = node.source?.inputs ?? [];
+    for (let index = children.length - 1; index >= 0; index -= 1) {
+      stack.push(children[index]);
+    }
+  }
+
+  const reportedMissing = new Set<string>();
+  return node => {
+    const expansion = node.deferredRecipeExpansion;
+    if (!expansion) return undefined;
+    const identity = recipeExpansionIdentity(node.key, direction, expansion);
+    const source = sourcesByIdentity.get(identity);
+    if (!source && !reportedMissing.has(identity)) {
+      reportedMissing.add(identity);
+      console.error(
+        'Tree totals could not resolve a deferred recipe to its expanded owner.',
+        {
+          nodeId: node.id,
+          itemKey: node.key,
+          recipeRef: expansion.ref,
+          direction,
+        },
+      );
+    }
+    return source;
+  };
+}

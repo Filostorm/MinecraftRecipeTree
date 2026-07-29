@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import {createDeferredRecipeSourceResolver} from './expansionOwnership.ts';
 import {calculateTreeTotals} from './treeTotals.ts';
 
 const item = (id, key, amount, options = {}) => ({
@@ -43,6 +44,47 @@ test('retained items normalize to one in both the tree and prerequisite totals',
   assert.equal(totals.prerequisites[0].amount, 1);
   assert.equal(totals.requiredByNode.get(catalystA.id), 1);
   assert.equal(totals.requiredByNode.get(catalystB.id), 1);
+});
+
+test('expand-once totals virtually traverse every deferred recipe occurrence', () => {
+  const ownerOre = item('root.s.0.s.0', 'item|test:ore', 3);
+  const owner = item('root.s.0', 'item|test:shared', 1, {
+    source: {
+      id: 'root.s.0.s',
+      kind: 'recipe',
+      ref: [4, 2],
+      recipe: {out: [[['item|test:shared', 1]]]},
+      inputs: [ownerOre],
+    },
+  });
+  const deferred = item('root.s.1', 'item|test:shared', 2, {
+    deferredRecipeExpansion: {ref: [4, 2]},
+  });
+  const root = item('root', 'item|test:result', 1, {
+    source: {
+      id: 'root.s',
+      kind: 'recipe',
+      ref: [0, 0],
+      recipe: {out: [[['item|test:result', 1]]]},
+      inputs: [owner, deferred],
+    },
+  });
+
+  const totals = calculateTreeTotals(root, false, {
+    resolveDeferredRecipeSource: createDeferredRecipeSourceResolver(root, 'inputs'),
+  });
+
+  assert.deepEqual(totals.inputs, [
+    {
+      key: 'item|test:ore',
+      amount: 9,
+      variants: 1,
+      tag: undefined,
+    },
+  ]);
+  assert.equal(totals.requiredByNode.get(ownerOre.id), 3);
+  assert.equal(totals.requiredByNode.get(deferred.id), 2);
+  assert.equal(totals.requiredByNode.has(`${deferred.id}.v.0`), false);
 });
 
 test('byproduct credits reduce consumed inputs and leave residual outputs', () => {
