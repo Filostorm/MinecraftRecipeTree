@@ -46,6 +46,8 @@ import {useUi} from '../ui/UiContext';
 import {
   COMPACT_LABEL_WIDTH,
   COMPACT_ITEM_SIZE,
+  COMPACT_ROOT_DIAMOND_SIZE,
+  COMPACT_ROOT_LABEL_GAP,
   COMPACT_ROOT_SIZE,
   ITEM_H,
   ITEM_W,
@@ -55,6 +57,7 @@ import {
 } from './layout';
 import {
   RADIAL_ITEM_SIZE,
+  RADIAL_ROOT_DIAMOND_SIZE,
   RADIAL_ROOT_SIZE,
   layoutRadialTree,
 } from './radialLayout';
@@ -2619,6 +2622,8 @@ function CompactItemNodeView({
       <View
         style={[
           styles.compactCountBadge,
+          isRoot && !radialRoot && styles.compactRootCountBadge,
+          radialRoot && styles.radialRootCountBadge,
           byproductCoverage && styles.compactByproductCountBadge,
         ]}>
         <Text
@@ -2635,6 +2640,7 @@ function CompactItemNodeView({
           pointerEvents="none"
           style={[
             styles.compactBranchLabel,
+            isRoot && !radialRoot && styles.compactRootBranchLabel,
             radialRoot && styles.radialRootBranchLabel,
           ]}>
           <Text style={[styles.compactBranchLabelText, noSelect]} numberOfLines={1}>
@@ -2990,8 +2996,8 @@ const styles = StyleSheet.create({
   },
   radialRootDiamond: {
     position: 'absolute',
-    width: 72,
-    height: 72,
+    width: RADIAL_ROOT_DIAMOND_SIZE,
+    height: RADIAL_ROOT_DIAMOND_SIZE,
     borderRadius: 17,
     borderColor: theme.radialRoot,
     borderWidth: 3,
@@ -3000,8 +3006,8 @@ const styles = StyleSheet.create({
   },
   compactRootDiamond: {
     position: 'absolute',
-    width: 48,
-    height: 48,
+    width: COMPACT_ROOT_DIAMOND_SIZE,
+    height: COMPACT_ROOT_DIAMOND_SIZE,
     borderRadius: 12,
     borderColor: theme.radialRoot,
     borderWidth: 3,
@@ -3009,8 +3015,12 @@ const styles = StyleSheet.create({
     transform: [{rotate: '45deg'}],
   },
   radialRootBranchLabel: {
-    top: RADIAL_ROOT_SIZE + 4,
+    top: RADIAL_ROOT_SIZE + COMPACT_ROOT_LABEL_GAP,
     left: -(COMPACT_LABEL_WIDTH - RADIAL_ROOT_SIZE) / 2,
+  },
+  compactRootBranchLabel: {
+    top: COMPACT_ROOT_SIZE + COMPACT_ROOT_LABEL_GAP,
+    left: -(COMPACT_LABEL_WIDTH - COMPACT_ROOT_SIZE) / 2,
   },
   compactBranchLabel: {
     position: 'absolute',
@@ -3050,6 +3060,14 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(14,17,22,0.9)',
   },
   compactCountText: {color: theme.text, fontSize: 9, fontWeight: '700'},
+  compactRootCountBadge: {
+    right: 8,
+    bottom: 8,
+  },
+  radialRootCountBadge: {
+    right: 18,
+    bottom: 18,
+  },
   compactByproductCountBadge: {
     borderColor: theme.accentAlt,
     borderWidth: 1,

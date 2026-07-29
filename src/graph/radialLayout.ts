@@ -3,6 +3,7 @@ import {
   COMPACT_LABEL_HEIGHT,
   COMPACT_LABEL_WIDTH,
   COMPACT_ITEM_SIZE,
+  COMPACT_ROOT_LABEL_HEIGHT,
   sourceNodeSize,
 } from './layout.ts';
 import type {ItemTreeNode} from './model.ts';
@@ -21,7 +22,8 @@ const MIN_LOCAL_FAN_SPAN = Math.PI / 7.5;
 const MAX_LOCAL_FAN_SPAN = Math.PI * 5 / 6;
 
 export const RADIAL_ITEM_SIZE = 52;
-export const RADIAL_ROOT_SIZE = 104;
+export const RADIAL_ROOT_DIAMOND_SIZE = 72;
+export const RADIAL_ROOT_SIZE = Math.ceil(RADIAL_ROOT_DIAMOND_SIZE * Math.SQRT2);
 const RADIAL_EXPANDED_ROOT_HORIZONTAL_GROWTH = 24;
 const RADIAL_EXPANDED_ROOT_VERTICAL_GROWTH = 18;
 
@@ -281,7 +283,7 @@ function flattenRadialTree(
       ? Math.max(COMPACT_LABEL_WIDTH, RADIAL_ROOT_SIZE)
       : RADIAL_ROOT_SIZE;
     rootUnit.collisionH = showLabels
-      ? RADIAL_ROOT_SIZE + COMPACT_LABEL_HEIGHT
+      ? RADIAL_ROOT_SIZE + COMPACT_ROOT_LABEL_HEIGHT
       : RADIAL_ROOT_SIZE;
     rootUnit.collisionDiameter = Math.max(rootUnit.collisionW, rootUnit.collisionH);
   } else if (!root.source) {
@@ -291,7 +293,7 @@ function flattenRadialTree(
       ? Math.max(COMPACT_LABEL_WIDTH, RADIAL_ROOT_SIZE)
       : RADIAL_ROOT_SIZE;
     rootUnit.collisionH = showLabels
-      ? RADIAL_ROOT_SIZE + COMPACT_LABEL_HEIGHT
+      ? RADIAL_ROOT_SIZE + COMPACT_ROOT_LABEL_HEIGHT
       : RADIAL_ROOT_SIZE;
     rootUnit.collisionDiameter = Math.max(rootUnit.collisionW, rootUnit.collisionH);
   } else {
@@ -683,7 +685,12 @@ export function layoutRadialTree(
       const labelOverflow = Math.max(0, (COMPACT_LABEL_WIDTH - node.w) / 2);
       minX = Math.min(minX, node.x - labelOverflow);
       maxX = Math.max(maxX, node.x + node.w + labelOverflow);
-      maxY = Math.max(maxY, node.y + node.h + COMPACT_LABEL_HEIGHT);
+      maxY = Math.max(
+        maxY,
+        node.y +
+          node.h +
+          (node.depth === 0 ? COMPACT_ROOT_LABEL_HEIGHT : COMPACT_LABEL_HEIGHT),
+      );
     }
   });
   if (![minX, minY, maxX, maxY].every(Number.isFinite)) {

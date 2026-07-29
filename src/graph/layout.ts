@@ -5,9 +5,12 @@ import type {ItemTreeNode, SourceTreeNode} from './model.ts';
 export const ITEM_W = 172;
 export const ITEM_H = 58;
 export const COMPACT_ITEM_SIZE = 52;
-export const COMPACT_ROOT_SIZE = 72;
+export const COMPACT_ROOT_DIAMOND_SIZE = 48;
+export const COMPACT_ROOT_SIZE = Math.ceil(COMPACT_ROOT_DIAMOND_SIZE * Math.SQRT2);
 export const COMPACT_LABEL_WIDTH = 96;
 export const COMPACT_LABEL_HEIGHT = 16;
+export const COMPACT_ROOT_LABEL_GAP = 8;
+export const COMPACT_ROOT_LABEL_HEIGHT = COMPACT_ROOT_LABEL_GAP + 12;
 /** Header strip on source nodes: icon + "Name ×N · Category". */
 export const SOURCE_HEADER = 22;
 /** Vertical gap between tree levels (rows). */
@@ -396,7 +399,12 @@ export function layoutTree(
       const labelOverflow = Math.max(0, (COMPACT_LABEL_WIDTH - n.w) / 2);
       minX = Math.min(minX, n.x - labelOverflow);
       maxX = Math.max(maxX, n.x + n.w + labelOverflow);
-      maxY = Math.max(maxY, n.y + n.h + COMPACT_LABEL_HEIGHT);
+      maxY = Math.max(
+        maxY,
+        n.y +
+          n.h +
+          (n.item.id === root.id ? COMPACT_ROOT_LABEL_HEIGHT : COMPACT_LABEL_HEIGHT),
+      );
     }
   }
   return {nodes, edges, minX, minY, maxX, maxY};

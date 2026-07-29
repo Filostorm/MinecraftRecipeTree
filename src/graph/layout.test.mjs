@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {COMPACT_ROOT_SIZE, layoutTree} from './layout.ts';
+import {
+  COMPACT_LABEL_HEIGHT,
+  COMPACT_ROOT_DIAMOND_SIZE,
+  COMPACT_ROOT_SIZE,
+  layoutTree,
+} from './layout.ts';
 
 function deepChain(nodeCount) {
   let root = {
@@ -76,7 +81,7 @@ test('reserves horizontal and export space for persistent compact item names', (
   const graph = layoutTree(root, true, true);
   const [left, right] = graph.nodes.slice(1);
   assert.ok(right.x + right.w / 2 - (left.x + left.w / 2) >= 96);
-  assert.ok(graph.maxY >= right.y + right.h + 16);
+  assert.ok(graph.maxY >= right.y + right.h + COMPACT_LABEL_HEIGHT);
 });
 
 test('reserves a larger collision-safe footprint for the compact starting item', () => {
@@ -87,6 +92,7 @@ test('reserves a larger collision-safe footprint for the compact starting item',
   };
 
   const graph = layoutTree(root, true);
+  assert.equal(COMPACT_ROOT_SIZE, Math.ceil(COMPACT_ROOT_DIAMOND_SIZE * Math.SQRT2));
   assert.equal(graph.nodes[0].w, COMPACT_ROOT_SIZE);
   assert.equal(graph.nodes[0].h, COMPACT_ROOT_SIZE);
   assert.equal(graph.maxX - graph.minX, COMPACT_ROOT_SIZE);

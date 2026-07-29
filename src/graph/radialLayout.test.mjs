@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   RADIAL_ITEM_SIZE,
+  RADIAL_ROOT_DIAMOND_SIZE,
   RADIAL_ROOT_SIZE,
   layoutRadialTree,
   planStaggeredRadialRows,
@@ -171,6 +172,7 @@ test('gives the compact radial root a larger collision-safe footprint than its i
   const ingredients = graph.nodes.filter(node => node.depth === 1);
 
   assert.ok(root);
+  assert.equal(RADIAL_ROOT_SIZE, Math.ceil(RADIAL_ROOT_DIAMOND_SIZE * Math.SQRT2));
   assert.equal(root.w, RADIAL_ROOT_SIZE);
   assert.equal(root.h, RADIAL_ROOT_SIZE);
   assert.ok(ingredients.every(node => node.w === RADIAL_ITEM_SIZE));
