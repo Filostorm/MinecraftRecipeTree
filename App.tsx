@@ -60,6 +60,7 @@ function DatasetRoot() {
     loadedManifest: Manifest | null,
     details?: React.ReactNode,
     leadingAction?: React.ReactNode,
+    fullWidthControls?: React.ReactNode,
   ) => (
     <>
       <DatasetSwitcher
@@ -69,6 +70,7 @@ function DatasetRoot() {
         loadedManifest={loadedManifest}
         onOpenPicker={() => setShowDatasetPicker(true)}
         leadingAction={leadingAction}
+        fullWidthControls={fullWidthControls}
         details={details}
       />
       {showDatasetPicker && (
@@ -143,6 +145,7 @@ function LoadedDatasetLayout({
     manifest: Manifest | null,
     details?: React.ReactNode,
     leadingAction?: React.ReactNode,
+    fullWidthControls?: React.ReactNode,
   ): React.ReactNode;
 }) {
   return (
@@ -164,6 +167,7 @@ function Root({
     manifest: Manifest | null,
     details?: React.ReactNode,
     leadingAction?: React.ReactNode,
+    fullWidthControls?: React.ReactNode,
   ): React.ReactNode;
 }) {
   const state = useLoadState();
@@ -225,6 +229,7 @@ function Shell({
     manifest: Manifest | null,
     details?: React.ReactNode,
     leadingAction?: React.ReactNode,
+    fullWidthControls?: React.ReactNode,
   ): React.ReactNode;
 }) {
   const data = useData();
@@ -269,65 +274,82 @@ function Shell({
           zoom: interfaceZoom,
         } as unknown as object)
       : null;
-  const headerDetails = (
-    <View style={styles.headerDetails}>
-      <View style={styles.headerActionRow}>
-        <TabBtn tab="items" label="Items" />
-        <TabBtn tab="graph" label="Graph" />
-        {data.capabilities.mobs && <TabBtn tab="mobs" label="Mobs" />}
-        {compactHeader && (
-          <TouchableOpacity
-            style={[
-              styles.headerDetailBtn,
-              showDatasetDetails && styles.headerDetailBtnActive,
-            ]}
-            onPress={() => setShowDatasetDetails(value => !value)}
-            accessibilityRole="button"
-            accessibilityState={{expanded: showDatasetDetails}}
-            accessibilityLabel="Dataset details">
-            <Text
-              style={[
-                styles.headerDetailBtnText,
-                showDatasetDetails && styles.headerDetailBtnTextActive,
-              ]}>
-              ⓘ Details
-            </Text>
-          </TouchableOpacity>
-        )}
-      </View>
-      {(!compactHeader || showDatasetDetails) && (
-        <Text style={styles.subtitle}>
-          Minecraft {data.descriptor.minecraftVersion} · pack {data.descriptor.packVersion} ·{' '}
-          {Object.keys(data.manifest.mods ?? {}).length} mods · {data.items.length} items ·{' '}
-          {data.manifest.counts?.recipes ?? '?'} recipes
-          {data.capabilities.mobs ? ` · ${data.mobs.length} mobs` : ' · mob catalog unavailable'}
-          {!data.capabilities.blockDrops ? ' · block-drop catalog unavailable' : ''}
-          {data.capabilities.recipePreviews
-            ? ' · JEI layout previews available'
-            : ' · JEI layout previews unavailable'}
-        </Text>
-      )}
-      {Platform.OS === 'web' && (
-        <View
-          style={styles.interfaceZoomControls}
-          accessibilityLabel="Interface zoom controls">
-          <Text
-            style={styles.interfaceZoomValue}
-            accessibilityLabel={`Interface zoom ${Math.round(interfaceZoom * 100)} percent`}>
-            UI {Math.round(interfaceZoom * 100)}%
-          </Text>
-          <InterfaceZoomSlider
-            minimumValue={MINIMUM_INTERFACE_ZOOM}
-            maximumValue={MAXIMUM_INTERFACE_ZOOM}
-            step={INTERFACE_ZOOM_STEP}
-            value={interfaceZoom}
-            onValueChange={previewInterfaceZoom}
-            onSlidingComplete={saveInterfaceZoom}
-          />
-        </View>
-      )}
+  const headerTabs = (
+    <View style={styles.headerActionRow}>
+      <TabBtn tab="items" label="Items" />
+      <TabBtn tab="graph" label="Graph" />
+      {data.capabilities.mobs && <TabBtn tab="mobs" label="Mobs" />}
     </View>
   );
+  const datasetDetailsButton = (
+    <TouchableOpacity
+      style={[
+        styles.headerDetailBtn,
+        showDatasetDetails && styles.headerDetailBtnActive,
+      ]}
+      onPress={() => setShowDatasetDetails(value => !value)}
+      accessibilityRole="button"
+      accessibilityState={{expanded: showDatasetDetails}}
+      accessibilityLabel="Dataset details">
+      <Text
+        style={[
+          styles.headerDetailBtnText,
+          showDatasetDetails && styles.headerDetailBtnTextActive,
+        ]}>
+        ⓘ Details
+      </Text>
+    </TouchableOpacity>
+  );
+  const datasetMetadata = (
+    <Text style={styles.subtitle}>
+      Minecraft {data.descriptor.minecraftVersion} · pack {data.descriptor.packVersion} ·{' '}
+      {Object.keys(data.manifest.mods ?? {}).length} mods · {data.items.length} items ·{' '}
+      {data.manifest.counts?.recipes ?? '?'} recipes
+      {data.capabilities.mobs ? ` · ${data.mobs.length} mobs` : ' · mob catalog unavailable'}
+      {!data.capabilities.blockDrops ? ' · block-drop catalog unavailable' : ''}
+      {data.capabilities.recipePreviews
+        ? ' · JEI layout previews available'
+        : ' · JEI layout previews unavailable'}
+    </Text>
+  );
+  const interfaceZoomControls = Platform.OS === 'web' ? (
+    <View
+      style={styles.interfaceZoomControls}
+      accessibilityLabel="Interface zoom controls">
+      <Text
+        style={styles.interfaceZoomValue}
+        accessibilityLabel={`Interface zoom ${Math.round(interfaceZoom * 100)} percent`}>
+        UI {Math.round(interfaceZoom * 100)}%
+      </Text>
+      <InterfaceZoomSlider
+        minimumValue={MINIMUM_INTERFACE_ZOOM}
+        maximumValue={MAXIMUM_INTERFACE_ZOOM}
+        step={INTERFACE_ZOOM_STEP}
+        value={interfaceZoom}
+        onValueChange={previewInterfaceZoom}
+        onSlidingComplete={saveInterfaceZoom}
+      />
+    </View>
+  ) : null;
+  const headerDetails = compactHeader ? (
+    <View style={styles.headerDetails}>
+      <View style={styles.compactHeaderNavigation}>
+        {headerTabs}
+        {datasetDetailsButton}
+      </View>
+      {showDatasetDetails && datasetMetadata}
+      {interfaceZoomControls}
+    </View>
+  ) : showDatasetDetails ? (
+    datasetMetadata
+  ) : null;
+  const fullWidthHeaderControls = !compactHeader ? (
+    <View style={styles.fullWidthHeaderControls}>
+      {headerTabs}
+      {datasetDetailsButton}
+      {interfaceZoomControls}
+    </View>
+  ) : null;
   const headerActions = (
     <View style={styles.headerUtilityRow}>
       <TouchableOpacity
@@ -357,7 +379,12 @@ function Shell({
   );
   return (
     <View style={styles.shell}>
-      {renderControls(data.manifest, headerDetails, headerActions)}
+      {renderControls(
+        data.manifest,
+        headerDetails,
+        headerActions,
+        fullWidthHeaderControls,
+      )}
       <View style={styles.workspaceViewport}>
         <View style={styles.workspace}>
           {/* All tabs stay mounted so graph expansion state survives tab switches. */}
@@ -461,6 +488,18 @@ const styles = StyleSheet.create({
   reloadBtnText: {color: theme.accent, fontSize: 13, fontWeight: '700'},
   shell: {flex: 1, minHeight: 0},
   headerDetails: {gap: 7},
+  compactHeaderNavigation: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  fullWidthHeaderControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexShrink: 0,
+    gap: 6,
+  },
   headerActionRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -517,7 +556,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.borderLight,
     borderRadius: 8,
-    minHeight: 38,
+    minHeight: 34,
     paddingHorizontal: 9,
     backgroundColor: theme.panelAlt,
   },

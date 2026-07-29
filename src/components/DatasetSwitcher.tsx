@@ -21,6 +21,7 @@ export function DatasetSwitcher({
   loadedManifest,
   onOpenPicker,
   leadingAction,
+  fullWidthControls,
   details,
 }: {
   status: CatalogStatus;
@@ -29,6 +30,7 @@ export function DatasetSwitcher({
   loadedManifest: Manifest | null;
   onOpenPicker(): void;
   leadingAction?: React.ReactNode;
+  fullWidthControls?: React.ReactNode;
   details?: React.ReactNode;
 }) {
   const {width} = useWindowDimensions();
@@ -62,6 +64,7 @@ export function DatasetSwitcher({
       style={[
         styles.compactDatasetButton,
         compact && styles.compactDatasetButtonExpanded,
+        !compact && styles.fullDatasetButton,
         !canOpen && styles.disabled,
       ]}
       disabled={!canOpen}
@@ -103,14 +106,17 @@ export function DatasetSwitcher({
           </View>
         </View>
       ) : (
-        <View style={styles.topRow}>
-          {brand}
-          {leadingAction}
-          {datasetButton}
+        <View style={styles.fullRows}>
+          <View style={styles.fullTitleRow}>{brand}</View>
+          <View style={styles.fullControlRow}>
+            {leadingAction}
+            {datasetButton}
+            {fullWidthControls}
+          </View>
         </View>
       )}
 
-      {(!compact || expanded) && (
+      {details && (!compact || expanded) && (
         <View style={styles.expandedContent}>
           {details}
         </View>
@@ -128,10 +134,16 @@ const styles = StyleSheet.create({
     backgroundColor: theme.panel,
   },
   barCompact: {paddingHorizontal: 10, paddingVertical: 7},
-  topRow: {
+  fullRows: {gap: 7},
+  fullTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    minHeight: 26,
+  },
+  fullControlRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   brand: {flexGrow: 1, flexShrink: 1, minWidth: 140},
   brandCompact: {minWidth: 0},
@@ -165,6 +177,11 @@ const styles = StyleSheet.create({
   compactDatasetButtonExpanded: {
     flex: 1,
     maxWidth: '100%',
+  },
+  fullDatasetButton: {
+    flexGrow: 1,
+    minWidth: 140,
+    maxWidth: 360,
   },
   compactDatasetText: {
     minWidth: 0,
