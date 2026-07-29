@@ -266,19 +266,30 @@ export async function renderTiledPng({
   }
   const plan = planTiledPng(logicalWidth, logicalHeight, requestedScale);
   const encoder = new PngRgbaRowEncoder(plan.outputWidth, plan.outputHeight);
+  const parking = document.createElement('div');
   const staging = document.createElement('div');
   const clone = source.cloneNode(true) as HTMLElement;
   let completedTiles = 0;
   let renderedVisualContent = false;
 
-  Object.assign(staging.style, {
+  // Keep the live staging surface clipped without putting off-screen or
+  // negative-z-index styles on the node serialized by html-to-image. WebKit can
+  // otherwise rasterize only the requested background color.
+  Object.assign(parking.style, {
     position: 'fixed',
+    left: '0',
+    top: '0',
+    width: '0',
+    height: '0',
+    overflow: 'hidden',
+    pointerEvents: 'none',
+  });
+  Object.assign(staging.style, {
+    position: 'relative',
     left: '0',
     top: '0',
     overflow: 'hidden',
     backgroundColor,
-    pointerEvents: 'none',
-    zIndex: '-2147483647',
   });
   Object.assign(clone.style, {
     position: 'absolute',
@@ -288,7 +299,8 @@ export async function renderTiledPng({
     overflow: 'visible',
   });
   staging.appendChild(clone);
-  document.body.appendChild(staging);
+  parking.appendChild(staging);
+  document.body.appendChild(parking);
 
   try {
     await document.fonts?.ready;
@@ -340,6 +352,12 @@ export async function renderTiledPng({
             cacheBust: false,
             fontEmbedCSS,
             skipAutoScale: true,
+            style: {
+              position: 'relative',
+              left: '0',
+              top: '0',
+              zIndex: '0',
+            },
           });
         } catch (error) {
           console.error('A tiled graph canvas failed to render.', {
@@ -398,6 +416,6 @@ export async function renderTiledPng({
     }
     return {blob: encoder.finish(), plan};
   } finally {
-    staging.remove();
+    parking.remove();
   }
 }

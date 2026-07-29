@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {inferIngredientTag} from './ingredientTags.ts';
+import {displayIngredientName, inferIngredientTag} from './ingredientTags.ts';
 
 test('uses an explicit 1.12 OreDictionary identity for resolved alternatives', () => {
   const slot = [
@@ -26,4 +26,19 @@ test('does not silently choose between conflicting exported identities', () => {
     console.error = originalError;
   }
   assert.equal(errors.length, 1);
+});
+
+test('presents Forge 1.12 OreDictionary ingredients by their selected item name', () => {
+  assert.equal(
+    displayIngredientName('Nickel Ingot', 'ore:ingotNickel', '1.12.2'),
+    'Nickel Ingot',
+  );
+  assert.equal(
+    displayIngredientName('Nickel Ingot', 'ore:ingotNickel', '1.7.10'),
+    '#ore:ingotNickel',
+  );
+  assert.equal(
+    displayIngredientName('Oak Planks', 'minecraft:planks', '1.20.1'),
+    '#minecraft:planks',
+  );
 });

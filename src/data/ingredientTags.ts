@@ -85,6 +85,20 @@ export function inferIngredientTag(slot: SlotEntry[]): string | undefined {
   )?.tag;
 }
 
-export function displayIngredientName(itemName: string, tag?: string): string {
-  return tag ? `#${tag}` : itemName;
+/**
+ * Preserve logical ingredient identities for modern tag-based packs, while
+ * presenting Forge 1.12 OreDictionary ingredients as the concrete catalog item
+ * the user selected. The logical `ore:*` identity remains attached to the graph
+ * and totals for aggregation, alternative selection, and CSV provenance.
+ */
+export function displayIngredientName(
+  itemName: string,
+  tag?: string,
+  minecraftVersion?: string,
+): string {
+  if (!tag) return itemName;
+  if (/^1\.12(?:\.|$)/.test(minecraftVersion ?? '') && tag.startsWith('ore:')) {
+    return itemName;
+  }
+  return `#${tag}`;
 }

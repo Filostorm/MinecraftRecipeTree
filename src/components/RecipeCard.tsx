@@ -184,7 +184,11 @@ export function ItemChip({
   const {openItem} = useUi();
   const item = data.itemsByKey.get(itemKey);
   const name = item?.n ?? itemKey.split('|').pop() ?? itemKey;
-  const displayName = displayIngredientName(name, tag);
+  const displayName = displayIngredientName(
+    name,
+    tag,
+    data.descriptor.minecraftVersion,
+  );
   const content = (
     <>
       <ItemIcon item={item} itemKey={itemKey} size={16} />

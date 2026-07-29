@@ -1633,7 +1633,11 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
   const exportTotals = useCallback(() => {
     try {
       const csv = buildTreeTotalsCsv(treeTotals, (key, tag) =>
-        displayIngredientName(data.itemsByKey.get(key)?.n ?? key, tag),
+        displayIngredientName(
+          data.itemsByKey.get(key)?.n ?? key,
+          tag,
+          data.descriptor.minecraftVersion,
+        ),
       );
       downloadBlob(
         `${rootExportName}-resources.csv`,
@@ -1644,7 +1648,12 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
       console.error('Tree resource-list export failed.', error);
       setExportMessage(error instanceof Error ? error.message : 'Resource-list export failed.');
     }
-  }, [data.itemsByKey, rootExportName, treeTotals]);
+  }, [
+    data.descriptor.minecraftVersion,
+    data.itemsByKey,
+    rootExportName,
+    treeTotals,
+  ]);
 
   const exportTreeImage = useCallback(async () => {
     if (Platform.OS !== 'web') {
@@ -2500,7 +2509,11 @@ function TreeTotalsSection({
               onPress={() => onPress(total)}>
               <ItemIcon item={item} itemKey={total.key} size={16} />
               <Text style={[styles.totalName, noSelect]} numberOfLines={1}>
-                {displayIngredientName(item?.n ?? total.key, total.tag)}
+                {displayIngredientName(
+                  item?.n ?? total.key,
+                  total.tag,
+                  data.descriptor.minecraftVersion,
+                )}
               </Text>
               <Text style={[styles.totalAmount, noSelect]}>
                 {formatIngredientQuantity(total.key, total.amount)}
@@ -2548,7 +2561,11 @@ function CompactItemNodeView({
 }) {
   const data = useData();
   const item = data.itemsByKey.get(node.key);
-  const name = displayIngredientName(item?.n ?? node.key, node.tag);
+  const name = displayIngredientName(
+    item?.n ?? node.key,
+    node.tag,
+    data.descriptor.minecraftVersion,
+  );
   const amount = formatIngredientQuantity(
     node.key,
     byproductCoverage?.remainingAmount ?? requiredAmount,
@@ -2649,7 +2666,11 @@ function ItemNodeView({
 }) {
   const data = useData();
   const item = data.itemsByKey.get(node.key);
-  const name = displayIngredientName(item?.n ?? node.key, node.tag);
+  const name = displayIngredientName(
+    item?.n ?? node.key,
+    node.tag,
+    data.descriptor.minecraftVersion,
+  );
   const glyph =
     node.loading
       ? '…'
@@ -2762,7 +2783,15 @@ function SourceNodeView({
   const data = useData();
   const catalogItem = data.itemsByKey.get(item.key);
   const concreteName = catalogItem?.n ?? item.key;
-  const name = item.tag ? `${displayIngredientName(concreteName, item.tag)} · ${concreteName}` : concreteName;
+  const logicalName = displayIngredientName(
+    concreteName,
+    item.tag,
+    data.descriptor.minecraftVersion,
+  );
+  const name =
+    item.tag && logicalName !== concreteName
+      ? `${logicalName} · ${concreteName}`
+      : concreteName;
   const amountText = shouldShowIngredientQuantity(item.key, requiredAmount)
     ? ` ${formatIngredientQuantity(item.key, requiredAmount)}`
     : '';
