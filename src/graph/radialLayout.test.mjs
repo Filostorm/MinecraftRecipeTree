@@ -67,6 +67,26 @@ function distanceBetween(graph, leftId, rightId) {
   return Math.hypot(leftCenter.x - rightCenter.x, leftCenter.y - rightCenter.y);
 }
 
+function angleBetweenChildren(graph, parentId, leftId, rightId) {
+  const parent = graph.nodes.find(node => node.id === parentId);
+  const left = graph.nodes.find(node => node.id === leftId);
+  const right = graph.nodes.find(node => node.id === rightId);
+  assert.ok(parent && left && right);
+  const parentCenter = nodeCenter(parent);
+  const leftCenter = nodeCenter(left);
+  const rightCenter = nodeCenter(right);
+  const leftAngle = Math.atan2(
+    leftCenter.y - parentCenter.y,
+    leftCenter.x - parentCenter.x,
+  );
+  const rightAngle = Math.atan2(
+    rightCenter.y - parentCenter.y,
+    rightCenter.x - parentCenter.x,
+  );
+  const delta = Math.abs(leftAngle - rightAngle) % (Math.PI * 2);
+  return Math.min(delta, Math.PI * 2 - delta);
+}
+
 function assertNoNodeOverlaps(graph) {
   for (let leftIndex = 0; leftIndex < graph.nodes.length; leftIndex += 1) {
     for (let rightIndex = leftIndex + 1; rightIndex < graph.nodes.length; rightIndex += 1) {
@@ -208,7 +228,7 @@ test('keeps a sparse branch near the center when another branch needs a dense an
   assertNoNodeOverlaps(graph);
 });
 
-test('keeps a recipe input fan approximately equidistant from its own recipe', () => {
+test('keeps a dense recipe input fan within one staggered row gap', () => {
   const branchInputs = Array.from({length: 10}, (_, index) => item(`branch-input-${index}`));
   const root = sourceNode('root', [
     sourceNode('branch', branchInputs),
@@ -220,7 +240,25 @@ test('keeps a recipe input fan approximately equidistant from its own recipe', (
     distanceBetween(graph, 'branch.source', input.id),
   );
 
-  assert.ok(Math.max(...distances) - Math.min(...distances) < 1);
+  assert.ok(Math.max(...distances) - Math.min(...distances) < 100);
+  assertNoNodeOverlaps(graph);
+});
+
+test('compacts descendant inputs instead of inheriting a large root sector', () => {
+  const root = sourceNode('root', [
+    sourceNode('branch', [item('branch-left'), item('branch-right')]),
+    item('side-input'),
+  ]);
+  const graph = layoutRadialTree(root);
+
+  assert.ok(
+    angleBetweenChildren(
+      graph,
+      'branch.source',
+      'branch-left',
+      'branch-right',
+    ) < 0.8,
+  );
   assertNoNodeOverlaps(graph);
 });
 

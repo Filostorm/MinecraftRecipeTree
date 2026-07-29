@@ -15,6 +15,8 @@ const RADIAL_TERMINAL_GAP = RADIAL_NODE_GAP;
 const RADIAL_COLLISION_PLACEMENT_STEP = 12;
 const MAX_COLLISION_PLACEMENT_ATTEMPTS = 100_000;
 const MAX_STAGGERED_ROWS = 8;
+const MIN_LOCAL_FAN_SPAN = Math.PI / 7.5;
+const MAX_LOCAL_FAN_SPAN = Math.PI * 5 / 6;
 
 export const RADIAL_ITEM_SIZE = 52;
 export const RADIAL_ROOT_SIZE = 104;
@@ -55,8 +57,8 @@ export function planStaggeredRadialRows(
     throw new Error('Radial row planning requires a positive finite minimum radius.');
   }
   angles.forEach((angle, index) => {
-    if (!Number.isFinite(angle) || angle < 0 || angle >= FULL_TURN) {
-      throw new Error(`Radial row angle ${index} must be finite and within one turn.`);
+    if (!Number.isFinite(angle)) {
+      throw new Error(`Radial row angle ${index} must be finite.`);
     }
     if (index > 0 && angle <= angles[index - 1]) {
       throw new Error('Radial row angles must be strictly increasing.');
@@ -126,6 +128,90 @@ export function planStaggeredRadialRows(
     throw new Error('Radial row planning did not produce a finite layout.');
   }
   return best;
+}
+
+function rotateSubtreeAngles(
+  units: RadialUnit[],
+  rootIndex: number,
+  angularDelta: number,
+): void {
+  if (Math.abs(angularDelta) <= 1e-9) return;
+  const stack = [rootIndex];
+  while (stack.length > 0) {
+    const index = stack.pop()!;
+    const unit = units[index];
+    unit.angle += angularDelta;
+    unit.leafStart += angularDelta;
+    unit.leafEnd += angularDelta;
+    for (const childIndex of unit.children) stack.push(childIndex);
+  }
+}
+
+/**
+ * Compress a non-root recipe's children into an outward-facing local fan.
+ *
+ * Global leaf sectors are useful for separating the root branches, but reusing
+ * their full width at every descendant creates large hollow wedges. Local fans
+ * retain the branch direction while using only the angle needed by this
+ * recipe's immediate inputs; the stagger planner handles denser groups.
+ */
+function packLocalChildAngles(
+  units: RadialUnit[],
+  parentIndex: number,
+  minimumParentDistance: number,
+): void {
+  const parent = units[parentIndex];
+  const childIndices = parent.children;
+  if (parent.depth === 0 || childIndices.length === 0) return;
+  if (childIndices.length === 1) {
+    rotateSubtreeAngles(
+      units,
+      childIndices[0],
+      parent.angle - units[childIndices[0]].angle,
+    );
+    return;
+  }
+
+  let maximumDiameter = 0;
+  for (const childIndex of childIndices) {
+    maximumDiameter = Math.max(
+      maximumDiameter,
+      units[childIndex].collisionDiameter,
+    );
+  }
+  const separationRatio = Math.min(
+    0.95,
+    (maximumDiameter + RADIAL_NODE_GAP) / (2 * minimumParentDistance),
+  );
+  const minimumAngularSeparation = 2 * Math.asin(separationRatio);
+  const requiredSpan = Math.min(
+    MAX_LOCAL_FAN_SPAN,
+    minimumAngularSeparation * (childIndices.length - 1),
+  );
+  const originalSpan =
+    units[childIndices[childIndices.length - 1]].angle -
+    units[childIndices[0]].angle;
+  if (!(originalSpan >= 0) || !Number.isFinite(originalSpan)) {
+    throw new Error(`Radial graph branch ${parentIndex} has invalid child angles.`);
+  }
+  const preferredMaximumSpan = Math.max(
+    MIN_LOCAL_FAN_SPAN,
+    requiredSpan * 1.15,
+  );
+  const targetSpan = Math.max(
+    requiredSpan,
+    Math.min(originalSpan, preferredMaximumSpan, MAX_LOCAL_FAN_SPAN),
+  );
+  const firstAngle = parent.angle - targetSpan / 2;
+  const angularStep = targetSpan / (childIndices.length - 1);
+  childIndices.forEach((childIndex, offset) => {
+    const targetAngle = firstAngle + angularStep * offset;
+    rotateSubtreeAngles(
+      units,
+      childIndex,
+      targetAngle - units[childIndex].angle,
+    );
+  });
 }
 
 interface RadialUnit {
@@ -399,7 +485,6 @@ function placeBranchLocalRings(units: RadialUnit[], levels: number[][]): void {
       }
       const parent = units[parentIndex];
       const childIndices = parent.children;
-      const angles = childIndices.map(index => units[index].angle);
       const diameters = childIndices.map(index => units[index].collisionDiameter);
       let maximumDiameter = 0;
       for (const diameter of diameters) maximumDiameter = Math.max(maximumDiameter, diameter);
@@ -408,8 +493,10 @@ function placeBranchLocalRings(units: RadialUnit[], levels: number[][]): void {
         parent.collisionDiameter / 2 +
         maximumDiameter / 2 +
         (allTerminal ? RADIAL_TERMINAL_GAP : RADIAL_DEPTH_GAP);
+      packLocalChildAngles(units, parentIndex, minimumParentDistance);
+      const packedAngles = childIndices.map(index => units[index].angle);
       const rowPlan = planStaggeredRadialRows(
-        angles,
+        packedAngles,
         diameters,
         minimumParentDistance,
       );
