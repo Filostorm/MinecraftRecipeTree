@@ -713,10 +713,11 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
             ref: [...choice.ref],
             ...(choice.allowFluidTransfer ? {allowFluidTransfer: true as const} : {}),
             ...(choice.ingredientSelections
-              ? {ingredientSelections: {...choice.ingredientSelections}}
-              : {}),
+                ? {ingredientSelections: {...choice.ingredientSelections}}
+                : {}),
           };
-          needsFitRef.current = true;
+          // Deferring a duplicate changes expansion ownership, not the user's
+          // viewport intent. Preserve the current pan and zoom transform.
           bump();
           return true;
         }
@@ -1292,7 +1293,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
       owner.source = undefined;
       owner.deferredRecipeExpansion = ownerExpansion;
       node.deferredRecipeExpansion = undefined;
-      needsFitRef.current = true;
+      // Moving the visible occurrence of a recipe must not behave like Fit.
       bump();
 
       const expanded = await applyRecipeChoice(node, {t: 'recipe', ...expansion});
