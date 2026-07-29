@@ -38,6 +38,7 @@ import {
   normalizeInterfaceZoom,
   persistInterfaceZoom,
 } from './src/ui/interfaceZoom';
+import {signalTarget, useSignalSurface} from './src/analytics/signal';
 
 export default function App() {
   return (
@@ -242,6 +243,17 @@ function Shell({
   const [feedbackKind, setFeedbackKind] = useState<FeedbackKind | null>(null);
   const [showDatasetDetails, setShowDatasetDetails] = useState(false);
   const [interfaceZoom, setInterfaceZoom] = useState(1);
+  const shellSurface = feedbackKind
+    ? `feedback/${feedbackKind}`
+    : showGraphGuide
+      ? 'graph-guide'
+      : showRecipeHistory
+        ? 'recipe-history'
+        : tab;
+  useSignalSurface(
+    shellSurface,
+    feedbackKind || showGraphGuide || showRecipeHistory ? 'modal' : 'screen',
+  );
   useEffect(() => {
     if (Platform.OS === 'web') setHasHydrated(true);
   }, []);
@@ -283,6 +295,7 @@ function Shell({
   );
   const datasetDetailsButton = (
     <TouchableOpacity
+      {...signalTarget('header.dataset-details')}
       style={[
         styles.headerDetailBtn,
         showDatasetDetails && styles.headerDetailBtnActive,
@@ -353,6 +366,7 @@ function Shell({
   const headerActions = (
     <View style={styles.headerUtilityRow}>
       <TouchableOpacity
+        {...signalTarget('header.recipe-history')}
         style={styles.headerUtilityButton}
         onPress={() => setShowRecipeHistory(true)}
         accessibilityRole="button"
@@ -360,6 +374,7 @@ function Shell({
         <Text style={styles.historyHeaderIcon}>◷</Text>
       </TouchableOpacity>
       <TouchableOpacity
+        {...signalTarget('header.graph-guide')}
         style={[
           styles.headerUtilityButton,
           showGraphGuide && styles.headerUtilityButtonActive,
@@ -457,7 +472,10 @@ function TabBtn({tab, label}: {tab: Tab; label: string}) {
   const ui = useUi();
   const active = ui.tab === tab;
   return (
-    <TouchableOpacity onPress={() => ui.setTab(tab)} style={[styles.tabBtn, active && styles.tabBtnActive]}>
+    <TouchableOpacity
+      {...signalTarget(`tab.${tab}`)}
+      onPress={() => ui.setTab(tab)}
+      style={[styles.tabBtn, active && styles.tabBtnActive]}>
       <Text style={[styles.tabBtnText, active && styles.tabBtnTextActive]}>{label}</Text>
     </TouchableOpacity>
   );

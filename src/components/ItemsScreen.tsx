@@ -13,6 +13,7 @@ import {
   catalogTypePresentation,
   isItemCatalogEligible,
 } from '../data/catalogPresentation';
+import {signalTarget} from '../analytics/signal';
 import {theme} from '../theme';
 import {CatalogItem} from '../types';
 import {useUi} from '../ui/UiContext';
@@ -114,6 +115,7 @@ export function ItemsScreen({interfaceZoom}: {interfaceZoom: number}) {
           const typeLabel = catalogTypePresentation(item.t)?.label;
           return (
             <TouchableOpacity
+              {...signalTarget('items.item.open')}
               style={[styles.cell, {width: `${100 / columns}%` as never}]}
               onPress={() => openItem(item.k)}>
               <ItemIcon item={item} size={48} />

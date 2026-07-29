@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import type {SlotSummary} from '../data/slotSummary';
+import {signalTarget} from '../analytics/signal';
 import {theme} from '../theme';
 import {uniformPickerRecipePreviewSize} from '../ui/interfaceZoom';
 import type {GraphDirection} from '../graph/direction';
@@ -112,6 +113,7 @@ export function PickerModal({
                 const selected = direction === value;
                 return (
                   <TouchableOpacity
+                    {...signalTarget(`graph.source-picker.direction.${value}`)}
                     key={value}
                     accessibilityRole="button"
                     accessibilityLabel={`${label}, build tree ${value === 'inputs' ? 'toward ingredients' : 'toward products'}`}
@@ -139,6 +141,7 @@ export function PickerModal({
                 <Text style={styles.rememberTitle}>★ Use automatically in future trees</Text>
               </View>
               <Switch
+                {...signalTarget('graph.source-picker.remember-source')}
                 accessibilityLabel="Use automatically in future trees"
                 value={rememberSource ?? true}
                 onValueChange={onRememberSourceChange}
@@ -154,6 +157,7 @@ export function PickerModal({
                 {filterHint ? <Text style={styles.rememberHint}>{filterHint}</Text> : null}
               </View>
               <Switch
+                {...signalTarget('graph.source-picker.filter-fluid-transfers')}
                 accessibilityLabel={filterLabel}
                 value={filterValue ?? false}
                 onValueChange={onFilterValueChange}
@@ -168,6 +172,7 @@ export function PickerModal({
                 {sourceTypeCount} source types · {loadedOptionCount}/{totalOptionCount} loaded
               </Text>
               <TouchableOpacity
+                {...signalTarget('graph.source-picker.groups.toggle-all')}
                 accessibilityRole="button"
                 style={styles.groupAction}
                 onPress={() => {
@@ -196,6 +201,7 @@ export function PickerModal({
                   const progress = groupProgress?.[group.key];
                   return (
                     <TouchableOpacity
+                      {...signalTarget('graph.source-picker.group.expand')}
                       key={group.key}
                       accessibilityRole="button"
                       accessibilityState={{expanded: false}}
@@ -218,6 +224,7 @@ export function PickerModal({
               return (
                 <View key={group.key} style={styles.group}>
                   <TouchableOpacity
+                    {...signalTarget('graph.source-picker.group.collapse')}
                     accessibilityRole="button"
                     accessibilityState={{expanded: true}}
                     accessibilityLabel={`${group.label}, ${group.entries.length} option${group.entries.length === 1 ? '' : 's'}`}
@@ -241,7 +248,11 @@ export function PickerModal({
                           )
                         : null;
                       return (
-                        <TouchableOpacity key={i} style={styles.option} onPress={() => onSelect(i)}>
+                        <TouchableOpacity
+                          {...signalTarget('graph.source-picker.source.select')}
+                          key={i}
+                          style={styles.option}
+                          onPress={() => onSelect(i)}>
                           <Text style={styles.optionLabel}>{opt.label}</Text>
                           {opt.sublabel ? <Text style={styles.optionSub}>{opt.sublabel}</Text> : null}
                           {opt.imageUri && imageSize ? (
@@ -316,6 +327,7 @@ export function PickerModal({
                   </View>
                   {hasMore && onLoadGroup ? (
                     <TouchableOpacity
+                      {...signalTarget('graph.source-picker.group.load-more')}
                       accessibilityRole="button"
                       accessibilityLabel={`Load more ${group.label} recipes`}
                       disabled={progress?.loading}

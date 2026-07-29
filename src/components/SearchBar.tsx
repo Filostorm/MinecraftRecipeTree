@@ -12,6 +12,7 @@ import {
   ViewStyle,
 } from 'react-native';
 import {ModInfo} from '../data/DataContext';
+import {signalTarget} from '../analytics/signal';
 import {theme} from '../theme';
 
 export function SearchBar({
@@ -40,6 +41,7 @@ export function SearchBar({
       />
       {value.length > 0 && (
         <TouchableOpacity
+          {...signalTarget('search.clear')}
           accessibilityLabel="Clear search"
           accessibilityRole="button"
           hitSlop={8}
@@ -99,6 +101,7 @@ export function ModFilter({
   return (
     <View style={[styles.filterWrap, style]}>
       <TouchableOpacity
+        {...signalTarget('filter.mod.open')}
         accessibilityHint="Opens a searchable list of mods"
         accessibilityLabel={`Mod filter, ${triggerLabel}`}
         accessibilityRole="combobox"

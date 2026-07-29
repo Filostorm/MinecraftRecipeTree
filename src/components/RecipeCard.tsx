@@ -16,6 +16,7 @@ import {
 } from '../data/slotSummary';
 import {Recipe} from '../types';
 import {useUi} from '../ui/UiContext';
+import {signalTarget} from '../analytics/signal';
 import type {GraphDirection} from '../graph/direction';
 import {ItemIcon, pixelated} from './ItemIcon';
 import {RecipePreviewImage} from './RecipePreviewImage';
@@ -71,6 +72,7 @@ export function RecipeCard({
   const displayTitle = catTitle ? recipeDisplayTitle(catTitle, recipe) : undefined;
   return (
     <TouchableOpacity
+      {...(onPress ? signalTarget(`recipe.open-graph.${graphDirection}`) : {})}
       accessibilityRole={onPress ? 'button' : undefined}
       accessibilityLabel={
         onPress
@@ -224,6 +226,7 @@ export function ItemChip({
   }
   return (
     <TouchableOpacity
+      {...signalTarget('item-detail.item.open')}
       accessibilityRole="button"
       accessibilityLabel={`Open ${displayName}`}
       style={[styles.chip, highlight && styles.chipHighlight]}

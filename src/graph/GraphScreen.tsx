@@ -23,6 +23,7 @@ import {
   prerequisiteSummary,
   slotSummary,
 } from '../data/slotSummary';
+import {signalTarget, useSignalSurface} from '../analytics/signal';
 import {RecipePreviewImage} from '../components/RecipePreviewImage';
 import {recipeImagePath, useData} from '../data/DataContext';
 import {
@@ -297,6 +298,15 @@ function loadNodeLabels(): boolean {
   }
 }
 
+function nodeDepthBucket(
+  node: ItemTreeNode,
+): 'root' | 'depth-1' | 'depth-2' | 'depth-3-plus' {
+  if (node.id === 'root' || node.ancestors.length === 0) return 'root';
+  if (node.ancestors.length === 1) return 'depth-1';
+  if (node.ancestors.length === 2) return 'depth-2';
+  return 'depth-3-plus';
+}
+
 export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
   const data = useData();
   const {
@@ -308,6 +318,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
     openRecipeInGraph,
     restoreGraph,
     openItem,
+    tab,
     setTab,
     animateMobs,
   } = useUi();
@@ -320,6 +331,10 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
   const [picker, setPicker] = useState<PickerState | null>(null);
   const pickerRef = useRef<PickerState | null>(null);
   pickerRef.current = picker;
+  useSignalSurface(
+    tab === 'graph' && picker ? 'graph/source-picker' : tab,
+    tab === 'graph' && picker ? 'modal' : 'screen',
+  );
   const pickerGroupLoadsRef = useRef(new Set<string>());
   const pickerRequestIdRef = useRef(0);
   const pendingRootChoiceRef = useRef<{
@@ -1672,7 +1687,10 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
           Open an item and tap one of its recipe cards to start a crafting tree. Tap nodes to
           expand how each item is obtained — recipes, mining, or mob drops.
         </Text>
-        <TouchableOpacity style={styles.emptyBtn} onPress={() => setTab('items')}>
+        <TouchableOpacity
+          {...signalTarget('graph.empty.browse-items')}
+          style={styles.emptyBtn}
+          onPress={() => setTab('items')}>
           <Text style={styles.emptyBtnText}>Browse items</Text>
         </TouchableOpacity>
       </View>
@@ -1821,21 +1839,34 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
             {graphDirection === 'inputs' && (
               <CtrlBtn
                 label="Totals"
+                metricsId="graph.control.totals"
                 active={showTreeTotals}
                 onPress={() => setShowTreeTotals(value => !value)}
               />
             )}
-            <CtrlBtn label="Radial" active={radialLayout} onPress={toggleRadialLayout} />
-            <CtrlBtn label="Compact" active={compactMode} onPress={toggleCompactMode} />
+            <CtrlBtn
+              label="Radial"
+              metricsId="graph.control.radial"
+              active={radialLayout}
+              onPress={toggleRadialLayout}
+            />
+            <CtrlBtn
+              label="Compact"
+              metricsId="graph.control.compact"
+              active={compactMode}
+              onPress={toggleCompactMode}
+            />
             <CtrlBtn
               label="Names"
+              metricsId="graph.control.names"
               active={showNodeLabels}
               onPress={() => updateNodeLabels(!showNodeLabels)}
             />
-            <CtrlBtn label="Fit" onPress={fitView} />
+            <CtrlBtn label="Fit" metricsId="graph.control.fit" onPress={fitView} />
           </View>
         )}
         <TouchableOpacity
+          {...signalTarget('graph.control.menu')}
           accessibilityRole="button"
           accessibilityLabel={showGraphControls ? 'Collapse graph controls' : 'Expand graph controls'}
           accessibilityState={{expanded: showGraphControls}}
@@ -2029,6 +2060,7 @@ function TreeTotalsPanel({
       <View style={styles.totalsHeader}>
         <Text style={[styles.totalsTitle, noSelect]}>Tree totals</Text>
         <TouchableOpacity
+          {...signalTarget('graph.totals.use-byproducts')}
           accessibilityRole="checkbox"
           accessibilityState={{checked: useByproducts}}
           style={[styles.totalsOption, useByproducts && styles.totalsOptionActive]}
@@ -2039,10 +2071,14 @@ function TreeTotalsPanel({
         </TouchableOpacity>
       </View>
       <View style={styles.exportActions}>
-        <TouchableOpacity style={styles.exportBtn} onPress={onExportTotals}>
+        <TouchableOpacity
+          {...signalTarget('graph.totals.export-csv')}
+          style={styles.exportBtn}
+          onPress={onExportTotals}>
           <Text style={styles.exportBtnText}>Export resources CSV</Text>
         </TouchableOpacity>
         <TouchableOpacity
+          {...signalTarget('graph.totals.export-png')}
           style={[styles.exportBtn, exportingTree && styles.exportBtnDisabled]}
           disabled={exportingTree}
           onPress={onExportTree}>
@@ -2098,6 +2134,7 @@ function TreeTotalsSection({
           const item = data.itemsByKey.get(total.key);
           return (
             <TouchableOpacity
+              {...signalTarget('graph.totals.item.open')}
               key={`${total.key}:${total.tag ?? ''}`}
               style={styles.totalRow}
               accessibilityRole="button"
@@ -2162,6 +2199,7 @@ function CompactItemNodeView({
     : null;
   return (
     <Pressable
+      {...signalTarget(`graph.node.expand.${nodeDepthBucket(node)}`)}
       accessibilityRole={selectable ? 'button' : undefined}
       accessibilityLabel={`${name}, quantity ${formatIngredientQuantity(node.key, requiredAmount)}${terminal ? `, ${terminalLabel}` : ''}${byproductLabel ? `, ${byproductLabel}` : ''}${node.nonConsumed ? ', not consumed' : ''}${node.consumptionProbability !== undefined ? `, ${node.consumptionProbability == null ? 'unknown' : `${String(Math.round(node.consumptionProbability * 10_000) / 100)} percent`} consume chance` : ''}${node.productionProbability !== undefined ? `, ${node.productionProbability == null ? 'unknown' : `${String(Math.round(node.productionProbability * 10_000) / 100)} percent`} produce chance` : ''}${selectable ? byproductCoverage?.remainingAmount === 0 ? ', navigate to producing recipe' : ', choose source' : ''}`}
       disabled={!selectable || node.loading}
@@ -2263,6 +2301,7 @@ function ItemNodeView({
     : '';
   return (
     <Pressable
+      {...signalTarget(`graph.node.expand.${nodeDepthBucket(node)}`)}
       onPress={onTap}
       accessibilityRole="button"
       accessibilityLabel={`${name}, quantity ${formatIngredientQuantity(node.key, requiredAmount)}${!expandable ? `, ${terminalLabel}` : ''}${node.productionProbability !== undefined ? `, ${node.productionProbability == null ? 'unknown' : `${String(Math.round(node.productionProbability * 10_000) / 100)} percent`} produce chance` : ''}${byproductCoverage ? byproductCoverage.remainingAmount === 0 ? ', completed by byproduct, navigate to producing recipe' : `, partially completed by byproduct, ${formatIngredientQuantity(node.key, byproductCoverage.remainingAmount)} still needed, choose source` : expandable ? ', choose source' : ''}`}
@@ -2306,7 +2345,11 @@ function ItemNodeView({
           {byproductText}
         </Text>
       </View>
-      <TouchableOpacity onPress={onInfo} style={styles.infoBtn} hitSlop={6}>
+      <TouchableOpacity
+        {...signalTarget(`graph.node.info.${nodeDepthBucket(node)}`)}
+        onPress={onInfo}
+        style={styles.infoBtn}
+        hitSlop={6}>
         <Text style={[styles.smallBtnText, noSelect]}>ⓘ</Text>
       </TouchableOpacity>
     </Pressable>
@@ -2381,7 +2424,10 @@ function SourceNodeView({
         isRoot && !radialRoot && styles.nodeRoot,
         radialRoot && styles.radialExpandedRootNode,
       ]}>
-      <Pressable onPress={onCollapse} style={styles.sourceHeader}>
+      <Pressable
+        {...signalTarget(`graph.node.collapse.${nodeDepthBucket(item)}`)}
+        onPress={onCollapse}
+        style={styles.sourceHeader}>
         {isRoot ? (
           <View style={styles.rootSourceIconFrame}>
             <View pointerEvents="none" style={styles.rootSourceIconDiamond} />
@@ -2402,11 +2448,19 @@ function SourceNodeView({
           )}
         </Text>
         {canSwap && (
-          <TouchableOpacity onPress={onSwap} hitSlop={6} style={styles.headerBtn}>
+          <TouchableOpacity
+            {...signalTarget(`graph.node.swap.${nodeDepthBucket(item)}`)}
+            onPress={onSwap}
+            hitSlop={6}
+            style={styles.headerBtn}>
             <Text style={[styles.smallBtnText, noSelect]}>⇄</Text>
           </TouchableOpacity>
         )}
-        <TouchableOpacity onPress={onInfo} hitSlop={6} style={styles.headerBtn}>
+        <TouchableOpacity
+          {...signalTarget(`graph.node.info.${nodeDepthBucket(item)}`)}
+          onPress={onInfo}
+          hitSlop={6}
+          style={styles.headerBtn}>
           <Text style={[styles.smallBtnText, noSelect]}>ⓘ</Text>
         </TouchableOpacity>
         <Text style={[styles.smallBtnText, noSelect]}>▴</Text>
@@ -2462,15 +2516,18 @@ function SourceNodeView({
 
 function CtrlBtn({
   label,
+  metricsId,
   active = false,
   onPress,
 }: {
   label: string;
+  metricsId: string;
   active?: boolean;
   onPress: () => void;
 }) {
   return (
     <TouchableOpacity
+      {...signalTarget(metricsId)}
       accessibilityRole="button"
       accessibilityState={{selected: active}}
       style={[styles.ctrlBtn, active && styles.ctrlBtnActive]}

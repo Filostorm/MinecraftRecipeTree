@@ -32,6 +32,7 @@ import type {GraphDirection} from '../graph/direction';
 import {theme} from '../theme';
 import {Recipe, RecipeRef} from '../types';
 import {useUi} from '../ui/UiContext';
+import {signalTarget, useSignalSurface} from '../analytics/signal';
 import {DropList, DropRow, formatDropStat} from './DropList';
 import {ItemIcon} from './ItemIcon';
 import {MobSprite} from './MobSprite';
@@ -51,10 +52,24 @@ function toolLabel(tool: string): string {
 
 export function ItemDetailModal() {
   const data = useData();
-  const {itemStack, popItem, closeItems} = useUi();
+  const {itemStack, popItem, closeItems, tab} = useUi();
   const key = itemStack[itemStack.length - 1];
   /** 'p' | 'u' | 'i' | 'd' | a secondary category index */
   const [side, setSide] = useState<'p' | 'u' | 'i' | 'd' | number>('p');
+  const sideName =
+    side === 'p'
+      ? 'recipes'
+      : side === 'u'
+        ? 'usages'
+        : side === 'i'
+          ? 'information'
+          : side === 'd'
+            ? 'drops'
+            : 'secondary';
+  useSignalSurface(
+    key ? `item-detail/${sideName}` : tab,
+    key ? 'modal' : 'screen',
+  );
 
   useEffect(() => setSide('p'), [key]);
   useEffect(() => {
@@ -78,6 +93,7 @@ export function ItemDetailModal() {
             </Text>
             {data.indexStatus === 'error' && (
               <TouchableOpacity
+                {...signalTarget('item-detail.retry-index')}
                 style={styles.headerBtn}
                 onPress={() => void data.ensureIndex().catch(() => {})}>
                 <Text style={styles.headerBtnText}>Retry recipe index</Text>
@@ -142,12 +158,18 @@ export function ItemDetailModal() {
         <Pressable style={styles.card} onPress={() => {}}>
           <View style={styles.header}>
             {itemStack.length > 1 && (
-              <TouchableOpacity onPress={popItem} style={styles.headerBtn}>
+              <TouchableOpacity
+                {...signalTarget('item-detail.back')}
+                onPress={popItem}
+                style={styles.headerBtn}>
                 <Text style={styles.headerBtnText}>‹ back</Text>
               </TouchableOpacity>
             )}
             <View style={{flex: 1}} />
-            <TouchableOpacity onPress={closeItems} style={styles.headerBtn}>
+            <TouchableOpacity
+              {...signalTarget('item-detail.close')}
+              onPress={closeItems}
+              style={styles.headerBtn}>
               <Text style={styles.headerBtnText}>✕</Text>
             </TouchableOpacity>
           </View>
@@ -164,10 +186,11 @@ export function ItemDetailModal() {
           </View>
 
           <View style={styles.tabsRow}>
-            <SideTab label={`Recipes (${produced.length})`} active={side === 'p'} onPress={() => setSide('p')} />
-            <SideTab label={`Usages (${used.length})`} active={side === 'u'} onPress={() => setSide('u')} />
+            <SideTab metricsId="item-detail.tab.recipes" label={`Recipes (${produced.length})`} active={side === 'p'} onPress={() => setSide('p')} />
+            <SideTab metricsId="item-detail.tab.usages" label={`Usages (${used.length})`} active={side === 'u'} onPress={() => setSide('u')} />
             {informational.length > 0 && (
               <SideTab
+                metricsId="item-detail.tab.information"
                 label={`Info (${informational.length})`}
                 active={side === 'i'}
                 onPress={() => setSide('i')}
@@ -176,13 +199,14 @@ export function ItemDetailModal() {
             {secondaryGroups.map(g => (
               <SideTab
                 key={g.catIdx}
+                metricsId="item-detail.tab.secondary"
                 label={`${g.title} (${g.refs.length})`}
                 active={side === g.catIdx}
                 onPress={() => setSide(g.catIdx)}
               />
             ))}
             {dropsCount > 0 && (
-              <SideTab label={`Drops (${dropsCount})`} active={side === 'd'} onPress={() => setSide('d')} />
+              <SideTab metricsId="item-detail.tab.drops" label={`Drops (${dropsCount})`} active={side === 'd'} onPress={() => setSide('d')} />
             )}
           </View>
 
@@ -244,9 +268,22 @@ export function ItemDetailModal() {
   );
 }
 
-function SideTab({label, active, onPress}: {label: string; active: boolean; onPress: () => void}) {
+function SideTab({
+  label,
+  active,
+  onPress,
+  metricsId,
+}: {
+  label: string;
+  active: boolean;
+  onPress: () => void;
+  metricsId: string;
+}) {
   return (
-    <TouchableOpacity onPress={onPress} style={[styles.sideTab, active && styles.sideTabActive]}>
+    <TouchableOpacity
+      {...signalTarget(metricsId)}
+      onPress={onPress}
+      style={[styles.sideTab, active && styles.sideTabActive]}>
       <Text style={[styles.sideTabText, active && styles.sideTabTextActive]}>{label}</Text>
     </TouchableOpacity>
   );
@@ -596,6 +633,7 @@ function RefsList({
               !collapsed && styles.categorySectionExpanded,
             ]}>
             <TouchableOpacity
+              {...signalTarget('item-detail.recipe-category.toggle')}
               accessibilityRole="button"
               accessibilityLabel={`${collapsed ? 'Expand' : 'Collapse'} ${category.title} recipes`}
               accessibilityState={{expanded: !collapsed}}
@@ -682,6 +720,7 @@ function RefsList({
           ? filteredRefs.length > visibleTarget
           : !scannedAll || visibleCandidates.length > visibleTarget) && (
         <TouchableOpacity
+          {...signalTarget('item-detail.show-more')}
           style={styles.moreBtn}
           onPress={() => {
             setVisibleTarget(value => value + PAGE);
@@ -699,6 +738,7 @@ function RefsList({
 function FilterChip({label, active, onPress}: {label: string; active: boolean; onPress: () => void}) {
   return (
     <TouchableOpacity
+      {...signalTarget('item-detail.filter.change')}
       accessibilityRole="button"
       accessibilityState={{selected: active}}
       onPress={onPress}
