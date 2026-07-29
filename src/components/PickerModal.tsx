@@ -1,4 +1,4 @@
-import React, {useMemo} from 'react';
+import React, {useMemo, useState} from 'react';
 import {
   Modal,
   Pressable,
@@ -58,6 +58,7 @@ export function PickerModal({
   onToggleGroup,
   groupProgress,
   onLoadGroup,
+  onSelectAlternative,
   onSelect,
   onClose,
   interfaceZoom = 1,
@@ -77,11 +78,20 @@ export function PickerModal({
   onToggleGroup?: (groupKey: string) => void;
   groupProgress?: Readonly<Record<string, PickerGroupProgress>>;
   onLoadGroup?: (groupKey: string) => void;
+  onSelectAlternative?: (
+    optionIndex: number,
+    selectionKey: string,
+    selectedKey: string,
+  ) => void;
   onSelect: (index: number) => void;
   onClose: () => void;
   /** The web UI scale applied to recipe imagery without shrinking the modal viewport. */
   interfaceZoom?: number;
 }) {
+  const [alternativePicker, setAlternativePicker] = useState<{
+    optionIndex: number;
+    slot: SlotSummary;
+  } | null>(null);
   const groups = useMemo(() => groupPickerOptions(options), [options]);
   const collapsedGroups = groups.filter(group => collapsedGroupKeys?.has(group.key));
   const expandedGroups = groups.filter(group => !collapsedGroupKeys?.has(group.key));
@@ -277,7 +287,24 @@ export function PickerModal({
                                     tag={input.tag}
                                     probability={input.probability}
                                     probabilityRole="consume"
-                                    interactive={false}
+                                    interactive={
+                                      Boolean(onSelectAlternative) &&
+                                      input.alternatives.length > 1
+                                    }
+                                    onPress={
+                                      onSelectAlternative && input.alternatives.length > 1
+                                        ? () =>
+                                            setAlternativePicker({
+                                              optionIndex: i,
+                                              slot: input,
+                                            })
+                                        : undefined
+                                    }
+                                    accessibilityLabel={
+                                      input.alternatives.length > 1
+                                        ? `Choose from ${input.alternatives.length} ingredient alternatives`
+                                        : undefined
+                                    }
                                   />
                                 ))}
                               </View>
@@ -348,6 +375,53 @@ export function PickerModal({
             })}
           </ScrollView>
         </Pressable>
+        {alternativePicker ? (
+          <Pressable
+            style={styles.alternativeBackdrop}
+            onPress={() => setAlternativePicker(null)}>
+            <Pressable
+              accessibilityViewIsModal
+              style={styles.alternativeCard}
+              onPress={() => {}}>
+              <View style={styles.alternativeHeader}>
+                <View style={styles.alternativeTitleGroup}>
+                  <Text style={styles.alternativeTitle}>Choose an ingredient</Text>
+                  <Text style={styles.alternativeCount}>
+                    {alternativePicker.slot.alternatives.length} valid alternatives
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel="Close ingredient alternatives"
+                  style={styles.alternativeClose}
+                  onPress={() => setAlternativePicker(null)}>
+                  <Text style={styles.alternativeCloseText}>×</Text>
+                </TouchableOpacity>
+              </View>
+              <ScrollView
+                style={styles.alternativeScroll}
+                contentContainerStyle={styles.alternativeList}>
+                {alternativePicker.slot.alternatives.map(itemKey => (
+                  <ItemChip
+                    key={itemKey}
+                    itemKey={itemKey}
+                    highlight={itemKey === alternativePicker.slot.key}
+                    accessibilityLabel={`Use ${itemKey.split('|').pop() ?? itemKey}`}
+                    onPress={() => {
+                      onSelectAlternative?.(
+                        alternativePicker.optionIndex,
+                        alternativePicker.slot.selectionKey ??
+                          alternativePicker.slot.key,
+                        itemKey,
+                      );
+                      setAlternativePicker(null);
+                    }}
+                  />
+                ))}
+              </ScrollView>
+            </Pressable>
+          </Pressable>
+        ) : null}
       </Pressable>
     </Modal>
   );
@@ -519,4 +593,51 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   ingredientChips: {flexDirection: 'row', flexWrap: 'wrap', gap: 5},
+  alternativeBackdrop: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: 'rgba(0,0,0,0.72)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  alternativeCard: {
+    width: '100%',
+    maxWidth: 520,
+    maxHeight: '78%' as never,
+    backgroundColor: theme.panel,
+    borderColor: theme.borderLight,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 14,
+  },
+  alternativeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 12,
+  },
+  alternativeTitleGroup: {flex: 1},
+  alternativeTitle: {color: theme.text, fontSize: 15, fontWeight: '700'},
+  alternativeCount: {color: theme.textDim, fontSize: 10, marginTop: 2},
+  alternativeClose: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderColor: theme.border,
+    borderWidth: 1,
+    borderRadius: 8,
+  },
+  alternativeCloseText: {color: theme.textDim, fontSize: 22, lineHeight: 24},
+  alternativeScroll: {maxHeight: 460},
+  alternativeList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
 });

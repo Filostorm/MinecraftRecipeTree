@@ -7,6 +7,8 @@ import type {SlotEntry} from '../types';
 
 export interface SlotSummary {
   key: string;
+  /** Original first member used as the stable identity after a user selects another variant. */
+  selectionKey?: string;
   /** null means the exporter could not determine the quantity. */
   amount: number | null;
   /** Undefined is deterministic; null means conflicting stochastic probabilities. */

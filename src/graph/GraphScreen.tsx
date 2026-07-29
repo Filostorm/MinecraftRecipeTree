@@ -23,6 +23,11 @@ import {
   prerequisiteSummary,
   slotSummary,
 } from '../data/slotSummary';
+import {
+  applyIngredientSelections,
+  selectSlotAlternative,
+  type IngredientSelections,
+} from '../data/ingredientAlternativeSelection';
 import {signalTarget, useSignalSurface} from '../analytics/signal';
 import {RecipePreviewImage} from '../components/RecipePreviewImage';
 import {recipeImagePath, useData} from '../data/DataContext';
@@ -108,7 +113,12 @@ import {
 
 /** One way to obtain an item: craft it, kill for it, or mine for it. */
 type SourceChoice =
-  | {t: 'recipe'; ref: RecipeRef; allowFluidTransfer?: true}
+  | {
+      t: 'recipe';
+      ref: RecipeRef;
+      allowFluidTransfer?: true;
+      ingredientSelections?: IngredientSelections;
+    }
   | {t: 'mob'; mob: Mob; stat: DropStat}
   | {t: 'block'; blockKey: string; stat: DropStat};
 
@@ -138,9 +148,14 @@ interface PickerState {
 
 function preferredSourceFromChoice(choice: SourceChoice): PreferredSource {
   if (choice.t === 'recipe') {
-    return choice.allowFluidTransfer
-      ? {t: 'recipe', ref: choice.ref, allowFluidTransfer: true}
-      : {t: 'recipe', ref: choice.ref};
+    return {
+      t: 'recipe',
+      ref: choice.ref,
+      ...(choice.allowFluidTransfer ? {allowFluidTransfer: true as const} : {}),
+      ...(choice.ingredientSelections
+        ? {ingredientSelections: {...choice.ingredientSelections}}
+        : {}),
+    };
   }
   if (choice.t === 'mob') return {t: 'mob', mobId: choice.mob.id};
   return {t: 'block', blockKey: choice.blockKey};
@@ -459,6 +474,9 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
               t: 'recipe',
               ref: preferred.ref,
               ...(preferred.allowFluidTransfer ? {allowFluidTransfer: true as const} : {}),
+              ...(preferred.ingredientSelections
+                ? {ingredientSelections: {...preferred.ingredientSelections}}
+                : {}),
             }
           : null;
       }
@@ -486,10 +504,12 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
         allowFluidTransfer = false,
         expandPreferredChildren = true,
         recordHistory = true,
+        ingredientSelections,
       }: {
         allowFluidTransfer?: boolean;
         expandPreferredChildren?: boolean;
         recordHistory?: boolean;
+        ingredientSelections?: IngredientSelections;
       } = {},
     ): Promise<boolean> => {
       node.loading = true;
@@ -507,9 +527,10 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
           });
           return false;
         }
+        const selectedRecipe = applyIngredientSelections(recipe, ingredientSelections);
         if (
           !allowFluidTransfer &&
-          isFluidContainerTransferRecipe(recipe, data.itemsByKey)
+          isFluidContainerTransferRecipe(selectedRecipe, data.itemsByKey)
         ) {
           console.info('A fluid container-transfer recipe was suppressed by the default filter.', {
             itemKey: node.key,
@@ -531,8 +552,8 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
         }
         if (graphDirection === 'outputs') {
           const anchor = [
-            ...inputSlotSummary(recipe.in),
-            ...prerequisiteSummary(recipe.cat),
+            ...inputSlotSummary(selectedRecipe.in),
+            ...prerequisiteSummary(selectedRecipe.cat),
           ].find(
             input =>
               input.key === node.key || input.alternatives.includes(node.key),
@@ -546,7 +567,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
           }
           node.amount = anchor.amount;
         } else if (node.id === 'root') {
-          const output = slotSummary(recipe.out).find(
+          const output = slotSummary(selectedRecipe.out).find(
             candidate =>
               candidate.key === node.key || candidate.alternatives.includes(node.key),
           );
@@ -560,7 +581,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
           node.amount = output.amount;
         }
         const sourceId = `${node.id}.s`;
-        const childSpecs = recipeChildrenForDirection(recipe, graphDirection);
+        const childSpecs = recipeChildrenForDirection(selectedRecipe, graphDirection);
         const children = childSpecs.map((spec, i) => {
           const child: ItemTreeNode = {
             id: `${sourceId}.${i}`,
@@ -585,10 +606,14 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
           id: sourceId,
           kind: 'recipe',
           ref,
-          recipe,
+          recipe: selectedRecipe,
           dir: cat.dir,
           catTitle: recipeDisplayTitle(cat.title, recipe),
           direction: graphDirection,
+          ingredientSelections:
+            ingredientSelections && Object.keys(ingredientSelections).length > 0
+              ? {...ingredientSelections}
+              : undefined,
           allowFluidTransfer: allowFluidTransfer || undefined,
           inputs: children,
         };
@@ -644,6 +669,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
       if (choice.t === 'recipe') {
         void expandRecipe(node, choice.ref, {
           allowFluidTransfer: choice.allowFluidTransfer === true,
+          ingredientSelections: choice.ingredientSelections,
         });
         return;
       }
@@ -676,6 +702,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
           if (selection.source.kind === 'recipe') {
             const expanded = await expandRecipe(node, selection.source.ref, {
               allowFluidTransfer: selection.source.allowFluidTransfer === true,
+              ingredientSelections: selection.source.ingredientSelections,
               expandPreferredChildren: false,
               recordHistory: false,
             });
@@ -728,6 +755,9 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
         currentPreferred && choiceMatchesPreference(choice, currentPreferred) ? '★ ' : '';
       const itemName = (key: string) => data.itemsByKey.get(key)?.n ?? key;
       if (choice.t === 'recipe') {
+        const presentedRecipe = recipe
+          ? applyIngredientSelections(recipe, choice.ingredientSelections)
+          : recipe;
         const [categoryIndex, recipeIndex] = choice.ref;
         const category = data.categories[categoryIndex];
         if (!category) {
@@ -738,40 +768,55 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
           });
         }
         const title =
-          recipe && category
-            ? recipeDisplayTitle(category.title, recipe)
+          presentedRecipe && category
+            ? recipeDisplayTitle(category.title, presentedRecipe)
             : category?.title;
         return {
           choice,
-          recipe,
+          recipe: presentedRecipe,
           option: {
             label: `${favoritePrefix}${title ?? `category ${categoryIndex}`}`,
             groupKey: category?.id ?? `recipe-category:${categoryIndex}`,
             groupLabel: category?.title ?? `Recipe category ${categoryIndex}`,
             sublabel:
               [
-                recipe?.id,
-                recipe && !recipe.img ? 'JEI layout preview unavailable' : undefined,
+                presentedRecipe?.id,
+                presentedRecipe && !presentedRecipe.img
+                  ? 'JEI layout preview unavailable'
+                  : undefined,
               ]
                 .filter((value): value is string => !!value)
                 .join(' · ') || undefined,
             imageUri:
-              recipe?.img && category
-                ? data.imageUrl(recipeImagePath(category.dir, recipe.img))
+              presentedRecipe?.img && category
+                ? data.imageUrl(recipeImagePath(category.dir, presentedRecipe.img))
                 : undefined,
-            imageW: recipe?.w,
-            imageH: recipe?.h,
+            imageW: presentedRecipe?.w,
+            imageH: presentedRecipe?.h,
             inputs:
               recipe && direction === 'inputs'
-                ? inputSlotSummary(recipe.in)
+                ? inputSlotSummary(recipe.in).map(input => {
+                    const selectedEntry = Object.entries(
+                      choice.ingredientSelections ?? {},
+                    ).find(([selectionKey]) =>
+                      input.alternatives.includes(selectionKey),
+                    );
+                    const selected = selectedEntry?.[1];
+                    return selected
+                      ? selectSlotAlternative(
+                          {...input, selectionKey: selectedEntry[0]},
+                          selected,
+                        )
+                      : input;
+                  })
                 : undefined,
             outputs:
-              recipe && direction === 'outputs'
-                ? slotSummary(recipe.out)
+              presentedRecipe && direction === 'outputs'
+                ? slotSummary(presentedRecipe.out)
                 : undefined,
             prerequisites:
-              recipe && direction === 'inputs'
-                ? prerequisiteSummary(recipe.cat)
+              presentedRecipe && direction === 'inputs'
+                ? prerequisiteSummary(presentedRecipe.cat)
                 : undefined,
           },
         };
@@ -875,6 +920,25 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
       }
 
       const itemName = data.itemsByKey.get(target.key)?.n ?? target.key;
+      const withCurrentPreference = (
+        choice: RecipeSourceChoice,
+      ): RecipeSourceChoice =>
+        currentPreferred?.t === 'recipe' &&
+        choiceMatchesPreference(choice, currentPreferred)
+          ? {
+              ...choice,
+              ...(currentPreferred.allowFluidTransfer
+                ? {allowFluidTransfer: true as const}
+                : {}),
+              ...(currentPreferred.ingredientSelections
+                ? {
+                    ingredientSelections: {
+                      ...currentPreferred.ingredientSelections,
+                    },
+                  }
+                : {}),
+            }
+          : choice;
       if (requestId !== pickerRequestIdRef.current) {
         console.info('A stale recipe-source picker request was discarded.', {
           itemKey: target.key,
@@ -897,7 +961,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
           ...standardRecipeChoices.map(choice =>
             pickerEntryFor(
               target.key,
-              choice,
+              withCurrentPreference(choice),
               recipesByRef.get(recipeRefKey(choice.ref)),
               direction,
             ),
@@ -906,7 +970,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
         fluidTransferEntries: fluidTransferChoices.map(choice =>
           pickerEntryFor(
             target.key,
-            choice,
+            withCurrentPreference(choice),
             recipesByRef.get(recipeRefKey(choice.ref)),
             direction,
           ),
@@ -1952,6 +2016,81 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
           groupProgress={picker.recipeGroupProgress}
           onLoadGroup={groupKey => void loadPickerRecipeGroup(groupKey)}
           onClose={() => setPicker(null)}
+          onSelectAlternative={(i, selectionKey, selectedKey) => {
+            setPicker(current => {
+              if (!current) {
+                console.error(
+                  'An ingredient alternative was selected after its source picker closed.',
+                  {selectedIndex: i, selectionKey, selectedKey},
+                );
+                return current;
+              }
+              const visibleEntries = current.showFluidTransfers
+                ? [...current.standardEntries, ...current.fluidTransferEntries]
+                : current.standardEntries;
+              const entry = visibleEntries[i];
+              if (entry?.choice.t !== 'recipe' || !entry.recipe) {
+                console.error(
+                  'An ingredient alternative was selected for a non-recipe source.',
+                  {
+                    selectedIndex: i,
+                    selectionKey,
+                    selectedKey,
+                    optionCount: visibleEntries.length,
+                  },
+                );
+                return current;
+              }
+              const displayedSlot = entry.option.inputs?.find(
+                input =>
+                  (input.selectionKey ?? input.key) === selectionKey &&
+                  input.alternatives.includes(selectedKey),
+              );
+              if (!displayedSlot) {
+                console.error(
+                  'The selected ingredient alternative is not present in the displayed recipe slot.',
+                  {selectedIndex: i, selectionKey, selectedKey},
+                );
+                return current;
+              }
+              const choice: RecipeSourceChoice = {
+                ...entry.choice,
+                ingredientSelections: {
+                  ...entry.choice.ingredientSelections,
+                  [selectionKey]: selectedKey,
+                },
+              };
+              const nextEntry = pickerEntryFor(
+                current.target.key,
+                choice,
+                entry.recipe,
+                current.direction,
+              );
+              if (i < current.standardEntries.length) {
+                const standardEntries = [...current.standardEntries];
+                standardEntries[i] = nextEntry;
+                return {...current, standardEntries};
+              }
+              if (!current.showFluidTransfers) {
+                console.error(
+                  'A hidden fluid-transfer recipe received an ingredient alternative selection.',
+                  {selectedIndex: i, selectionKey, selectedKey},
+                );
+                return current;
+              }
+              const fluidIndex = i - current.standardEntries.length;
+              const fluidTransferEntries = [...current.fluidTransferEntries];
+              if (!fluidTransferEntries[fluidIndex]) {
+                console.error(
+                  'The selected fluid-transfer recipe index is outside the picker entries.',
+                  {selectedIndex: i, fluidIndex},
+                );
+                return current;
+              }
+              fluidTransferEntries[fluidIndex] = nextEntry;
+              return {...current, fluidTransferEntries};
+            });
+          }}
           onSelect={i => {
             const p = picker;
             const entries = p.showFluidTransfers

@@ -29,6 +29,9 @@ test('serializes only expanded source identities and tree paths', () => {
       kind: 'recipe',
       ref: [2, 4],
       allowFluidTransfer: true,
+      ingredientSelections: {
+        'item|example:copper': 'item|example:annealed-copper',
+      },
       inputs: [
         {
           id: 'root.s.0',
@@ -57,7 +60,14 @@ test('serializes only expanded source identities and tree paths', () => {
       {
         path: [],
         itemKey: 'item|example:machine',
-        source: {kind: 'recipe', ref: [2, 4], allowFluidTransfer: true},
+        source: {
+          kind: 'recipe',
+          ref: [2, 4],
+          allowFluidTransfer: true,
+          ingredientSelections: {
+            'item|example:copper': 'item|example:annealed-copper',
+          },
+        },
       },
       {
         path: [0],

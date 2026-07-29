@@ -1,4 +1,5 @@
 import type {DatasetDescriptor} from '../data/datasetCatalog';
+import type {IngredientSelections} from '../data/ingredientAlternativeSelection';
 import type {RecipeRef} from '../types';
 import type {GraphDirection} from './direction';
 import type {ItemTreeNode, SourceTreeNode} from './model';
@@ -10,7 +11,12 @@ const MAX_TREE_DEPTH = 64;
 export const MAX_GRAPH_SESSION_SELECTIONS = 2048;
 
 export type StoredGraphSource =
-  | {kind: 'recipe'; ref: RecipeRef; allowFluidTransfer?: true}
+  | {
+      kind: 'recipe';
+      ref: RecipeRef;
+      allowFluidTransfer?: true;
+      ingredientSelections?: IngredientSelections;
+    }
   | {kind: 'mob'; mobId: string}
   | {kind: 'block'; blockKey: string};
 
@@ -58,15 +64,32 @@ function requireRecipeRef(value: unknown, label: string): RecipeRef {
   return [value[0], value[1]];
 }
 
+function requireIngredientSelections(value: unknown, label: string): IngredientSelections {
+  if (
+    !isRecord(value) ||
+    Object.keys(value).length > 256 ||
+    Object.entries(value).some(
+      ([selectionKey, selectedKey]) =>
+        !isBoundedString(selectionKey, MAX_ITEM_KEY_LENGTH) ||
+        !isBoundedString(selectedKey, MAX_ITEM_KEY_LENGTH),
+    )
+  ) {
+    throw new Error(`${label} has invalid ingredient selections.`);
+  }
+  return Object.fromEntries(Object.entries(value)) as IngredientSelections;
+}
+
 function requireStoredSource(value: unknown, index: number): StoredGraphSource {
   if (!isRecord(value) || typeof value.kind !== 'string') {
     throw new Error(`Graph selection ${index} has no valid source.`);
   }
   if (value.kind === 'recipe') {
-    const expected =
-      value.allowFluidTransfer === undefined
-        ? ['kind', 'ref']
-        : ['allowFluidTransfer', 'kind', 'ref'];
+    const expected = [
+      ...(value.allowFluidTransfer === undefined ? [] : ['allowFluidTransfer']),
+      ...(value.ingredientSelections === undefined ? [] : ['ingredientSelections']),
+      'kind',
+      'ref',
+    ];
     if (
       !hasExactKeys(value, expected) ||
       (value.allowFluidTransfer !== undefined && value.allowFluidTransfer !== true)
@@ -74,9 +97,19 @@ function requireStoredSource(value: unknown, index: number): StoredGraphSource {
       throw new Error(`Graph selection ${index} has an invalid recipe source.`);
     }
     const ref = requireRecipeRef(value.ref, `Graph selection ${index} recipe`);
-    return value.allowFluidTransfer === true
-      ? {kind: 'recipe', ref, allowFluidTransfer: true}
-      : {kind: 'recipe', ref};
+    const ingredientSelections =
+      value.ingredientSelections === undefined
+        ? undefined
+        : requireIngredientSelections(
+            value.ingredientSelections,
+            `Graph selection ${index} recipe`,
+          );
+    return {
+      kind: 'recipe',
+      ref,
+      ...(value.allowFluidTransfer === true ? {allowFluidTransfer: true as const} : {}),
+      ...(ingredientSelections ? {ingredientSelections} : {}),
+    };
   }
   if (
     value.kind === 'mob' &&
@@ -156,9 +189,14 @@ export function parseGraphSession(raw: string): GraphSession {
 function storedSourceFromNode(source: SourceTreeNode): StoredGraphSource {
   if (source.kind === 'recipe') {
     if (!source.ref) throw new Error(`Expanded recipe source ${source.id} has no recipe reference.`);
-    return source.allowFluidTransfer
-      ? {kind: 'recipe', ref: [...source.ref] as RecipeRef, allowFluidTransfer: true}
-      : {kind: 'recipe', ref: [...source.ref] as RecipeRef};
+    return {
+      kind: 'recipe',
+      ref: [...source.ref] as RecipeRef,
+      ...(source.allowFluidTransfer ? {allowFluidTransfer: true as const} : {}),
+      ...(source.ingredientSelections
+        ? {ingredientSelections: {...source.ingredientSelections}}
+        : {}),
+    };
   }
   if (source.kind === 'mob') {
     if (!source.mob?.id) throw new Error(`Expanded mob source ${source.id} has no mob identity.`);

@@ -1,4 +1,5 @@
 import type {DropStat, Mob, Recipe, RecipeRef} from '../types';
+import type {IngredientSelections} from '../data/ingredientAlternativeSelection';
 import type {GraphDirection} from './direction';
 
 /**
@@ -29,6 +30,8 @@ export interface SourceTreeNode {
   catTitle?: string;
   /** Whether this source expands toward ingredients or toward recipe products. */
   direction?: GraphDirection;
+  /** User-selected concrete members for interchangeable recipe input slots. */
+  ingredientSelections?: IngredientSelections;
   /** Recipe was explicitly allowed through the default fluid-transfer filter. */
   allowFluidTransfer?: boolean;
   /** mob-drop source */

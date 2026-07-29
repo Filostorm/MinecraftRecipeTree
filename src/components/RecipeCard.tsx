@@ -182,6 +182,8 @@ export function ItemChip({
   probabilityRole = 'produce',
   highlight,
   interactive = true,
+  onPress,
+  accessibilityLabel,
 }: {
   itemKey: string;
   amount?: number | null;
@@ -194,6 +196,9 @@ export function ItemChip({
   probabilityRole?: 'consume' | 'produce';
   highlight?: boolean;
   interactive?: boolean;
+  /** Overrides the normal item-detail action, for contextual ingredient selection. */
+  onPress?: () => void;
+  accessibilityLabel?: string;
 }) {
   const data = useData();
   const {openItem} = useUi();
@@ -226,13 +231,14 @@ export function ItemChip({
   }
   return (
     <TouchableOpacity
-      {...signalTarget('item-detail.item.open')}
+      {...signalTarget(onPress ? 'graph.source-picker.alternative.open' : 'item-detail.item.open')}
       accessibilityRole="button"
-      accessibilityLabel={`Open ${displayName}`}
+      accessibilityLabel={accessibilityLabel ?? `Open ${displayName}`}
       style={[styles.chip, highlight && styles.chipHighlight]}
       onPress={event => {
         event.stopPropagation();
-        openItem(itemKey);
+        if (onPress) onPress();
+        else openItem(itemKey);
       }}>
       {content}
     </TouchableOpacity>
