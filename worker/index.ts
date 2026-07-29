@@ -19,6 +19,15 @@ import {
   PREVIEW_UPLOAD_BASE_PATH,
   handlePreviewAssetUpload,
 } from './previewAssetUpload.ts';
+import {FEEDBACK_ROUTE, handleFeedback} from './feedback.ts';
+
+const CONTENT_SECURITY_POLICY =
+  "default-src 'self'; base-uri 'self'; connect-src 'self' https://metrics.craftsmannsoftware.com; " +
+  "font-src 'self' data:; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: blob:; " +
+  "object-src 'none'; script-src 'self' 'unsafe-inline' https://metrics.craftsmannsoftware.com; " +
+  "style-src 'self' 'unsafe-inline'; worker-src 'self' blob:";
+const PERMISSIONS_POLICY =
+  'camera=(), display-capture=(), geolocation=(), microphone=(), payment=(), usb=()';
 
 interface LegacyModpackRow {
   id: string;
@@ -83,75 +92,110 @@ async function handleLegacyModpackApi(
   }
 }
 
+function withSecurityHeaders(request: Request, response: Response): Response {
+  const headers = new Headers(response.headers);
+  headers.set('Content-Security-Policy', CONTENT_SECURITY_POLICY);
+  headers.set('Cross-Origin-Opener-Policy', 'same-origin');
+  headers.set('Cross-Origin-Resource-Policy', 'same-origin');
+  headers.set('Permissions-Policy', PERMISSIONS_POLICY);
+  headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  headers.set('X-Content-Type-Options', 'nosniff');
+  headers.set('X-Frame-Options', 'DENY');
+  if (new URL(request.url).protocol === 'https:') {
+    headers.set('Strict-Transport-Security', 'max-age=63072000; includeSubDomains');
+  }
+  const bodyForbidden =
+    request.method === 'HEAD' ||
+    response.status === 204 ||
+    response.status === 205 ||
+    response.status === 304;
+  return new Response(bodyForbidden ? null : response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+async function dispatchRequest(
+  request: Request,
+  env: Parameters<typeof handler.fetch>[1],
+  ctx: Parameters<typeof handler.fetch>[2],
+): Promise<Response> {
+  const runtime = (env ?? {}) as DatasetRuntime;
+  const url = new URL(request.url);
+
+  if (url.pathname.startsWith(PREVIEW_UPLOAD_BASE_PATH)) {
+    return handlePreviewAssetUpload(request, runtime, url);
+  }
+  if (url.pathname.startsWith(CORE_DATASET_UPLOAD_BASE_PATH)) {
+    return handleCoreDatasetUpload(request, runtime, url);
+  }
+  if (DATASET_CHANNEL_ACTIVATION_ROUTE.test(url.pathname)) {
+    return handleDatasetChannelActivation(
+      request,
+      runtime,
+      url,
+      (publicationId, previewAssetSetId) =>
+        verifyCommittedDatasetPair(runtime, publicationId, previewAssetSetId),
+    );
+  }
+  if (DATASET_CHANNEL_DELETION_ROUTE.test(url.pathname)) {
+    return handleDatasetChannelDeletion(request, runtime, url);
+  }
+  if (url.pathname === '/api/datasets') {
+    return handleDatasetCatalog(request, runtime);
+  }
+  if (url.pathname === FEEDBACK_ROUTE) {
+    return handleFeedback(request, runtime, url);
+  }
+  if (url.pathname === '/api/modpacks' || url.pathname.startsWith('/api/modpacks/')) {
+    return handleLegacyModpackApi(request, runtime, url.pathname);
+  }
+
+  const coreMatch = CORE_PUBLIC_ROUTE.exec(url.pathname);
+  if (coreMatch) {
+    return handleCoreDatasetRead(request, runtime, url, coreMatch);
+  }
+  const previewMatch = PREVIEW_PUBLIC_ROUTE.exec(url.pathname);
+  if (previewMatch) {
+    return handlePreviewDatasetRead(request, runtime, url, previewMatch);
+  }
+
+  // These paths depended on a process-global PREVIEW_ASSET_SET_ID/static snapshot. Keeping an
+  // explicit tombstone prevents old clients from silently mixing datasets after migration.
+  if (
+    url.pathname.startsWith('/dataset/exports/') ||
+    url.pathname.startsWith('/dataset/previews/')
+  ) {
+    console.warn('A retired single-dataset route was requested.', {pathname: url.pathname});
+    return new Response('Single-dataset route retired; refresh the application', {
+      status: 410,
+      headers: {'Cache-Control': 'no-store'},
+    });
+  }
+
+  const response = await handler.fetch(request, env, ctx);
+  if (response.headers.has('cache-control')) return response;
+  const headers = new Headers(response.headers);
+  headers.set('Cache-Control', 'no-store');
+  return new Response(request.method === 'HEAD' ? null : response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 const worker = {
   async fetch(
     request: Request,
     env: Parameters<typeof handler.fetch>[1],
     ctx: Parameters<typeof handler.fetch>[2],
   ): Promise<Response> {
-    const runtime = (env ?? {}) as DatasetRuntime;
     try {
-      const url = new URL(request.url);
-
-      if (url.pathname.startsWith(PREVIEW_UPLOAD_BASE_PATH)) {
-        return await handlePreviewAssetUpload(request, runtime, url);
-      }
-      if (url.pathname.startsWith(CORE_DATASET_UPLOAD_BASE_PATH)) {
-        return await handleCoreDatasetUpload(request, runtime, url);
-      }
-      if (DATASET_CHANNEL_ACTIVATION_ROUTE.test(url.pathname)) {
-        return await handleDatasetChannelActivation(
-          request,
-          runtime,
-          url,
-          (publicationId, previewAssetSetId) =>
-            verifyCommittedDatasetPair(runtime, publicationId, previewAssetSetId),
-        );
-      }
-      if (DATASET_CHANNEL_DELETION_ROUTE.test(url.pathname)) {
-        return await handleDatasetChannelDeletion(request, runtime, url);
-      }
-      if (url.pathname === '/api/datasets') {
-        return await handleDatasetCatalog(request, runtime);
-      }
-      if (url.pathname === '/api/modpacks' || url.pathname.startsWith('/api/modpacks/')) {
-        return await handleLegacyModpackApi(request, runtime, url.pathname);
-      }
-
-      const coreMatch = CORE_PUBLIC_ROUTE.exec(url.pathname);
-      if (coreMatch) {
-        return await handleCoreDatasetRead(request, runtime, url, coreMatch, ctx);
-      }
-      const previewMatch = PREVIEW_PUBLIC_ROUTE.exec(url.pathname);
-      if (previewMatch) {
-        return await handlePreviewDatasetRead(request, runtime, url, previewMatch, ctx);
-      }
-
-      // These paths depended on a process-global PREVIEW_ASSET_SET_ID/static snapshot. Keeping an
-      // explicit tombstone prevents old clients from silently mixing datasets after migration.
-      if (
-        url.pathname.startsWith('/dataset/exports/') ||
-        url.pathname.startsWith('/dataset/previews/')
-      ) {
-        console.warn('A retired single-dataset route was requested.', {pathname: url.pathname});
-        return new Response('Single-dataset route retired; refresh the application', {
-          status: 410,
-          headers: {'Cache-Control': 'no-store'},
-        });
-      }
-
-      const response = await handler.fetch(request, env, ctx);
-      if (response.headers.has('cache-control')) return response;
-      const headers = new Headers(response.headers);
-      headers.set('Cache-Control', 'no-store');
-      return new Response(request.method === 'HEAD' ? null : response.body, {
-        status: response.status,
-        statusText: response.statusText,
-        headers,
-      });
+      return withSecurityHeaders(request, await dispatchRequest(request, env, ctx));
     } catch (error) {
       console.error('Minecraft Recipe Tree request failed closed.', error);
-      return noStoreJson({error: 'Request failed.'}, 500);
+      return withSecurityHeaders(request, noStoreJson({error: 'Request failed.'}, 500));
     }
   },
 };

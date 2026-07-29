@@ -8,6 +8,7 @@ import {
   searchWithDatasetSlug,
   selectDataset,
 } from './datasetCatalog.ts';
+import {datasetPackIconPath} from './datasetPresentation.ts';
 
 const PUBLICATION_A = 'a'.repeat(64);
 const PUBLICATION_B = 'b'.repeat(64);
@@ -133,4 +134,18 @@ test('pack query writes preserve unrelated state and mount keys change with eith
     datasetMountKey(madness),
     datasetMountKey({...madness, previewAssetSetId: 'e'.repeat(64)}),
   );
+});
+
+test('maps every published modpack to a first-party picker icon', () => {
+  assert.equal(datasetPackIconPath('meatballcraft'), '/pack-icons/meatballcraft.webp?v=1');
+  assert.equal(datasetPackIconPath('gt-new-horizons'), '/pack-icons/gt-new-horizons.webp?v=1');
+  assert.equal(
+    datasetPackIconPath('multiblock-madness'),
+    '/pack-icons/multiblock-madness.webp?v=1',
+  );
+  assert.equal(
+    datasetPackIconPath('multiblock-madness-2'),
+    '/pack-icons/multiblock-madness-2.webp?v=1',
+  );
+  assert.equal(datasetPackIconPath('unconfigured-pack'), null);
 });

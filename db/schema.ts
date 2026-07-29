@@ -1,5 +1,5 @@
 import {sql} from 'drizzle-orm';
-import {integer, sqliteTable, text, uniqueIndex} from 'drizzle-orm/sqlite-core';
+import {index, integer, sqliteTable, text, uniqueIndex} from 'drizzle-orm/sqlite-core';
 
 export const modpacks = sqliteTable('modpacks', {
   id: text('id').primaryKey(),
@@ -40,5 +40,26 @@ export const datasetChannels = sqliteTable(
       .where(sql`${table.isDefault} = 1`),
     uniqueIndex('dataset_channels_publication_idx').on(table.publicationId),
     uniqueIndex('dataset_channels_preview_asset_set_idx').on(table.previewAssetSetId),
+  ],
+);
+
+export const feedbackReports = sqliteTable(
+  'feedback_reports',
+  {
+    id: text('id').primaryKey(),
+    kind: text('kind', {enum: ['bug', 'feature']}).notNull(),
+    title: text('title').notNull().default(''),
+    message: text('message').notNull(),
+    contact: text('contact'),
+    packSlug: text('pack_slug'),
+    packName: text('pack_name'),
+    pageUrl: text('page_url'),
+    userAgent: text('user_agent'),
+    fingerprintHash: text('fingerprint_hash').notNull(),
+    createdAt: integer('created_at').notNull(),
+  },
+  table => [
+    index('feedback_reports_rate_limit_idx').on(table.fingerprintHash, table.createdAt),
+    index('feedback_reports_created_at_idx').on(table.createdAt),
   ],
 );

@@ -4,25 +4,30 @@ import {
   Modal,
   Pressable,
   StyleSheet,
+  StyleProp,
   Text,
   TextInput,
   TouchableOpacity,
   View,
+  ViewStyle,
 } from 'react-native';
 import {ModInfo} from '../data/DataContext';
+import {signalTarget} from '../analytics/signal';
 import {theme} from '../theme';
 
 export function SearchBar({
   value,
   onChange,
   placeholder,
+  style,
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder: string;
+  style?: StyleProp<ViewStyle>;
 }) {
   return (
-    <View style={styles.searchWrap}>
+    <View style={[styles.searchWrap, style]}>
       <Text style={styles.searchIcon}>⌕</Text>
       <TextInput
         accessibilityLabel={placeholder}
@@ -36,6 +41,7 @@ export function SearchBar({
       />
       {value.length > 0 && (
         <TouchableOpacity
+          {...signalTarget('search.clear')}
           accessibilityLabel="Clear search"
           accessibilityRole="button"
           hitSlop={8}
@@ -52,10 +58,12 @@ export function ModFilter({
   mods,
   selected,
   onSelect,
+  style,
 }: {
   mods: ModInfo[];
   selected: string | null;
   onSelect: (modId: string | null) => void;
+  style?: StyleProp<ViewStyle>;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -91,8 +99,9 @@ export function ModFilter({
     : `${selectedMod?.name ?? selected}${selectedMod ? ` (${selectedMod.itemCount})` : ''}`;
 
   return (
-    <View style={styles.filterWrap}>
+    <View style={[styles.filterWrap, style]}>
       <TouchableOpacity
+        {...signalTarget('filter.mod.open')}
         accessibilityHint="Opens a searchable list of mods"
         accessibilityLabel={`Mod filter, ${triggerLabel}`}
         accessibilityRole="combobox"
@@ -250,7 +259,7 @@ const styles = StyleSheet.create({
     flex: 1,
     color: theme.text,
     paddingVertical: 8,
-    fontSize: 14,
+    fontSize: 16,
     outlineWidth: 0,
   },
   clear: {color: theme.textDim, fontSize: 14, padding: 4},
@@ -315,7 +324,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingHorizontal: 10,
   },
-  selectorInput: {flex: 1, color: theme.text, fontSize: 14, paddingVertical: 8, outlineWidth: 0},
+  selectorInput: {flex: 1, color: theme.text, fontSize: 16, paddingVertical: 8, outlineWidth: 0},
   resultCount: {color: theme.textDim, fontSize: 10, minHeight: 26, paddingHorizontal: 2, paddingTop: 7},
   modList: {flex: 1, minHeight: 0},
   modOption: {

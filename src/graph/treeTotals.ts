@@ -1,5 +1,6 @@
 import {slotSummary} from '../data/slotSummary.ts';
 import type {ByproductAllocation, ItemTreeNode} from './model.ts';
+import type {DeferredRecipeSourceResolver} from './expansionOwnership.ts';
 
 export interface TreeTotal {
   key: string;
@@ -27,6 +28,10 @@ export interface NodeByproductCoverage {
 export interface TreeCalculation extends TreeTotals {
   requiredByNode: Map<string, number | null>;
   byproductCoverageByNode: Map<string, NodeByproductCoverage>;
+}
+
+export interface TreeTotalsOptions {
+  resolveDeferredRecipeSource?: DeferredRecipeSourceResolver;
 }
 
 const warnedMissingTreeYields = new Set<string>();
@@ -308,6 +313,7 @@ function effectiveNodeRequirement(
 export function calculateTreeTotals(
   root: ItemTreeNode,
   useByproducts = false,
+  options: TreeTotalsOptions = {},
 ): TreeCalculation {
   const inputs = new Map<string, TreeTotal>();
   const prerequisites = new Map<string, TreeTotal>();
@@ -321,12 +327,15 @@ export function calculateTreeTotals(
     | {
         phase: 'enter';
         node: ItemTreeNode;
+        nodeId: string;
         required: number | null;
         grossRequired: number | null;
+        virtual: boolean;
       }
     | {
         phase: 'exit';
         source: NonNullable<ItemTreeNode['source']>;
+        sourceId: string;
         outputs: ReturnType<typeof slotSummary>;
         selectedOutput: ReturnType<typeof slotSummary>[number] | undefined;
         runs: number | null;
@@ -335,8 +344,10 @@ export function calculateTreeTotals(
     {
       phase: 'enter',
       node: root,
+      nodeId: root.id,
       required: root.amount === undefined ? 1 : root.amount,
       grossRequired: root.amount === undefined ? 1 : root.amount,
+      virtual: false,
     },
   ];
 
@@ -374,7 +385,7 @@ export function calculateTreeTotals(
           output.tag,
         );
         producerBalances.push({
-          sourceId: frame.source.id,
+          sourceId: frame.sourceId,
           logicalKey: treeTotalIdentity(output),
           remainingAmount: amount,
         });
@@ -385,8 +396,9 @@ export function calculateTreeTotals(
     const {node} = frame;
     const required = effectiveNodeRequirement(node, frame.required);
     const grossRequired = effectiveNodeRequirement(node, frame.grossRequired);
-    requiredByNode.set(node.id, required);
+    if (!frame.virtual) requiredByNode.set(node.id, required);
     if (
+      !frame.virtual &&
       useByproducts &&
       node.byproductFulfillment &&
       grossRequired != null &&
@@ -413,13 +425,17 @@ export function calculateTreeTotals(
       );
     }
 
-    const source = node.source;
+    const deferredSource =
+      node.source || !node.deferredRecipeExpansion
+        ? undefined
+        : options.resolveDeferredRecipeSource?.(node);
+    const source = node.source ?? deferredSource;
     if (!source || source.kind !== 'recipe' || !source.recipe || node.cyclic) {
       if (!node.nonConsumed) {
         addTotal(inputs, node.key, required, node.variantCount ?? 1, node.tag);
         if (required != null && required > 0) {
           inputBalances.push({
-            nodeId: node.id,
+            nodeId: frame.nodeId,
             key: node.key,
             tag: node.tag,
             variants: node.variantCount ?? 1,
@@ -471,7 +487,15 @@ export function calculateTreeTotals(
           ? Math.ceil(required / outputYield)
           : required / outputYield;
 
-    stack.push({phase: 'exit', source, outputs, selectedOutput, runs});
+    const virtualChildren = frame.virtual || deferredSource !== undefined;
+    stack.push({
+      phase: 'exit',
+      source,
+      sourceId: virtualChildren ? `${frame.nodeId}.s` : source.id,
+      outputs,
+      selectedOutput,
+      runs,
+    });
     for (let index = source.inputs.length - 1; index >= 0; index -= 1) {
       const child = source.inputs[index];
       const stochasticConsumption =
@@ -499,6 +523,7 @@ export function calculateTreeTotals(
             : child.amount * runs;
       const committedAmount =
         useByproducts &&
+        !virtualChildren &&
         !child.nonConsumed &&
         grossChildRequired != null &&
         child.byproductFulfillment
@@ -507,9 +532,11 @@ export function calculateTreeTotals(
       stack.push({
         phase: 'enter',
         node: child,
+        nodeId: virtualChildren ? `${frame.nodeId}.v.${index}` : child.id,
         grossRequired: grossChildRequired,
         required:
           grossChildRequired == null ? null : grossChildRequired - committedAmount,
+        virtual: virtualChildren,
       });
     }
   }

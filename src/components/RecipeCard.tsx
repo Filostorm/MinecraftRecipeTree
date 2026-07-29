@@ -9,13 +9,14 @@ import {
 } from '../data/ingredientQuantities';
 import {recipeDisplayTitle} from '../data/recipeTitles';
 import {theme} from '../theme';
-import {
-  inputSlotSummary,
-  prerequisiteSummary,
-  slotSummary,
-} from '../data/slotSummary';
+import {slotSummary} from '../data/slotSummary';
 import {Recipe} from '../types';
 import {useUi} from '../ui/UiContext';
+import {signalTarget} from '../analytics/signal';
+import {
+  materialInputSummary,
+  type GraphDirection,
+} from '../graph/direction';
 import {ItemIcon, pixelated} from './ItemIcon';
 import {RecipePreviewImage} from './RecipePreviewImage';
 import {
@@ -29,14 +30,25 @@ export function RecipeCard({
   dir,
   catTitle,
   onPress,
+  graphDirection = 'inputs',
+  actionSubject,
+  usageOutputSubject,
   availableCardWidth,
+  grouped = false,
 }: {
   recipe: Recipe;
   dir: string;
   catTitle?: string;
   onPress?: () => void;
+  graphDirection?: GraphDirection;
+  /** Item name anchoring the graph request, used by the visible action hint. */
+  actionSubject?: string;
+  /** Primary recipe product that will replace the usage anchor as the graph root. */
+  usageOutputSubject?: string;
   /** Measured width of the full-width recipe-list container in CSS/layout pixels. */
   availableCardWidth: number;
+  /** Render inside a category frame that supplies the outer border and corner radius. */
+  grouped?: boolean;
 }) {
   const data = useData();
   const presentation = recipePresentationKind(recipe);
@@ -53,18 +65,28 @@ export function RecipeCard({
     data.manifest.settings.recipeScale,
     availableCardWidth,
   );
-  const inputs = inputSlotSummary(recipe.in);
+  const inputs = materialInputSummary(recipe);
   const outputs = slotSummary(recipe.out);
-  const prerequisites = prerequisiteSummary(recipe.cat);
   const displayTitle = catTitle ? recipeDisplayTitle(catTitle, recipe) : undefined;
   return (
     <TouchableOpacity
+      {...(onPress ? signalTarget(`recipe.open-graph.${graphDirection}`) : {})}
       accessibilityRole={onPress ? 'button' : undefined}
-      accessibilityLabel={onPress ? `Open ${displayTitle ?? 'recipe'} in graph` : undefined}
+      accessibilityLabel={
+        onPress
+          ? graphDirection === 'outputs'
+            ? `Make ${usageOutputSubject ?? 'the primary product'} the tree root using ${actionSubject ?? 'this item'} through ${displayTitle ?? 'this recipe'}`
+            : `Start an ingredient tree for ${actionSubject ?? 'this item'} with ${displayTitle ?? 'this recipe'}`
+          : undefined
+      }
       activeOpacity={onPress ? 0.72 : 1}
       disabled={!onPress}
       onPress={onPress}
-      style={[styles.card, onPress && styles.cardAction]}>
+      style={[
+        styles.card,
+        onPress && styles.cardAction,
+        grouped && styles.cardGrouped,
+      ]}>
       {displayTitle ? <Text style={styles.catTitle}>{displayTitle}</Text> : null}
       {presentation === 'image' && recipe.img ? (
         <RecipePreviewImage
@@ -114,27 +136,16 @@ export function RecipeCard({
           ))}
         </View>
       )}
-      {prerequisites.length > 0 && (
-        <View style={styles.prerequisites}>
-          <Text style={styles.prerequisiteLabel}>Required · not consumed</Text>
-          <View style={styles.prerequisiteItems}>
-            {prerequisites.map(item => (
-              <ItemChip
-                key={`prerequisite-${item.key}`}
-                itemKey={item.key}
-                amount={item.amount}
-                variableAmount={item.variableAmount}
-                variants={item.variants}
-                tag={item.tag}
-                interactive={!onPress}
-              />
-            ))}
-          </View>
-        </View>
-      )}
       {recipe.id ? (
         <Text style={styles.recipeId} numberOfLines={1}>
           {recipe.id}
+        </Text>
+      ) : null}
+      {onPress ? (
+        <Text style={styles.cardActionHint}>
+          {graphDirection === 'outputs'
+            ? `Tap to make ${usageOutputSubject ?? 'the primary product'} the new root`
+            : 'Tap to add recipe to the graph'}
         </Text>
       ) : null}
     </TouchableOpacity>
@@ -151,6 +162,8 @@ export function ItemChip({
   probabilityRole = 'produce',
   highlight,
   interactive = true,
+  onPress,
+  accessibilityLabel,
 }: {
   itemKey: string;
   amount?: number | null;
@@ -163,6 +176,9 @@ export function ItemChip({
   probabilityRole?: 'consume' | 'produce';
   highlight?: boolean;
   interactive?: boolean;
+  /** Overrides the normal item-detail action, for contextual ingredient selection. */
+  onPress?: () => void;
+  accessibilityLabel?: string;
 }) {
   const data = useData();
   const {openItem} = useUi();
@@ -195,12 +211,14 @@ export function ItemChip({
   }
   return (
     <TouchableOpacity
+      {...signalTarget(onPress ? 'graph.source-picker.alternative.open' : 'item-detail.item.open')}
       accessibilityRole="button"
-      accessibilityLabel={`Open ${displayName}`}
+      accessibilityLabel={accessibilityLabel ?? `Open ${displayName}`}
       style={[styles.chip, highlight && styles.chipHighlight]}
       onPress={event => {
         event.stopPropagation();
-        openItem(itemKey);
+        if (onPress) onPress();
+        else openItem(itemKey);
       }}>
       {content}
     </TouchableOpacity>
@@ -219,6 +237,19 @@ const styles = StyleSheet.create({
     maxWidth: '100%',
   },
   cardAction: {borderColor: theme.borderLight},
+  cardGrouped: {
+    alignSelf: 'stretch',
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+    borderRadius: 0,
+    marginBottom: 0,
+  },
+  cardActionHint: {
+    color: theme.accent,
+    fontSize: 10,
+    fontWeight: '700',
+    marginTop: 8,
+  },
   catTitle: {color: theme.textDim, fontSize: 11, marginBottom: 6},
   recipeImage: {borderRadius: 4},
   previewUnavailable: {
@@ -235,9 +266,6 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   recipeArrow: {color: theme.textDim, fontSize: 14},
-  prerequisites: {marginTop: 8, gap: 5},
-  prerequisiteLabel: {color: theme.textDim, fontSize: 10, fontWeight: '600'},
-  prerequisiteItems: {flexDirection: 'row', flexWrap: 'wrap', gap: 6},
   chip: {
     flexDirection: 'row',
     alignItems: 'center',

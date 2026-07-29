@@ -50,19 +50,34 @@ export function normalizeRecipeInputAmount(key: string, raw: number): number | n
 export function formatAmount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 10_000) return `${Math.round(n / 1000)}k`;
-  return Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100);
+  if (Number.isInteger(n)) return String(n);
+
+  const roundedToHundredth = Math.round(n * 100) / 100;
+  if (roundedToHundredth !== 0) return String(roundedToHundredth);
+
+  if (n > 0) {
+    const decimalPlaces = Math.min(6, Math.ceil(-Math.log10(n)) + 2);
+    const precise = Number(n.toFixed(decimalPlaces));
+    return precise > 0 ? String(precise) : '<0.000001';
+  }
+
+  return String(roundedToHundredth);
 }
 
 /** Graph/totals notation: item counts are ×N; bulk quantities are N mB. */
 export function formatIngredientQuantity(key: string, amount: number | null): string {
   if (isBulkIngredient(key)) return `${amount == null ? '?' : formatAmount(amount)} mB`;
-  return amount == null ? '×?' : `×${formatAmount(amount)}`;
+  return amount == null
+    ? '×?'
+    : `×${formatAmount(amount > 0 ? Math.ceil(amount) : amount)}`;
 }
 
 /** Recipe-chip notation places the item multiplier before the ingredient name. */
 export function formatIngredientQuantityPrefix(key: string, amount: number | null): string {
   if (isBulkIngredient(key)) return `${amount == null ? '?' : formatAmount(amount)} mB`;
-  return amount == null ? '?×' : `${formatAmount(amount)}×`;
+  return amount == null
+    ? '?×'
+    : `${formatAmount(amount > 0 ? Math.ceil(amount) : amount)}×`;
 }
 
 export function shouldShowIngredientQuantity(key: string, amount: number | null): boolean {

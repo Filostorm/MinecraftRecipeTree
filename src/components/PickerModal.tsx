@@ -1,4 +1,4 @@
-import React, {useMemo} from 'react';
+import React, {useMemo, useState} from 'react';
 import {
   Modal,
   Pressable,
@@ -9,12 +9,15 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import {pixelArtImageStyle} from '../data/pixelArtSizing';
 import type {SlotSummary} from '../data/slotSummary';
+import {signalTarget} from '../analytics/signal';
 import {theme} from '../theme';
+import {uniformPickerRecipePreviewSize} from '../ui/interfaceZoom';
+import type {GraphDirection} from '../graph/direction';
 import {pixelated} from './ItemIcon';
 import {ItemChip} from './RecipeCard';
 import {RecipePreviewImage} from './RecipePreviewImage';
+import {VisibilityIcon} from './VisibilityIcon';
 import {groupPickerOptions} from './pickerGroups';
 
 export interface PickerOption {
@@ -28,7 +31,7 @@ export interface PickerOption {
   imageW?: number;
   imageH?: number;
   inputs?: SlotSummary[];
-  prerequisites?: SlotSummary[];
+  outputs?: SlotSummary[];
 }
 
 export interface PickerGroupProgress {
@@ -42,6 +45,8 @@ export function PickerModal({
   visible,
   title,
   options,
+  direction,
+  onDirectionChange,
   rememberSource,
   onRememberSourceChange,
   filterLabel,
@@ -52,12 +57,16 @@ export function PickerModal({
   onToggleGroup,
   groupProgress,
   onLoadGroup,
+  onSelectAlternative,
   onSelect,
   onClose,
+  interfaceZoom = 1,
 }: {
   visible: boolean;
   title: string;
   options: PickerOption[];
+  direction?: GraphDirection;
+  onDirectionChange?: (direction: GraphDirection) => void;
   rememberSource?: boolean;
   onRememberSourceChange?: (remember: boolean) => void;
   filterLabel?: string;
@@ -68,9 +77,20 @@ export function PickerModal({
   onToggleGroup?: (groupKey: string) => void;
   groupProgress?: Readonly<Record<string, PickerGroupProgress>>;
   onLoadGroup?: (groupKey: string) => void;
+  onSelectAlternative?: (
+    optionIndex: number,
+    selectionKey: string,
+    selectedKey: string,
+  ) => void;
   onSelect: (index: number) => void;
   onClose: () => void;
+  /** The web UI scale applied to recipe imagery without shrinking the modal viewport. */
+  interfaceZoom?: number;
 }) {
+  const [alternativePicker, setAlternativePicker] = useState<{
+    optionIndex: number;
+    slot: SlotSummary;
+  } | null>(null);
   const groups = useMemo(() => groupPickerOptions(options), [options]);
   const collapsedGroups = groups.filter(group => collapsedGroupKeys?.has(group.key));
   const expandedGroups = groups.filter(group => !collapsedGroupKeys?.has(group.key));
@@ -91,12 +111,46 @@ export function PickerModal({
       <Pressable style={styles.backdrop} onPress={onClose}>
         <Pressable style={styles.card} onPress={() => {}}>
           <Text style={styles.title}>{title}</Text>
+          {direction && onDirectionChange ? (
+            <View
+              accessibilityLabel="Tree direction"
+              style={styles.directionTabs}>
+              {([
+                ['inputs', 'Recipes'],
+                ['outputs', 'Usages'],
+              ] as const).map(([value, label]) => {
+                const selected = direction === value;
+                return (
+                  <TouchableOpacity
+                    {...signalTarget(`graph.source-picker.direction.${value}`)}
+                    key={value}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${label}, build tree ${value === 'inputs' ? 'toward ingredients' : 'toward products'}`}
+                    accessibilityState={{selected}}
+                    style={[
+                      styles.directionTab,
+                      selected && styles.directionTabSelected,
+                    ]}
+                    onPress={() => onDirectionChange(value)}>
+                    <Text
+                      style={[
+                        styles.directionTabText,
+                        selected && styles.directionTabTextSelected,
+                      ]}>
+                      {label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          ) : null}
           {onRememberSourceChange && (
             <View style={styles.rememberRow}>
               <View style={styles.rememberCopy}>
                 <Text style={styles.rememberTitle}>★ Use automatically in future trees</Text>
               </View>
               <Switch
+                {...signalTarget('graph.source-picker.remember-source')}
                 accessibilityLabel="Use automatically in future trees"
                 value={rememberSource ?? true}
                 onValueChange={onRememberSourceChange}
@@ -112,6 +166,7 @@ export function PickerModal({
                 {filterHint ? <Text style={styles.rememberHint}>{filterHint}</Text> : null}
               </View>
               <Switch
+                {...signalTarget('graph.source-picker.filter-fluid-transfers')}
                 accessibilityLabel={filterLabel}
                 value={filterValue ?? false}
                 onValueChange={onFilterValueChange}
@@ -126,6 +181,7 @@ export function PickerModal({
                 {sourceTypeCount} source types · {loadedOptionCount}/{totalOptionCount} loaded
               </Text>
               <TouchableOpacity
+                {...signalTarget('graph.source-picker.groups.toggle-all')}
                 accessibilityRole="button"
                 style={styles.groupAction}
                 onPress={() => {
@@ -144,7 +200,8 @@ export function PickerModal({
           ) : null}
           <ScrollView
             style={styles.optionsScroll}
-            contentContainerStyle={styles.groupList}>
+            contentContainerStyle={styles.groupList}
+            showsVerticalScrollIndicator>
             {options.length === 0 ? (
               <Text style={styles.emptyText}>No standard sources are available.</Text>
             ) : null}
@@ -154,6 +211,7 @@ export function PickerModal({
                   const progress = groupProgress?.[group.key];
                   return (
                     <TouchableOpacity
+                      {...signalTarget('graph.source-picker.group.expand')}
                       key={group.key}
                       accessibilityRole="button"
                       accessibilityState={{expanded: false}}
@@ -176,12 +234,15 @@ export function PickerModal({
               return (
                 <View key={group.key} style={styles.group}>
                   <TouchableOpacity
+                    {...signalTarget('graph.source-picker.group.collapse')}
                     accessibilityRole="button"
                     accessibilityState={{expanded: true}}
                     accessibilityLabel={`${group.label}, ${group.entries.length} option${group.entries.length === 1 ? '' : 's'}`}
                     style={styles.groupHeader}
                     onPress={() => toggleGroup(group.key)}>
-                    <Text style={styles.groupCaret}>▾</Text>
+                    <View accessibilityElementsHidden style={styles.groupVisibilityIcon}>
+                      <VisibilityIcon visible size={14} />
+                    </View>
                     <Text style={styles.groupTitle}>{group.label}</Text>
                     <Text style={styles.groupCount}>
                       {progress ? `${progress.loaded}/${progress.total}` : group.entries.length}
@@ -190,10 +251,18 @@ export function PickerModal({
                   <View style={styles.optionGrid}>
                     {group.entries.map(({option: opt, index: i}) => {
                       const imageSize = opt.imageUri
-                        ? pixelArtImageStyle(opt.imageW ?? 160, opt.imageH ?? 60, 250, 128)
+                        ? uniformPickerRecipePreviewSize(
+                            opt.imageW ?? 160,
+                            opt.imageH ?? 60,
+                            interfaceZoom,
+                          )
                         : null;
                       return (
-                        <TouchableOpacity key={i} style={styles.option} onPress={() => onSelect(i)}>
+                        <TouchableOpacity
+                          {...signalTarget('graph.source-picker.source.select')}
+                          key={i}
+                          style={styles.option}
+                          onPress={() => onSelect(i)}>
                           <Text style={styles.optionLabel}>{opt.label}</Text>
                           {opt.sublabel ? <Text style={styles.optionSub}>{opt.sublabel}</Text> : null}
                           {opt.imageUri && imageSize ? (
@@ -218,24 +287,43 @@ export function PickerModal({
                                     tag={input.tag}
                                     probability={input.probability}
                                     probabilityRole="consume"
-                                    interactive={false}
+                                    interactive={
+                                      Boolean(onSelectAlternative) &&
+                                      input.alternatives.length > 1
+                                    }
+                                    onPress={
+                                      onSelectAlternative && input.alternatives.length > 1
+                                        ? () =>
+                                            setAlternativePicker({
+                                              optionIndex: i,
+                                              slot: input,
+                                            })
+                                        : undefined
+                                    }
+                                    accessibilityLabel={
+                                      input.alternatives.length > 1
+                                        ? `Choose from ${input.alternatives.length} ingredient alternatives`
+                                        : undefined
+                                    }
                                   />
                                 ))}
                               </View>
                             </View>
                           ) : null}
-                          {opt.prerequisites && opt.prerequisites.length > 0 ? (
+                          {opt.outputs && opt.outputs.length > 0 ? (
                             <View style={styles.ingredientGroup}>
-                              <Text style={styles.ingredientLabel}>Required · not consumed</Text>
+                              <Text style={styles.ingredientLabel}>Outputs</Text>
                               <View style={styles.ingredientChips}>
-                                {opt.prerequisites.map(input => (
+                                {opt.outputs.map(output => (
                                   <ItemChip
-                                    key={`prerequisite-${input.tag ?? input.key}`}
-                                    itemKey={input.key}
-                                    amount={input.amount}
-                                    variableAmount={input.variableAmount}
-                                    variants={input.variants}
-                                    tag={input.tag}
+                                    key={`output-${output.tag ?? output.key}`}
+                                    itemKey={output.key}
+                                    amount={output.amount}
+                                    variableAmount={output.variableAmount}
+                                    variants={output.variants}
+                                    tag={output.tag}
+                                    probability={output.probability}
+                                    probabilityRole="produce"
                                     interactive={false}
                                   />
                                 ))}
@@ -248,6 +336,7 @@ export function PickerModal({
                   </View>
                   {hasMore && onLoadGroup ? (
                     <TouchableOpacity
+                      {...signalTarget('graph.source-picker.group.load-more')}
                       accessibilityRole="button"
                       accessibilityLabel={`Load more ${group.label} recipes`}
                       disabled={progress?.loading}
@@ -268,6 +357,53 @@ export function PickerModal({
             })}
           </ScrollView>
         </Pressable>
+        {alternativePicker ? (
+          <Pressable
+            style={styles.alternativeBackdrop}
+            onPress={() => setAlternativePicker(null)}>
+            <Pressable
+              accessibilityViewIsModal
+              style={styles.alternativeCard}
+              onPress={() => {}}>
+              <View style={styles.alternativeHeader}>
+                <View style={styles.alternativeTitleGroup}>
+                  <Text style={styles.alternativeTitle}>Choose an ingredient</Text>
+                  <Text style={styles.alternativeCount}>
+                    {alternativePicker.slot.alternatives.length} valid alternatives
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel="Close ingredient alternatives"
+                  style={styles.alternativeClose}
+                  onPress={() => setAlternativePicker(null)}>
+                  <Text style={styles.alternativeCloseText}>×</Text>
+                </TouchableOpacity>
+              </View>
+              <ScrollView
+                style={styles.alternativeScroll}
+                contentContainerStyle={styles.alternativeList}>
+                {alternativePicker.slot.alternatives.map(itemKey => (
+                  <ItemChip
+                    key={itemKey}
+                    itemKey={itemKey}
+                    highlight={itemKey === alternativePicker.slot.key}
+                    accessibilityLabel={`Use ${itemKey.split('|').pop() ?? itemKey}`}
+                    onPress={() => {
+                      onSelectAlternative?.(
+                        alternativePicker.optionIndex,
+                        alternativePicker.slot.selectionKey ??
+                          alternativePicker.slot.key,
+                        itemKey,
+                      );
+                      setAlternativePicker(null);
+                    }}
+                  />
+                ))}
+              </ScrollView>
+            </Pressable>
+          </Pressable>
+        ) : null}
       </Pressable>
     </Modal>
   );
@@ -288,10 +424,39 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     width: '100%',
     maxWidth: 920,
+    height: '92%' as never,
     maxHeight: '92%' as never,
+    minHeight: 0,
     padding: 14,
   },
   title: {color: theme.text, fontSize: 15, fontWeight: '700', marginBottom: 10},
+  directionTabs: {
+    flexDirection: 'row',
+    alignSelf: 'flex-start',
+    gap: 6,
+    marginBottom: 10,
+    padding: 3,
+    borderRadius: 9,
+    backgroundColor: theme.panelAlt,
+  },
+  directionTab: {
+    minWidth: 94,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 7,
+    alignItems: 'center',
+  },
+  directionTabSelected: {
+    backgroundColor: theme.radialRootPanel,
+    borderColor: theme.radialRoot,
+    borderWidth: 1,
+  },
+  directionTabText: {
+    color: theme.textDim,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  directionTabTextSelected: {color: theme.radialRoot},
   rememberRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -307,8 +472,8 @@ const styles = StyleSheet.create({
   rememberTitle: {color: theme.accent, fontSize: 12, fontWeight: '700'},
   filterTitle: {color: theme.text, fontSize: 12, fontWeight: '700'},
   rememberHint: {color: theme.textDim, fontSize: 10, marginTop: 2, lineHeight: 14},
-  optionsScroll: {maxHeight: 560, flexShrink: 1},
-  groupList: {gap: 8},
+  optionsScroll: {flex: 1, minHeight: 0},
+  groupList: {gap: 8, paddingBottom: 2},
   collapsedBubbles: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -357,7 +522,7 @@ const styles = StyleSheet.create({
     gap: 7,
     paddingHorizontal: 10,
   },
-  groupCaret: {color: theme.accent, fontSize: 13, width: 13},
+  groupVisibilityIcon: {width: 18},
   groupTitle: {color: theme.text, fontSize: 12, fontWeight: '700', flex: 1},
   groupCount: {
     color: theme.textDim,
@@ -412,4 +577,51 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   ingredientChips: {flexDirection: 'row', flexWrap: 'wrap', gap: 5},
+  alternativeBackdrop: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: 'rgba(0,0,0,0.72)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  alternativeCard: {
+    width: '100%',
+    maxWidth: 520,
+    maxHeight: '78%' as never,
+    backgroundColor: theme.panel,
+    borderColor: theme.borderLight,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 14,
+  },
+  alternativeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 12,
+  },
+  alternativeTitleGroup: {flex: 1},
+  alternativeTitle: {color: theme.text, fontSize: 15, fontWeight: '700'},
+  alternativeCount: {color: theme.textDim, fontSize: 10, marginTop: 2},
+  alternativeClose: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderColor: theme.border,
+    borderWidth: 1,
+    borderRadius: 8,
+  },
+  alternativeCloseText: {color: theme.textDim, fontSize: 22, lineHeight: 24},
+  alternativeScroll: {maxHeight: 460},
+  alternativeList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
 });

@@ -1,10 +1,16 @@
 import {RecipeRef} from '../types';
+import type {IngredientSelections} from '../data/ingredientAlternativeSelection';
 
 const STORAGE_KEY = 'minecraft-recipe-tree.preferred-sources.v2';
 const LEGACY_RECIPE_STORAGE_KEY = 'minecraft-recipe-tree.favorite-recipes.v1';
 
 export type PreferredSource =
-  | {t: 'recipe'; ref: RecipeRef; allowFluidTransfer?: true}
+  | {
+      t: 'recipe';
+      ref: RecipeRef;
+      allowFluidTransfer?: true;
+      ingredientSelections?: IngredientSelections;
+    }
   | {t: 'mob'; mobId: string}
   | {t: 'block'; blockKey: string};
 
@@ -24,11 +30,30 @@ function isPreferredSource(value: unknown): value is PreferredSource {
   return (
     (source.t === 'recipe' &&
       isRecipeRef(source.ref) &&
-      (source.allowFluidTransfer === undefined || source.allowFluidTransfer === true)) ||
+      (source.allowFluidTransfer === undefined || source.allowFluidTransfer === true) &&
+      isIngredientSelections(source.ingredientSelections)) ||
     (source.t === 'mob' && typeof source.mobId === 'string' && source.mobId.length > 0) ||
     (source.t === 'block' &&
       typeof source.blockKey === 'string' &&
       source.blockKey.length > 0)
+  );
+}
+
+function isIngredientSelections(value: unknown): value is IngredientSelections | undefined {
+  return (
+    value === undefined ||
+    (!!value &&
+      typeof value === 'object' &&
+      !Array.isArray(value) &&
+      Object.keys(value).length <= 256 &&
+      Object.entries(value).every(
+        ([selectionKey, selectedKey]) =>
+          selectionKey.length > 0 &&
+          selectionKey.length <= 512 &&
+          typeof selectedKey === 'string' &&
+          selectedKey.length > 0 &&
+          selectedKey.length <= 512,
+      ))
   );
 }
 

@@ -23,14 +23,21 @@ import {
   toggleCollapsedRecipeCategory,
 } from '../data/recipeCategoryPreferences';
 import {isFluidContainerTransferRecipe} from '../data/recipeVisibility';
-import {slotSummary} from '../data/slotSummary';
+import {
+  recipeProducesItem,
+  recipeUsesItem,
+  usageGraphStart,
+} from '../graph/direction';
+import type {GraphDirection} from '../graph/direction';
 import {theme} from '../theme';
 import {Recipe, RecipeRef} from '../types';
 import {useUi} from '../ui/UiContext';
+import {signalTarget, useSignalSurface} from '../analytics/signal';
 import {DropList, DropRow, formatDropStat} from './DropList';
 import {ItemIcon} from './ItemIcon';
 import {MobSprite} from './MobSprite';
 import {ItemChip, RecipeCard} from './RecipeCard';
+import {VisibilityIcon} from './VisibilityIcon';
 
 const PAGE = 15;
 const MAX_DEFAULT_FILTER_SCAN = 400;
@@ -45,10 +52,24 @@ function toolLabel(tool: string): string {
 
 export function ItemDetailModal() {
   const data = useData();
-  const {itemStack, popItem, closeItems} = useUi();
+  const {itemStack, popItem, closeItems, tab} = useUi();
   const key = itemStack[itemStack.length - 1];
   /** 'p' | 'u' | 'i' | 'd' | a secondary category index */
   const [side, setSide] = useState<'p' | 'u' | 'i' | 'd' | number>('p');
+  const sideName =
+    side === 'p'
+      ? 'recipes'
+      : side === 'u'
+        ? 'usages'
+        : side === 'i'
+          ? 'information'
+          : side === 'd'
+            ? 'drops'
+            : 'secondary';
+  useSignalSurface(
+    key ? `item-detail/${sideName}` : tab,
+    key ? 'modal' : 'screen',
+  );
 
   useEffect(() => setSide('p'), [key]);
   useEffect(() => {
@@ -72,6 +93,7 @@ export function ItemDetailModal() {
             </Text>
             {data.indexStatus === 'error' && (
               <TouchableOpacity
+                {...signalTarget('item-detail.retry-index')}
                 style={styles.headerBtn}
                 onPress={() => void data.ensureIndex().catch(() => {})}>
                 <Text style={styles.headerBtnText}>Retry recipe index</Text>
@@ -136,12 +158,18 @@ export function ItemDetailModal() {
         <Pressable style={styles.card} onPress={() => {}}>
           <View style={styles.header}>
             {itemStack.length > 1 && (
-              <TouchableOpacity onPress={popItem} style={styles.headerBtn}>
+              <TouchableOpacity
+                {...signalTarget('item-detail.back')}
+                onPress={popItem}
+                style={styles.headerBtn}>
                 <Text style={styles.headerBtnText}>‹ back</Text>
               </TouchableOpacity>
             )}
             <View style={{flex: 1}} />
-            <TouchableOpacity onPress={closeItems} style={styles.headerBtn}>
+            <TouchableOpacity
+              {...signalTarget('item-detail.close')}
+              onPress={closeItems}
+              style={styles.headerBtn}>
               <Text style={styles.headerBtnText}>✕</Text>
             </TouchableOpacity>
           </View>
@@ -158,10 +186,11 @@ export function ItemDetailModal() {
           </View>
 
           <View style={styles.tabsRow}>
-            <SideTab label={`Recipes (${produced.length})`} active={side === 'p'} onPress={() => setSide('p')} />
-            <SideTab label={`Usages (${used.length})`} active={side === 'u'} onPress={() => setSide('u')} />
+            <SideTab metricsId="item-detail.tab.recipes" label={`Recipes (${produced.length})`} active={side === 'p'} onPress={() => setSide('p')} />
+            <SideTab metricsId="item-detail.tab.usages" label={`Usages (${used.length})`} active={side === 'u'} onPress={() => setSide('u')} />
             {informational.length > 0 && (
               <SideTab
+                metricsId="item-detail.tab.information"
                 label={`Info (${informational.length})`}
                 active={side === 'i'}
                 onPress={() => setSide('i')}
@@ -170,13 +199,14 @@ export function ItemDetailModal() {
             {secondaryGroups.map(g => (
               <SideTab
                 key={g.catIdx}
+                metricsId="item-detail.tab.secondary"
                 label={`${g.title} (${g.refs.length})`}
                 active={side === g.catIdx}
                 onPress={() => setSide(g.catIdx)}
               />
             ))}
             {dropsCount > 0 && (
-              <SideTab label={`Drops (${dropsCount})`} active={side === 'd'} onPress={() => setSide('d')} />
+              <SideTab metricsId="item-detail.tab.drops" label={`Drops (${dropsCount})`} active={side === 'd'} onPress={() => setSide('d')} />
             )}
           </View>
 
@@ -228,6 +258,7 @@ export function ItemDetailModal() {
                 itemKey={key}
                 refs={refs}
                 informational={side === 'i'}
+                graphDirection={side === 'u' ? 'outputs' : 'inputs'}
               />
             )}
           </ScrollView>
@@ -237,9 +268,22 @@ export function ItemDetailModal() {
   );
 }
 
-function SideTab({label, active, onPress}: {label: string; active: boolean; onPress: () => void}) {
+function SideTab({
+  label,
+  active,
+  onPress,
+  metricsId,
+}: {
+  label: string;
+  active: boolean;
+  onPress: () => void;
+  metricsId: string;
+}) {
   return (
-    <TouchableOpacity onPress={onPress} style={[styles.sideTab, active && styles.sideTabActive]}>
+    <TouchableOpacity
+      {...signalTarget(metricsId)}
+      onPress={onPress}
+      style={[styles.sideTab, active && styles.sideTabActive]}>
       <Text style={[styles.sideTabText, active && styles.sideTabTextActive]}>{label}</Text>
     </TouchableOpacity>
   );
@@ -250,10 +294,12 @@ function RefsList({
   itemKey,
   refs,
   informational = false,
+  graphDirection,
 }: {
   itemKey: string;
   refs: RecipeRef[];
   informational?: boolean;
+  graphDirection: GraphDirection;
 }) {
   const data = useData();
   const {openRecipeInGraph} = useUi();
@@ -460,6 +506,11 @@ function RefsList({
         );
       }}>
       <View style={styles.recipeFilters}>
+        {!informational && graphDirection === 'outputs' && (
+          <Text style={styles.usageTreeNotice}>
+            Tap a usage to trace what {data.itemsByKey.get(itemKey)?.n ?? itemKey} can produce.
+          </Text>
+        )}
         {informational && (
           <Text style={styles.informationNotice}>
             {hasBetterQuestingPages
@@ -575,14 +626,27 @@ function RefsList({
         const collapsed = collapsedCategoryIds.has(category.id);
         const categoryRefs = shownByCategory.get(group.catIdx) ?? [];
         return (
-          <View key={category.id} style={styles.categorySection}>
+          <View
+            key={category.id}
+            style={[
+              styles.categorySection,
+              !collapsed && styles.categorySectionExpanded,
+            ]}>
             <TouchableOpacity
+              {...signalTarget('item-detail.recipe-category.toggle')}
               accessibilityRole="button"
               accessibilityLabel={`${collapsed ? 'Expand' : 'Collapse'} ${category.title} recipes`}
               accessibilityState={{expanded: !collapsed}}
-              style={[styles.categoryHeader, collapsed && styles.categoryHeaderCollapsed]}
+              style={[
+                styles.categoryHeader,
+                collapsed
+                  ? styles.categoryHeaderCollapsed
+                  : styles.categoryHeaderExpanded,
+              ]}
               onPress={() => toggleCategory(category.id)}>
-              <Text style={styles.categoryChevron}>{collapsed ? '▸' : '▾'}</Text>
+              <View accessibilityElementsHidden style={styles.categoryVisibilityIcon}>
+                <VisibilityIcon visible={!collapsed} size={14} />
+              </View>
               <Text style={styles.categoryTitle} numberOfLines={1}>
                 {category.title}
               </Text>
@@ -592,26 +656,46 @@ function RefsList({
             </TouchableOpacity>
             {!collapsed && categoryRefs.length > 0 ? (
               <View style={styles.categoryRecipes}>
-                {categoryRefs.map(([catIdx, recipeIdx]) => {
+                {categoryRefs.map(([catIdx, recipeIdx], recipePosition) => {
                   const recipe = recipesByRef.get(recipeRefKey([catIdx, recipeIdx]));
-                  const selectedOutput = recipe
-                    ? slotSummary(recipe.out).find(
-                        output =>
-                          output.key === itemKey || output.alternatives.includes(itemKey),
-                      )
+                  const usageStart =
+                    graphDirection === 'outputs' && recipe
+                      ? usageGraphStart(recipe)
+                      : null;
+                  const canStartTree =
+                    recipe &&
+                    (graphDirection === 'outputs'
+                      ? recipeUsesItem(recipe, itemKey) && usageStart !== null
+                      : recipeProducesItem(recipe, itemKey));
+                  const actionSubject = data.itemsByKey.get(itemKey)?.n ?? itemKey;
+                  const usageOutputSubject = usageStart
+                    ? data.itemsByKey.get(usageStart.rootKey)?.n ?? usageStart.rootKey
                     : undefined;
-                  const outputKey = selectedOutput ? itemKey : undefined;
                   return (
-                    <View key={`${catIdx}-${recipeIdx}`}>
+                    <View
+                      key={`${catIdx}-${recipeIdx}`}
+                      style={[
+                        styles.categoryRecipe,
+                        recipePosition > 0 && styles.categoryRecipeSeparated,
+                      ]}>
                       {recipe && availableCardWidth !== null ? (
                         <RecipeCard
                           recipe={recipe}
                           dir={category.dir}
                           catTitle={category.title}
                           availableCardWidth={availableCardWidth}
+                          graphDirection={graphDirection}
+                          actionSubject={actionSubject}
+                          usageOutputSubject={usageOutputSubject}
+                          grouped
                           onPress={
-                            outputKey && !informational
-                              ? () => openRecipeInGraph(outputKey, [catIdx, recipeIdx])
+                            canStartTree && !informational
+                              ? () =>
+                                  openRecipeInGraph(
+                                    usageStart?.rootKey ?? itemKey,
+                                    [catIdx, recipeIdx],
+                                    usageStart?.direction ?? graphDirection,
+                                  )
                               : undefined
                           }
                         />
@@ -636,6 +720,7 @@ function RefsList({
           ? filteredRefs.length > visibleTarget
           : !scannedAll || visibleCandidates.length > visibleTarget) && (
         <TouchableOpacity
+          {...signalTarget('item-detail.show-more')}
           style={styles.moreBtn}
           onPress={() => {
             setVisibleTarget(value => value + PAGE);
@@ -653,6 +738,7 @@ function RefsList({
 function FilterChip({label, active, onPress}: {label: string; active: boolean; onPress: () => void}) {
   return (
     <TouchableOpacity
+      {...signalTarget('item-detail.filter.change')}
       accessibilityRole="button"
       accessibilityState={{selected: active}}
       onPress={onPress}
@@ -708,6 +794,13 @@ const styles = StyleSheet.create({
   },
   recipeList: {width: '100%'},
   categorySection: {marginBottom: 10},
+  categorySectionExpanded: {
+    overflow: 'hidden',
+    backgroundColor: theme.panelAlt,
+    borderColor: theme.borderLight,
+    borderWidth: 1,
+    borderRadius: 8,
+  },
   categoryHeader: {
     minHeight: 38,
     flexDirection: 'row',
@@ -721,11 +814,20 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   categoryHeaderCollapsed: {borderColor: theme.border},
-  categoryChevron: {color: theme.accent, fontSize: 13, width: 12},
+  categoryHeaderExpanded: {
+    borderWidth: 0,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.border,
+    borderRadius: 0,
+  },
+  categoryVisibilityIcon: {width: 18},
   categoryTitle: {color: theme.text, fontSize: 12, fontWeight: '700', flex: 1},
   categoryCount: {color: theme.textDim, fontSize: 9},
-  categoryRecipes: {paddingTop: 9},
+  categoryRecipes: {paddingTop: 0},
+  categoryRecipe: {width: '100%'},
+  categoryRecipeSeparated: {borderTopColor: theme.border, borderTopWidth: 1},
   informationNotice: {color: theme.textDim, fontSize: 12, lineHeight: 17},
+  usageTreeNotice: {color: theme.accent, fontSize: 12, lineHeight: 17, fontWeight: '700'},
   filterHeader: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -1,6 +1,8 @@
 import React, {useEffect, useMemo, useState} from 'react';
 import {
+  Image,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -8,9 +10,61 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  type ImageErrorEvent,
 } from 'react-native';
 import type {DatasetDescriptor} from '../data/datasetCatalog';
+import {datasetPackIconPath} from '../data/datasetPresentation';
 import {theme} from '../theme';
+
+const PRODUCTION_ORIGIN = 'https://minecraftrecipetree.craftsmannsoftware.com';
+
+function PackIcon({dataset}: {dataset: DatasetDescriptor}) {
+  const [failed, setFailed] = useState(false);
+  const path = datasetPackIconPath(dataset.slug);
+
+  useEffect(() => {
+    if (path !== null) return;
+    console.error('Published modpack has no configured picker icon.', {
+      slug: dataset.slug,
+      displayName: dataset.displayName,
+    });
+  }, [dataset.displayName, dataset.slug, path]);
+
+  if (path === null || failed) {
+    return (
+      <View
+        style={styles.packIconFallback}
+        accessible
+        accessibilityRole="image"
+        accessibilityLabel={`${dataset.displayName} pack icon unavailable`}>
+        <Text style={styles.packIconFallbackText}>
+          {dataset.displayName.trim().charAt(0).toUpperCase() || '?'}
+        </Text>
+      </View>
+    );
+  }
+
+  const uri = Platform.OS === 'web' ? path : `${PRODUCTION_ORIGIN}${path}`;
+  const onError = (event: ImageErrorEvent) => {
+    console.error('Published modpack picker icon failed to load.', {
+      slug: dataset.slug,
+      uri,
+      detail: event.nativeEvent.error,
+    });
+    setFailed(true);
+  };
+  return (
+    <Image
+      source={{uri}}
+      style={styles.packIcon}
+      resizeMode="cover"
+      onError={onError}
+      accessible
+      accessibilityRole="image"
+      accessibilityLabel={`${dataset.displayName} pack icon`}
+    />
+  );
+}
 
 export function DatasetPicker({
   visible,
@@ -66,14 +120,9 @@ export function DatasetPicker({
           onPress={() => {}}
           accessible={false}>
           <View style={styles.header}>
-            <View style={styles.headerCopy}>
-              <Text style={styles.title} accessibilityRole="header">
-                Choose a recipe dataset
-              </Text>
-              <Text style={styles.subtitle}>
-                Each pack is an immutable export with its own items, recipes, and layout previews.
-              </Text>
-            </View>
+            <Text style={styles.title} accessibilityRole="header">
+              Choose a modpack
+            </Text>
             <TouchableOpacity
               onPress={onClose}
               style={styles.closeButton}
@@ -141,6 +190,7 @@ export function DatasetPicker({
                   accessibilityLabel={`${dataset.displayName}, Minecraft ${dataset.minecraftVersion}, pack version ${dataset.packVersion}${selected ? ', selected' : ''}`}
                   accessibilityHint="Loads this modpack's recipe dataset"
                   focusable>
+                  <PackIcon dataset={dataset} />
                   <View style={styles.optionCopy}>
                     <Text style={[styles.optionName, selected && styles.optionNameSelected]}>
                       {dataset.displayName}
@@ -189,9 +239,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: theme.border,
   },
-  headerCopy: {flex: 1},
-  title: {color: theme.text, fontSize: 19, fontWeight: '800'},
-  subtitle: {color: theme.textDim, fontSize: 12, lineHeight: 18, marginTop: 5},
+  title: {flex: 1, color: theme.text, fontSize: 19, fontWeight: '800'},
   closeButton: {
     width: 44,
     height: 44,
@@ -219,6 +267,7 @@ const styles = StyleSheet.create({
     flexBasis: 260,
     minWidth: 0,
     minHeight: 44,
+    fontSize: 16,
     color: theme.text,
     backgroundColor: theme.bg,
     borderColor: theme.border,
@@ -258,6 +307,27 @@ const styles = StyleSheet.create({
     borderColor: theme.accent,
     backgroundColor: 'rgba(74, 222, 128, 0.08)',
   },
+  packIcon: {
+    width: 48,
+    height: 48,
+    flexShrink: 0,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: theme.borderLight,
+    backgroundColor: theme.bg,
+  },
+  packIconFallback: {
+    width: 48,
+    height: 48,
+    flexShrink: 0,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: theme.borderLight,
+    backgroundColor: theme.bg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  packIconFallbackText: {color: theme.textDim, fontSize: 20, fontWeight: '800'},
   optionCopy: {flex: 1, minWidth: 0},
   optionName: {color: theme.text, fontSize: 15, fontWeight: '700'},
   optionNameSelected: {color: theme.accent},

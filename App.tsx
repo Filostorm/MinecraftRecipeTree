@@ -1,5 +1,5 @@
 import {StatusBar} from 'expo-status-bar';
-import React, {useEffect, useState} from 'react';
+import React, {Suspense, useEffect, useState} from 'react';
 import {
   ActivityIndicator,
   Platform,
@@ -8,10 +8,14 @@ import {
   Text,
   TouchableOpacity,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import {ItemDetailModal} from './src/components/ItemDetailModal';
+import {InterfaceZoomSlider} from './src/components/InterfaceZoomSlider';
 import {DatasetPicker} from './src/components/DatasetPicker';
 import {DatasetSwitcher} from './src/components/DatasetSwitcher';
+import {FeedbackModal, type FeedbackKind} from './src/components/FeedbackModal';
+import {GraphGuideModal} from './src/components/GraphGuideModal';
 import {ItemsScreen} from './src/components/ItemsScreen';
 import {MobsScreen} from './src/components/MobsScreen';
 import {RecipeHistoryModal} from './src/components/RecipeHistoryModal';
@@ -22,16 +26,23 @@ import {
   useDatasetCatalog,
 } from './src/data/DatasetCatalogContext';
 import {datasetMountKey} from './src/data/datasetCatalog';
-import {GraphScreen} from './src/graph/GraphScreen';
 import {theme} from './src/theme';
 import type {Manifest} from './src/types';
 import {Tab, UiProvider, useUi} from './src/ui/UiContext';
 import {
-  INTERFACE_ZOOM_LEVELS,
-  adjacentInterfaceZoom,
+  INTERFACE_ZOOM_STEP,
+  MAXIMUM_INTERFACE_ZOOM,
+  MINIMUM_INTERFACE_ZOOM,
   loadInterfaceZoom,
+  normalizeInterfaceZoom,
   persistInterfaceZoom,
 } from './src/ui/interfaceZoom';
+import {signalTarget, useSignalSurface} from './src/analytics/signal';
+
+const LazyGraphScreen = React.lazy(async () => {
+  const module = await import('./src/graph/GraphScreen');
+  return {default: module.GraphScreen};
+});
 
 export default function App() {
   return (
@@ -50,26 +61,35 @@ function DatasetRoot() {
   const datasets = catalog.state.status === 'loading' ? [] : catalog.state.datasets;
   const selectedSlug = catalog.state.status === 'ready' ? catalog.state.selected.slug : null;
 
-  const datasetControls = (loadedManifest: Manifest | null) => (
+  const datasetControls = (
+    loadedManifest: Manifest | null,
+    details?: React.ReactNode,
+    leadingAction?: React.ReactNode,
+    fullWidthControls?: React.ReactNode,
+  ) => (
     <>
       <DatasetSwitcher
         status={catalog.state.status}
         datasets={datasets}
         selectedSlug={selectedSlug}
         loadedManifest={loadedManifest}
-        onSelect={catalog.select}
         onOpenPicker={() => setShowDatasetPicker(true)}
+        leadingAction={leadingAction}
+        fullWidthControls={fullWidthControls}
+        details={details}
       />
-      <DatasetPicker
-        visible={showDatasetPicker}
-        datasets={datasets}
-        selectedSlug={selectedSlug}
-        onSelect={slug => {
-          catalog.select(slug);
-          setShowDatasetPicker(false);
-        }}
-        onClose={() => setShowDatasetPicker(false)}
-      />
+      {showDatasetPicker && (
+        <DatasetPicker
+          visible
+          datasets={datasets}
+          selectedSlug={selectedSlug}
+          onSelect={slug => {
+            catalog.select(slug);
+            setShowDatasetPicker(false);
+          }}
+          onClose={() => setShowDatasetPicker(false)}
+        />
+      )}
     </>
   );
 
@@ -126,75 +146,121 @@ function LoadedDatasetLayout({
   renderControls,
 }: {
   expectedPublicationId: string;
-  renderControls(manifest: Manifest | null): React.ReactNode;
+  renderControls(
+    manifest: Manifest | null,
+    details?: React.ReactNode,
+    leadingAction?: React.ReactNode,
+    fullWidthControls?: React.ReactNode,
+  ): React.ReactNode;
 }) {
-  const state = useLoadState();
-  const manifest = state.status === 'ready' ? state.data.manifest : null;
   return (
     <View style={styles.datasetRoot}>
       <DatasetReadinessMarker expectedPublicationId={expectedPublicationId} />
-      {renderControls(manifest)}
       <View style={styles.datasetContent}>
         <UiProvider>
-          <Root />
+          <Root renderControls={renderControls} />
         </UiProvider>
       </View>
     </View>
   );
 }
 
-function Root() {
+function Root({
+  renderControls,
+}: {
+  renderControls(
+    manifest: Manifest | null,
+    details?: React.ReactNode,
+    leadingAction?: React.ReactNode,
+    fullWidthControls?: React.ReactNode,
+  ): React.ReactNode;
+}) {
   const state = useLoadState();
   if (state.status === 'loading') {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator color={theme.accent} size="large" />
-        <Text style={styles.loadingText}>loading {state.step}</Text>
+      <View style={styles.datasetRoot}>
+        {renderControls(null)}
+        <View style={styles.center}>
+          <ActivityIndicator color={theme.accent} size="large" />
+          <Text style={styles.loadingText}>loading {state.step}</Text>
+        </View>
       </View>
     );
   }
   if (state.status === 'error') {
     const stale = state.kind === 'stale';
     return (
-      <View style={styles.center}>
-        <Text style={styles.errorTitle}>{stale ? 'Recipe dataset updated' : 'Export unavailable'}</Text>
-        <Text style={styles.errorText}>
-          {state.message}
-          {!stale && (
-            <>
-              {'\n\n'}Expected data at “{state.base}/manifest.json”.
-              {'\n\n'}Development recovery:
-              {'\n'}1. Run the version-appropriate Minecraft exporter.
-              {'\n'}2. Run npm run import-data -- --source /absolute/path/to/export.
-              {'\n'}3. Reload this page after validation and publication complete.
-            </>
+      <View style={styles.datasetRoot}>
+        {renderControls(null)}
+        <View style={styles.center}>
+          <Text style={styles.errorTitle}>{stale ? 'Recipe dataset updated' : 'Export unavailable'}</Text>
+          <Text style={styles.errorText}>
+            {state.message}
+            {!stale && (
+              <>
+                {'\n\n'}Expected data at “{state.base}/manifest.json”.
+                {'\n\n'}Development recovery:
+                {'\n'}1. Run the version-appropriate Minecraft exporter.
+                {'\n'}2. Run npm run import-data -- --source /absolute/path/to/export.
+                {'\n'}3. Reload this page after validation and publication complete.
+              </>
+            )}
+          </Text>
+          {stale && Platform.OS === 'web' && (
+            <TouchableOpacity
+              accessibilityRole="button"
+              style={styles.reloadBtn}
+              onPress={() => {
+                if (typeof window === 'undefined') {
+                  console.error('Dataset reload was requested, but the browser window is unavailable.');
+                  return;
+                }
+                window.location.reload();
+              }}>
+              <Text style={styles.reloadBtnText}>Reload catalog and dataset</Text>
+            </TouchableOpacity>
           )}
-        </Text>
-        {stale && Platform.OS === 'web' && (
-          <TouchableOpacity
-            accessibilityRole="button"
-            style={styles.reloadBtn}
-            onPress={() => {
-              if (typeof window === 'undefined') {
-                console.error('Dataset reload was requested, but the browser window is unavailable.');
-                return;
-              }
-              window.location.reload();
-            }}>
-            <Text style={styles.reloadBtnText}>Reload catalog and dataset</Text>
-          </TouchableOpacity>
-        )}
+        </View>
       </View>
     );
   }
-  return <Shell />;
+  return <Shell renderControls={renderControls} />;
 }
 
-function Shell() {
+function Shell({
+  renderControls,
+}: {
+  renderControls(
+    manifest: Manifest | null,
+    details?: React.ReactNode,
+    leadingAction?: React.ReactNode,
+    fullWidthControls?: React.ReactNode,
+  ): React.ReactNode;
+}) {
   const data = useData();
   const {tab} = useUi();
+  const {width} = useWindowDimensions();
+  const [hasHydrated, setHasHydrated] = useState(Platform.OS !== 'web');
+  const compactHeader = hasHydrated && width < 720;
   const [showRecipeHistory, setShowRecipeHistory] = useState(false);
+  const [showGraphGuide, setShowGraphGuide] = useState(false);
+  const [feedbackKind, setFeedbackKind] = useState<FeedbackKind | null>(null);
+  const [showDatasetDetails, setShowDatasetDetails] = useState(false);
   const [interfaceZoom, setInterfaceZoom] = useState(1);
+  const shellSurface = feedbackKind
+    ? `feedback/${feedbackKind}`
+    : showGraphGuide
+      ? 'graph-guide'
+      : showRecipeHistory
+        ? 'recipe-history'
+        : tab;
+  useSignalSurface(
+    shellSurface,
+    feedbackKind || showGraphGuide || showRecipeHistory ? 'modal' : 'screen',
+  );
+  useEffect(() => {
+    if (Platform.OS === 'web') setHasHydrated(true);
+  }, []);
   useEffect(() => {
     if (tab !== 'graph' || data.indexStatus === 'ready' || data.indexStatus === 'loading') return;
     void data.ensureIndex().catch(() => {
@@ -204,91 +270,157 @@ function Shell() {
   useEffect(() => {
     if (Platform.OS === 'web') setInterfaceZoom(loadInterfaceZoom());
   }, []);
-  const updateInterfaceZoom = (direction: -1 | 1) => {
-    setInterfaceZoom(current => {
-      const next = adjacentInterfaceZoom(current, direction);
-      try {
-        persistInterfaceZoom(next);
-      } catch (error) {
-        console.error('Interface zoom could not be saved.', error);
-      }
-      return next;
-    });
+  const previewInterfaceZoom = (value: number) => {
+    try {
+      setInterfaceZoom(normalizeInterfaceZoom(value));
+    } catch (error) {
+      console.error('Interface zoom slider produced an invalid value.', error);
+    }
   };
-  const minimumInterfaceZoom = INTERFACE_ZOOM_LEVELS[0];
-  const maximumInterfaceZoom = INTERFACE_ZOOM_LEVELS[INTERFACE_ZOOM_LEVELS.length - 1];
+  const saveInterfaceZoom = (value: number) => {
+    try {
+      persistInterfaceZoom(normalizeInterfaceZoom(value));
+    } catch (error) {
+      console.error('Interface zoom could not be saved.', error);
+    }
+  };
   const scaledWorkspaceStyle =
     Platform.OS === 'web'
       ? ({
           zoom: interfaceZoom,
         } as unknown as object)
       : null;
+  const headerTabs = (
+    <View style={styles.headerActionRow}>
+      <TabBtn tab="items" label="Items" />
+      <TabBtn tab="graph" label="Graph" />
+      {data.capabilities.mobs && <TabBtn tab="mobs" label="Mobs" />}
+    </View>
+  );
+  const datasetDetailsButton = (
+    <TouchableOpacity
+      {...signalTarget('header.dataset-details')}
+      style={[
+        styles.headerDetailBtn,
+        showDatasetDetails && styles.headerDetailBtnActive,
+      ]}
+      onPress={() => setShowDatasetDetails(value => !value)}
+      accessibilityRole="button"
+      accessibilityState={{expanded: showDatasetDetails}}
+      accessibilityLabel="Dataset details">
+      <Text
+        style={[
+          styles.headerDetailBtnText,
+          showDatasetDetails && styles.headerDetailBtnTextActive,
+        ]}>
+        ⓘ Details
+      </Text>
+    </TouchableOpacity>
+  );
+  const datasetMetadata = (
+    <Text style={styles.subtitle}>
+      Minecraft {data.descriptor.minecraftVersion} · pack {data.descriptor.packVersion} ·{' '}
+      {Object.keys(data.manifest.mods ?? {}).length} mods · {data.items.length} items ·{' '}
+      {data.manifest.counts?.recipes ?? '?'} recipes
+      {data.capabilities.mobs ? ` · ${data.mobs.length} mobs` : ' · mob catalog unavailable'}
+      {!data.capabilities.blockDrops ? ' · block-drop catalog unavailable' : ''}
+      {data.capabilities.recipePreviews
+        ? ' · JEI layout previews available'
+        : ' · JEI layout previews unavailable'}
+    </Text>
+  );
+  const interfaceZoomControls = Platform.OS === 'web' ? (
+    <View
+      style={styles.interfaceZoomControls}
+      accessibilityLabel="Interface zoom controls">
+      <Text
+        style={styles.interfaceZoomValue}
+        accessibilityLabel={`Interface zoom ${Math.round(interfaceZoom * 100)} percent`}>
+        UI {Math.round(interfaceZoom * 100)}%
+      </Text>
+      <InterfaceZoomSlider
+        minimumValue={MINIMUM_INTERFACE_ZOOM}
+        maximumValue={MAXIMUM_INTERFACE_ZOOM}
+        step={INTERFACE_ZOOM_STEP}
+        value={interfaceZoom}
+        onValueChange={previewInterfaceZoom}
+        onSlidingComplete={saveInterfaceZoom}
+      />
+    </View>
+  ) : null;
+  const headerDetails = compactHeader ? (
+    <View style={styles.headerDetails}>
+      <View style={styles.compactHeaderNavigation}>
+        {headerTabs}
+        {datasetDetailsButton}
+      </View>
+      {showDatasetDetails && datasetMetadata}
+      {interfaceZoomControls}
+    </View>
+  ) : showDatasetDetails ? (
+    datasetMetadata
+  ) : null;
+  const fullWidthHeaderControls = !compactHeader ? (
+    <View style={styles.fullWidthHeaderControls}>
+      {headerTabs}
+      {datasetDetailsButton}
+      {interfaceZoomControls}
+    </View>
+  ) : null;
+  const headerActions = (
+    <View style={styles.headerUtilityRow}>
+      <TouchableOpacity
+        {...signalTarget('header.recipe-history')}
+        style={styles.headerUtilityButton}
+        onPress={() => setShowRecipeHistory(true)}
+        accessibilityRole="button"
+        accessibilityLabel={`Open recipe history for ${data.descriptor.displayName}`}>
+        <Text style={styles.historyHeaderIcon}>◷</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        {...signalTarget('header.graph-guide')}
+        style={[
+          styles.headerUtilityButton,
+          showGraphGuide && styles.headerUtilityButtonActive,
+        ]}
+        onPress={() => setShowGraphGuide(true)}
+        accessibilityRole="button"
+        accessibilityLabel="Open graph guide">
+        <Text
+          style={[
+            styles.guideHeaderIcon,
+            showGraphGuide && styles.guideHeaderIconActive,
+          ]}>
+          ?
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
   return (
     <View style={styles.shell}>
-      <View style={styles.header}>
-        <Text style={styles.subtitle}>
-          Minecraft {data.descriptor.minecraftVersion} · pack {data.descriptor.packVersion} ·{' '}
-          {Object.keys(data.manifest.mods ?? {}).length} mods · {data.items.length} items ·{' '}
-          {data.manifest.counts?.recipes ?? '?'} recipes
-          {data.capabilities.mobs ? ` · ${data.mobs.length} mobs` : ' · mob catalog unavailable'}
-          {!data.capabilities.blockDrops ? ' · block-drop catalog unavailable' : ''}
-          {data.capabilities.recipePreviews
-            ? ' · JEI layout previews available'
-            : ' · JEI layout previews unavailable'}
-        </Text>
-        <TouchableOpacity
-          style={styles.historyBtn}
-          onPress={() => setShowRecipeHistory(true)}
-          accessibilityRole="button"
-          accessibilityLabel={`Open recipe history for ${data.descriptor.displayName}`}>
-          <Text style={styles.historyBtnText}>↶ Recipe history</Text>
-        </TouchableOpacity>
-        <TabBtn tab="items" label="Items" />
-        <TabBtn tab="graph" label="Graph" />
-        {data.capabilities.mobs && <TabBtn tab="mobs" label="Mobs" />}
-        {Platform.OS === 'web' && (
-          <View
-            style={styles.interfaceZoomControls}
-            accessibilityLabel="Interface zoom controls">
-            <TouchableOpacity
-              style={[
-                styles.interfaceZoomButton,
-                interfaceZoom === minimumInterfaceZoom && styles.interfaceZoomButtonDisabled,
-              ]}
-              disabled={interfaceZoom === minimumInterfaceZoom}
-              onPress={() => updateInterfaceZoom(-1)}
-              accessibilityRole="button"
-              accessibilityLabel="Decrease interface zoom">
-              <Text style={styles.interfaceZoomButtonText}>−</Text>
-            </TouchableOpacity>
-            <Text
-              style={styles.interfaceZoomValue}
-              accessibilityLabel={`Interface zoom ${Math.round(interfaceZoom * 100)} percent`}>
-              UI {Math.round(interfaceZoom * 100)}%
-            </Text>
-            <TouchableOpacity
-              style={[
-                styles.interfaceZoomButton,
-                interfaceZoom === maximumInterfaceZoom && styles.interfaceZoomButtonDisabled,
-              ]}
-              disabled={interfaceZoom === maximumInterfaceZoom}
-              onPress={() => updateInterfaceZoom(1)}
-              accessibilityRole="button"
-              accessibilityLabel="Increase interface zoom">
-              <Text style={styles.interfaceZoomButtonText}>＋</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-      </View>
+      {renderControls(
+        data.manifest,
+        headerDetails,
+        headerActions,
+        fullWidthHeaderControls,
+      )}
       <View style={styles.workspaceViewport}>
-        <View style={[styles.workspace, scaledWorkspaceStyle]}>
+        <View style={styles.workspace}>
           {/* All tabs stay mounted so graph expansion state survives tab switches. */}
           <View style={[styles.body, tab !== 'items' && styles.hidden]}>
-            <ItemsScreen />
+            <ItemsScreen interfaceZoom={interfaceZoom} />
           </View>
-          <View style={[styles.body, tab !== 'graph' && styles.hidden]}>
+          <View style={[styles.body, scaledWorkspaceStyle, tab !== 'graph' && styles.hidden]}>
             {data.indexStatus === 'ready' ? (
-              <GraphScreen />
+              <Suspense
+                fallback={
+                  <View style={styles.center}>
+                    <ActivityIndicator color={theme.accent} size="large" />
+                    <Text style={styles.loadingText}>loading graph workspace…</Text>
+                  </View>
+                }>
+                <LazyGraphScreen interfaceZoom={interfaceZoom} />
+              </Suspense>
             ) : (
               <View style={styles.center}>
                 {data.indexStatus !== 'error' && (
@@ -313,17 +445,37 @@ function Shell() {
             )}
           </View>
           {data.capabilities.mobs && (
-            <View style={[styles.body, tab !== 'mobs' && styles.hidden]}>
+            <View style={[styles.body, scaledWorkspaceStyle, tab !== 'mobs' && styles.hidden]}>
               <MobsScreen />
             </View>
           )}
         </View>
       </View>
       <ItemDetailModal />
-      <RecipeHistoryModal
-        visible={showRecipeHistory}
-        onClose={() => setShowRecipeHistory(false)}
-      />
+      {showRecipeHistory && (
+        <RecipeHistoryModal
+          visible
+          onClose={() => setShowRecipeHistory(false)}
+        />
+      )}
+      {showGraphGuide && (
+        <GraphGuideModal
+          visible
+          onClose={() => setShowGraphGuide(false)}
+          onOpenFeedback={kind => {
+            setShowGraphGuide(false);
+            setFeedbackKind(kind);
+          }}
+        />
+      )}
+      {feedbackKind && (
+        <FeedbackModal
+          kind={feedbackKind}
+          onClose={() => setFeedbackKind(null)}
+          packSlug={data.descriptor.slug}
+          packName={data.descriptor.displayName}
+        />
+      )}
     </View>
   );
 }
@@ -332,7 +484,10 @@ function TabBtn({tab, label}: {tab: Tab; label: string}) {
   const ui = useUi();
   const active = ui.tab === tab;
   return (
-    <TouchableOpacity onPress={() => ui.setTab(tab)} style={[styles.tabBtn, active && styles.tabBtnActive]}>
+    <TouchableOpacity
+      {...signalTarget(`tab.${tab}`)}
+      onPress={() => ui.setTab(tab)}
+      style={[styles.tabBtn, active && styles.tabBtnActive]}>
       <Text style={[styles.tabBtnText, active && styles.tabBtnTextActive]}>{label}</Text>
     </TouchableOpacity>
   );
@@ -362,18 +517,26 @@ const styles = StyleSheet.create({
   },
   reloadBtnText: {color: theme.accent, fontSize: 13, fontWeight: '700'},
   shell: {flex: 1, minHeight: 0},
-  header: {
+  headerDetails: {gap: 7},
+  compactHeaderNavigation: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.border,
-    backgroundColor: theme.panel,
     flexWrap: 'wrap',
-    gap: 8,
+    gap: 6,
   },
-  subtitle: {color: theme.textDim, fontSize: 11, flexGrow: 1, flexShrink: 1, minWidth: 220},
+  fullWidthHeaderControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexShrink: 0,
+    gap: 6,
+  },
+  headerActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  subtitle: {color: theme.textDim, fontSize: 11, lineHeight: 16},
   tabBtn: {
     paddingHorizontal: 14,
     paddingVertical: 7,
@@ -384,36 +547,52 @@ const styles = StyleSheet.create({
   tabBtnActive: {backgroundColor: theme.panelAlt, borderColor: theme.border},
   tabBtnText: {color: theme.textDim, fontSize: 13},
   tabBtnTextActive: {color: theme.accent, fontWeight: '700'},
-  historyBtn: {
-    minHeight: 44,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
+  headerDetailBtn: {
+    minHeight: 34,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: theme.borderLight,
     justifyContent: 'center',
   },
-  historyBtnText: {color: theme.text, fontSize: 12, fontWeight: '700'},
+  headerDetailBtnActive: {borderColor: theme.accent, backgroundColor: theme.panelAlt},
+  headerDetailBtnText: {color: theme.text, fontSize: 11, fontWeight: '700'},
+  headerDetailBtnTextActive: {color: theme.accent},
+  headerUtilityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexShrink: 0,
+  },
+  headerUtilityButton: {
+    width: 34,
+    minHeight: 34,
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: theme.borderLight,
+    backgroundColor: theme.panelAlt,
+  },
+  headerUtilityButtonActive: {borderColor: theme.accent},
+  historyHeaderIcon: {color: theme.text, fontSize: 17, fontWeight: '700'},
+  guideHeaderIcon: {color: theme.text, fontSize: 16, fontWeight: '800'},
+  guideHeaderIconActive: {color: theme.accent},
   interfaceZoomControls: {
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
     borderColor: theme.borderLight,
     borderRadius: 8,
-    overflow: 'hidden',
-  },
-  interfaceZoomButton: {
-    width: 34,
     minHeight: 34,
-    alignItems: 'center',
-    justifyContent: 'center',
+    paddingHorizontal: 9,
     backgroundColor: theme.panelAlt,
   },
-  interfaceZoomButtonDisabled: {opacity: 0.35},
-  interfaceZoomButtonText: {color: theme.accent, fontSize: 18, fontWeight: '800'},
   interfaceZoomValue: {
-    minWidth: 72,
-    paddingHorizontal: 8,
+    minWidth: 60,
+    marginRight: 5,
     color: theme.text,
     fontSize: 11,
     fontWeight: '700',

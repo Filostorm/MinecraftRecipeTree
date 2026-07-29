@@ -1,4 +1,6 @@
-import {DropStat, Mob, Recipe, RecipeRef} from '../types';
+import type {DropStat, Mob, Recipe, RecipeRef} from '../types';
+import type {IngredientSelections} from '../data/ingredientAlternativeSelection';
+import type {GraphDirection} from './direction';
 
 /**
  * The flowchart is a tree rooted at the item being crafted, growing downward.
@@ -18,6 +20,12 @@ export interface ByproductFulfillment {
   allocations: ByproductAllocation[];
 }
 
+export interface DeferredRecipeExpansion {
+  ref: RecipeRef;
+  allowFluidTransfer?: true;
+  ingredientSelections?: IngredientSelections;
+}
+
 export interface SourceTreeNode {
   id: string;
   kind: SourceKind;
@@ -26,6 +34,12 @@ export interface SourceTreeNode {
   recipe?: Recipe;
   dir?: string;
   catTitle?: string;
+  /** Whether this source expands toward ingredients or toward recipe products. */
+  direction?: GraphDirection;
+  /** User-selected concrete members for interchangeable recipe input slots. */
+  ingredientSelections?: IngredientSelections;
+  /** Recipe was explicitly allowed through the default fluid-transfer filter. */
+  allowFluidTransfer?: boolean;
   /** mob-drop source */
   mob?: Mob;
   /** block-mining source */
@@ -53,6 +67,8 @@ export interface ItemTreeNode {
   nonConsumed?: boolean;
   /** Exact per-run chance that this consumed input is used; null means conflicting chances. */
   consumptionProbability?: number | null;
+  /** Exact per-run chance that this output is produced; null means conflicting chances. */
+  productionProbability?: number | null;
   /** Byproduct quantity reserved for this ingredient before its selected source is run. */
   byproductFulfillment?: ByproductFulfillment;
   /** Keys of item ancestors, for cycle detection */
@@ -62,8 +78,15 @@ export interface ItemTreeNode {
   loading?: boolean;
   /** The chosen way to obtain this item; set = expanded */
   source?: SourceTreeNode;
+  /** Recipe expansion held by another occurrence while expand-once mode is active. */
+  deferredRecipeExpansion?: DeferredRecipeExpansion;
 }
 
 export function makeRoot(key: string): ItemTreeNode {
   return {id: 'root', key, ancestors: []};
+}
+
+/** A node is a recursion boundary when its item already exists in its own path. */
+export function isRecursiveItemNode(node: ItemTreeNode): boolean {
+  return node.cyclic === true || node.ancestors.includes(node.key);
 }

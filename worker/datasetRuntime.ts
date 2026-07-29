@@ -50,6 +50,7 @@ export interface DatasetRuntime {
   PREVIEW_UPLOAD_ASSET_SET_ID?: string;
   PREVIEW_UPLOAD_ENABLED?: string;
   PREVIEW_UPLOAD_TOKEN?: string;
+  FEEDBACK_ADMIN_TOKEN?: string;
 }
 
 export function noStoreJson(value: unknown, status = 200): Response {
@@ -70,7 +71,7 @@ export function methodNotAllowed(allow: string): Response {
   });
 }
 
-async function tokensEqual(left: string, right: string): Promise<boolean> {
+export async function tokensEqual(left: string, right: string): Promise<boolean> {
   const encoder = new TextEncoder();
   const [leftDigest, rightDigest] = await Promise.all([
     crypto.subtle.digest('SHA-256', encoder.encode(left)),

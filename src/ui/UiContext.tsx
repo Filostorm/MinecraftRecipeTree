@@ -1,5 +1,6 @@
 import React, {createContext, useCallback, useContext, useMemo, useState} from 'react';
 import {RecipeRef} from '../types';
+import type {GraphDirection} from '../graph/direction';
 
 export type Tab = 'items' | 'graph' | 'mobs';
 
@@ -25,7 +26,12 @@ interface Ui {
   graphRequestId: number;
   /** Exact recipe requested from an item-detail recipe card. */
   graphRecipeRef: RecipeRef | null;
-  openRecipeInGraph(key: string, ref: RecipeRef): void;
+  /** Active traversal direction for the current graph. */
+  graphDirection: GraphDirection;
+  openRecipeInGraph(key: string, ref: RecipeRef, direction?: GraphDirection): void;
+  /** Hydrates a saved graph without changing the user's active workspace tab. */
+  restoreGraph(key: string, direction: GraphDirection): void;
+  changeGraphDirection(direction: GraphDirection): void;
   /** Mob sprite animation on/off (persisted). */
   animateMobs: boolean;
   toggleAnimateMobs(): void;
@@ -39,6 +45,7 @@ export function UiProvider({children}: {children: React.ReactNode}) {
   const [graphRootKey, setGraphRootKey] = useState<string | null>(null);
   const [graphRequestId, setGraphRequestId] = useState(0);
   const [graphRecipeRef, setGraphRecipeRef] = useState<RecipeRef | null>(null);
+  const [graphDirection, setGraphDirection] = useState<GraphDirection>('inputs');
   const [animateMobs, setAnimateMobs] = useState<boolean>(loadAnimateMobs);
 
   const toggleAnimateMobs = useCallback(() => {
@@ -57,12 +64,28 @@ export function UiProvider({children}: {children: React.ReactNode}) {
   }, []);
   const popItem = useCallback(() => setItemStack(s => s.slice(0, -1)), []);
   const closeItems = useCallback(() => setItemStack([]), []);
-  const openRecipeInGraph = useCallback((key: string, ref: RecipeRef) => {
+  const openRecipeInGraph = useCallback((
+    key: string,
+    ref: RecipeRef,
+    direction: GraphDirection = 'inputs',
+  ) => {
     setItemStack([]);
     setGraphRootKey(key);
     setGraphRecipeRef(ref);
+    setGraphDirection(direction);
     setGraphRequestId(requestId => requestId + 1);
     setTab('graph');
+  }, []);
+  const restoreGraph = useCallback((key: string, direction: GraphDirection) => {
+    setGraphRootKey(key);
+    setGraphRecipeRef(null);
+    setGraphDirection(direction);
+    setGraphRequestId(requestId => requestId + 1);
+  }, []);
+  const changeGraphDirection = useCallback((direction: GraphDirection) => {
+    setGraphRecipeRef(null);
+    setGraphDirection(direction);
+    setGraphRequestId(requestId => requestId + 1);
   }, []);
 
   const value = useMemo<Ui>(
@@ -76,7 +99,10 @@ export function UiProvider({children}: {children: React.ReactNode}) {
       graphRootKey,
       graphRequestId,
       graphRecipeRef,
+      graphDirection,
       openRecipeInGraph,
+      restoreGraph,
+      changeGraphDirection,
       animateMobs,
       toggleAnimateMobs,
     }),
@@ -86,11 +112,14 @@ export function UiProvider({children}: {children: React.ReactNode}) {
       graphRootKey,
       graphRequestId,
       graphRecipeRef,
+      graphDirection,
+      changeGraphDirection,
       animateMobs,
       openItem,
       popItem,
       closeItems,
       openRecipeInGraph,
+      restoreGraph,
       toggleAnimateMobs,
     ],
   );

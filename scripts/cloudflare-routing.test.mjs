@@ -7,6 +7,7 @@ const sitesVitePlugin = await readFile(
   new URL('../build/sites-vite-plugin.ts', import.meta.url),
   'utf8',
 );
+const applicationSource = await readFile(new URL('../App.tsx', import.meta.url), 'utf8');
 const datasetCatalog = await readFile(new URL('../src/data/datasetCatalog.ts', import.meta.url), 'utf8');
 const datasetCatalogContext = await readFile(
   new URL('../src/data/DatasetCatalogContext.tsx', import.meta.url),
@@ -16,6 +17,8 @@ const environmentExample = await readFile(new URL('../.env.example', import.meta
 const d1Migrations = await Promise.all([
   readFile(new URL('../drizzle/0000_yummy_impossible_man.sql', import.meta.url), 'utf8'),
   readFile(new URL('../drizzle/0001_wide_the_hand.sql', import.meta.url), 'utf8'),
+  readFile(new URL('../drizzle/0002_swift_nitro.sql', import.meta.url), 'utf8'),
+  readFile(new URL('../drizzle/0003_empty_salo.sql', import.meta.url), 'utf8'),
 ]);
 
 test('Cloudflare routes catalog, immutable datasets, and administration through the Worker', () => {
@@ -34,6 +37,11 @@ test('Cloudflare routes catalog, immutable datasets, and administration through 
     /resolve\(root, ['"]public['"], ['"]exporters['"]\)[\s\S]*?resolve\(root, ['"]dist['"], ['"]client['"], ['"]exporters['"]\)[\s\S]*?lstat\(source\)[\s\S]*?metadata\.nlink !== 1[\s\S]*?copyFile/,
     'only bounded single-link exporter release files may be copied into the deployable client',
   );
+  assert.match(
+    sitesVitePlugin,
+    /resolve\(root, ['"]public['"], ['"]pack-icons['"]\)[\s\S]*?resolve\(root, ['"]dist['"], ['"]client['"], ['"]pack-icons['"]\)[\s\S]*?metadata\.nlink !== 1[\s\S]*?MAX_PACK_ICON_BYTES[\s\S]*?copyFile/,
+    'only the exact bounded pack icon set may be copied into the deployable client',
+  );
   const workerFirstSource = /run_worker_first:\s*\[([\s\S]*?)\]/.exec(viteConfig)?.[1];
   assert.ok(workerFirstSource, 'vite.config.ts must define an explicit run_worker_first route list');
   const workerFirstRoutes = [...workerFirstSource.matchAll(/['"]([^'"]+)['"]/g)].map(
@@ -44,6 +52,7 @@ test('Cloudflare routes catalog, immutable datasets, and administration through 
     '/api/admin/core-datasets/*',
     '/api/admin/dataset-channels/*',
     '/api/datasets',
+    '/api/feedback',
     '/api/modpacks*',
     '/dataset/publications/*',
     '/dataset/preview-sets/*',
@@ -62,6 +71,38 @@ test('Cloudflare routes catalog, immutable datasets, and administration through 
     viteConfig,
     /r2_buckets:\s*hostingConfig\.r2[\s\S]*?binding:\s*hostingConfig\.r2[\s\S]*?bucket_name:\s*['"]site-creator-r2['"]/,
     'preview assets must use the Sites-managed native R2 binding',
+  );
+  for (const header of [
+    'Content-Security-Policy',
+    'Permissions-Policy',
+    'Referrer-Policy',
+    'Strict-Transport-Security',
+    'X-Content-Type-Options',
+    'X-Frame-Options',
+  ]) {
+    assert.match(
+      sitesVitePlugin,
+      new RegExp(`${header}:`),
+      `static responses must declare ${header}`,
+    );
+  }
+  assert.match(
+    sitesVitePlugin,
+    /\/assets\/\*[\s\S]*?max-age=31536000,\s*immutable/,
+    'content-hashed client assets should be cached immutably',
+  );
+});
+
+test('the graph implementation is deferred until the recipe index is requested', () => {
+  assert.doesNotMatch(
+    applicationSource,
+    /import\s+\{\s*GraphScreen\s*\}\s+from/,
+    'the graph renderer must not remain on the initial item-browser dependency path',
+  );
+  assert.match(
+    applicationSource,
+    /React\.lazy\([\s\S]*?import\(['"]\.\/src\/graph\/GraphScreen['"]\)/,
+    'the graph renderer should load in a separate on-demand chunk',
   );
 });
 
@@ -97,12 +138,15 @@ test('the environment template exposes only the current server-side operator con
     'PREVIEW_UPLOAD_ENABLED',
     'PREVIEW_UPLOAD_ASSET_SET_ID',
     'PREVIEW_UPLOAD_TOKEN',
+    'FEEDBACK_ADMIN_TOKEN',
   ]);
   assert.equal(values.DATASET_ADMIN_ENABLED, 'false');
   assert.equal(values.PREVIEW_UPLOAD_ENABLED, 'false');
   assert.ok(values.CORE_DATASET_UPLOAD_TOKEN.length >= 32);
   assert.doesNotMatch(values.CORE_DATASET_UPLOAD_TOKEN, /[\s\u0000-\u001f\u007f]/);
   assert.ok(values.PREVIEW_UPLOAD_TOKEN.length >= 32);
+  assert.ok(values.FEEDBACK_ADMIN_TOKEN.length >= 32);
+  assert.doesNotMatch(values.FEEDBACK_ADMIN_TOKEN, /[\s\u0000-\u001f\u007f]/);
   assert.doesNotMatch(environmentExample, /^PREVIEW_ASSET_SET_ID=/m);
   assert.doesNotMatch(environmentExample, /^EXPO_PUBLIC_.*TOKEN=/m);
 });
