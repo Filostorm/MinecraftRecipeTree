@@ -224,7 +224,6 @@ const COMPACT_MODE_KEY = 'graphCompactMode';
 const RADIAL_LAYOUT_KEY = 'graphRadialLayout';
 const LEGACY_PACKED_LAYOUT_KEY = 'graphPackedLayout';
 const USE_BYPRODUCTS_KEY = 'graphUseByproducts';
-const NODE_LABELS_KEY = 'graphNodeLabels';
 const MAX_RECIPE_PICKER_CHOICES = 40;
 const RECIPE_PICKER_GROUP_PAGE = 40;
 const GRAPH_EXPORT_PADDING = 48;
@@ -304,15 +303,6 @@ function loadUseByproducts(): boolean {
   }
 }
 
-function loadNodeLabels(): boolean {
-  try {
-    return globalThis.localStorage?.getItem(NODE_LABELS_KEY) !== '0';
-  } catch (error) {
-    console.error('Graph node-label preference could not be loaded from localStorage.', error);
-    return true;
-  }
-}
-
 function nodeDepthBucket(
   node: ItemTreeNode,
 ): 'root' | 'depth-1' | 'depth-2' | 'depth-3-plus' {
@@ -365,7 +355,6 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
   const [showTreeTotals, setShowTreeTotals] = useState(true);
   const [showGraphControls, setShowGraphControls] = useState(false);
   const [useByproducts, setUseByproducts] = useState(loadUseByproducts);
-  const [showNodeLabels, setShowNodeLabels] = useState(loadNodeLabels);
   const [exportingTree, setExportingTree] = useState(false);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
   const [preferredSources, setPreferredSources] =
@@ -1304,9 +1293,9 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
               graphDirection === 'outputs'
                 ? item => usagesFor(item.key).length === 0
                 : undefined,
-              showNodeLabels,
+              true,
             )
-          : layoutTree(root, compactMode, showNodeLabels)
+          : layoutTree(root, compactMode, true)
         : null,
     [
       root,
@@ -1315,7 +1304,6 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
       radialLayout,
       graphDirection,
       usagesFor,
-      showNodeLabels,
     ],
   );
   const graphRef = useRef(graph);
@@ -1588,20 +1576,6 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
     }
   }, []);
 
-  const updateNodeLabels = useCallback((value: boolean) => {
-    needsFitRef.current = true;
-    setShowNodeLabels(value);
-    try {
-      const storage = globalThis.localStorage;
-      if (storage) storage.setItem(NODE_LABELS_KEY, value ? '1' : '0');
-      else if (Platform.OS === 'web') {
-        console.warn('Graph node-label preference is using memory only because localStorage is unavailable.');
-      }
-    } catch (error) {
-      console.error('Graph node-label preference could not be saved to localStorage.', error);
-    }
-  }, []);
-
   // Native web listeners handle browser behaviors that React Native Web's
   // responder and inherited userSelect style do not consistently suppress in Safari.
   // The canvas mounts/unmounts with the empty state, so attach via callback ref.
@@ -1837,7 +1811,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
                 radial={n.radial === true}
                 radialRoot={radialLayout && n.item.id === 'root'}
                 branchLabel={n.compactBranch === true}
-                showLabel={showNodeLabels}
+                showLabel
                 onTap={() =>
                   handleCollapsedIngredientTap(n.item, () =>
                     n.radial ? onItemTap(n.item) : openPickerWithErrorHandling(n.item),
@@ -1919,12 +1893,6 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
               metricsId="graph.control.compact"
               active={compactMode}
               onPress={toggleCompactMode}
-            />
-            <CtrlBtn
-              label="Names"
-              metricsId="graph.control.names"
-              active={showNodeLabels}
-              onPress={() => updateNodeLabels(!showNodeLabels)}
             />
             <CtrlBtn label="Fit" metricsId="graph.control.fit" onPress={fitView} />
           </View>
@@ -2962,16 +2930,17 @@ const styles = StyleSheet.create({
     borderColor: theme.border,
     borderWidth: 1,
     borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
+    height: 36,
+    paddingHorizontal: 10,
     minWidth: 40,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   ctrlBtnActive: {borderColor: theme.accent, backgroundColor: '#173724'},
   ctrlBtnText: {color: theme.text, fontSize: 13},
   ctrlBtnTextActive: {color: theme.accent, fontWeight: '700'},
   controlMenuBtn: {
-    width: 40,
+    width: 38,
     paddingHorizontal: 0,
   },
   controlMenuBtnText: {
