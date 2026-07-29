@@ -162,11 +162,9 @@ function LoadedDatasetLayout({
     <View style={styles.datasetRoot}>
       <DatasetReadinessMarker expectedPublicationId={expectedPublicationId} />
       <View style={styles.datasetContent}>
-        <RecipeStageProvider>
-          <UiProvider>
-            <Root renderControls={renderControls} />
-          </UiProvider>
-        </RecipeStageProvider>
+        <UiProvider>
+          <Root renderControls={renderControls} />
+        </UiProvider>
       </View>
     </View>
   );
@@ -231,7 +229,11 @@ function Root({
       </View>
     );
   }
-  return <Shell renderControls={renderControls} />;
+  return (
+    <RecipeStageProvider>
+      <Shell renderControls={renderControls} />
+    </RecipeStageProvider>
+  );
 }
 
 function Shell({
