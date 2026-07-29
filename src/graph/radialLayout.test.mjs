@@ -6,6 +6,10 @@ import {
   layoutRadialTree,
   planStaggeredRadialRows,
 } from './radialLayout.ts';
+import {
+  COMPACT_LABEL_HEIGHT,
+  COMPACT_LABEL_WIDTH,
+} from './layout.ts';
 
 function item(id, options = {}) {
   return {
@@ -94,6 +98,28 @@ function assertNoNodeOverlaps(graph) {
         rectanglesOverlap(graph.nodes[leftIndex], graph.nodes[rightIndex]),
         false,
         `${graph.nodes[leftIndex].id} overlaps ${graph.nodes[rightIndex].id}`,
+      );
+    }
+  }
+}
+
+function assertNoCompactLabelOverlaps(graph) {
+  const collisionRects = graph.nodes.map(node => {
+    const width = Math.max(node.w, COMPACT_LABEL_WIDTH);
+    return {
+      id: node.id,
+      x: node.x + node.w / 2 - width / 2,
+      y: node.y,
+      w: width,
+      h: node.h + COMPACT_LABEL_HEIGHT,
+    };
+  });
+  for (let leftIndex = 0; leftIndex < collisionRects.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < collisionRects.length; rightIndex += 1) {
+      assert.equal(
+        rectanglesOverlap(collisionRects[leftIndex], collisionRects[rightIndex]),
+        false,
+        `${collisionRects[leftIndex].id} label overlaps ${collisionRects[rightIndex].id}`,
       );
     }
   }
@@ -242,6 +268,41 @@ test('keeps a dense recipe input fan within one staggered row gap', () => {
 
   assert.ok(Math.max(...distances) - Math.min(...distances) < 100);
   assertNoNodeOverlaps(graph);
+});
+
+test('keeps multiple labeled ingredient fans local to their recipes', () => {
+  const branchCount = 12;
+  const inputsPerBranch = 8;
+  const root = sourceNode(
+    'root',
+    Array.from({length: branchCount}, (_, branchIndex) =>
+      sourceNode(
+        `branch-${branchIndex}`,
+        Array.from({length: inputsPerBranch}, (_, inputIndex) =>
+          item(`branch-${branchIndex}-input-${inputIndex}`),
+        ),
+      ),
+    ),
+  );
+  const graph = layoutRadialTree(root, true, () => true, true);
+  const distances = [];
+  for (let branchIndex = 0; branchIndex < branchCount; branchIndex += 1) {
+    for (let inputIndex = 0; inputIndex < inputsPerBranch; inputIndex += 1) {
+      distances.push(
+        distanceBetween(
+          graph,
+          `branch-${branchIndex}.source`,
+          `branch-${branchIndex}-input-${inputIndex}`,
+        ),
+      );
+    }
+  }
+
+  assert.ok(Math.max(...distances) < 1_000);
+  assert.ok(
+    distances.reduce((sum, distance) => sum + distance, 0) / distances.length < 600,
+  );
+  assertNoCompactLabelOverlaps(graph);
 });
 
 test('compacts descendant inputs instead of inheriting a large root sector', () => {

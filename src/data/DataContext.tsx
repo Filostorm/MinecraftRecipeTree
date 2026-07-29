@@ -14,6 +14,7 @@ import {
   ShardedJsonPart,
 } from '../types';
 import type {DatasetDescriptor} from './datasetCatalog';
+import {normalizeCatalogItemNames} from './catalogPresentation';
 import {
   GTNH_1710_DATASET_PROFILE,
   GTNH_PACK_NAME,
@@ -1049,7 +1050,7 @@ export function DataProvider({
               : Promise.resolve<RecipePreviewManifest | null>(null),
           ]);
         const itemsDescriptor = parseShardedDescriptor(itemsRoot.value, 'array', itemsUrl);
-        const items = itemsDescriptor
+        const loadedItems = itemsDescriptor
           ? await loadArrayDescriptor<CatalogItem>(
               itemsDescriptor,
               itemsUrl,
@@ -1063,6 +1064,23 @@ export function DataProvider({
                 isRecord(value) && Array.isArray(value.items),
               'a legacy object with an items array or a sharded-array descriptor',
             ).items;
+        const {
+          items,
+          formattedNameCount,
+          emptyNameFallbackCount,
+        } = normalizeCatalogItemNames(loadedItems);
+        if (formattedNameCount > 0) {
+          console.info('Minecraft formatting codes were removed from item names.', {
+            datasetIdentity,
+            formattedNameCount,
+          });
+        }
+        if (emptyNameFallbackCount > 0) {
+          console.error(
+            'Some item names contained only Minecraft formatting codes; registry ids are being shown instead.',
+            {datasetIdentity, emptyNameFallbackCount},
+          );
+        }
         const categoriesDoc = requireDocument<{categories: Category[]}>(
           categoriesValue,
           categoriesUrl,

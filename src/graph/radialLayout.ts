@@ -13,6 +13,8 @@ const RADIAL_DEPTH_GAP = 64;
 const RADIAL_NODE_GAP = 20;
 const RADIAL_TERMINAL_GAP = RADIAL_NODE_GAP;
 const RADIAL_COLLISION_PLACEMENT_STEP = 12;
+const RADIAL_COLLISION_ROTATION_STEP = Math.PI / 36;
+const RADIAL_COLLISION_ROTATION_STEPS = 8;
 const MAX_COLLISION_PLACEMENT_ATTEMPTS = 100_000;
 const MAX_STAGGERED_ROWS = 8;
 const MIN_LOCAL_FAN_SPAN = Math.PI / 7.5;
@@ -221,6 +223,8 @@ interface RadialUnit {
   depth: number;
   visualW: number;
   visualH: number;
+  collisionW: number;
+  collisionH: number;
   collisionDiameter: number;
   terminal: boolean;
   leafCount: number;
@@ -250,7 +254,9 @@ function makeRadialUnit(
     depth,
     visualW: visualSize.w,
     visualH: visualSize.h,
-    collisionDiameter: Math.hypot(collisionSize.w, collisionSize.h),
+    collisionW: collisionSize.w,
+    collisionH: collisionSize.h,
+    collisionDiameter: Math.max(collisionSize.w, collisionSize.h),
     terminal,
     leafCount: 0,
     leafStart: 0,
@@ -271,21 +277,29 @@ function flattenRadialTree(
   if (compact) {
     rootUnit.visualW = RADIAL_ROOT_SIZE;
     rootUnit.visualH = RADIAL_ROOT_SIZE;
-    rootUnit.collisionDiameter = Math.hypot(
-      showLabels ? Math.max(COMPACT_LABEL_WIDTH, RADIAL_ROOT_SIZE) : RADIAL_ROOT_SIZE,
-      showLabels ? RADIAL_ROOT_SIZE + COMPACT_LABEL_HEIGHT : RADIAL_ROOT_SIZE,
-    );
+    rootUnit.collisionW = showLabels
+      ? Math.max(COMPACT_LABEL_WIDTH, RADIAL_ROOT_SIZE)
+      : RADIAL_ROOT_SIZE;
+    rootUnit.collisionH = showLabels
+      ? RADIAL_ROOT_SIZE + COMPACT_LABEL_HEIGHT
+      : RADIAL_ROOT_SIZE;
+    rootUnit.collisionDiameter = Math.max(rootUnit.collisionW, rootUnit.collisionH);
   } else if (!root.source) {
     rootUnit.visualW = RADIAL_ROOT_SIZE;
     rootUnit.visualH = RADIAL_ROOT_SIZE;
-    rootUnit.collisionDiameter = Math.hypot(
-      showLabels ? Math.max(COMPACT_LABEL_WIDTH, RADIAL_ROOT_SIZE) : RADIAL_ROOT_SIZE,
-      showLabels ? RADIAL_ROOT_SIZE + COMPACT_LABEL_HEIGHT : RADIAL_ROOT_SIZE,
-    );
+    rootUnit.collisionW = showLabels
+      ? Math.max(COMPACT_LABEL_WIDTH, RADIAL_ROOT_SIZE)
+      : RADIAL_ROOT_SIZE;
+    rootUnit.collisionH = showLabels
+      ? RADIAL_ROOT_SIZE + COMPACT_LABEL_HEIGHT
+      : RADIAL_ROOT_SIZE;
+    rootUnit.collisionDiameter = Math.max(rootUnit.collisionW, rootUnit.collisionH);
   } else {
     rootUnit.visualW += RADIAL_EXPANDED_ROOT_HORIZONTAL_GROWTH;
     rootUnit.visualH += RADIAL_EXPANDED_ROOT_VERTICAL_GROWTH;
-    rootUnit.collisionDiameter = Math.hypot(rootUnit.visualW, rootUnit.visualH);
+    rootUnit.collisionW = rootUnit.visualW;
+    rootUnit.collisionH = rootUnit.visualH;
+    rootUnit.collisionDiameter = Math.max(rootUnit.collisionW, rootUnit.collisionH);
   }
   const units = [rootUnit];
   const expansionStack = [0];
@@ -304,15 +318,15 @@ function flattenRadialTree(
       if (compact) {
         child.visualW = COMPACT_ITEM_SIZE;
         child.visualH = COMPACT_ITEM_SIZE;
-        child.collisionDiameter = Math.hypot(
-          showLabels ? COMPACT_LABEL_WIDTH : COMPACT_ITEM_SIZE,
-          showLabels ? COMPACT_ITEM_SIZE + COMPACT_LABEL_HEIGHT : COMPACT_ITEM_SIZE,
-        );
+        child.collisionW = showLabels ? COMPACT_LABEL_WIDTH : COMPACT_ITEM_SIZE;
+        child.collisionH = showLabels
+          ? COMPACT_ITEM_SIZE + COMPACT_LABEL_HEIGHT
+          : COMPACT_ITEM_SIZE;
+        child.collisionDiameter = Math.max(child.collisionW, child.collisionH);
       } else if (!input.source && showLabels) {
-        child.collisionDiameter = Math.hypot(
-          COMPACT_LABEL_WIDTH,
-          RADIAL_ITEM_SIZE + COMPACT_LABEL_HEIGHT,
-        );
+        child.collisionW = COMPACT_LABEL_WIDTH;
+        child.collisionH = RADIAL_ITEM_SIZE + COMPACT_LABEL_HEIGHT;
+        child.collisionDiameter = Math.max(child.collisionW, child.collisionH);
       }
       const childIndex = units.length;
       units.push(child);
@@ -372,7 +386,8 @@ function calculateAngularSectors(units: RadialUnit[]): void {
 interface SpatialEntry {
   x: number;
   y: number;
-  radius: number;
+  halfW: number;
+  halfH: number;
   cells: string[];
 }
 
@@ -409,12 +424,14 @@ class RadialSpatialIndex {
     if (this.entries.has(index)) {
       throw new Error(`Radial spatial index cannot insert duplicate node ${index}.`);
     }
-    const radius = this.units[index].collisionDiameter / 2;
+    const halfW = this.units[index].collisionW / 2;
+    const halfH = this.units[index].collisionH / 2;
     const entry = {
       x,
       y,
-      radius,
-      cells: this.cellKeysFor(x, y, radius + RADIAL_NODE_GAP),
+      halfW,
+      halfH,
+      cells: this.cellKeysFor(x, y, Math.max(halfW, halfH) + RADIAL_NODE_GAP),
     };
     this.entries.set(index, entry);
     for (const key of entry.cells) {
@@ -438,9 +455,14 @@ class RadialSpatialIndex {
   }
 
   collides(index: number, x: number, y: number): boolean {
-    const radius = this.units[index].collisionDiameter / 2;
+    const halfW = this.units[index].collisionW / 2;
+    const halfH = this.units[index].collisionH / 2;
     const candidates = new Set<number>();
-    for (const key of this.cellKeysFor(x, y, radius + RADIAL_NODE_GAP)) {
+    for (const key of this.cellKeysFor(
+      x,
+      y,
+      Math.max(halfW, halfH) + RADIAL_NODE_GAP,
+    )) {
       for (const candidate of this.cells.get(key) ?? []) candidates.add(candidate);
     }
     for (const candidate of candidates) {
@@ -449,8 +471,12 @@ class RadialSpatialIndex {
       if (!entry) {
         throw new Error(`Radial spatial index lost node ${candidate}.`);
       }
-      const minimumDistance = radius + entry.radius + RADIAL_NODE_GAP;
-      if ((x - entry.x) ** 2 + (y - entry.y) ** 2 < minimumDistance ** 2 - 0.001) {
+      const horizontalClearance = halfW + entry.halfW + RADIAL_NODE_GAP;
+      const verticalClearance = halfH + entry.halfH + RADIAL_NODE_GAP;
+      if (
+        Math.abs(x - entry.x) < horizontalClearance - 0.001 &&
+        Math.abs(y - entry.y) < verticalClearance - 0.001
+      ) {
         return true;
       }
     }
@@ -458,11 +484,23 @@ class RadialSpatialIndex {
   }
 }
 
+function collisionRotationOffsets(parent: RadialUnit): number[] {
+  if (parent.depth === 0) return [0];
+  const offsets = [0];
+  for (let step = 1; step <= RADIAL_COLLISION_ROTATION_STEPS; step += 1) {
+    const offset = step * RADIAL_COLLISION_ROTATION_STEP;
+    offsets.push(offset, -offset);
+  }
+  return offsets;
+}
+
 /**
  * Place every sibling group on parent-centered annuli. A shared collision
  * offset moves the complete group together, preserving approximately equal
  * parent-to-child edge lengths instead of aligning descendants to root-centered
- * depth rings.
+ * depth rings. Before extending those edges, the solver rotates a descendant
+ * fan through nearby angular lanes so occupied neighboring branches do not
+ * force an otherwise compact recipe ring far away from its parent.
  */
 function placeBranchLocalRings(units: RadialUnit[], levels: number[][]): void {
   const spatialIndex = new RadialSpatialIndex(units);
@@ -502,23 +540,39 @@ function placeBranchLocalRings(units: RadialUnit[], levels: number[][]): void {
       );
 
       let collisionOffset = 0;
+      const rotationOffsets = collisionRotationOffsets(parent);
       for (let attempts = 0; ; attempts += 1) {
-        const candidates = childIndices.map((index, offset) => {
-          const unit = units[index];
-          const displayAngle = unit.angle - Math.PI / 2;
-          const parentDistance = rowPlan.radiusByIndex[offset] + collisionOffset;
-          return {
-            index,
-            centerX: parent.centerX + Math.cos(displayAngle) * parentDistance,
-            centerY: parent.centerY + Math.sin(displayAngle) * parentDistance,
-          };
-        });
-        if (
-          candidates.every(candidate =>
-            !spatialIndex.collides(candidate.index, candidate.centerX, candidate.centerY),
-          )
-        ) {
-          for (const candidate of candidates) {
+        let placement:
+          | {
+              rotationOffset: number;
+              candidates: Array<{index: number; centerX: number; centerY: number}>;
+            }
+          | undefined;
+        for (const rotationOffset of rotationOffsets) {
+          const candidates = childIndices.map((index, offset) => {
+            const unit = units[index];
+            const displayAngle = unit.angle + rotationOffset - Math.PI / 2;
+            const parentDistance = rowPlan.radiusByIndex[offset] + collisionOffset;
+            return {
+              index,
+              centerX: parent.centerX + Math.cos(displayAngle) * parentDistance,
+              centerY: parent.centerY + Math.sin(displayAngle) * parentDistance,
+            };
+          });
+          if (
+            candidates.every(candidate =>
+              !spatialIndex.collides(candidate.index, candidate.centerX, candidate.centerY),
+            )
+          ) {
+            placement = {rotationOffset, candidates};
+            break;
+          }
+        }
+        if (placement) {
+          for (const childIndex of childIndices) {
+            rotateSubtreeAngles(units, childIndex, placement.rotationOffset);
+          }
+          for (const candidate of placement.candidates) {
             const unit = units[candidate.index];
             unit.centerX = candidate.centerX;
             unit.centerY = candidate.centerY;

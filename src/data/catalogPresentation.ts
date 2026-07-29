@@ -5,6 +5,7 @@ const EXPORTER_HASH_SUFFIX = /_[0-9a-f]{8}$/i;
 const SYNTHETIC_MULTIBLOCK_TYPE = 'genericmultiblockingredient';
 const SYNTHETIC_ENDER_IO_ENERGY_TYPE =
   'crazypants.enderio.base.integration.jei.energy.energyingredient';
+const MINECRAFT_FORMATTING_CODE = /\u00a7[0-9a-fk-orx]/gi;
 
 const CUSTOM_TYPE_LABELS: ReadonlyArray<readonly [needle: string, label: string]> = [
   ['energyingredient', 'Energy'],
@@ -22,6 +23,43 @@ const CUSTOM_TYPE_LABELS: ReadonlyArray<readonly [needle: string, label: string]
 
 function normalizedCustomType(type: string): string {
   return type.toLocaleLowerCase().replace(EXPORTER_HASH_SUFFIX, '');
+}
+
+export function stripMinecraftFormattingCodes(value: string): string {
+  return value.replace(MINECRAFT_FORMATTING_CODE, '');
+}
+
+export interface CatalogNameNormalization {
+  items: CatalogItem[];
+  formattedNameCount: number;
+  emptyNameFallbackCount: number;
+}
+
+/**
+ * Normalize catalog labels once at ingestion so search, item lists, recipe
+ * chips, graph nodes, totals, exports, and accessibility names all share the
+ * same plain-text presentation.
+ */
+export function normalizeCatalogItemNames(
+  items: readonly CatalogItem[],
+): CatalogNameNormalization {
+  let formattedNameCount = 0;
+  let emptyNameFallbackCount = 0;
+  const normalizedItems = items.map(item => {
+    const strippedName = stripMinecraftFormattingCodes(item.n);
+    if (strippedName === item.n) return item;
+    formattedNameCount += 1;
+    if (strippedName.trim().length === 0) {
+      emptyNameFallbackCount += 1;
+      return {...item, n: item.id};
+    }
+    return {...item, n: strippedName};
+  });
+  return {
+    items: normalizedItems,
+    formattedNameCount,
+    emptyNameFallbackCount,
+  };
 }
 
 /**

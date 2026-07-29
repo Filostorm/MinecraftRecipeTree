@@ -3,6 +3,8 @@ import test from 'node:test';
 import {
   catalogTypePresentation,
   isItemCatalogEligible,
+  normalizeCatalogItemNames,
+  stripMinecraftFormattingCodes,
 } from './catalogPresentation.ts';
 
 const item = (overrides = {}) => ({
@@ -84,4 +86,30 @@ test('keeps unknown exporter types readable and marks them for diagnostics', () 
     catalogTypePresentation('future_resource'),
     {label: 'future resource', recognized: false},
   );
+});
+
+test('removes legacy and hexadecimal Minecraft formatting codes from item names', () => {
+  assert.equal(
+    stripMinecraftFormattingCodes('§3Galactic §lStandard §rCurrency'),
+    'Galactic Standard Currency',
+  );
+  assert.equal(
+    stripMinecraftFormattingCodes('§x§f§f§0§0§a§aDimensional Alloy'),
+    'Dimensional Alloy',
+  );
+});
+
+test('normalizes catalog names once and reports a visible registry-id fallback', () => {
+  const result = normalizeCatalogItemNames([
+    item({n: 'Stone'}),
+    item({k: 'item|test:colored', id: 'test:colored', n: '§9Stage 4 Alloy'}),
+    item({k: 'item|test:empty', id: 'test:empty', n: '§l§r'}),
+  ]);
+
+  assert.deepEqual(
+    result.items.map(entry => entry.n),
+    ['Stone', 'Stage 4 Alloy', 'test:empty'],
+  );
+  assert.equal(result.formattedNameCount, 2);
+  assert.equal(result.emptyNameFallbackCount, 1);
 });
