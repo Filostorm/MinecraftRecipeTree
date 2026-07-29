@@ -17,8 +17,8 @@ const environmentExample = await readFile(new URL('../.env.example', import.meta
 const d1Migrations = await Promise.all([
   readFile(new URL('../drizzle/0000_yummy_impossible_man.sql', import.meta.url), 'utf8'),
   readFile(new URL('../drizzle/0001_wide_the_hand.sql', import.meta.url), 'utf8'),
-  readFile(new URL('../drizzle/0002_swift_nitro.sql', import.meta.url), 'utf8'),
-  readFile(new URL('../drizzle/0003_empty_salo.sql', import.meta.url), 'utf8'),
+  readFile(new URL('../drizzle/0002_shiny_sunfire.sql', import.meta.url), 'utf8'),
+  readFile(new URL('../drizzle/0003_tidy_ogun.sql', import.meta.url), 'utf8'),
 ]);
 
 test('Cloudflare routes catalog, immutable datasets, and administration through the Worker', () => {
