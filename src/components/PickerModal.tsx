@@ -32,7 +32,6 @@ export interface PickerOption {
   imageH?: number;
   inputs?: SlotSummary[];
   outputs?: SlotSummary[];
-  prerequisites?: SlotSummary[];
 }
 
 export interface PickerGroupProgress {
@@ -325,24 +324,6 @@ export function PickerModal({
                                     tag={output.tag}
                                     probability={output.probability}
                                     probabilityRole="produce"
-                                    interactive={false}
-                                  />
-                                ))}
-                              </View>
-                            </View>
-                          ) : null}
-                          {opt.prerequisites && opt.prerequisites.length > 0 ? (
-                            <View style={styles.ingredientGroup}>
-                              <Text style={styles.ingredientLabel}>Required · not consumed</Text>
-                              <View style={styles.ingredientChips}>
-                                {opt.prerequisites.map(input => (
-                                  <ItemChip
-                                    key={`prerequisite-${input.tag ?? input.key}`}
-                                    itemKey={input.key}
-                                    amount={input.amount}
-                                    variableAmount={input.variableAmount}
-                                    variants={input.variants}
-                                    tag={input.tag}
                                     interactive={false}
                                   />
                                 ))}

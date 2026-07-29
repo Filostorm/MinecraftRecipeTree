@@ -9,15 +9,14 @@ import {
 } from '../data/ingredientQuantities';
 import {recipeDisplayTitle} from '../data/recipeTitles';
 import {theme} from '../theme';
-import {
-  inputSlotSummary,
-  prerequisiteSummary,
-  slotSummary,
-} from '../data/slotSummary';
+import {slotSummary} from '../data/slotSummary';
 import {Recipe} from '../types';
 import {useUi} from '../ui/UiContext';
 import {signalTarget} from '../analytics/signal';
-import type {GraphDirection} from '../graph/direction';
+import {
+  materialInputSummary,
+  type GraphDirection,
+} from '../graph/direction';
 import {ItemIcon, pixelated} from './ItemIcon';
 import {RecipePreviewImage} from './RecipePreviewImage';
 import {
@@ -66,9 +65,8 @@ export function RecipeCard({
     data.manifest.settings.recipeScale,
     availableCardWidth,
   );
-  const inputs = inputSlotSummary(recipe.in);
+  const inputs = materialInputSummary(recipe);
   const outputs = slotSummary(recipe.out);
-  const prerequisites = prerequisiteSummary(recipe.cat);
   const displayTitle = catTitle ? recipeDisplayTitle(catTitle, recipe) : undefined;
   return (
     <TouchableOpacity
@@ -136,24 +134,6 @@ export function RecipeCard({
               interactive={!onPress}
             />
           ))}
-        </View>
-      )}
-      {prerequisites.length > 0 && (
-        <View style={styles.prerequisites}>
-          <Text style={styles.prerequisiteLabel}>Required · not consumed</Text>
-          <View style={styles.prerequisiteItems}>
-            {prerequisites.map(item => (
-              <ItemChip
-                key={`prerequisite-${item.key}`}
-                itemKey={item.key}
-                amount={item.amount}
-                variableAmount={item.variableAmount}
-                variants={item.variants}
-                tag={item.tag}
-                interactive={!onPress}
-              />
-            ))}
-          </View>
         </View>
       )}
       {recipe.id ? (
@@ -286,9 +266,6 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   recipeArrow: {color: theme.textDim, fontSize: 14},
-  prerequisites: {marginTop: 8, gap: 5},
-  prerequisiteLabel: {color: theme.textDim, fontSize: 10, fontWeight: '600'},
-  prerequisiteItems: {flexDirection: 'row', flexWrap: 'wrap', gap: 6},
   chip: {
     flexDirection: 'row',
     alignItems: 'center',

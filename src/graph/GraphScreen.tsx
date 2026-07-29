@@ -18,11 +18,7 @@ import {
   PickerModal,
   PickerOption,
 } from '../components/PickerModal';
-import {
-  inputSlotSummary,
-  prerequisiteSummary,
-  slotSummary,
-} from '../data/slotSummary';
+import {slotSummary} from '../data/slotSummary';
 import {
   applyIngredientSelections,
   selectSlotAlternative,
@@ -81,6 +77,7 @@ import type {GraphTransform, PanGestureOrigin} from './panGesture';
 import {recordRecipeHistory} from './recipeHistory';
 import {planRecipePickerChoices} from './recipePickerPlan';
 import {
+  materialInputSummary,
   recipeChildrenForDirection,
   usageGraphStart,
   type GraphDirection,
@@ -259,24 +256,47 @@ function recipeRefKey([categoryIndex, recipeIndex]: RecipeRef): string {
 function nodeForStoredSelection(
   root: ItemTreeNode,
   selection: StoredGraphSelection,
+  restoredNodesByPath: ReadonlyMap<string, ItemTreeNode>,
 ): ItemTreeNode {
-  let node = root;
-  for (const childIndex of selection.path) {
-    const child = node.source?.inputs[childIndex];
-    if (!child) {
+  if (selection.path.length === 0) {
+    if (root.key !== selection.itemKey) {
       throw new Error(
-        `Saved graph path ${selection.path.join('.')} does not exist in the reconstructed tree.`,
+        `Saved graph root resolved to ${JSON.stringify(root.key)} instead of ${JSON.stringify(selection.itemKey)}.`,
       );
     }
-    node = child;
+    return root;
   }
-  if (node.key !== selection.itemKey) {
+
+  const parentPath = selection.path.slice(0, -1).join('.');
+  const parent = restoredNodesByPath.get(parentPath);
+  if (!parent) {
     throw new Error(
-      `Saved graph path ${selection.path.join('.')} resolved to ${JSON.stringify(node.key)} ` +
-        `instead of ${JSON.stringify(selection.itemKey)}.`,
+      `Saved graph parent path ${parentPath} was not reconstructed.`,
     );
   }
-  return node;
+  const storedChildIndex = selection.path[selection.path.length - 1];
+  const indexedChild = parent.source?.inputs[storedChildIndex];
+  if (indexedChild?.key === selection.itemKey) return indexedChild;
+
+  const matchingChildren = (parent.source?.inputs ?? []).filter(
+    child => child.key === selection.itemKey,
+  );
+  if (matchingChildren.length === 1) {
+    console.info(
+      'A saved graph path was remapped after presentation-only recipe inputs were removed.',
+      {
+        storedPath: selection.path,
+        itemKey: selection.itemKey,
+        storedChildIndex,
+        reconstructedChildIndex: parent.source!.inputs.indexOf(matchingChildren[0]),
+      },
+    );
+    return matchingChildren[0];
+  }
+  throw new Error(
+    `Saved graph path ${selection.path.join('.')} could not uniquely resolve ` +
+      `${JSON.stringify(selection.itemKey)} in the reconstructed parent.`,
+  );
 }
 
 function loadCompactMode(): boolean {
@@ -565,10 +585,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
           return false;
         }
         if (graphDirection === 'outputs') {
-          const anchor = [
-            ...inputSlotSummary(selectedRecipe.in),
-            ...prerequisiteSummary(selectedRecipe.cat),
-          ].find(
+          const anchor = materialInputSummary(selectedRecipe).find(
             input =>
               input.key === node.key || input.alternatives.includes(node.key),
           );
@@ -755,8 +772,14 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
             `Saved graph direction ${session.direction} does not match active direction ${graphDirection}.`,
           );
         }
+        const restoredNodesByPath = new Map<string, ItemTreeNode>();
         for (const selection of session.selections) {
-          const node = nodeForStoredSelection(newRoot, selection);
+          const node = nodeForStoredSelection(
+            newRoot,
+            selection,
+            restoredNodesByPath,
+          );
+          restoredNodesByPath.set(selection.path.join('.'), node);
           if (isRecursiveItemNode(node)) {
             throw new Error(
               `Saved graph tries to expand recursive item ${JSON.stringify(node.key)}.`,
@@ -870,7 +893,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
             imageH: presentedRecipe?.h,
             inputs:
               recipe && direction === 'inputs'
-                ? inputSlotSummary(recipe.in).map(input => {
+                ? materialInputSummary(recipe).map(input => {
                     const selectedEntry = Object.entries(
                       choice.ingredientSelections ?? {},
                     ).find(([selectionKey]) =>
@@ -888,10 +911,6 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
             outputs:
               presentedRecipe && direction === 'outputs'
                 ? slotSummary(presentedRecipe.out)
-                : undefined,
-            prerequisites:
-              presentedRecipe && direction === 'inputs'
-                ? prerequisiteSummary(presentedRecipe.cat)
                 : undefined,
           },
         };
@@ -2423,11 +2442,6 @@ function TreeTotalsPanel({
           title={useByproducts ? 'Inputs still needed' : 'Inputs'}
           totals={totals.inputs}
           onPress={total => onIngredientTap(total, 'input')}
-        />
-        <TreeTotalsSection
-          title="Required · not consumed"
-          totals={totals.prerequisites}
-          onPress={total => onIngredientTap(total, 'prerequisite')}
         />
         {useByproducts && (
           <TreeTotalsSection
