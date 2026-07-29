@@ -201,7 +201,8 @@ export function PickerModal({
           ) : null}
           <ScrollView
             style={styles.optionsScroll}
-            contentContainerStyle={styles.groupList}>
+            contentContainerStyle={styles.groupList}
+            showsVerticalScrollIndicator>
             {options.length === 0 ? (
               <Text style={styles.emptyText}>No standard sources are available.</Text>
             ) : null}
@@ -442,7 +443,9 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     width: '100%',
     maxWidth: 920,
+    height: '92%' as never,
     maxHeight: '92%' as never,
+    minHeight: 0,
     padding: 14,
   },
   title: {color: theme.text, fontSize: 15, fontWeight: '700', marginBottom: 10},
@@ -488,8 +491,8 @@ const styles = StyleSheet.create({
   rememberTitle: {color: theme.accent, fontSize: 12, fontWeight: '700'},
   filterTitle: {color: theme.text, fontSize: 12, fontWeight: '700'},
   rememberHint: {color: theme.textDim, fontSize: 10, marginTop: 2, lineHeight: 14},
-  optionsScroll: {maxHeight: 560, flexShrink: 1},
-  groupList: {gap: 8},
+  optionsScroll: {flex: 1, minHeight: 0},
+  groupList: {gap: 8, paddingBottom: 2},
   collapsedBubbles: {
     flexDirection: 'row',
     flexWrap: 'wrap',
