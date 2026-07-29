@@ -38,6 +38,12 @@ import {
   persistCollapsedRecipeCategories,
   toggleCollapsedRecipeCategory,
 } from '../data/recipeCategoryPreferences';
+import {
+  loadHiddenRecipeStages,
+  persistHiddenRecipeStages,
+  toggleHiddenRecipeStage,
+} from '../data/recipeStagePreferences';
+import {isRecipeVisibleForStages} from '../data/recipeStages';
 import {isFluidContainerTransferRecipe} from '../data/recipeVisibility';
 import {recipeDisplayTitle} from '../data/recipeTitles';
 import {theme} from '../theme';
@@ -156,6 +162,35 @@ interface PickerState {
   byproductCoverage?: NodeByproductCoverage;
   rememberSource: boolean;
   collapsedGroupKeys: Set<string>;
+  hiddenRecipeStages: Set<string>;
+}
+
+function visiblePickerEntries(picker: PickerState): PickerEntry[] {
+  const visibleStandard = picker.standardEntries.filter(
+    entry =>
+      !entry.recipe ||
+      isRecipeVisibleForStages(entry.recipe, picker.hiddenRecipeStages),
+  );
+  if (!picker.showFluidTransfers) return visibleStandard;
+  return [
+    ...visibleStandard,
+    ...picker.fluidTransferEntries.filter(
+      entry =>
+        !entry.recipe ||
+        isRecipeVisibleForStages(entry.recipe, picker.hiddenRecipeStages),
+    ),
+  ];
+}
+
+function pickerRecipeStageCounts(picker: PickerState): {stage: string; count: number}[] {
+  const counts = new Map<string, number>();
+  for (const entry of [...picker.standardEntries, ...picker.fluidTransferEntries]) {
+    const stage = entry.recipe?.stage;
+    if (stage) counts.set(stage, (counts.get(stage) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([stage, count]) => ({stage, count}));
 }
 
 function preferredSourceFromChoice(choice: SourceChoice): PreferredSource {
@@ -884,6 +919,9 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
             sublabel:
               [
                 presentedRecipe?.id,
+                presentedRecipe?.stage
+                  ? `Requires stage ${presentedRecipe.stage}`
+                  : undefined,
                 presentedRecipe && !presentedRecipe.img
                   ? 'JEI layout preview unavailable'
                   : undefined,
@@ -1082,6 +1120,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
         byproductCoverage,
         rememberSource: direction === 'inputs',
         collapsedGroupKeys: loadCollapsedRecipeCategories(),
+        hiddenRecipeStages: loadHiddenRecipeStages(data.descriptor.slug),
       });
     },
     [data, choicesFor, graphDirection, pickerEntryFor],
@@ -1213,6 +1252,21 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
     [data.categories],
   );
 
+  const togglePickerRecipeStage = useCallback(
+    (stage: string) => {
+      setPicker(current => {
+        if (!current) return current;
+        const hiddenRecipeStages = toggleHiddenRecipeStage(
+          current.hiddenRecipeStages,
+          stage,
+        );
+        persistHiddenRecipeStages(data.descriptor.slug, hiddenRecipeStages);
+        return {...current, hiddenRecipeStages};
+      });
+    },
+    [data.descriptor.slug],
+  );
+
   const openPickerWithErrorHandling = useCallback(
     (node: ItemTreeNode, byproductCoverage?: NodeByproductCoverage) => {
       void openPicker(node, byproductCoverage).catch(error => {
@@ -1230,7 +1284,11 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
       }
       if (choice.t === 'recipe') {
         const [recipe] = await data.getRecipes([choice.ref]);
-        if (isFluidContainerTransferRecipe(recipe, data.itemsByKey)) {
+        if (
+          isFluidContainerTransferRecipe(recipe, data.itemsByKey) ||
+          (recipe.stage &&
+            loadHiddenRecipeStages(data.descriptor.slug).has(recipe.stage))
+        ) {
           await openPicker(node);
           return;
         }
@@ -2227,10 +2285,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
                 }
               : undefined
           }
-          options={(picker.showFluidTransfers
-            ? [...picker.standardEntries, ...picker.fluidTransferEntries]
-            : picker.standardEntries
-          ).map(entry => entry.option)}
+          options={visiblePickerEntries(picker).map(entry => entry.option)}
           rememberSource={picker.rememberSource}
           onRememberSourceChange={
             picker.direction === 'inputs'
@@ -2255,6 +2310,9 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
                   setPicker(current => (current ? {...current, showFluidTransfers} : current))
               : undefined
           }
+          recipeStageCounts={pickerRecipeStageCounts(picker)}
+          hiddenRecipeStages={picker.hiddenRecipeStages}
+          onToggleRecipeStage={togglePickerRecipeStage}
           collapsedGroupKeys={picker.collapsedGroupKeys}
           onToggleGroup={togglePickerGroup}
           groupProgress={picker.recipeGroupProgress}
@@ -2269,9 +2327,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
                 );
                 return current;
               }
-              const visibleEntries = current.showFluidTransfers
-                ? [...current.standardEntries, ...current.fluidTransferEntries]
-                : current.standardEntries;
+              const visibleEntries = visiblePickerEntries(current);
               const entry = visibleEntries[i];
               if (entry?.choice.t !== 'recipe' || !entry.recipe) {
                 console.error(
@@ -2310,9 +2366,10 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
                 entry.recipe,
                 current.direction,
               );
-              if (i < current.standardEntries.length) {
+              const standardIndex = current.standardEntries.indexOf(entry);
+              if (standardIndex >= 0) {
                 const standardEntries = [...current.standardEntries];
-                standardEntries[i] = nextEntry;
+                standardEntries[standardIndex] = nextEntry;
                 return {...current, standardEntries};
               }
               if (!current.showFluidTransfers) {
@@ -2322,7 +2379,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
                 );
                 return current;
               }
-              const fluidIndex = i - current.standardEntries.length;
+              const fluidIndex = current.fluidTransferEntries.indexOf(entry);
               const fluidTransferEntries = [...current.fluidTransferEntries];
               if (!fluidTransferEntries[fluidIndex]) {
                 console.error(
@@ -2337,9 +2394,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
           }}
           onSelect={i => {
             const p = picker;
-            const entries = p.showFluidTransfers
-              ? [...p.standardEntries, ...p.fluidTransferEntries]
-              : p.standardEntries;
+            const entries = visiblePickerEntries(p);
             const selectedEntry = entries[i];
             const choice = selectedEntry?.choice;
             if (!choice) {

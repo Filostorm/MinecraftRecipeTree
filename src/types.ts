@@ -169,6 +169,8 @@ export interface Recipe {
   err?: boolean;
   /** Recipe registry id when JEI knows it */
   id?: string;
+  /** GameStages/RecipeStages gate required to use this recipe, when exported. */
+  stage?: string;
   /** Optional legacy screenshot filename or packed coordinate; absent in structured publications. */
   img?: string;
   /** Logical (GUI-pixel) size of the image; actual PNG is scaled up */

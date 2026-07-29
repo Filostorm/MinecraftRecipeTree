@@ -22,6 +22,12 @@ import {
   persistCollapsedRecipeCategories,
   toggleCollapsedRecipeCategory,
 } from '../data/recipeCategoryPreferences';
+import {
+  loadHiddenRecipeStages,
+  persistHiddenRecipeStages,
+  toggleHiddenRecipeStage,
+} from '../data/recipeStagePreferences';
+import {isRecipeVisibleForStages, recipeStageLabel} from '../data/recipeStages';
 import {isFluidContainerTransferRecipe} from '../data/recipeVisibility';
 import {
   recipeProducesItem,
@@ -312,6 +318,9 @@ function RefsList({
   const [collapsedCategoryIds, setCollapsedCategoryIds] = useState(
     loadCollapsedRecipeCategories,
   );
+  const [hiddenRecipeStages, setHiddenRecipeStages] = useState(() =>
+    loadHiddenRecipeStages(data.descriptor.slug),
+  );
   const [recipesByRef, setRecipesByRef] = useState<Map<string, Recipe>>(() => new Map());
   const [availableCardWidth, setAvailableCardWidth] = useState<number | null>(null);
 
@@ -382,18 +391,33 @@ function RefsList({
     [filteredRefs, informational, showFluidTransfers, visibleTarget, scanLimit],
   );
   const loadedScan = refsToLoad.every(ref => recipesByRef.has(recipeRefKey(ref)));
+  const recipeStageCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const ref of refsToLoad) {
+      const stage = recipesByRef.get(recipeRefKey(ref))?.stage;
+      if (stage) counts.set(stage, (counts.get(stage) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort(([left], [right]) => left.localeCompare(right));
+  }, [refsToLoad, recipesByRef]);
   const visibleCandidates = useMemo(
     () =>
       refsToLoad.filter(ref => {
         const recipe = recipesByRef.get(recipeRefKey(ref));
         return (
-          recipe !== undefined &&
+          isRecipeVisibleForStages(recipe, hiddenRecipeStages) &&
           (informational ||
             showFluidTransfers ||
             !isFluidContainerTransferRecipe(recipe, data.itemsByKey))
         );
       }),
-    [refsToLoad, recipesByRef, informational, showFluidTransfers, data.itemsByKey],
+    [
+      refsToLoad,
+      recipesByRef,
+      hiddenRecipeStages,
+      informational,
+      showFluidTransfers,
+      data.itemsByKey,
+    ],
   );
   const shown = visibleCandidates.slice(0, visibleTarget);
   const shownByCategory = useMemo(() => {
@@ -409,6 +433,10 @@ function RefsList({
     const recipe = recipesByRef.get(recipeRefKey(ref));
     return count +
       (!informational && recipe && isFluidContainerTransferRecipe(recipe, data.itemsByKey) ? 1 : 0);
+  }, 0);
+  const hiddenRecipeStageCount = refsToLoad.reduce((count, ref) => {
+    const stage = recipesByRef.get(recipeRefKey(ref))?.stage;
+    return count + (stage && hiddenRecipeStages.has(stage) ? 1 : 0);
   }, 0);
   const defaultScanMaximum = Math.min(filteredRefs.length, MAX_DEFAULT_FILTER_SCAN);
   const scannedAll = scanLimit >= defaultScanMaximum;
@@ -428,7 +456,14 @@ function RefsList({
   useEffect(() => {
     setVisibleTarget(PAGE);
     setScanLimit(PAGE);
-  }, [categoryFilter, showAutomatedShaped, showFluidTransfers, sortMode, collapsedCategoryIds]);
+  }, [
+    categoryFilter,
+    showAutomatedShaped,
+    showFluidTransfers,
+    sortMode,
+    collapsedCategoryIds,
+    hiddenRecipeStages,
+  ]);
 
   const toggleCategory = useCallback((categoryId: string) => {
     setCollapsedCategoryIds(current => {
@@ -437,6 +472,17 @@ function RefsList({
       return next;
     });
   }, []);
+
+  const toggleRecipeStage = useCallback(
+    (stage: string) => {
+      setHiddenRecipeStages(current => {
+        const next = toggleHiddenRecipeStage(current, stage);
+        persistHiddenRecipeStages(data.descriptor.slug, next);
+        return next;
+      });
+    },
+    [data.descriptor.slug],
+  );
 
   useEffect(() => {
     if (
@@ -575,6 +621,46 @@ function RefsList({
             />
           </View>
         )}
+        {!informational && recipeStageCounts.length > 0 && (
+          <View style={styles.recipeStageFilters}>
+            <View style={styles.recipeStageHeading}>
+              <Text style={styles.disabledTypeTitle}>Recipe stages</Text>
+              <Text style={styles.disabledTypeHint}>
+                Hide recipes gated by MeatballCraft progression
+              </Text>
+            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator
+              contentContainerStyle={styles.recipeStageChips}>
+              {recipeStageCounts.map(([stage, count]) => {
+                const visible = !hiddenRecipeStages.has(stage);
+                return (
+                  <TouchableOpacity
+                    {...signalTarget('item-detail.recipe-stage.visibility')}
+                    key={stage}
+                    accessibilityRole="button"
+                    accessibilityState={{selected: visible}}
+                    accessibilityLabel={`${visible ? 'Hide' : 'Show'} recipes requiring stage ${stage}`}
+                    style={[
+                      styles.recipeStageChip,
+                      visible && styles.recipeStageChipVisible,
+                    ]}
+                    onPress={() => toggleRecipeStage(stage)}>
+                    <VisibilityIcon visible={visible} size={13} />
+                    <Text
+                      style={[
+                        styles.recipeStageName,
+                        visible && styles.recipeStageNameVisible,
+                      ]}>
+                      {recipeStageLabel(stage)} · {count}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        )}
         {!informational && (showFluidTransfers || hiddenFluidTransferCount > 0) && (
           <View style={styles.disabledTypeRow}>
             <View style={styles.disabledTypeCopy}>
@@ -612,7 +698,9 @@ function RefsList({
         <Text style={styles.emptyText}>
           {informational
             ? 'No informational pages could be displayed.'
-            : 'No standard recipes match. Enable fluid container transfers to view hidden conversions.'}
+            : hiddenRecipeStageCount > 0
+              ? 'All loaded recipes are hidden by the selected recipe-stage visibility toggles.'
+              : 'No standard recipes match. Enable fluid container transfers to view hidden conversions.'}
         </Text>
       ) : null}
       {scanCapped ? (
@@ -861,6 +949,29 @@ const styles = StyleSheet.create({
   disabledTypeCopy: {flex: 1},
   disabledTypeTitle: {color: theme.text, fontSize: 11, fontWeight: '600'},
   disabledTypeHint: {color: theme.textDim, fontSize: 9, marginTop: 2},
+  recipeStageFilters: {
+    borderTopColor: theme.border,
+    borderTopWidth: 1,
+    paddingTop: 8,
+    gap: 6,
+  },
+  recipeStageHeading: {marginBottom: 2},
+  recipeStageChips: {gap: 6, paddingBottom: 3},
+  recipeStageChip: {
+    minHeight: 32,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderColor: theme.border,
+    borderWidth: 1,
+    borderRadius: 7,
+    backgroundColor: theme.panel,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+  },
+  recipeStageChipVisible: {borderColor: theme.accent, backgroundColor: '#1c2b22'},
+  recipeStageName: {color: theme.text, fontSize: 10, fontWeight: '600'},
+  recipeStageNameVisible: {color: theme.accent},
   sideTabTextActive: {color: theme.accent, fontWeight: '700'},
   body: {marginTop: 12},
   emptyText: {color: theme.textDim, padding: 10},

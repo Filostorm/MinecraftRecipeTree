@@ -88,6 +88,11 @@ export function RecipeCard({
         grouped && styles.cardGrouped,
       ]}>
       {displayTitle ? <Text style={styles.catTitle}>{displayTitle}</Text> : null}
+      {recipe.stage ? (
+        <View style={styles.recipeStageBadge}>
+          <Text style={styles.recipeStageBadgeText}>Requires stage · {recipe.stage}</Text>
+        </View>
+      ) : null}
       {presentation === 'image' && recipe.img ? (
         <RecipePreviewImage
           uri={data.imageUrl(recipeImagePath(dir, recipe.img))!}
@@ -255,6 +260,17 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   catTitle: {color: theme.textDim, fontSize: 11, marginBottom: 6},
+  recipeStageBadge: {
+    alignSelf: 'flex-start',
+    borderColor: theme.accent,
+    borderWidth: 1,
+    borderRadius: 6,
+    backgroundColor: '#1c2b22',
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+    marginBottom: 7,
+  },
+  recipeStageBadgeText: {color: theme.accent, fontSize: 9, fontWeight: '700'},
   recipeImage: {borderRadius: 4},
   previewUnavailable: {
     color: theme.textDim,

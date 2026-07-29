@@ -57,6 +57,7 @@ import {
   isRepairRecipeCategory,
   isSecondaryRecipeCategory,
 } from './recipeCategories';
+import {applyRecipeStageMetadata} from './recipeStages';
 
 const SHARDED_JSON_FORMAT = 'mrt-sharded-json-v1';
 const MAX_SHARD_BYTES = 8 * 1024 * 1024;
@@ -1527,10 +1528,11 @@ export function DataProvider({
             ? new Map<number, Map<number, RecipePreviewEntry>>(previewSelections)
             : null;
           return refs.map(([catIdx, recipeIdx]) => {
-            const recipe = selectedByCategory.get(catIdx)?.get(recipeIdx);
-            if (!recipe) {
+            const selectedRecipe = selectedByCategory.get(catIdx)?.get(recipeIdx);
+            if (!selectedRecipe) {
               throw new Error(`Recipe access did not resolve reference ${catIdx}:${recipeIdx}.`);
             }
+            const recipe = applyRecipeStageMetadata(selectedRecipe, descriptor);
             if (previewsByCategory) {
               if (!previewsByCategory.get(catIdx)?.has(recipeIdx)) {
                 throw new Error(

@@ -53,6 +53,9 @@ export function PickerModal({
   filterHint,
   filterValue,
   onFilterValueChange,
+  recipeStageCounts,
+  hiddenRecipeStages,
+  onToggleRecipeStage,
   collapsedGroupKeys,
   onToggleGroup,
   groupProgress,
@@ -73,6 +76,9 @@ export function PickerModal({
   filterHint?: string;
   filterValue?: boolean;
   onFilterValueChange?: (show: boolean) => void;
+  recipeStageCounts?: readonly {stage: string; count: number}[];
+  hiddenRecipeStages?: ReadonlySet<string>;
+  onToggleRecipeStage?: (stage: string) => void;
   collapsedGroupKeys?: ReadonlySet<string>;
   onToggleGroup?: (groupKey: string) => void;
   groupProgress?: Readonly<Record<string, PickerGroupProgress>>;
@@ -175,6 +181,46 @@ export function PickerModal({
               />
             </View>
           )}
+          {recipeStageCounts && recipeStageCounts.length > 0 && onToggleRecipeStage ? (
+            <View style={styles.recipeStageFilters}>
+              <View style={styles.recipeStageHeading}>
+                <Text style={styles.filterTitle}>Recipe stages</Text>
+                <Text style={styles.rememberHint}>
+                  Hide MeatballCraft recipes gated by selected progression stages
+                </Text>
+              </View>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator
+                contentContainerStyle={styles.recipeStageGrid}>
+                {recipeStageCounts.map(({stage, count}) => {
+                  const shown = !hiddenRecipeStages?.has(stage);
+                  return (
+                    <TouchableOpacity
+                      {...signalTarget('graph.source-picker.recipe-stage.visibility')}
+                      key={stage}
+                      accessibilityRole="button"
+                      accessibilityState={{selected: shown}}
+                      accessibilityLabel={`${shown ? 'Hide' : 'Show'} recipes requiring stage ${stage}`}
+                      style={[
+                        styles.recipeStageChip,
+                        shown && styles.recipeStageChipVisible,
+                      ]}
+                      onPress={() => onToggleRecipeStage(stage)}>
+                      <VisibilityIcon visible={shown} size={13} />
+                      <Text
+                        style={[
+                          styles.recipeStageName,
+                          shown && styles.recipeStageNameVisible,
+                        ]}>
+                        {stage} · {count}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          ) : null}
           {groups.length > 1 ? (
             <View style={styles.groupActions}>
               <Text style={styles.groupSummary}>
@@ -468,6 +514,30 @@ const styles = StyleSheet.create({
     padding: 10,
     marginBottom: 10,
   },
+  recipeStageFilters: {
+    borderTopColor: theme.border,
+    borderTopWidth: 1,
+    paddingTop: 8,
+    marginBottom: 8,
+    gap: 6,
+  },
+  recipeStageHeading: {gap: 2},
+  recipeStageGrid: {gap: 6, paddingBottom: 3},
+  recipeStageChip: {
+    minHeight: 32,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderColor: theme.border,
+    borderWidth: 1,
+    borderRadius: 7,
+    backgroundColor: theme.panelAlt,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+  },
+  recipeStageChipVisible: {borderColor: theme.accent, backgroundColor: '#1c2b22'},
+  recipeStageName: {color: theme.text, fontSize: 10, fontWeight: '600'},
+  recipeStageNameVisible: {color: theme.accent},
   rememberCopy: {flex: 1},
   rememberTitle: {color: theme.accent, fontSize: 12, fontWeight: '700'},
   filterTitle: {color: theme.text, fontSize: 12, fontWeight: '700'},
