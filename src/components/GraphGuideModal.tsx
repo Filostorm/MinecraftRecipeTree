@@ -25,9 +25,13 @@ const controls = [
     description: 'Choose a different source for an expanded item.',
   },
   {
-    title: 'Expand once',
+    title: 'Unique',
     description:
-      'Keep one expanded occurrence of each recipe. Tap a deferred duplicate to move the expansion there.',
+      'Expand only one occurrence of each recipe. Deferred duplicates have a dotted teal outline; tap one to move the existing expansion there.',
+  },
+  {
+    title: 'Fit  ⛶',
+    description: 'Center the complete recipe tree and scale it to the available canvas.',
   },
 ] as const;
 

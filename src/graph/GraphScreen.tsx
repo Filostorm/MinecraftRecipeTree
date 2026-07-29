@@ -2154,13 +2154,12 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
               onPress={toggleCompactMode}
             />
             <CtrlBtn
-              label="Once"
-              accessibilityLabel="Expand each recipe once"
+              label="Unique"
+              accessibilityLabel="Use unique recipes"
               metricsId="graph.control.expand-once"
               active={expandRecipesOnce}
               onPress={() => updateExpandRecipesOnce(!expandRecipesOnce)}
             />
-            <CtrlBtn label="Fit" metricsId="graph.control.fit" onPress={fitView} />
           </View>
         )}
         <TouchableOpacity
@@ -2180,6 +2179,14 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
           </Text>
         </TouchableOpacity>
       </View>
+      <TouchableOpacity
+        {...signalTarget('graph.control.fit')}
+        accessibilityRole="button"
+        accessibilityLabel="Fit graph to view"
+        style={[styles.ctrlBtn, styles.fitControl]}
+        onPress={fitView}>
+        <Text style={[styles.ctrlBtnText, styles.fitControlIcon]}>⛶</Text>
+      </TouchableOpacity>
       {showGraphControls && graphDirection === 'inputs' && showTreeTotals && (
         <TreeTotalsPanel
           totals={treeTotals}
@@ -3244,6 +3251,17 @@ const styles = StyleSheet.create({
     fontSize: 18,
     lineHeight: 18,
     fontWeight: '800',
+  },
+  fitControl: {
+    position: 'absolute',
+    left: 10,
+    bottom: 10,
+    width: 40,
+    paddingHorizontal: 0,
+  },
+  fitControlIcon: {
+    fontSize: 21,
+    lineHeight: 21,
   },
   emptyWrap: {flex: 1, alignItems: 'center', justifyContent: 'center', padding: 30},
   emptyTitle: {color: theme.text, fontSize: 17, fontWeight: '700'},
