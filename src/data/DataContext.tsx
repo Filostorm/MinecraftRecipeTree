@@ -58,6 +58,7 @@ import {
   isSecondaryRecipeCategory,
 } from './recipeCategories';
 import {applyRecipeStageMetadata} from './recipeStages';
+import {reconstructLegacyReplaceableInputs} from './legacyReplaceableInputs';
 
 const SHARDED_JSON_FORMAT = 'mrt-sharded-json-v1';
 const MAX_SHARD_BYTES = 8 * 1024 * 1024;
@@ -1532,7 +1533,12 @@ export function DataProvider({
             if (!selectedRecipe) {
               throw new Error(`Recipe access did not resolve reference ${catIdx}:${recipeIdx}.`);
             }
-            const recipe = applyRecipeStageMetadata(selectedRecipe, descriptor);
+            const recipe = reconstructLegacyReplaceableInputs(
+              applyRecipeStageMetadata(selectedRecipe, descriptor),
+              categories[catIdx],
+              descriptor.minecraftVersion,
+              itemsByKey,
+            );
             if (previewsByCategory) {
               if (!previewsByCategory.get(catIdx)?.has(recipeIdx)) {
                 throw new Error(
