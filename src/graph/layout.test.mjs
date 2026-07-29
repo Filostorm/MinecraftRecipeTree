@@ -59,6 +59,26 @@ test('preserves left-to-right preorder placement and child-to-parent edge orderi
   assert.ok(graph.nodes[1].x < graph.nodes[2].x);
 });
 
+test('reserves horizontal and export space for persistent compact item names', () => {
+  const root = {
+    id: 'root',
+    key: 'item|test:root',
+    ancestors: [],
+    source: {
+      id: 'root.source',
+      kind: 'recipe',
+      inputs: [
+        {id: 'left', key: 'item|test:left', ancestors: []},
+        {id: 'right', key: 'item|test:right', ancestors: []},
+      ],
+    },
+  };
+  const graph = layoutTree(root, true, true);
+  const [left, right] = graph.nodes.slice(1);
+  assert.ok(right.x + right.w / 2 - (left.x + left.w / 2) >= 96);
+  assert.ok(graph.maxY >= right.y + right.h + 16);
+});
+
 test('reserves a larger collision-safe footprint for the compact starting item', () => {
   const root = {
     id: 'root',

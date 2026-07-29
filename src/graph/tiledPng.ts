@@ -226,6 +226,27 @@ export interface RenderTiledPngResult {
   plan: TiledPngPlan;
 }
 
+export function rgbaHasColorVariation(
+  rgba: Uint8Array | Uint8ClampedArray,
+): boolean {
+  if (rgba.length < 8 || rgba.length % 4 !== 0) return false;
+  const red = rgba[0];
+  const green = rgba[1];
+  const blue = rgba[2];
+  const alpha = rgba[3];
+  for (let offset = 4; offset < rgba.length; offset += 4) {
+    if (
+      rgba[offset] !== red ||
+      rgba[offset + 1] !== green ||
+      rgba[offset + 2] !== blue ||
+      rgba[offset + 3] !== alpha
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function yieldToBrowser(): Promise<void> {
   return new Promise(resolve => globalThis.setTimeout(resolve, 0));
 }
@@ -248,19 +269,23 @@ export async function renderTiledPng({
   const staging = document.createElement('div');
   const clone = source.cloneNode(true) as HTMLElement;
   let completedTiles = 0;
+  let renderedVisualContent = false;
 
   Object.assign(staging.style, {
     position: 'fixed',
-    left: '-100000px',
+    left: '0',
     top: '0',
     overflow: 'hidden',
     backgroundColor,
+    pointerEvents: 'none',
+    zIndex: '-2147483647',
   });
   Object.assign(clone.style, {
     position: 'absolute',
-    width: '0px',
-    height: '0px',
+    width: `${logicalWidth}px`,
+    height: `${logicalHeight}px`,
     transform: 'none',
+    overflow: 'visible',
   });
   staging.appendChild(clone);
   document.body.appendChild(staging);
@@ -335,11 +360,13 @@ export async function renderTiledPng({
         }
         const context = canvas.getContext('2d', {willReadFrequently: true});
         if (!context) throw new Error('Tiled graph canvas could not create a 2D readback context.');
+        const rgba = context.getImageData(0, 0, tileOutputWidth, tileOutputHeight).data;
+        renderedVisualContent ||= rgbaHasColorVariation(rgba);
         renderedTiles.push({
           outputX: logicalX * plan.scale,
           width: tileOutputWidth,
           height: tileOutputHeight,
-          rgba: context.getImageData(0, 0, tileOutputWidth, tileOutputHeight).data,
+          rgba,
         });
         canvas.width = 1;
         canvas.height = 1;
@@ -364,6 +391,11 @@ export async function renderTiledPng({
       }
     }
 
+    if (!renderedVisualContent) {
+      throw new Error(
+        'The tree export rendered only a uniform background; no PNG was downloaded.',
+      );
+    }
     return {blob: encoder.finish(), plan};
   } finally {
     staging.remove();

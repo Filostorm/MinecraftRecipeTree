@@ -137,6 +137,13 @@ test('gives the compact radial root a larger collision-safe footprint than its i
   );
 });
 
+test('includes persistent radial item-name labels in graph bounds', () => {
+  const withoutLabels = layoutRadialTree(highFanout(12), false, () => false, false);
+  const withLabels = layoutRadialTree(highFanout(12), false, () => false, true);
+  assert.ok(withLabels.maxY > withoutLabels.maxY);
+  assert.ok(withLabels.maxX - withLabels.minX >= withoutLabels.maxX - withoutLabels.minX);
+});
+
 test('preserves hierarchy while each dependency moves outward from its parent', () => {
   const root = sourceNode('root', [
     sourceNode('left', [item('left-a'), item('left-b')]),

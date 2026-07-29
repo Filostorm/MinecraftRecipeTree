@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {unzlibSync} from 'fflate';
-import {PngRgbaRowEncoder, planTiledPng} from './tiledPng.ts';
+import {
+  PngRgbaRowEncoder,
+  planTiledPng,
+  rgbaHasColorVariation,
+} from './tiledPng.ts';
 
 function uint32(data, offset) {
   return (
@@ -74,4 +78,16 @@ test('rejects incomplete or overfilled PNG row streams', () => {
   const complete = new PngRgbaRowEncoder(1, 1);
   complete.pushRow(new Uint8Array([0, 0, 0, 255]));
   assert.throws(() => complete.pushRow(new Uint8Array([0, 0, 0, 255])), /too many rows|finished/);
+});
+
+test('distinguishes a blank export tile from rendered graph content', () => {
+  assert.equal(
+    rgbaHasColorVariation(new Uint8ClampedArray([14, 17, 22, 255, 14, 17, 22, 255])),
+    false,
+  );
+  assert.equal(
+    rgbaHasColorVariation(new Uint8ClampedArray([14, 17, 22, 255, 59, 75, 96, 255])),
+    true,
+  );
+  assert.equal(rgbaHasColorVariation(new Uint8ClampedArray([14, 17, 22, 255])), false);
 });

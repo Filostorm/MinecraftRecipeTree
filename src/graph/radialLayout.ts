@@ -1,5 +1,7 @@
 import type {EdgeRect, GraphLayout, LaidNode} from './layout.ts';
 import {
+  COMPACT_LABEL_HEIGHT,
+  COMPACT_LABEL_WIDTH,
   COMPACT_ITEM_SIZE,
   sourceNodeSize,
 } from './layout.ts';
@@ -16,8 +18,6 @@ const MAX_STAGGERED_ROWS = 8;
 
 export const RADIAL_ITEM_SIZE = 52;
 export const RADIAL_ROOT_SIZE = 104;
-export const RADIAL_BRANCH_LABEL_WIDTH = 96;
-const RADIAL_BRANCH_LABEL_HEIGHT = 72;
 const RADIAL_EXPANDED_ROOT_HORIZONTAL_GROWTH = 24;
 const RADIAL_EXPANDED_ROOT_VERTICAL_GROWTH = 18;
 
@@ -179,14 +179,22 @@ function flattenRadialTree(
   root: ItemTreeNode,
   compact: boolean,
   isTerminal: (item: ItemTreeNode) => boolean,
+  showLabels: boolean,
 ): RadialUnit[] {
   const rootUnit = makeRadialUnit(root, 0, null, false);
   if (compact) {
     rootUnit.visualW = RADIAL_ROOT_SIZE;
     rootUnit.visualH = RADIAL_ROOT_SIZE;
     rootUnit.collisionDiameter = Math.hypot(
-      root.source ? Math.max(RADIAL_BRANCH_LABEL_WIDTH, RADIAL_ROOT_SIZE) : RADIAL_ROOT_SIZE,
-      root.source ? Math.max(RADIAL_BRANCH_LABEL_HEIGHT, RADIAL_ROOT_SIZE) : RADIAL_ROOT_SIZE,
+      showLabels ? Math.max(COMPACT_LABEL_WIDTH, RADIAL_ROOT_SIZE) : RADIAL_ROOT_SIZE,
+      showLabels ? RADIAL_ROOT_SIZE + COMPACT_LABEL_HEIGHT : RADIAL_ROOT_SIZE,
+    );
+  } else if (!root.source) {
+    rootUnit.visualW = RADIAL_ROOT_SIZE;
+    rootUnit.visualH = RADIAL_ROOT_SIZE;
+    rootUnit.collisionDiameter = Math.hypot(
+      showLabels ? Math.max(COMPACT_LABEL_WIDTH, RADIAL_ROOT_SIZE) : RADIAL_ROOT_SIZE,
+      showLabels ? RADIAL_ROOT_SIZE + COMPACT_LABEL_HEIGHT : RADIAL_ROOT_SIZE,
     );
   } else {
     rootUnit.visualW += RADIAL_EXPANDED_ROOT_HORIZONTAL_GROWTH;
@@ -211,8 +219,13 @@ function flattenRadialTree(
         child.visualW = COMPACT_ITEM_SIZE;
         child.visualH = COMPACT_ITEM_SIZE;
         child.collisionDiameter = Math.hypot(
-          input.source ? RADIAL_BRANCH_LABEL_WIDTH : COMPACT_ITEM_SIZE,
-          input.source ? RADIAL_BRANCH_LABEL_HEIGHT : COMPACT_ITEM_SIZE,
+          showLabels ? COMPACT_LABEL_WIDTH : COMPACT_ITEM_SIZE,
+          showLabels ? COMPACT_ITEM_SIZE + COMPACT_LABEL_HEIGHT : COMPACT_ITEM_SIZE,
+        );
+      } else if (!input.source && showLabels) {
+        child.collisionDiameter = Math.hypot(
+          COMPACT_LABEL_WIDTH,
+          RADIAL_ITEM_SIZE + COMPACT_LABEL_HEIGHT,
         );
       }
       const childIndex = units.length;
@@ -485,8 +498,9 @@ export function layoutRadialTree(
   root: ItemTreeNode,
   compact = false,
   isTerminal: (item: ItemTreeNode) => boolean = () => false,
+  showLabels = false,
 ): GraphLayout {
-  const units = flattenRadialTree(root, compact, isTerminal);
+  const units = flattenRadialTree(root, compact, isTerminal, showLabels);
   calculateAngularSectors(units);
 
   const levels: number[][] = [];
@@ -524,10 +538,11 @@ export function layoutRadialTree(
     minY = Math.min(minY, node.y);
     maxX = Math.max(maxX, node.x + node.w);
     maxY = Math.max(maxY, node.y + node.h);
-    if (node.compactBranch) {
-      minX = Math.min(minX, node.x - (RADIAL_BRANCH_LABEL_WIDTH - node.w) / 2);
-      maxX = Math.max(maxX, node.x + node.w + (RADIAL_BRANCH_LABEL_WIDTH - node.w) / 2);
-      maxY = Math.max(maxY, node.y + RADIAL_BRANCH_LABEL_HEIGHT);
+    if (showLabels && (node.radial || node.compactBranch)) {
+      const labelOverflow = Math.max(0, (COMPACT_LABEL_WIDTH - node.w) / 2);
+      minX = Math.min(minX, node.x - labelOverflow);
+      maxX = Math.max(maxX, node.x + node.w + labelOverflow);
+      maxY = Math.max(maxY, node.y + node.h + COMPACT_LABEL_HEIGHT);
     }
   });
   if (![minX, minY, maxX, maxY].every(Number.isFinite)) {

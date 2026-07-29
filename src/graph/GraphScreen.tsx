@@ -42,6 +42,7 @@ import {theme} from '../theme';
 import {DropStat, Mob, Recipe, RecipeRef} from '../types';
 import {useUi} from '../ui/UiContext';
 import {
+  COMPACT_LABEL_WIDTH,
   COMPACT_ITEM_SIZE,
   COMPACT_ROOT_SIZE,
   ITEM_H,
@@ -51,7 +52,6 @@ import {
   recipeImageDisplay,
 } from './layout';
 import {
-  RADIAL_BRANCH_LABEL_WIDTH,
   RADIAL_ITEM_SIZE,
   RADIAL_ROOT_SIZE,
   layoutRadialTree,
@@ -208,6 +208,7 @@ const COMPACT_MODE_KEY = 'graphCompactMode';
 const RADIAL_LAYOUT_KEY = 'graphRadialLayout';
 const LEGACY_PACKED_LAYOUT_KEY = 'graphPackedLayout';
 const USE_BYPRODUCTS_KEY = 'graphUseByproducts';
+const NODE_LABELS_KEY = 'graphNodeLabels';
 const MAX_RECIPE_PICKER_CHOICES = 40;
 const RECIPE_PICKER_GROUP_PAGE = 40;
 const GRAPH_EXPORT_PADDING = 48;
@@ -287,6 +288,15 @@ function loadUseByproducts(): boolean {
   }
 }
 
+function loadNodeLabels(): boolean {
+  try {
+    return globalThis.localStorage?.getItem(NODE_LABELS_KEY) !== '0';
+  } catch (error) {
+    console.error('Graph node-label preference could not be loaded from localStorage.', error);
+    return true;
+  }
+}
+
 export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
   const data = useData();
   const {
@@ -325,6 +335,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
   const [showTreeTotals, setShowTreeTotals] = useState(true);
   const [showGraphControls, setShowGraphControls] = useState(false);
   const [useByproducts, setUseByproducts] = useState(loadUseByproducts);
+  const [showNodeLabels, setShowNodeLabels] = useState(loadNodeLabels);
   const [exportingTree, setExportingTree] = useState(false);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
   const [preferredSources, setPreferredSources] =
@@ -1214,10 +1225,19 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
               graphDirection === 'outputs'
                 ? item => usagesFor(item.key).length === 0
                 : undefined,
+              showNodeLabels,
             )
-          : layoutTree(root, compactMode)
+          : layoutTree(root, compactMode, showNodeLabels)
         : null,
-    [root, version, compactMode, radialLayout, graphDirection, usagesFor],
+    [
+      root,
+      version,
+      compactMode,
+      radialLayout,
+      graphDirection,
+      usagesFor,
+      showNodeLabels,
+    ],
   );
   const graphRef = useRef(graph);
   graphRef.current = graph;
@@ -1489,6 +1509,20 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
     }
   }, []);
 
+  const updateNodeLabels = useCallback((value: boolean) => {
+    needsFitRef.current = true;
+    setShowNodeLabels(value);
+    try {
+      const storage = globalThis.localStorage;
+      if (storage) storage.setItem(NODE_LABELS_KEY, value ? '1' : '0');
+      else if (Platform.OS === 'web') {
+        console.warn('Graph node-label preference is using memory only because localStorage is unavailable.');
+      }
+    } catch (error) {
+      console.error('Graph node-label preference could not be saved to localStorage.', error);
+    }
+  }, []);
+
   // Native web listeners handle browser behaviors that React Native Web's
   // responder and inherited userSelect style do not consistently suppress in Safari.
   // The canvas mounts/unmounts with the empty state, so attach via callback ref.
@@ -1721,6 +1755,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
                 radial={n.radial === true}
                 radialRoot={radialLayout && n.item.id === 'root'}
                 branchLabel={n.compactBranch === true}
+                showLabel={showNodeLabels}
                 onTap={() =>
                   handleCollapsedIngredientTap(n.item, () =>
                     n.radial ? onItemTap(n.item) : openPickerWithErrorHandling(n.item),
@@ -1792,6 +1827,11 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
             )}
             <CtrlBtn label="Radial" active={radialLayout} onPress={toggleRadialLayout} />
             <CtrlBtn label="Compact" active={compactMode} onPress={toggleCompactMode} />
+            <CtrlBtn
+              label="Names"
+              active={showNodeLabels}
+              onPress={() => updateNodeLabels(!showNodeLabels)}
+            />
             <CtrlBtn label="Fit" onPress={fitView} />
           </View>
         )}
@@ -2090,6 +2130,7 @@ function CompactItemNodeView({
   radial = false,
   radialRoot = false,
   branchLabel = false,
+  showLabel,
   onTap,
 }: {
   x: number;
@@ -2104,10 +2145,10 @@ function CompactItemNodeView({
   radial?: boolean;
   radialRoot?: boolean;
   branchLabel?: boolean;
+  showLabel: boolean;
   onTap: () => void;
 }) {
   const data = useData();
-  const [showRadialLabel, setShowRadialLabel] = useState(false);
   const item = data.itemsByKey.get(node.key);
   const name = displayIngredientName(item?.n ?? node.key, node.tag);
   const amount = formatIngredientQuantity(
@@ -2125,15 +2166,10 @@ function CompactItemNodeView({
       accessibilityLabel={`${name}, quantity ${formatIngredientQuantity(node.key, requiredAmount)}${terminal ? `, ${terminalLabel}` : ''}${byproductLabel ? `, ${byproductLabel}` : ''}${node.nonConsumed ? ', not consumed' : ''}${node.consumptionProbability !== undefined ? `, ${node.consumptionProbability == null ? 'unknown' : `${String(Math.round(node.consumptionProbability * 10_000) / 100)} percent`} consume chance` : ''}${node.productionProbability !== undefined ? `, ${node.productionProbability == null ? 'unknown' : `${String(Math.round(node.productionProbability * 10_000) / 100)} percent`} produce chance` : ''}${selectable ? byproductCoverage?.remainingAmount === 0 ? ', navigate to producing recipe' : ', choose source' : ''}`}
       disabled={!selectable || node.loading}
       onPress={onTap}
-      onHoverIn={radial ? () => setShowRadialLabel(true) : undefined}
-      onHoverOut={radial ? () => setShowRadialLabel(false) : undefined}
-      onFocus={radial ? () => setShowRadialLabel(true) : undefined}
-      onBlur={radial ? () => setShowRadialLabel(false) : undefined}
       style={[
         radial ? styles.radialItemNode : styles.compactItemNode,
         branchLabel && styles.compactBranchNode,
         {left: x, top: y},
-        radial && showRadialLabel && styles.radialItemNodeRaised,
         node.nonConsumed && styles.nodePrerequisite,
         isRecursiveItemNode(node) && styles.nodeCyclic,
         terminal && !isRecursiveItemNode(node) && styles.nodeTerminal,
@@ -2170,14 +2206,7 @@ function CompactItemNodeView({
           {byproductCoverage?.remainingAmount === 0 ? '✓' : amount}
         </Text>
       </View>
-      {radial && showRadialLabel && (
-        <View pointerEvents="none" style={styles.radialItemTooltip}>
-          <Text style={[styles.radialItemTooltipText, noSelect]} numberOfLines={1}>
-            {name} · {byproductLabel ?? amount}
-          </Text>
-        </View>
-      )}
-      {branchLabel && (
+      {showLabel && (
         <View
           pointerEvents="none"
           style={[
@@ -2518,13 +2547,13 @@ const styles = StyleSheet.create({
   },
   radialRootBranchLabel: {
     top: RADIAL_ROOT_SIZE + 4,
-    left: -(RADIAL_BRANCH_LABEL_WIDTH - RADIAL_ROOT_SIZE) / 2,
+    left: -(COMPACT_LABEL_WIDTH - RADIAL_ROOT_SIZE) / 2,
   },
   compactBranchLabel: {
     position: 'absolute',
     top: COMPACT_ITEM_SIZE + 4,
-    left: -(RADIAL_BRANCH_LABEL_WIDTH - COMPACT_ITEM_SIZE) / 2,
-    width: RADIAL_BRANCH_LABEL_WIDTH,
+    left: -(COMPACT_LABEL_WIDTH - COMPACT_ITEM_SIZE) / 2,
+    width: COMPACT_LABEL_WIDTH,
     alignItems: 'center',
   },
   compactBranchLabelText: {
@@ -2544,28 +2573,6 @@ const styles = StyleSheet.create({
     borderColor: theme.border,
     borderWidth: 1,
     borderRadius: RADIAL_ITEM_SIZE / 2,
-  },
-  radialItemNodeRaised: {
-    zIndex: 20,
-    borderColor: theme.accent,
-  },
-  radialItemTooltip: {
-    position: 'absolute',
-    left: RADIAL_ITEM_SIZE / 2,
-    bottom: RADIAL_ITEM_SIZE + 5,
-    maxWidth: 220,
-    minWidth: 96,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 6,
-    borderColor: theme.borderLight,
-    borderWidth: 1,
-    backgroundColor: 'rgba(14,17,22,0.97)',
-  },
-  radialItemTooltipText: {
-    color: theme.text,
-    fontSize: 10,
-    fontWeight: '600',
   },
   compactCountBadge: {
     position: 'absolute',

@@ -6,6 +6,8 @@ export const ITEM_W = 172;
 export const ITEM_H = 58;
 export const COMPACT_ITEM_SIZE = 52;
 export const COMPACT_ROOT_SIZE = 72;
+export const COMPACT_LABEL_WIDTH = 96;
+export const COMPACT_LABEL_HEIGHT = 16;
 /** Header strip on source nodes: icon + "Name ×N · Category". */
 export const SOURCE_HEADER = 22;
 /** Vertical gap between tree levels (rows). */
@@ -87,7 +89,11 @@ function treeNodeSize(
  * remain disjoint, while immediate inputs anchor into a compact parent-centered
  * row whenever those bands allow it. Edges run child-top -> parent-bottom.
  */
-export function layoutTree(root: ItemTreeNode, compact = false): GraphLayout {
+export function layoutTree(
+  root: ItemTreeNode,
+  compact = false,
+  showCompactLabels = false,
+): GraphLayout {
   const nodes: LaidNode[] = [];
   const edges: EdgeRect[] = [];
 
@@ -194,7 +200,11 @@ export function layoutTree(root: ItemTreeNode, compact = false): GraphLayout {
   const nextRight = (record: LayoutRecord): LayoutRecord | undefined =>
     record.children[record.children.length - 1] ?? record.thread;
   const separation = (left: LayoutRecord, right: LayoutRecord): number =>
-    left.size.w / 2 + SIBLING_GAP + right.size.w / 2;
+    left.size.w / 2 +
+    (compact && showCompactLabels
+      ? Math.max(SIBLING_GAP, COMPACT_LABEL_WIDTH - COMPACT_ITEM_SIZE)
+      : SIBLING_GAP) +
+    right.size.w / 2;
 
   const moveSubtree = (left: LayoutRecord, right: LayoutRecord, shift: number) => {
     const subtreeCount = right.index - left.index;
@@ -382,6 +392,12 @@ export function layoutTree(root: ItemTreeNode, compact = false): GraphLayout {
     minY = Math.min(minY, n.y);
     maxX = Math.max(maxX, n.x + n.w);
     maxY = Math.max(maxY, n.y + n.h);
+    if (compact && showCompactLabels) {
+      const labelOverflow = Math.max(0, (COMPACT_LABEL_WIDTH - n.w) / 2);
+      minX = Math.min(minX, n.x - labelOverflow);
+      maxX = Math.max(maxX, n.x + n.w + labelOverflow);
+      maxY = Math.max(maxY, n.y + n.h + COMPACT_LABEL_HEIGHT);
+    }
   }
   return {nodes, edges, minX, minY, maxX, maxY};
 }
