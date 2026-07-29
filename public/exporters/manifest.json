@@ -1,0 +1,63 @@
+{
+  "format": "mrt-exporter-releases-v2",
+  "generatedAt": "2026-07-22T20:39:23.000Z",
+  "releases": [
+    {
+      "id": "forge-jei-1.20.1",
+      "minecraftVersion": "1.20.1",
+      "recipeViewer": "JEI 15",
+      "loader": "Forge 47",
+      "version": "1.0.0",
+      "filename": "recipe-tree-exporter-forge-1.20.1-1.0.0.jar",
+      "sha256": "8e526ae9d751a569cd3a8392f5af27c08663ba7a0d11ab13b01f3611374b944b",
+      "bytes": 90336,
+      "qualityProfiles": [
+        "generic-jei-1.20.1"
+      ],
+      "compatibility": "Forge 47 with JEI 15.x"
+    },
+    {
+      "id": "forge-rei-1.18.2",
+      "minecraftVersion": "1.18.2",
+      "recipeViewer": "REI 8",
+      "loader": "Forge 40",
+      "version": "1.0.47",
+      "filename": "recipe-tree-exporter-forge-1.18.2-1.0.47.jar",
+      "sha256": "24e6ed69fb055f2904e096db1f0086e4ebf059c9003bf11f2fb6f505e25c2205",
+      "bytes": 577946,
+      "qualityProfiles": [
+        "multiblock-madness-2-1.18.2"
+      ],
+      "compatibility": "Forge 40 with REI 8.4.x"
+    },
+    {
+      "id": "forge-hei-1.12.2",
+      "minecraftVersion": "1.12.2",
+      "recipeViewer": "HEI/JEI 4",
+      "loader": "Forge 14.23.5",
+      "version": "1.0.3",
+      "filename": "recipe-tree-exporter-forge-1.12.2-1.0.3.jar",
+      "sha256": "563536a2f5f034bf55c5e89e61fd3bbc91440243a8d0aad65919c4c8bed00f23",
+      "bytes": 252053,
+      "qualityProfiles": [
+        "meatballcraft-1.12.2",
+        "multiblock-madness-1.12.2"
+      ],
+      "compatibility": "Forge 14.23.5 with HEI 4.25.0+ (validated on 4.25.0 and 4.30.3)"
+    },
+    {
+      "id": "forge-nei-gtnh-1.7.10",
+      "minecraftVersion": "1.7.10",
+      "recipeViewer": "NEI 2.8.44-GTNH",
+      "loader": "Forge 10.13.4.1614",
+      "version": "1.0.149",
+      "filename": "recipe-tree-exporter-gtnh-1.7.10-1.0.149.jar",
+      "sha256": "efa6383f7d1518ceafdc081921357e5878286ad42747f810cbf7ecc4ec9512c5",
+      "bytes": 1009917,
+      "qualityProfiles": [
+        "gtnh-1.7.10"
+      ],
+      "compatibility": "GT New Horizons 2.8.4 with NEI 2.8.44-GTNH"
+    }
+  ]
+}
