@@ -22,11 +22,7 @@ import {
   persistCollapsedRecipeCategories,
   toggleCollapsedRecipeCategory,
 } from '../data/recipeCategoryPreferences';
-import {
-  loadHiddenRecipeStages,
-  persistHiddenRecipeStages,
-  toggleHiddenRecipeStage,
-} from '../data/recipeStagePreferences';
+import {useRecipeStages} from '../data/RecipeStageContext';
 import {isRecipeVisibleForStages, recipeStageLabel} from '../data/recipeStages';
 import {isFluidContainerTransferRecipe} from '../data/recipeVisibility';
 import {
@@ -308,6 +304,10 @@ function RefsList({
   graphDirection: GraphDirection;
 }) {
   const data = useData();
+  const {
+    hiddenStages: hiddenRecipeStages,
+    toggleStage: toggleRecipeStage,
+  } = useRecipeStages();
   const {openRecipeInGraph} = useUi();
   const [visibleTarget, setVisibleTarget] = useState(PAGE);
   const [scanLimit, setScanLimit] = useState(PAGE);
@@ -317,9 +317,6 @@ function RefsList({
   const [showFluidTransfers, setShowFluidTransfers] = useState(false);
   const [collapsedCategoryIds, setCollapsedCategoryIds] = useState(
     loadCollapsedRecipeCategories,
-  );
-  const [hiddenRecipeStages, setHiddenRecipeStages] = useState(() =>
-    loadHiddenRecipeStages(data.descriptor.slug),
   );
   const [recipesByRef, setRecipesByRef] = useState<Map<string, Recipe>>(() => new Map());
   const [availableCardWidth, setAvailableCardWidth] = useState<number | null>(null);
@@ -472,17 +469,6 @@ function RefsList({
       return next;
     });
   }, []);
-
-  const toggleRecipeStage = useCallback(
-    (stage: string) => {
-      setHiddenRecipeStages(current => {
-        const next = toggleHiddenRecipeStage(current, stage);
-        persistHiddenRecipeStages(data.descriptor.slug, next);
-        return next;
-      });
-    },
-    [data.descriptor.slug],
-  );
 
   useEffect(() => {
     if (

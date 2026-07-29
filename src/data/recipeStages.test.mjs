@@ -5,6 +5,7 @@ import {
   MEATBALLCRAFT_STAGE_COMPATIBILITY_PUBLICATION_ID,
   applyRecipeStageMetadata,
   isRecipeVisibleForStages,
+  recipeStageCatalogForDataset,
 } from './recipeStages.ts';
 
 const descriptor = {
@@ -64,4 +65,42 @@ test('applies one stage-visibility predicate to native and compatibility metadat
   assert.equal(isRecipeVisibleForStages({id: 'example:plain'}, hidden), true);
   assert.equal(isRecipeVisibleForStages({id: 'example:hard', stage: 'hardmode'}, hidden), false);
   assert.equal(isRecipeVisibleForStages(undefined, hidden), false);
+});
+
+test('exposes a complete publication-locked high-level stage catalog', () => {
+  const catalog = recipeStageCatalogForDataset(descriptor);
+  assert.equal(catalog.recipes.length, 119);
+  assert.equal(catalog.stages.length, 102);
+  assert.equal(catalog.stagesByItemKey.size, 110);
+  assert.deepEqual(
+    catalog.stagesByItemKey.get('item|draconicevolution:fusion_crafting_core'),
+    ['draconicstage'],
+  );
+  assert.deepEqual(
+    catalog.recipes.find(recipe => recipe.id === 'crafttweaker:modular_controller'),
+    {
+      id: 'crafttweaker:modular_controller',
+      stage: 'modularstage',
+      ref: [0, 20049],
+      outputKeys: ['item|modularmachinery:blockcontroller'],
+    },
+  );
+  assert.deepEqual(
+    catalog.stages.find(summary => summary.stage === 'draconicstage'),
+    {
+      stage: 'draconicstage',
+      recipeCount: 2,
+      itemCount: 1,
+      recipeIds: [
+        'crafttweaker:ct_shapeless584517755',
+        'draconicevolution:fusion_crafting_core',
+      ],
+      itemKeys: ['item|draconicevolution:fusion_crafting_core'],
+    },
+  );
+  assert.equal(
+    recipeStageCatalogForDataset({...descriptor, publicationId: 'b'.repeat(64)})
+      .recipes.length,
+    0,
+  );
 });

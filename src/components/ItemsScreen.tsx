@@ -13,6 +13,7 @@ import {
   catalogTypePresentation,
   isItemCatalogEligible,
 } from '../data/catalogPresentation';
+import {useRecipeStages} from '../data/RecipeStageContext';
 import {signalTarget} from '../analytics/signal';
 import {theme} from '../theme';
 import {CatalogItem} from '../types';
@@ -25,6 +26,7 @@ const CELL_W = 104;
 
 export function ItemsScreen({interfaceZoom}: {interfaceZoom: number}) {
   const data = useData();
+  const recipeStages = useRecipeStages();
   const {openItem} = useUi();
   const [query, setQuery] = useState('');
   const [mod, setMod] = useState<string | null>(null);
@@ -56,6 +58,13 @@ export function ItemsScreen({interfaceZoom}: {interfaceZoom: number}) {
     const q = query.trim().toLowerCase();
     const out: CatalogItem[] = [];
     for (const item of catalogItems) {
+      const gatedStages = recipeStages.catalog.stagesByItemKey.get(item.k);
+      if (
+        recipeStages.selectedStage &&
+        !gatedStages?.includes(recipeStages.selectedStage)
+      ) {
+        continue;
+      }
       if (mod && item.m !== mod) continue;
       const typeLabel = catalogTypePresentation(item.t)?.label.toLowerCase() ?? '';
       if (
@@ -70,7 +79,13 @@ export function ItemsScreen({interfaceZoom}: {interfaceZoom: number}) {
       if (out.length >= MAX_RESULTS + 1) break;
     }
     return out;
-  }, [catalogItems, query, mod]);
+  }, [
+    catalogItems,
+    query,
+    mod,
+    recipeStages.catalog.stagesByItemKey,
+    recipeStages.selectedStage,
+  ]);
 
   const truncated = filtered.length > MAX_RESULTS;
   const shown = truncated ? filtered.slice(0, MAX_RESULTS) : filtered;
@@ -100,6 +115,26 @@ export function ItemsScreen({interfaceZoom}: {interfaceZoom: number}) {
             style={[styles.modControl, compactControls && styles.modControlCompact]}
           />
         </View>
+        {recipeStages.selectedStage && (
+          <View style={styles.stageFilterRow}>
+            <View style={styles.stageFilterCopy}>
+              <Text style={styles.stageFilterTitle}>
+                ⚑ Stage: {recipeStages.selectedStage}
+              </Text>
+              <Text style={styles.stageFilterMeta}>
+                Showing items with at least one recipe gated by this stage
+              </Text>
+            </View>
+            <TouchableOpacity
+              {...signalTarget('items.recipe-stage.clear')}
+              style={styles.clearStageButton}
+              onPress={() => recipeStages.selectStage(null)}
+              accessibilityRole="button"
+              accessibilityLabel={`Clear recipe stage filter ${recipeStages.selectedStage}`}>
+              <Text style={styles.clearStageButtonText}>Show all items</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
       <FlatList
         style={[styles.grid, scaledGridStyle]}
@@ -111,13 +146,35 @@ export function ItemsScreen({interfaceZoom}: {interfaceZoom: number}) {
         initialNumToRender={60}
         maxToRenderPerBatch={60}
         contentContainerStyle={styles.gridContent}
+        ListEmptyComponent={
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyTitle}>No matching staged items</Text>
+            <Text style={styles.emptyText}>
+              Clear the search, mod filter, or recipe-stage filter.
+            </Text>
+          </View>
+        }
         renderItem={({item}) => {
           const typeLabel = catalogTypePresentation(item.t)?.label;
+          const gatedStages = recipeStages.catalog.stagesByItemKey.get(item.k) ?? [];
+          const allGatedRecipesHidden =
+            gatedStages.length > 0 &&
+            gatedStages.every(stage => recipeStages.hiddenStages.has(stage));
+          const stageLabel =
+            gatedStages.length === 1
+              ? gatedStages[0]
+              : `${gatedStages.length} stages`;
           return (
             <TouchableOpacity
               {...signalTarget('items.item.open')}
-              style={[styles.cell, {width: `${100 / columns}%` as never}]}
-              onPress={() => openItem(item.k)}>
+              style={[
+                styles.cell,
+                gatedStages.length > 0 && styles.gatedCell,
+                {width: `${100 / columns}%` as never},
+              ]}
+              onPress={() => openItem(item.k)}
+              accessibilityRole="button"
+              accessibilityLabel={`${item.n}${gatedStages.length > 0 ? `, has recipes gated by ${gatedStages.join(', ')}` : ''}`}>
               <ItemIcon item={item} size={48} />
               <Text style={styles.cellName} numberOfLines={2}>
                 {item.n}
@@ -125,6 +182,17 @@ export function ItemsScreen({interfaceZoom}: {interfaceZoom: number}) {
               {typeLabel && (
                 <Text style={styles.typeBadge} numberOfLines={1}>
                   {typeLabel}
+                </Text>
+              )}
+              {gatedStages.length > 0 && (
+                <Text
+                  style={[
+                    styles.stageBadge,
+                    allGatedRecipesHidden && styles.stageBadgeHidden,
+                  ]}
+                  numberOfLines={1}>
+                  ⚑ {stageLabel}
+                  {allGatedRecipesHidden ? ' · hidden' : ''}
                 </Text>
               )}
             </TouchableOpacity>
@@ -152,6 +220,33 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
   },
+  stageFilterRow: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderWidth: 1,
+    borderColor: theme.accentAlt,
+    borderRadius: 8,
+    backgroundColor: 'rgba(90, 167, 250, 0.08)',
+  },
+  stageFilterCopy: {flex: 1, minWidth: 0},
+  stageFilterTitle: {color: theme.accentAlt, fontSize: 11, fontWeight: '800'},
+  stageFilterMeta: {color: theme.textDim, fontSize: 9, marginTop: 2},
+  clearStageButton: {
+    minHeight: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 9,
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.panelAlt,
+  },
+  clearStageButtonText: {color: theme.text, fontSize: 10, fontWeight: '700'},
   searchControl: {
     flex: 1,
     minWidth: 0,
@@ -171,7 +266,10 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 4,
     borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'transparent',
   },
+  gatedCell: {borderColor: 'rgba(224, 179, 65, 0.42)', backgroundColor: 'rgba(224, 179, 65, 0.04)'},
   cellName: {
     color: theme.textDim,
     fontSize: 11,
@@ -184,4 +282,16 @@ const styles = StyleSheet.create({
     marginTop: 2,
     textTransform: 'uppercase',
   },
+  stageBadge: {
+    maxWidth: '96%',
+    color: theme.warn,
+    fontSize: 8,
+    fontWeight: '800',
+    marginTop: 3,
+    textTransform: 'none',
+  },
+  stageBadgeHidden: {color: theme.textDim},
+  emptyState: {alignItems: 'center', padding: 28},
+  emptyTitle: {color: theme.text, fontSize: 14, fontWeight: '700'},
+  emptyText: {color: theme.textDim, fontSize: 11, marginTop: 5},
 });

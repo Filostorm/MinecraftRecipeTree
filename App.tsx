@@ -18,6 +18,7 @@ import {FeedbackModal, type FeedbackKind} from './src/components/FeedbackModal';
 import {GraphGuideModal} from './src/components/GraphGuideModal';
 import {ItemsScreen} from './src/components/ItemsScreen';
 import {MobsScreen} from './src/components/MobsScreen';
+import {RecipeStageModal} from './src/components/RecipeStageModal';
 import {RecipeHistoryModal} from './src/components/RecipeHistoryModal';
 import {DataProvider, useData, useLoadState} from './src/data/DataContext';
 import {DatasetReadinessMarker} from './src/data/DatasetReadinessMarker';
@@ -25,6 +26,10 @@ import {
   DatasetCatalogProvider,
   useDatasetCatalog,
 } from './src/data/DatasetCatalogContext';
+import {
+  RecipeStageProvider,
+  useRecipeStages,
+} from './src/data/RecipeStageContext';
 import {datasetMountKey} from './src/data/datasetCatalog';
 import {theme} from './src/theme';
 import type {Manifest} from './src/types';
@@ -157,9 +162,11 @@ function LoadedDatasetLayout({
     <View style={styles.datasetRoot}>
       <DatasetReadinessMarker expectedPublicationId={expectedPublicationId} />
       <View style={styles.datasetContent}>
-        <UiProvider>
-          <Root renderControls={renderControls} />
-        </UiProvider>
+        <RecipeStageProvider>
+          <UiProvider>
+            <Root renderControls={renderControls} />
+          </UiProvider>
+        </RecipeStageProvider>
       </View>
     </View>
   );
@@ -238,25 +245,31 @@ function Shell({
   ): React.ReactNode;
 }) {
   const data = useData();
+  const recipeStages = useRecipeStages();
   const {tab} = useUi();
   const {width} = useWindowDimensions();
   const [hasHydrated, setHasHydrated] = useState(Platform.OS !== 'web');
   const compactHeader = hasHydrated && width < 720;
   const [showRecipeHistory, setShowRecipeHistory] = useState(false);
+  const [showRecipeStages, setShowRecipeStages] = useState(false);
   const [showGraphGuide, setShowGraphGuide] = useState(false);
   const [feedbackKind, setFeedbackKind] = useState<FeedbackKind | null>(null);
   const [showDatasetDetails, setShowDatasetDetails] = useState(false);
   const [interfaceZoom, setInterfaceZoom] = useState(1);
   const shellSurface = feedbackKind
     ? `feedback/${feedbackKind}`
-    : showGraphGuide
-      ? 'graph-guide'
-      : showRecipeHistory
-        ? 'recipe-history'
-        : tab;
+    : showRecipeStages
+      ? 'recipe-stages'
+      : showGraphGuide
+        ? 'graph-guide'
+        : showRecipeHistory
+          ? 'recipe-history'
+          : tab;
   useSignalSurface(
     shellSurface,
-    feedbackKind || showGraphGuide || showRecipeHistory ? 'modal' : 'screen',
+    feedbackKind || showRecipeStages || showGraphGuide || showRecipeHistory
+      ? 'modal'
+      : 'screen',
   );
   useEffect(() => {
     if (Platform.OS === 'web') setHasHydrated(true);
@@ -377,6 +390,26 @@ function Shell({
         accessibilityLabel={`Open recipe history for ${data.descriptor.displayName}`}>
         <Text style={styles.historyHeaderIcon}>◷</Text>
       </TouchableOpacity>
+      {recipeStages.catalog.stages.length > 0 && (
+        <TouchableOpacity
+          {...signalTarget('header.recipe-stages')}
+          style={[
+            styles.headerUtilityButton,
+            styles.recipeStagesHeaderButton,
+            showRecipeStages && styles.headerUtilityButtonActive,
+          ]}
+          onPress={() => setShowRecipeStages(true)}
+          accessibilityRole="button"
+          accessibilityLabel={`Open recipe stage controls, ${recipeStages.catalog.stages.length} stages`}>
+          <Text
+            style={[
+              styles.recipeStagesHeaderText,
+              showRecipeStages && styles.recipeStagesHeaderTextActive,
+            ]}>
+            ⚑ Stages
+          </Text>
+        </TouchableOpacity>
+      )}
       <TouchableOpacity
         {...signalTarget('header.graph-guide')}
         style={[
@@ -452,6 +485,12 @@ function Shell({
         </View>
       </View>
       <ItemDetailModal />
+      {showRecipeStages && (
+        <RecipeStageModal
+          visible
+          onClose={() => setShowRecipeStages(false)}
+        />
+      )}
       {showRecipeHistory && (
         <RecipeHistoryModal
           visible
@@ -578,6 +617,9 @@ const styles = StyleSheet.create({
   },
   headerUtilityButtonActive: {borderColor: theme.accent},
   historyHeaderIcon: {color: theme.text, fontSize: 17, fontWeight: '700'},
+  recipeStagesHeaderButton: {width: 'auto', minWidth: 72, paddingHorizontal: 8},
+  recipeStagesHeaderText: {color: theme.text, fontSize: 11, fontWeight: '800'},
+  recipeStagesHeaderTextActive: {color: theme.accent},
   guideHeaderIcon: {color: theme.text, fontSize: 16, fontWeight: '800'},
   guideHeaderIconActive: {color: theme.accent},
   interfaceZoomControls: {

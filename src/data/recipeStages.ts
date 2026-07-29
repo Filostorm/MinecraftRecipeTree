@@ -1,5 +1,6 @@
 import type {DatasetDescriptor} from './datasetCatalog';
 import type {Recipe} from '../types';
+import {MEATBALLCRAFT_RECIPE_STAGE_INDEX} from './meatballcraftRecipeStageIndex.generated.ts';
 
 export const MEATBALLCRAFT_STAGE_COMPATIBILITY_PUBLICATION_ID =
   '04c674ab74eeeaea151c9b985191f09e2be42156a879bb0493e2e29f94f3d46a';
@@ -133,6 +134,110 @@ export const MEATBALLCRAFT_RECIPE_STAGES: Readonly<Record<string, string>> = Obj
 
 const RECIPE_STAGE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,119}$/;
 let loggedCompatibilityPublication = false;
+
+export interface IndexedStagedRecipe {
+  readonly id: string;
+  readonly stage: string;
+  readonly ref: readonly [categoryIndex: number, recipeIndex: number];
+  readonly outputKeys: readonly string[];
+}
+
+export interface RecipeStageSummary {
+  readonly stage: string;
+  readonly recipeCount: number;
+  readonly itemCount: number;
+  readonly recipeIds: readonly string[];
+  readonly itemKeys: readonly string[];
+}
+
+export interface RecipeStageCatalog {
+  readonly recipes: readonly IndexedStagedRecipe[];
+  readonly stages: readonly RecipeStageSummary[];
+  readonly stagesByItemKey: ReadonlyMap<string, readonly string[]>;
+}
+
+function buildMeatballCraftStageCatalog(): RecipeStageCatalog {
+  const recipeIds = Object.keys(MEATBALLCRAFT_RECIPE_STAGES).sort();
+  const indexedIds = Object.keys(MEATBALLCRAFT_RECIPE_STAGE_INDEX).sort();
+  if (
+    recipeIds.length !== indexedIds.length ||
+    recipeIds.some((recipeId, index) => recipeId !== indexedIds[index])
+  ) {
+    throw new Error(
+      'The MeatballCraft RecipeStages compatibility assignments and high-level index differ.',
+    );
+  }
+
+  const recipes: IndexedStagedRecipe[] = recipeIds.map(id => {
+    const indexed = MEATBALLCRAFT_RECIPE_STAGE_INDEX[
+      id as keyof typeof MEATBALLCRAFT_RECIPE_STAGE_INDEX
+    ];
+    return Object.freeze({
+      id,
+      stage: MEATBALLCRAFT_RECIPE_STAGES[id],
+      ref: indexed.ref,
+      outputKeys: indexed.outputKeys,
+    });
+  });
+  const summaryState = new Map<
+    string,
+    {recipeIds: string[]; itemKeys: Set<string>}
+  >();
+  const stageSetsByItemKey = new Map<string, Set<string>>();
+  for (const recipe of recipes) {
+    const summary = summaryState.get(recipe.stage) ?? {
+      recipeIds: [],
+      itemKeys: new Set<string>(),
+    };
+    summary.recipeIds.push(recipe.id);
+    for (const itemKey of recipe.outputKeys) {
+      summary.itemKeys.add(itemKey);
+      const itemStages = stageSetsByItemKey.get(itemKey) ?? new Set<string>();
+      itemStages.add(recipe.stage);
+      stageSetsByItemKey.set(itemKey, itemStages);
+    }
+    summaryState.set(recipe.stage, summary);
+  }
+  const stages = [...summaryState.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([stage, summary]) => {
+      const itemKeys = [...summary.itemKeys].sort();
+      return Object.freeze({
+        stage,
+        recipeCount: summary.recipeIds.length,
+        itemCount: itemKeys.length,
+        recipeIds: Object.freeze([...summary.recipeIds].sort()),
+        itemKeys: Object.freeze(itemKeys),
+      });
+    });
+  const stagesByItemKey = new Map<string, readonly string[]>(
+    [...stageSetsByItemKey.entries()].map(([itemKey, stagesForItem]) => [
+      itemKey,
+      Object.freeze([...stagesForItem].sort()),
+    ]),
+  );
+  return Object.freeze({
+    recipes: Object.freeze(recipes),
+    stages: Object.freeze(stages),
+    stagesByItemKey,
+  });
+}
+
+const MEATBALLCRAFT_STAGE_CATALOG = buildMeatballCraftStageCatalog();
+const EMPTY_STAGE_CATALOG: RecipeStageCatalog = Object.freeze({
+  recipes: Object.freeze([]),
+  stages: Object.freeze([]),
+  stagesByItemKey: new Map(),
+});
+
+export function recipeStageCatalogForDataset(
+  descriptor: DatasetDescriptor,
+): RecipeStageCatalog {
+  return descriptor.slug === 'meatballcraft' &&
+    descriptor.publicationId === MEATBALLCRAFT_STAGE_COMPATIBILITY_PUBLICATION_ID
+    ? MEATBALLCRAFT_STAGE_CATALOG
+    : EMPTY_STAGE_CATALOG;
+}
 
 export function isValidRecipeStage(value: unknown): value is string {
   return typeof value === 'string' && RECIPE_STAGE_PATTERN.test(value);

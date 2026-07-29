@@ -38,11 +38,7 @@ import {
   persistCollapsedRecipeCategories,
   toggleCollapsedRecipeCategory,
 } from '../data/recipeCategoryPreferences';
-import {
-  loadHiddenRecipeStages,
-  persistHiddenRecipeStages,
-  toggleHiddenRecipeStage,
-} from '../data/recipeStagePreferences';
+import {useRecipeStages} from '../data/RecipeStageContext';
 import {isRecipeVisibleForStages} from '../data/recipeStages';
 import {isFluidContainerTransferRecipe} from '../data/recipeVisibility';
 import {recipeDisplayTitle} from '../data/recipeTitles';
@@ -162,14 +158,16 @@ interface PickerState {
   byproductCoverage?: NodeByproductCoverage;
   rememberSource: boolean;
   collapsedGroupKeys: Set<string>;
-  hiddenRecipeStages: Set<string>;
 }
 
-function visiblePickerEntries(picker: PickerState): PickerEntry[] {
+function visiblePickerEntries(
+  picker: PickerState,
+  hiddenRecipeStages: ReadonlySet<string>,
+): PickerEntry[] {
   const visibleStandard = picker.standardEntries.filter(
     entry =>
       !entry.recipe ||
-      isRecipeVisibleForStages(entry.recipe, picker.hiddenRecipeStages),
+      isRecipeVisibleForStages(entry.recipe, hiddenRecipeStages),
   );
   if (!picker.showFluidTransfers) return visibleStandard;
   return [
@@ -177,7 +175,7 @@ function visiblePickerEntries(picker: PickerState): PickerEntry[] {
     ...picker.fluidTransferEntries.filter(
       entry =>
         !entry.recipe ||
-        isRecipeVisibleForStages(entry.recipe, picker.hiddenRecipeStages),
+        isRecipeVisibleForStages(entry.recipe, hiddenRecipeStages),
     ),
   ];
 }
@@ -394,6 +392,10 @@ function nodeDepthBucket(
 
 export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
   const data = useData();
+  const {
+    hiddenStages: hiddenRecipeStages,
+    toggleStage: toggleRecipeStage,
+  } = useRecipeStages();
   const {
     graphRootKey,
     graphRequestId,
@@ -1120,7 +1122,6 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
         byproductCoverage,
         rememberSource: direction === 'inputs',
         collapsedGroupKeys: loadCollapsedRecipeCategories(),
-        hiddenRecipeStages: loadHiddenRecipeStages(data.descriptor.slug),
       });
     },
     [data, choicesFor, graphDirection, pickerEntryFor],
@@ -1252,21 +1253,6 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
     [data.categories],
   );
 
-  const togglePickerRecipeStage = useCallback(
-    (stage: string) => {
-      setPicker(current => {
-        if (!current) return current;
-        const hiddenRecipeStages = toggleHiddenRecipeStage(
-          current.hiddenRecipeStages,
-          stage,
-        );
-        persistHiddenRecipeStages(data.descriptor.slug, hiddenRecipeStages);
-        return {...current, hiddenRecipeStages};
-      });
-    },
-    [data.descriptor.slug],
-  );
-
   const openPickerWithErrorHandling = useCallback(
     (node: ItemTreeNode, byproductCoverage?: NodeByproductCoverage) => {
       void openPicker(node, byproductCoverage).catch(error => {
@@ -1286,8 +1272,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
         const [recipe] = await data.getRecipes([choice.ref]);
         if (
           isFluidContainerTransferRecipe(recipe, data.itemsByKey) ||
-          (recipe.stage &&
-            loadHiddenRecipeStages(data.descriptor.slug).has(recipe.stage))
+          (recipe.stage && hiddenRecipeStages.has(recipe.stage))
         ) {
           await openPicker(node);
           return;
@@ -1301,6 +1286,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
       applyPreferredSourceAcrossTree,
       data,
       graphDirection,
+      hiddenRecipeStages,
       openPicker,
       setPreferredSource,
     ],
@@ -2285,7 +2271,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
                 }
               : undefined
           }
-          options={visiblePickerEntries(picker).map(entry => entry.option)}
+          options={visiblePickerEntries(picker, hiddenRecipeStages).map(entry => entry.option)}
           rememberSource={picker.rememberSource}
           onRememberSourceChange={
             picker.direction === 'inputs'
@@ -2311,8 +2297,8 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
               : undefined
           }
           recipeStageCounts={pickerRecipeStageCounts(picker)}
-          hiddenRecipeStages={picker.hiddenRecipeStages}
-          onToggleRecipeStage={togglePickerRecipeStage}
+          hiddenRecipeStages={hiddenRecipeStages}
+          onToggleRecipeStage={toggleRecipeStage}
           collapsedGroupKeys={picker.collapsedGroupKeys}
           onToggleGroup={togglePickerGroup}
           groupProgress={picker.recipeGroupProgress}
@@ -2327,7 +2313,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
                 );
                 return current;
               }
-              const visibleEntries = visiblePickerEntries(current);
+              const visibleEntries = visiblePickerEntries(current, hiddenRecipeStages);
               const entry = visibleEntries[i];
               if (entry?.choice.t !== 'recipe' || !entry.recipe) {
                 console.error(
@@ -2394,7 +2380,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
           }}
           onSelect={i => {
             const p = picker;
-            const entries = visiblePickerEntries(p);
+            const entries = visiblePickerEntries(p, hiddenRecipeStages);
             const selectedEntry = entries[i];
             const choice = selectedEntry?.choice;
             if (!choice) {

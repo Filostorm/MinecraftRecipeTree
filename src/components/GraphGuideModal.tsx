@@ -33,6 +33,11 @@ const controls = [
     title: 'Fit  ⛶',
     description: 'Center the complete recipe tree and scale it to the available canvas.',
   },
+  {
+    title: 'Recipe stages  ⚑',
+    description:
+      'Open the global stage controls to identify gated recipes, browse their output items, or show and hide every recipe assigned to a progression stage.',
+  },
 ] as const;
 
 type KeyVariant =
