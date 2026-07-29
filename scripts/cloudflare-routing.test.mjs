@@ -133,6 +133,7 @@ test('the environment template exposes only the current server-side operator con
   const entries = [...environmentExample.matchAll(/^([A-Z][A-Z0-9_]*)=(.*)$/gm)];
   const values = Object.fromEntries(entries.map(([, name, value]) => [name, value]));
   assert.deepEqual(Object.keys(values), [
+    'BETA_DATA_ORIGIN',
     'DATASET_ADMIN_ENABLED',
     'CORE_DATASET_UPLOAD_TOKEN',
     'PREVIEW_UPLOAD_ENABLED',
@@ -140,6 +141,7 @@ test('the environment template exposes only the current server-side operator con
     'PREVIEW_UPLOAD_TOKEN',
     'FEEDBACK_ADMIN_TOKEN',
   ]);
+  assert.equal(values.BETA_DATA_ORIGIN, 'https://minecraftrecipetree.craftsmannsoftware.com');
   assert.equal(values.DATASET_ADMIN_ENABLED, 'false');
   assert.equal(values.PREVIEW_UPLOAD_ENABLED, 'false');
   assert.ok(values.CORE_DATASET_UPLOAD_TOKEN.length >= 32);

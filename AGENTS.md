@@ -2,11 +2,13 @@
 
 Read the exact versioned docs at https://docs.expo.dev/versions/v56.0.0/ before writing any code.
 
-# Release branches
+# Beta web environment
 
-- Use `beta` as the integration branch for requested application changes. Start work from `beta`, validate the completed change, commit it, and push it to `origin/beta`.
-- A successful beta build is not authorization to deploy production. Do not update the production branch, push the beta commit to the Sites source repository, save a production Sites version, or deploy it unless the user explicitly requests a production promotion.
-- When the user explicitly requests production promotion, deploy the exact validated `beta` commit with Sites using the existing project in `.openai/hosting.json`. Do not rebuild from a different source state.
+- Use `beta` as the source branch for requested application changes and deploy every completed, validated change to the separate beta Sites project configured in `.openai/hosting.json`.
+- A successful beta deployment is not authorization to change the public application. Do not update or deploy the production Sites project unless the user explicitly requests production promotion.
+- The beta Site must set `BETA_DATA_ORIGIN=https://minecraftrecipetree.craftsmannsoftware.com`. Its Worker may proxy only public read requests for the dataset catalog, immutable publications, immutable preview sets, and legacy modpack verification. Never proxy cookies, authorization, feedback, administration, or mutation methods.
+- After every beta deployment, verify the beta URL hydrates in a fresh browser tab, exposes the stage controls, serves a hashed application asset, and returns `X-MRT-Beta-Data-Origin: https://minecraftrecipetree.craftsmannsoftware.com` on `/api/datasets`.
+- When the user explicitly requests production promotion, promote the exact validated beta application changes while preserving the production project configuration, then run the production verification below.
 
 # Production publishing
 
