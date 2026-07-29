@@ -92,8 +92,19 @@ import {
   type GraphSession,
   type StoredGraphSelection,
 } from './graphSession';
+import {
+  deferredRecipeExpansionNodes,
+  duplicateRecipeExpansions,
+  findRecipeExpansionOwner,
+  recipeExpansionFromSource,
+  recipeExpansionIdentity,
+} from './expansionOwnership';
 import {isRecursiveItemNode, makeRoot} from './model';
-import type {ItemTreeNode, SourceTreeNode} from './model';
+import type {
+  DeferredRecipeExpansion,
+  ItemTreeNode,
+  SourceTreeNode,
+} from './model';
 import {
   buildTreeTotalsCsv,
   downloadBlob,
@@ -224,6 +235,7 @@ const COMPACT_MODE_KEY = 'graphCompactMode';
 const RADIAL_LAYOUT_KEY = 'graphRadialLayout';
 const LEGACY_PACKED_LAYOUT_KEY = 'graphPackedLayout';
 const USE_BYPRODUCTS_KEY = 'graphUseByproducts';
+const EXPAND_RECIPES_ONCE_KEY = 'graphExpandRecipesOnce';
 const MAX_RECIPE_PICKER_CHOICES = 40;
 const RECIPE_PICKER_GROUP_PAGE = 40;
 const GRAPH_EXPORT_PADDING = 48;
@@ -303,6 +315,15 @@ function loadUseByproducts(): boolean {
   }
 }
 
+function loadExpandRecipesOnce(): boolean {
+  try {
+    return globalThis.localStorage?.getItem(EXPAND_RECIPES_ONCE_KEY) === '1';
+  } catch (error) {
+    console.error('Expand-once graph preference could not be loaded from localStorage.', error);
+    return false;
+  }
+}
+
 function nodeDepthBucket(
   node: ItemTreeNode,
 ): 'root' | 'depth-1' | 'depth-2' | 'depth-3-plus' {
@@ -355,6 +376,10 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
   const [showTreeTotals, setShowTreeTotals] = useState(true);
   const [showGraphControls, setShowGraphControls] = useState(false);
   const [useByproducts, setUseByproducts] = useState(loadUseByproducts);
+  const [expandRecipesOnce, setExpandRecipesOnce] = useState(loadExpandRecipesOnce);
+  const expandRecipesOnceRef = useRef(expandRecipesOnce);
+  expandRecipesOnceRef.current = expandRecipesOnce;
+  const pendingRecipeExpansionOwnersRef = useRef(new Map<string, ItemTreeNode>());
   const [exportingTree, setExportingTree] = useState(false);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
   const [preferredSources, setPreferredSources] =
@@ -652,16 +677,65 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
     [],
   );
 
+  const applyRecipeChoice = useCallback(
+    async (node: ItemTreeNode, choice: RecipeSourceChoice): Promise<boolean> => {
+      const identity = recipeExpansionIdentity(node.key, graphDirection, choice);
+      if (expandRecipesOnceRef.current) {
+        const owner =
+          findRecipeExpansionOwner(
+            rootRef.current,
+            node.key,
+            graphDirection,
+            choice,
+            node,
+          ) ?? pendingRecipeExpansionOwnersRef.current.get(identity);
+        if (owner && owner !== node) {
+          node.source = undefined;
+          node.deferredRecipeExpansion = {
+            ref: [...choice.ref],
+            ...(choice.allowFluidTransfer ? {allowFluidTransfer: true as const} : {}),
+            ...(choice.ingredientSelections
+              ? {ingredientSelections: {...choice.ingredientSelections}}
+              : {}),
+          };
+          needsFitRef.current = true;
+          bump();
+          return true;
+        }
+      }
+
+      node.deferredRecipeExpansion = undefined;
+      pendingRecipeExpansionOwnersRef.current.set(identity, node);
+      try {
+        const expanded = await expandRecipe(node, choice.ref, {
+          allowFluidTransfer: choice.allowFluidTransfer === true,
+          ingredientSelections: choice.ingredientSelections,
+        });
+        if (!expanded) {
+          console.error('The requested recipe expansion could not claim its graph position.', {
+            nodeId: node.id,
+            itemKey: node.key,
+            recipeRef: choice.ref,
+          });
+        }
+        return expanded;
+      } finally {
+        if (pendingRecipeExpansionOwnersRef.current.get(identity) === node) {
+          pendingRecipeExpansionOwnersRef.current.delete(identity);
+        }
+      }
+    },
+    [bump, expandRecipe, graphDirection],
+  );
+
   const applyChoice = useCallback(
     (node: ItemTreeNode, choice: SourceChoice) => {
       if (blockRecursiveExpansion(node, 'apply source choice')) return;
       if (choice.t === 'recipe') {
-        void expandRecipe(node, choice.ref, {
-          allowFluidTransfer: choice.allowFluidTransfer === true,
-          ingredientSelections: choice.ingredientSelections,
-        });
+        void applyRecipeChoice(node, choice);
         return;
       }
+      node.deferredRecipeExpansion = undefined;
       const sourceId = `${node.id}.s`;
       node.source =
         choice.t === 'mob'
@@ -669,7 +743,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
           : {id: sourceId, kind: 'block', blockKey: choice.blockKey, stat: choice.stat, inputs: []};
       bump();
     },
-    [expandRecipe, bump],
+    [applyRecipeChoice, bump],
   );
   applyChoiceRef.current = applyChoice;
 
@@ -689,6 +763,18 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
             );
           }
           if (selection.source.kind === 'recipe') {
+            if (selection.deferred) {
+              node.deferredRecipeExpansion = {
+                ref: [...selection.source.ref],
+                ...(selection.source.allowFluidTransfer
+                  ? {allowFluidTransfer: true as const}
+                  : {}),
+                ...(selection.source.ingredientSelections
+                  ? {ingredientSelections: {...selection.source.ingredientSelections}}
+                  : {}),
+              };
+              continue;
+            }
             const expanded = await expandRecipe(node, selection.source.ref, {
               allowFluidTransfer: selection.source.allowFluidTransfer === true,
               ingredientSelections: selection.source.ingredientSelections,
@@ -1154,11 +1240,94 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
     [],
   );
 
+  const transferDeferredRecipeExpansion = useCallback(
+    async (node: ItemTreeNode, expansion: DeferredRecipeExpansion) => {
+      const owner = findRecipeExpansionOwner(
+        rootRef.current,
+        node.key,
+        graphDirection,
+        expansion,
+        node,
+      );
+      if (!owner) {
+        console.error('A deferred recipe node has no expanded owner; expanding it directly.', {
+          nodeId: node.id,
+          itemKey: node.key,
+          recipeRef: expansion.ref,
+        });
+        node.deferredRecipeExpansion = undefined;
+        await applyRecipeChoice(node, {t: 'recipe', ...expansion});
+        return;
+      }
+      const ownerExpansion = recipeExpansionFromSource(owner.source);
+      if (!ownerExpansion) {
+        console.error('The expanded recipe owner has no transferable recipe metadata.', {
+          ownerNodeId: owner.id,
+          targetNodeId: node.id,
+        });
+        return;
+      }
+
+      releaseByproductFulfillmentsFromSubtree(owner);
+      owner.source = undefined;
+      owner.deferredRecipeExpansion = ownerExpansion;
+      node.deferredRecipeExpansion = undefined;
+      needsFitRef.current = true;
+      bump();
+
+      const expanded = await applyRecipeChoice(node, {t: 'recipe', ...expansion});
+      if (expanded && node.source) return;
+
+      console.error('Recipe expansion ownership transfer failed; restoring the previous owner.', {
+        ownerNodeId: owner.id,
+        targetNodeId: node.id,
+        recipeRef: expansion.ref,
+      });
+      node.deferredRecipeExpansion = expansion;
+      owner.deferredRecipeExpansion = undefined;
+      const restored = await applyRecipeChoice(owner, {t: 'recipe', ...ownerExpansion});
+      if (!restored || !owner.source) {
+        console.error('The previous recipe expansion owner could not be restored.', {
+          ownerNodeId: owner.id,
+          recipeRef: ownerExpansion.ref,
+        });
+      }
+    },
+    [
+      applyRecipeChoice,
+      bump,
+      graphDirection,
+      releaseByproductFulfillmentsFromSubtree,
+    ],
+  );
+
   const onItemTap = useCallback(
     (node: ItemTreeNode) => {
       if (node.loading) return;
       if (blockRecursiveExpansion(node, 'tap graph node')) return;
+      if (node.deferredRecipeExpansion) {
+        void transferDeferredRecipeExpansion(node, node.deferredRecipeExpansion);
+        return;
+      }
       if (node.source) {
+        const collapsedExpansion = recipeExpansionFromSource(node.source);
+        if (expandRecipesOnceRef.current && collapsedExpansion) {
+          const collapsedIdentity = recipeExpansionIdentity(
+            node.key,
+            graphDirection,
+            collapsedExpansion,
+          );
+          for (const candidate of deferredRecipeExpansionNodes(rootRef.current)) {
+            const deferred = candidate.deferredRecipeExpansion;
+            if (
+              deferred &&
+              recipeExpansionIdentity(candidate.key, graphDirection, deferred) ===
+                collapsedIdentity
+            ) {
+              candidate.deferredRecipeExpansion = undefined;
+            }
+          }
+        }
         releaseByproductFulfillmentsFromSubtree(node);
         node.source = undefined;
         bump();
@@ -1183,6 +1352,8 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
       preferredSourceFor,
       applyOnlyChoiceWithErrorHandling,
       releaseByproductFulfillmentsFromSubtree,
+      transferDeferredRecipeExpansion,
+      graphDirection,
     ],
   );
 
@@ -1363,6 +1534,10 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
   const handleCollapsedIngredientTap = useCallback(
     (node: ItemTreeNode, defaultAction: () => void) => {
       if (blockRecursiveExpansion(node, 'tap collapsed ingredient')) return;
+      if (node.deferredRecipeExpansion) {
+        defaultAction();
+        return;
+      }
       const coverage = treeTotals.byproductCoverageByNode.get(node.id);
       if (!coverage) {
         defaultAction();
@@ -1562,6 +1737,42 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
       return next;
     });
   }, []);
+
+  const updateExpandRecipesOnce = useCallback(
+    (value: boolean) => {
+      expandRecipesOnceRef.current = value;
+      setExpandRecipesOnce(value);
+      needsFitRef.current = true;
+      try {
+        const storage = globalThis.localStorage;
+        if (storage) storage.setItem(EXPAND_RECIPES_ONCE_KEY, value ? '1' : '0');
+        else if (Platform.OS === 'web') {
+          console.warn('Expand-once graph mode is using memory only because localStorage is unavailable.');
+        }
+      } catch (error) {
+        console.error('Expand-once graph preference could not be saved to localStorage.', error);
+      }
+
+      if (value) {
+        const currentRoot = rootRef.current;
+        const duplicates = duplicateRecipeExpansions(currentRoot, graphDirection);
+        for (const {node, expansion} of duplicates) {
+          releaseByproductFulfillments(currentRoot, node);
+          node.source = undefined;
+          node.deferredRecipeExpansion = expansion;
+        }
+      } else {
+        for (const node of deferredRecipeExpansionNodes(rootRef.current)) {
+          const expansion = node.deferredRecipeExpansion;
+          if (!expansion) continue;
+          node.deferredRecipeExpansion = undefined;
+          void applyRecipeChoice(node, {t: 'recipe', ...expansion});
+        }
+      }
+      bump();
+    },
+    [applyRecipeChoice, bump, graphDirection],
+  );
 
   const updateUseByproducts = useCallback((value: boolean) => {
     setUseByproducts(value);
@@ -1794,12 +2005,14 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
                 isRoot={n.item.id === 'root'}
                 selectable={
                   !isRecursiveItemNode(n.item) &&
-                  (treeTotals.byproductCoverageByNode.has(n.item.id) ||
+                  (!!n.item.deferredRecipeExpansion ||
+                    treeTotals.byproductCoverageByNode.has(n.item.id) ||
                     choicesFor(n.item.key).length > 0)
                 }
                 terminal={
                   isRecursiveItemNode(n.item) ||
-                  choicesFor(n.item.key).length === 0
+                  (!n.item.deferredRecipeExpansion &&
+                    choicesFor(n.item.key).length === 0)
                 }
                 terminalLabel={
                   isRecursiveItemNode(n.item)
@@ -1812,9 +2025,12 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
                 radialRoot={radialLayout && n.item.id === 'root'}
                 branchLabel={n.compactBranch === true}
                 showLabel
+                deferredDuplicate={!!n.item.deferredRecipeExpansion}
                 onTap={() =>
                   handleCollapsedIngredientTap(n.item, () =>
-                    n.radial ? onItemTap(n.item) : openPickerWithErrorHandling(n.item),
+                    n.item.deferredRecipeExpansion || n.radial
+                      ? onItemTap(n.item)
+                      : openPickerWithErrorHandling(n.item),
                   )
                 }
               />
@@ -1829,8 +2045,10 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
                 isRoot={n.item.id === 'root'}
                 expandable={
                   !isRecursiveItemNode(n.item) &&
-                  choicesFor(n.item.key).length > 0
+                  (!!n.item.deferredRecipeExpansion ||
+                    choicesFor(n.item.key).length > 0)
                 }
+                deferredDuplicate={!!n.item.deferredRecipeExpansion}
                 terminalLabel={
                   isRecursiveItemNode(n.item)
                     ? 'recursive input, expansion disabled'
@@ -1893,6 +2111,13 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
               metricsId="graph.control.compact"
               active={compactMode}
               onPress={toggleCompactMode}
+            />
+            <CtrlBtn
+              label="Once"
+              accessibilityLabel="Expand each recipe once"
+              metricsId="graph.control.expand-once"
+              active={expandRecipesOnce}
+              onPress={() => updateExpandRecipesOnce(!expandRecipesOnce)}
             />
             <CtrlBtn label="Fit" metricsId="graph.control.fit" onPress={fitView} />
           </View>
@@ -2275,6 +2500,7 @@ function CompactItemNodeView({
   radialRoot = false,
   branchLabel = false,
   showLabel,
+  deferredDuplicate,
   onTap,
 }: {
   x: number;
@@ -2290,6 +2516,7 @@ function CompactItemNodeView({
   radialRoot?: boolean;
   branchLabel?: boolean;
   showLabel: boolean;
+  deferredDuplicate: boolean;
   onTap: () => void;
 }) {
   const data = useData();
@@ -2308,7 +2535,7 @@ function CompactItemNodeView({
     <Pressable
       {...signalTarget(`graph.node.expand.${nodeDepthBucket(node)}`)}
       accessibilityRole={selectable ? 'button' : undefined}
-      accessibilityLabel={`${name}, quantity ${formatIngredientQuantity(node.key, requiredAmount)}${terminal ? `, ${terminalLabel}` : ''}${byproductLabel ? `, ${byproductLabel}` : ''}${node.nonConsumed ? ', not consumed' : ''}${node.consumptionProbability !== undefined ? `, ${node.consumptionProbability == null ? 'unknown' : `${String(Math.round(node.consumptionProbability * 10_000) / 100)} percent`} consume chance` : ''}${node.productionProbability !== undefined ? `, ${node.productionProbability == null ? 'unknown' : `${String(Math.round(node.productionProbability * 10_000) / 100)} percent`} produce chance` : ''}${selectable ? byproductCoverage?.remainingAmount === 0 ? ', navigate to producing recipe' : ', choose source' : ''}`}
+      accessibilityLabel={`${name}, quantity ${formatIngredientQuantity(node.key, requiredAmount)}${terminal ? `, ${terminalLabel}` : ''}${deferredDuplicate ? ', recipe expanded elsewhere, tap to move expansion here' : ''}${byproductLabel ? `, ${byproductLabel}` : ''}${node.nonConsumed ? ', not consumed' : ''}${node.consumptionProbability !== undefined ? `, ${node.consumptionProbability == null ? 'unknown' : `${String(Math.round(node.consumptionProbability * 10_000) / 100)} percent`} consume chance` : ''}${node.productionProbability !== undefined ? `, ${node.productionProbability == null ? 'unknown' : `${String(Math.round(node.productionProbability * 10_000) / 100)} percent`} produce chance` : ''}${selectable && !deferredDuplicate ? byproductCoverage?.remainingAmount === 0 ? ', navigate to producing recipe' : ', choose source' : ''}`}
       disabled={!selectable || node.loading}
       onPress={onTap}
       style={[
@@ -2323,6 +2550,7 @@ function CompactItemNodeView({
         byproductCoverage &&
           byproductCoverage.remainingAmount > 0 &&
           styles.nodeByproductPartial,
+        deferredDuplicate && styles.nodeDeferredRecipe,
         isRoot && !radialRoot && styles.compactRootNode,
         radialRoot && styles.radialRootNode,
       ]}>
@@ -2375,6 +2603,7 @@ function ItemNodeView({
   byproductCoverage,
   isRoot,
   expandable,
+  deferredDuplicate,
   terminalLabel,
   onTap,
   onInfo,
@@ -2386,6 +2615,7 @@ function ItemNodeView({
   byproductCoverage?: NodeByproductCoverage;
   isRoot: boolean;
   expandable: boolean;
+  deferredDuplicate: boolean;
   terminalLabel: string;
   onTap: () => void;
   onInfo: () => void;
@@ -2398,7 +2628,9 @@ function ItemNodeView({
       ? '…'
       : byproductCoverage?.remainingAmount === 0
         ? '↗'
-        : expandable
+        : deferredDuplicate
+          ? '⇥'
+          : expandable
           ? '▸'
           : '·';
   const byproductText = byproductCoverage
@@ -2411,7 +2643,7 @@ function ItemNodeView({
       {...signalTarget(`graph.node.expand.${nodeDepthBucket(node)}`)}
       onPress={onTap}
       accessibilityRole="button"
-      accessibilityLabel={`${name}, quantity ${formatIngredientQuantity(node.key, requiredAmount)}${!expandable ? `, ${terminalLabel}` : ''}${node.productionProbability !== undefined ? `, ${node.productionProbability == null ? 'unknown' : `${String(Math.round(node.productionProbability * 10_000) / 100)} percent`} produce chance` : ''}${byproductCoverage ? byproductCoverage.remainingAmount === 0 ? ', completed by byproduct, navigate to producing recipe' : `, partially completed by byproduct, ${formatIngredientQuantity(node.key, byproductCoverage.remainingAmount)} still needed, choose source` : expandable ? ', choose source' : ''}`}
+      accessibilityLabel={`${name}, quantity ${formatIngredientQuantity(node.key, requiredAmount)}${!expandable ? `, ${terminalLabel}` : ''}${deferredDuplicate ? ', recipe expanded elsewhere, tap to move expansion here' : ''}${node.productionProbability !== undefined ? `, ${node.productionProbability == null ? 'unknown' : `${String(Math.round(node.productionProbability * 10_000) / 100)} percent`} produce chance` : ''}${byproductCoverage ? byproductCoverage.remainingAmount === 0 ? ', completed by byproduct, navigate to producing recipe' : `, partially completed by byproduct, ${formatIngredientQuantity(node.key, byproductCoverage.remainingAmount)} still needed, choose source` : expandable && !deferredDuplicate ? ', choose source' : ''}`}
       style={[
         styles.itemNode,
         {left: x, top: y, width: ITEM_W, height: ITEM_H},
@@ -2422,6 +2654,7 @@ function ItemNodeView({
         byproductCoverage &&
           byproductCoverage.remainingAmount > 0 &&
           styles.nodeByproductPartial,
+        deferredDuplicate && styles.nodeDeferredRecipe,
         isRoot && styles.nodeRoot,
       ]}>
       {isRoot ? (
@@ -2623,11 +2856,13 @@ function SourceNodeView({
 
 function CtrlBtn({
   label,
+  accessibilityLabel,
   metricsId,
   active = false,
   onPress,
 }: {
   label: string;
+  accessibilityLabel?: string;
   metricsId: string;
   active?: boolean;
   onPress: () => void;
@@ -2636,6 +2871,7 @@ function CtrlBtn({
     <TouchableOpacity
       {...signalTarget(metricsId)}
       accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
       accessibilityState={{selected: active}}
       style={[styles.ctrlBtn, active && styles.ctrlBtnActive]}
       onPress={onPress}>
@@ -2784,6 +3020,11 @@ const styles = StyleSheet.create({
   nodeByproductTarget: {
     borderColor: theme.accentAlt,
     borderWidth: 3,
+  },
+  nodeDeferredRecipe: {
+    borderColor: theme.transfer,
+    borderWidth: 2,
+    borderStyle: 'dotted',
   },
   rootItemIconFrame: {
     width: 38,

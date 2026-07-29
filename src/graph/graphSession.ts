@@ -24,6 +24,7 @@ export interface StoredGraphSelection {
   path: number[];
   itemKey: string;
   source: StoredGraphSource;
+  deferred?: true;
 }
 
 export interface GraphSession {
@@ -129,9 +130,16 @@ function requireStoredSource(value: unknown, index: number): StoredGraphSource {
 }
 
 function requireSelection(value: unknown, index: number): StoredGraphSelection {
+  const expectedKeys = [
+    ...(value && typeof value === 'object' && 'deferred' in value ? ['deferred'] : []),
+    'itemKey',
+    'path',
+    'source',
+  ];
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, ['itemKey', 'path', 'source']) ||
+    !hasExactKeys(value, expectedKeys) ||
+    (value.deferred !== undefined && value.deferred !== true) ||
     !isBoundedString(value.itemKey, MAX_ITEM_KEY_LENGTH) ||
     !Array.isArray(value.path) ||
     value.path.length > MAX_TREE_DEPTH ||
@@ -139,10 +147,15 @@ function requireSelection(value: unknown, index: number): StoredGraphSelection {
   ) {
     throw new Error(`Graph selection ${index} does not satisfy the storage contract.`);
   }
+  const source = requireStoredSource(value.source, index);
+  if (value.deferred === true && source.kind !== 'recipe') {
+    throw new Error(`Graph selection ${index} defers a non-recipe source.`);
+  }
   return {
     path: [...value.path] as number[],
     itemKey: value.itemKey,
-    source: requireStoredSource(value.source, index),
+    source,
+    ...(value.deferred === true ? {deferred: true as const} : {}),
   };
 }
 
@@ -161,21 +174,27 @@ export function parseGraphSession(raw: string): GraphSession {
   }
   const selections = parsed.selections.map(requireSelection);
   const expandedPaths = new Set<string>();
+  const selectedPaths = new Set<string>();
   for (let index = 0; index < selections.length; index += 1) {
-    const path = selections[index].path;
+    const selection = selections[index];
+    const path = selection.path;
     const pathKey = path.join('.');
-    if (expandedPaths.has(pathKey)) {
-      throw new Error(`Graph selection ${index} repeats an expanded node path.`);
+    if (selectedPaths.has(pathKey)) {
+      throw new Error(`Graph selection ${index} repeats a selected node path.`);
     }
+    selectedPaths.add(pathKey);
     if (path.length > 0) {
       const parentKey = path.slice(0, -1).join('.');
       if (!expandedPaths.has(parentKey)) {
         throw new Error(`Graph selection ${index} has no previously expanded parent.`);
       }
     }
-    expandedPaths.add(pathKey);
+    if (!selection.deferred) expandedPaths.add(pathKey);
     if (index === 0 && path.length !== 0) {
       throw new Error(`Graph selection ${index} has no expanded parent.`);
+    }
+    if (index === 0 && selection.deferred) {
+      throw new Error('The graph root cannot be a deferred recipe expansion.');
     }
   }
   return {
@@ -212,10 +231,37 @@ export function serializeGraphSession(root: ItemTreeNode, direction: GraphDirect
   }
   const selections: StoredGraphSelection[] = [];
   const visit = (node: ItemTreeNode, path: number[]) => {
-    if (!node.source) return;
     if (path.length > MAX_TREE_DEPTH) {
       throw new Error(`The graph exceeds the persisted depth limit of ${MAX_TREE_DEPTH}.`);
     }
+    if (node.deferredRecipeExpansion) {
+      selections.push({
+        path,
+        itemKey: node.key,
+        source: {
+          kind: 'recipe',
+          ref: [...node.deferredRecipeExpansion.ref],
+          ...(node.deferredRecipeExpansion.allowFluidTransfer
+            ? {allowFluidTransfer: true as const}
+            : {}),
+          ...(node.deferredRecipeExpansion.ingredientSelections
+            ? {
+                ingredientSelections: {
+                  ...node.deferredRecipeExpansion.ingredientSelections,
+                },
+              }
+            : {}),
+        },
+        deferred: true,
+      });
+      if (selections.length > MAX_GRAPH_SESSION_SELECTIONS) {
+        throw new Error(
+          `The graph exceeds the persisted expansion limit of ${MAX_GRAPH_SESSION_SELECTIONS}.`,
+        );
+      }
+      return;
+    }
+    if (!node.source) return;
     selections.push({path, itemKey: node.key, source: storedSourceFromNode(node.source)});
     if (selections.length > MAX_GRAPH_SESSION_SELECTIONS) {
       throw new Error(

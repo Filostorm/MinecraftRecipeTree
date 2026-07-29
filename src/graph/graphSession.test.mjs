@@ -99,6 +99,42 @@ test('parses a validated output-directed saved graph', () => {
   assert.deepEqual(parseGraphSession(JSON.stringify(session)), session);
 });
 
+test('persists a deferred duplicate recipe without expanding its descendants', () => {
+  const root = {
+    id: 'root',
+    key: 'item|example:machine',
+    ancestors: [],
+    source: {
+      id: 'root.s',
+      kind: 'recipe',
+      ref: [2, 4],
+      inputs: [
+        {
+          id: 'root.s.0',
+          key: 'item|example:shared',
+          ancestors: ['item|example:machine'],
+          deferredRecipeExpansion: {
+            ref: [5, 6],
+            ingredientSelections: {'item|example:tag': 'item|example:member'},
+          },
+        },
+      ],
+    },
+  };
+  const session = serializeGraphSession(root, 'inputs');
+  assert.deepEqual(session.selections[1], {
+    path: [0],
+    itemKey: 'item|example:shared',
+    source: {
+      kind: 'recipe',
+      ref: [5, 6],
+      ingredientSelections: {'item|example:tag': 'item|example:member'},
+    },
+    deferred: true,
+  });
+  assert.deepEqual(parseGraphSession(JSON.stringify(session)), session);
+});
+
 test('rejects malformed, duplicated, and orphaned expansion paths', () => {
   assert.throws(
     () => parseGraphSession('{"version":1,"rootKey":"x","direction":"inputs","selections":{} }'),
@@ -119,7 +155,7 @@ test('rejects malformed, duplicated, and orphaned expansion paths', () => {
           selections: [root, root],
         }),
       ),
-    /repeats an expanded node path/,
+    /repeats a selected node path/,
   );
   assert.throws(
     () =>
@@ -132,5 +168,51 @@ test('rejects malformed, duplicated, and orphaned expansion paths', () => {
         }),
       ),
     /expanded parent/,
+  );
+});
+
+test('rejects a deferred root or descendants beneath a deferred recipe', () => {
+  const root = {
+    path: [],
+    itemKey: 'item|example:root',
+    source: {kind: 'recipe', ref: [0, 0]},
+    deferred: true,
+  };
+  assert.throws(
+    () =>
+      parseGraphSession(
+        JSON.stringify({
+          version: 1,
+          rootKey: 'item|example:root',
+          direction: 'inputs',
+          selections: [root],
+        }),
+      ),
+    /root cannot be a deferred/,
+  );
+  assert.throws(
+    () =>
+      parseGraphSession(
+        JSON.stringify({
+          version: 1,
+          rootKey: 'item|example:root',
+          direction: 'inputs',
+          selections: [
+            {...root, deferred: undefined},
+            {
+              path: [0],
+              itemKey: 'item|example:shared',
+              source: {kind: 'recipe', ref: [1, 1]},
+              deferred: true,
+            },
+            {
+              path: [0, 0],
+              itemKey: 'item|example:child',
+              source: {kind: 'recipe', ref: [2, 2]},
+            },
+          ],
+        }),
+      ),
+    /storage contract|expanded parent/,
   );
 });

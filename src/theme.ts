@@ -8,6 +8,7 @@ export const theme = {
   textDim: '#8b97a8',
   accent: '#58c47b', // minecraft-grass green
   accentAlt: '#5aa7fa',
+  transfer: '#4ecdc4',
   radialRoot: '#c69cff',
   radialRootPanel: '#352448',
   warn: '#e0b341',

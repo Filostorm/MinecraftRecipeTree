@@ -24,9 +24,20 @@ const controls = [
     title: 'Swap recipe  ⇄',
     description: 'Choose a different source for an expanded item.',
   },
+  {
+    title: 'Expand once',
+    description:
+      'Keep one expanded occurrence of each recipe. Tap a deferred duplicate to move the expansion there.',
+  },
 ] as const;
 
-type KeyVariant = 'root' | 'terminal' | 'recursive' | 'complete' | 'partial';
+type KeyVariant =
+  | 'root'
+  | 'terminal'
+  | 'recursive'
+  | 'transfer'
+  | 'complete'
+  | 'partial';
 const visualKey: ReadonlyArray<{
   variant: KeyVariant;
   title: string;
@@ -46,6 +57,11 @@ const visualKey: ReadonlyArray<{
     variant: 'recursive',
     title: 'Amber outline',
     description: 'A recursive input.',
+  },
+  {
+    variant: 'transfer',
+    title: 'Dotted teal outline',
+    description: 'This recipe is expanded elsewhere. Tap to move the expansion to this node.',
   },
   {
     variant: 'complete',
@@ -108,6 +124,7 @@ export function GraphGuideModal({
                         entry.variant === 'root' && styles.swatchRoot,
                         entry.variant === 'terminal' && styles.swatchTerminal,
                         entry.variant === 'recursive' && styles.swatchRecursive,
+                        entry.variant === 'transfer' && styles.swatchTransfer,
                         entry.variant === 'complete' && styles.swatchComplete,
                         entry.variant === 'partial' && styles.swatchPartial,
                       ]}
@@ -227,6 +244,7 @@ const styles = StyleSheet.create({
   },
   swatchTerminal: {borderColor: theme.textDim},
   swatchRecursive: {borderColor: theme.warn},
+  swatchTransfer: {borderColor: theme.transfer, borderStyle: 'dotted'},
   swatchComplete: {borderColor: theme.accentAlt},
   swatchPartial: {borderColor: theme.accentAlt, borderStyle: 'dashed'},
   keyCopy: {flex: 1, minWidth: 0},

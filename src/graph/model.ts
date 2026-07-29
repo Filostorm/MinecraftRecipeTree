@@ -20,6 +20,12 @@ export interface ByproductFulfillment {
   allocations: ByproductAllocation[];
 }
 
+export interface DeferredRecipeExpansion {
+  ref: RecipeRef;
+  allowFluidTransfer?: true;
+  ingredientSelections?: IngredientSelections;
+}
+
 export interface SourceTreeNode {
   id: string;
   kind: SourceKind;
@@ -72,6 +78,8 @@ export interface ItemTreeNode {
   loading?: boolean;
   /** The chosen way to obtain this item; set = expanded */
   source?: SourceTreeNode;
+  /** Recipe expansion held by another occurrence while expand-once mode is active. */
+  deferredRecipeExpansion?: DeferredRecipeExpansion;
 }
 
 export function makeRoot(key: string): ItemTreeNode {
