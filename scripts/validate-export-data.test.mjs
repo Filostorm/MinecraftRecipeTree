@@ -7,13 +7,19 @@ import sharp from 'sharp';
 import {
   configureMultiblockExportFixture,
   createRawExportFixture,
+  multiblockMadness2Warnings,
   readJson,
   writeJson,
   writeTransparentImage,
   writeUniformVisibleImage,
 } from './test-export-fixture.mjs';
 import {validateExportData} from './validate-export-data.mjs';
-import {MULTIBLOCK_MADNESS_112_PROFILE} from './export-quality-policy.mjs';
+import {
+  MULTIBLOCK_MADNESS_112_PROFILE,
+  MULTIBLOCK_MADNESS_2_118_CATEGORICAL_WARNINGS,
+  MULTIBLOCK_MADNESS_2_118_ICON_OMISSION_IDS,
+  MULTIBLOCK_MADNESS_2_118_PROFILE,
+} from './export-quality-policy.mjs';
 import {createRecipeImageInventory} from './recipe-image-inventory.mjs';
 import {
   GTNH_RECIPE_IMAGE_OMISSION_REASON,
@@ -247,6 +253,126 @@ test('MM1 validation requires and reconciles the complete warnings.json audit', 
       }),
       /requires warnings\.json to contain an array/,
     );
+  } finally {
+    await rm(root, {recursive: true, force: true});
+  }
+});
+
+test('MM2 validation permits isolated magenta but rejects both canonical missingno phases', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'recipe-tree-mm2-icon-quality-test-'));
+  try {
+    await createRawExportFixture(root, {iconScale: 3, recipeScale: 2});
+    const manifest = await configureMultiblockExportFixture(
+      root,
+      MULTIBLOCK_MADNESS_2_118_PROFILE,
+    );
+
+    const summary = await validateExportData(root, {
+      assetMode: 'raw',
+      profile: MULTIBLOCK_MADNESS_2_118_PROFILE,
+    });
+    assert.equal(summary.items, 1 + MULTIBLOCK_MADNESS_2_118_ICON_OMISSION_IDS.length);
+    assert.equal(
+      summary.warnings,
+      MULTIBLOCK_MADNESS_2_118_ICON_OMISSION_IDS.length +
+        MULTIBLOCK_MADNESS_2_118_CATEGORICAL_WARNINGS.length,
+    );
+
+    manifest.counts.nativeIconCorrections = 2;
+    manifest.diagnostics.nativeIconCorrections = 2;
+    await writeJson(join(root, 'manifest.json'), manifest);
+    const mixedCorrectionWarnings = multiblockMadness2Warnings(2);
+    await writeJson(join(root, 'warnings.json'), mixedCorrectionWarnings);
+    const mixedCorrectionSummary = await validateExportData(root, {
+      assetMode: 'raw',
+      profile: MULTIBLOCK_MADNESS_2_118_PROFILE,
+    });
+    assert.equal(
+      mixedCorrectionSummary.warnings,
+      MULTIBLOCK_MADNESS_2_118_ICON_OMISSION_IDS.length +
+        MULTIBLOCK_MADNESS_2_118_CATEGORICAL_WARNINGS.length +
+        2,
+    );
+
+    await writeJson(join(root, 'warnings.json'), [
+      ...mixedCorrectionWarnings.slice(0, -1),
+      'Canonicalized animated native REI catalog icon to its first declared frame: ' +
+        'entry=fixture:near_miss',
+    ]);
+    await assert.rejects(
+      validateExportData(root, {
+        assetMode: 'raw',
+        profile: MULTIBLOCK_MADNESS_2_118_PROFILE,
+      }),
+      /unrecognized warning class/,
+    );
+    await writeJson(join(root, 'warnings.json'), mixedCorrectionWarnings);
+
+    const iconSize = 48;
+    const isolatedMagenta = Buffer.alloc(iconSize * iconSize * 4);
+    for (let offset = 0; offset < isolatedMagenta.length; offset += 4) {
+      isolatedMagenta[offset] = 24;
+      isolatedMagenta[offset + 1] = 48;
+      isolatedMagenta[offset + 2] = 72;
+      isolatedMagenta[offset + 3] = 255;
+    }
+    for (const pixelIndex of [0, (iconSize * iconSize) / 2, iconSize * iconSize - 1]) {
+      const offset = pixelIndex * 4;
+      isolatedMagenta[offset] = 248;
+      isolatedMagenta[offset + 1] = 0;
+      isolatedMagenta[offset + 2] = 248;
+    }
+    await sharp(isolatedMagenta, {
+      raw: {width: iconSize, height: iconSize, channels: 4},
+    })
+      .png()
+      .toFile(join(root, 'icons', 'stone.png'));
+    const isolatedSummary = await validateExportData(root, {
+      assetMode: 'raw',
+      profile: MULTIBLOCK_MADNESS_2_118_PROFILE,
+    });
+    assert.equal(
+      isolatedSummary.items,
+      1 + MULTIBLOCK_MADNESS_2_118_ICON_OMISSION_IDS.length,
+    );
+
+    for (const [inverted, expectedRgbaSha256] of [
+      [false, '386c06ecfb9a401bf0abe1d92a04a23a06a424dd39e33df2c7dcae19bc6ec31a'],
+      [true, '1e76e32423f2e15298af791e370c640b8e62dd7e36efc1cee260ba1430432b44'],
+    ]) {
+      const missingno = Buffer.alloc(iconSize * iconSize * 4);
+      for (let y = 0; y < iconSize; y += 1) {
+        for (let x = 0; x < iconSize; x += 1) {
+          const offset = (y * iconSize + x) * 4;
+          const magenta =
+            ((x < iconSize / 2) !== (y < iconSize / 2)) !== inverted;
+          missingno[offset] = magenta ? 248 : 0;
+          missingno[offset + 1] = 0;
+          missingno[offset + 2] = magenta ? 248 : 0;
+          missingno[offset + 3] = 255;
+        }
+      }
+      await sharp(missingno, {
+        raw: {width: iconSize, height: iconSize, channels: 4},
+      })
+        .png()
+        .toFile(join(root, 'icons', 'stone.png'));
+      await assert.rejects(
+        validateExportData(root, {
+          assetMode: 'raw',
+          profile: MULTIBLOCK_MADNESS_2_118_PROFILE,
+        }),
+        error => {
+          assert.match(error.message, /canonical Minecraft missing-texture signature/);
+          assert.match(error.message, new RegExp(`decoded RGBA SHA-256 ${expectedRgbaSha256}`));
+          assert.match(
+            error.message,
+            /exact black\/magenta checker scaled from 8×8 source quadrants/,
+          );
+          return true;
+        },
+      );
+    }
   } finally {
     await rm(root, {recursive: true, force: true});
   }

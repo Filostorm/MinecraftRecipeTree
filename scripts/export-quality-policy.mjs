@@ -1,3 +1,4 @@
+import {isDeepStrictEqual} from 'node:util';
 import {isRecord} from './export-data-utils.mjs';
 import {requirePackIdentity} from './pack-identity.mjs';
 
@@ -15,6 +16,185 @@ export const MULTIBLOCK_MADNESS_112_WARNING_PREFIXES = Object.freeze([
   'NATIVE_ICON_OVERSCAN_RECOVERY_APPLIED',
   'UPSTREAM_NATIVE_ICON_UNAVAILABLE',
 ]);
+
+export const MULTIBLOCK_MADNESS_2_118_ICON_OMISSION_WARNING_PREFIX =
+  'UPSTREAM_NATIVE_ICON_UNAVAILABLE ';
+
+export const MULTIBLOCK_MADNESS_2_118_ICON_CORRECTION_WARNING_PREFIXES = Object.freeze([
+  'Corrected transparent or quantity-clipped native REI catalog icon:',
+  'Canonicalized animated native REI catalog icon to its first physical source keyframe:',
+]);
+
+export const MULTIBLOCK_MADNESS_2_118_CATEGORICAL_WARNING_PREFIX =
+  'CATEGORICAL_UNIT_CARDINALITY ';
+
+export const MULTIBLOCK_MADNESS_2_118_CATEGORICAL_WARNINGS = Object.freeze(
+  [
+    [
+      'tconstruct:jei_plugin_jei_compat_pattern',
+      'slimeknights.tconstruct.library.recipe.partbuilder.Pattern',
+    ],
+    [
+      'tconstruct:jei_plugin_jei_compat_modifierentry',
+      'slimeknights.tconstruct.library.modifiers.ModifierEntry',
+    ],
+    ['tconstruct:jei_plugin_jei_compat_entitytype', 'net.minecraft.world.entity.EntityType'],
+    [
+      'jeed:jei_plugin_jei_compat_mobeffectinstance',
+      'net.minecraft.world.effect.MobEffectInstance',
+    ],
+    [
+      'spirit:jei_jei_compat_entityingredient',
+      'me.codexadrian.spirit.compat.jei.ingredients.EntityIngredient',
+    ],
+  ]
+    .map(
+      ([typeId, valueClass]) =>
+        `CATEGORICAL_UNIT_CARDINALITY typeId=${typeId} valueClass=${valueClass} ` +
+        'amount=1 semantics=identity-membership; exact categorical pair has no upstream ' +
+        'stack quantity',
+    )
+    .sort(),
+);
+
+export const MULTIBLOCK_MADNESS_2_118_WARNING_PREFIXES = Object.freeze([
+  MULTIBLOCK_MADNESS_2_118_ICON_OMISSION_WARNING_PREFIX,
+  ...MULTIBLOCK_MADNESS_2_118_ICON_CORRECTION_WARNING_PREFIXES,
+  MULTIBLOCK_MADNESS_2_118_CATEGORICAL_WARNING_PREFIX,
+]);
+
+export const MULTIBLOCK_MADNESS_2_118_ICON_OMISSIONS = Object.freeze([
+  Object.freeze({
+    id: 'ae2:cable_bus',
+    type: 'minecraft:item',
+    valueClass: 'net.minecraft.world.item.ItemStack',
+    itemClass: 'appeng.block.AEBaseBlockItem',
+    blockClass: 'appeng.block.networking.CableBusBlock',
+  }),
+  Object.freeze({
+    id: 'ae2:matrix_frame',
+    type: 'minecraft:item',
+    valueClass: 'net.minecraft.world.item.ItemStack',
+    itemClass: 'appeng.block.AEBaseBlockItem',
+    blockClass: 'appeng.block.spatial.MatrixFrameBlock',
+  }),
+  Object.freeze({
+    id: 'ae2:paint',
+    type: 'minecraft:item',
+    valueClass: 'net.minecraft.world.item.ItemStack',
+    itemClass: 'appeng.block.AEBaseBlockItem',
+    blockClass: 'appeng.block.paint.PaintSplotchesBlock',
+  }),
+  Object.freeze({
+    id: 'ars_nouveau:debug',
+    type: 'minecraft:item',
+    valueClass: 'net.minecraft.world.item.ItemStack',
+    itemClass: 'com.hollingsworth.arsnouveau.common.items.Debug',
+    blockClass: null,
+  }),
+  Object.freeze({
+    id: 'ars_nouveau:light_block',
+    type: 'minecraft:item',
+    valueClass: 'net.minecraft.world.item.ItemStack',
+    itemClass: 'net.minecraft.world.item.BlockItem',
+    blockClass: 'com.hollingsworth.arsnouveau.common.block.LightBlock',
+  }),
+  Object.freeze({
+    id: 'ars_nouveau:portal',
+    type: 'minecraft:item',
+    valueClass: 'net.minecraft.world.item.ItemStack',
+    itemClass: 'net.minecraft.world.item.BlockItem',
+    blockClass: 'com.hollingsworth.arsnouveau.common.block.PortalBlock',
+  }),
+  Object.freeze({
+    id: 'integrateddynamics:block_liquid_chorus',
+    type: 'minecraft:item',
+    valueClass: 'net.minecraft.world.item.ItemStack',
+    itemClass: 'net.minecraft.world.item.BlockItem',
+    blockClass: 'org.cyclops.integrateddynamics.block.BlockFluidLiquidChorus',
+  }),
+  Object.freeze({
+    id: 'integrateddynamics:block_menril_resin',
+    type: 'minecraft:item',
+    valueClass: 'net.minecraft.world.item.ItemStack',
+    itemClass: 'net.minecraft.world.item.BlockItem',
+    blockClass: 'org.cyclops.integrateddynamics.block.BlockFluidMenrilResin',
+  }),
+  Object.freeze({
+    id: 'integrateddynamics:invisible_light',
+    type: 'minecraft:item',
+    valueClass: 'net.minecraft.world.item.ItemStack',
+    itemClass: 'net.minecraft.world.item.BlockItem',
+    blockClass: 'org.cyclops.integrateddynamics.block.BlockInvisibleLight',
+  }),
+  Object.freeze({
+    id: 'mcjtylib:multipart',
+    type: 'minecraft:item',
+    valueClass: 'net.minecraft.world.item.ItemStack',
+    itemClass: 'mcjty.lib.multipart.MultipartItemBlock',
+    blockClass: 'mcjty.lib.multipart.MultipartBlock',
+  }),
+  Object.freeze({
+    id: 'mekanism:bounding_block',
+    type: 'minecraft:item',
+    valueClass: 'net.minecraft.world.item.ItemStack',
+    itemClass: 'net.minecraft.world.item.BlockItem',
+    blockClass: 'mekanism.common.block.BlockBounding',
+  }),
+  Object.freeze({
+    id: 'mininggadgets:minerslight',
+    type: 'minecraft:item',
+    valueClass: 'net.minecraft.world.item.ItemStack',
+    itemClass: 'net.minecraft.world.item.BlockItem',
+    blockClass: 'com.direwolf20.mininggadgets.common.blocks.MinersLight',
+  }),
+  Object.freeze({
+    id: 'multiblocked:dummy_component',
+    type: 'minecraft:item',
+    valueClass: 'net.minecraft.world.item.ItemStack',
+    itemClass: 'com.lowdragmc.multiblocked.api.block.ItemComponent',
+    blockClass: 'com.lowdragmc.multiblocked.api.block.BlockComponent',
+  }),
+  Object.freeze({
+    id: 'multiblocked:symbol',
+    type: 'minecraft:item',
+    valueClass: 'net.minecraft.world.item.ItemStack',
+    itemClass: 'com.lowdragmc.multiblocked.api.block.ItemComponent',
+    blockClass: 'com.lowdragmc.multiblocked.api.block.BlockComponent',
+  }),
+  Object.freeze({
+    id: 'reliquary:cure',
+    type: 'jeed:jei_plugin_jei_compat_mobeffectinstance',
+    valueClass: 'net.minecraft.world.effect.MobEffectInstance',
+    itemClass: null,
+    blockClass: null,
+  }),
+  Object.freeze({
+    id: 'reliquary:pacification',
+    type: 'jeed:jei_plugin_jei_compat_mobeffectinstance',
+    valueClass: 'net.minecraft.world.effect.MobEffectInstance',
+    itemClass: null,
+    blockClass: null,
+  }),
+]);
+
+export const MULTIBLOCK_MADNESS_2_118_ICON_OMISSION_IDS = Object.freeze(
+  MULTIBLOCK_MADNESS_2_118_ICON_OMISSIONS.map(({id}) => id),
+);
+
+export function collectIconlessItemIds(itemsDocument, label = 'items.json') {
+  if (!isRecord(itemsDocument) || !Array.isArray(itemsDocument.items)) {
+    throw new Error(`${label} must contain an object with an items array.`);
+  }
+  const iconless = [];
+  for (const [index, item] of itemsDocument.items.entries()) {
+    if (!isRecord(item) || typeof item.id !== 'string' || item.id.length === 0) {
+      throw new Error(`${label}.items[${index}] must contain a non-empty string id.`);
+    }
+    if (item.icon === undefined) iconless.push(item.id);
+  }
+  return iconless;
+}
 
 export const GTNH_NEI_DIAGNOSTIC_KEYS = Object.freeze([
   'itemListLoaded',
@@ -901,7 +1081,7 @@ export function gtnhManifestQualityIssues(manifest, label = 'GT New Horizons') {
  * explicit pack exporter contracts that generic datasets do not share.
  */
 export function exportQualityIssues(
-  {manifest, failures, warnings, semanticErrorRecipes = 0},
+  {manifest, failures, warnings, iconlessItemIds, semanticErrorRecipes = 0},
   profile,
 ) {
   const resolvedProfile = resolveQualityProfile(profile);
@@ -1079,6 +1259,173 @@ export function exportQualityIssues(
           `${label} warnings.json[${unknownWarningIndex}] has an unrecognized warning class: ` +
             `${JSON.stringify(warnings[unknownWarningIndex])}. Allowed prefixes: ` +
             `${MULTIBLOCK_MADNESS_112_WARNING_PREFIXES.join(', ')}.`,
+        );
+      }
+    }
+  }
+
+  if (resolvedProfile === MULTIBLOCK_MADNESS_2_118_PROFILE) {
+    if (!Array.isArray(warnings)) {
+      issues.push(`${label} requires warnings.json to contain an array.`);
+    } else {
+      const malformedWarningIndex = warnings.findIndex(
+        warning => typeof warning !== 'string' || warning.trim().length === 0,
+      );
+      if (malformedWarningIndex >= 0) {
+        issues.push(
+          `${label} warnings.json[${malformedWarningIndex}] must be a non-empty string.`,
+        );
+      }
+      const unknownWarningIndex = warnings.findIndex(
+        warning =>
+          typeof warning === 'string' &&
+          !MULTIBLOCK_MADNESS_2_118_WARNING_PREFIXES.some(prefix =>
+            warning.startsWith(prefix),
+          ),
+      );
+      if (unknownWarningIndex >= 0) {
+        issues.push(
+          `${label} warnings.json[${unknownWarningIndex}] has an unrecognized warning class: ` +
+            `${JSON.stringify(warnings[unknownWarningIndex])}. Allowed prefixes: ` +
+            `${MULTIBLOCK_MADNESS_2_118_WARNING_PREFIXES.join(', ')}.`,
+        );
+      }
+
+      const correctionWarnings = warnings.filter(
+        warning =>
+          typeof warning === 'string' &&
+          MULTIBLOCK_MADNESS_2_118_ICON_CORRECTION_WARNING_PREFIXES.some(prefix =>
+            warning.startsWith(prefix),
+          ),
+      );
+      if (
+        isNonNegativeSafeInteger(manifest?.diagnostics?.nativeIconCorrections) &&
+        correctionWarnings.length !== manifest.diagnostics.nativeIconCorrections
+      ) {
+        issues.push(
+          `${label} diagnostics.nativeIconCorrections ` +
+            `(${manifest.diagnostics.nativeIconCorrections}) must equal the number of ` +
+            `native-icon correction warnings (${correctionWarnings.length}).`,
+        );
+      }
+
+      const categoricalWarnings = warnings.filter(
+        warning =>
+          typeof warning === 'string' &&
+          warning.startsWith(MULTIBLOCK_MADNESS_2_118_CATEGORICAL_WARNING_PREFIX),
+      );
+      const auditedCategoricalWarnings = new Set(
+        MULTIBLOCK_MADNESS_2_118_CATEGORICAL_WARNINGS,
+      );
+      const unknownCategoricalWarning = categoricalWarnings.find(
+        warning => !auditedCategoricalWarnings.has(warning),
+      );
+      if (unknownCategoricalWarning !== undefined) {
+        issues.push(
+          `${label} categorical warning must exactly match one of the five audited ` +
+            `type/value-class unit-cardinality contracts; received ` +
+            `${JSON.stringify(unknownCategoricalWarning)}.`,
+        );
+      }
+      if (new Set(categoricalWarnings).size !== categoricalWarnings.length) {
+        issues.push(
+          `${label} categorical warnings must contain each exact type/value-class pair at ` +
+            `most once; duplicate warning detected.`,
+        );
+      }
+      if (
+        !Object.prototype.hasOwnProperty.call(manifest ?? {}, 'qualitySample') &&
+        !isDeepStrictEqual(
+          [...categoricalWarnings].sort(),
+          MULTIBLOCK_MADNESS_2_118_CATEGORICAL_WARNINGS,
+        )
+      ) {
+        issues.push(
+          `${label} full export must contain all five exact categorical unit-cardinality ` +
+            `warnings once each; received ${categoricalWarnings.length}.`,
+        );
+      }
+
+      const omissionWarningIdentities = [];
+      for (const warning of warnings) {
+        if (
+          typeof warning !== 'string' ||
+          !warning.startsWith(MULTIBLOCK_MADNESS_2_118_ICON_OMISSION_WARNING_PREFIX)
+        ) {
+          continue;
+        }
+        const match =
+          /^UPSTREAM_NATIVE_ICON_UNAVAILABLE id=([^ ]+) type=([^ ]+) valueClass=([^ ]+) itemClass=([^ ]+) blockClass=([^ ]+) visiblePixels=0 contract=(.+); exact native 16x16 render has zero visible pixels; omitted PNG\/icon field; named UI fallback used$/.exec(
+            warning,
+          );
+        if (match === null) {
+          issues.push(
+            `${label} native-icon omission warning does not contain its exact audited ` +
+              `type/id/value/item/block identity and zero-alpha evidence: ` +
+              `${JSON.stringify(warning)}.`,
+          );
+        } else {
+          omissionWarningIdentities.push({
+            id: match[1],
+            type: match[2],
+            valueClass: match[3],
+            itemClass: match[4] === '<none>' ? null : match[4],
+            blockClass: match[5] === '<none>' ? null : match[5],
+          });
+        }
+      }
+      omissionWarningIdentities.sort((left, right) => left.id.localeCompare(right.id));
+      if (
+        !isDeepStrictEqual(
+          omissionWarningIdentities,
+          MULTIBLOCK_MADNESS_2_118_ICON_OMISSIONS,
+        )
+      ) {
+        issues.push(
+          `${label} native-icon omission warnings must contain the exact 16 audited ` +
+            `type/id/value/item/block identities; received ids ` +
+            `${omissionWarningIdentities.map(({id}) => id).join(', ') || '(none)'}.`,
+        );
+      }
+      if (
+        isNonNegativeSafeInteger(manifest?.diagnostics?.nativeIconCorrections) &&
+        warnings.length !==
+          manifest.diagnostics.nativeIconCorrections +
+            MULTIBLOCK_MADNESS_2_118_ICON_OMISSION_IDS.length +
+            categoricalWarnings.length
+      ) {
+        issues.push(
+          `${label} warnings.json must contain exactly ` +
+            `${MULTIBLOCK_MADNESS_2_118_ICON_OMISSION_IDS.length} audited omission warnings plus ` +
+            `diagnostics.nativeIconCorrections and the applicable exact categorical warnings; ` +
+            `expected ` +
+            `${
+              manifest.diagnostics.nativeIconCorrections +
+              MULTIBLOCK_MADNESS_2_118_ICON_OMISSION_IDS.length +
+              categoricalWarnings.length
+            }, ` +
+            `received ${warnings.length}.`,
+        );
+      }
+    }
+
+    if (!Array.isArray(iconlessItemIds)) {
+      issues.push(`${label} requires the complete iconless item-id inventory.`);
+    } else {
+      const malformedIconlessIndex = iconlessItemIds.findIndex(
+        id => typeof id !== 'string' || id.length === 0,
+      );
+      if (malformedIconlessIndex >= 0) {
+        issues.push(
+          `${label} iconless item id ${malformedIconlessIndex} must be a non-empty string.`,
+        );
+      }
+      const sortedIconlessItemIds = [...iconlessItemIds].sort();
+      if (!isDeepStrictEqual(sortedIconlessItemIds, MULTIBLOCK_MADNESS_2_118_ICON_OMISSION_IDS)) {
+        issues.push(
+          `${label} iconless items must be exactly ` +
+            `${MULTIBLOCK_MADNESS_2_118_ICON_OMISSION_IDS.join(', ')}; received ` +
+            `${sortedIconlessItemIds.join(', ') || '(none)'}.`,
         );
       }
     }

@@ -14,6 +14,12 @@ import {
   MULTIBLOCK_MADNESS_112_PROFILE,
   MULTIBLOCK_MADNESS_112_WARNING_PREFIXES,
   MULTIBLOCK_MADNESS_2_118_PROFILE,
+  MULTIBLOCK_MADNESS_2_118_CATEGORICAL_WARNING_PREFIX,
+  MULTIBLOCK_MADNESS_2_118_CATEGORICAL_WARNINGS,
+  MULTIBLOCK_MADNESS_2_118_ICON_CORRECTION_WARNING_PREFIXES,
+  MULTIBLOCK_MADNESS_2_118_ICON_OMISSION_IDS,
+  MULTIBLOCK_MADNESS_2_118_ICON_OMISSIONS,
+  MULTIBLOCK_MADNESS_2_118_WARNING_PREFIXES,
   qualityProfileRequirementsFor,
   resolveQualityProfile,
 } from './export-quality-policy.mjs';
@@ -25,6 +31,31 @@ const validManifest = {
   settings: {iconScale: 3, recipeScale: 2},
   diagnostics: {failureEvents: 2, failureEventsOmitted: 0},
 };
+
+function validMm2Warnings(
+  nativeIconCorrections = 2,
+  categoricalWarnings = MULTIBLOCK_MADNESS_2_118_CATEGORICAL_WARNINGS,
+) {
+  return [
+    ...MULTIBLOCK_MADNESS_2_118_ICON_OMISSIONS.map(
+      ({id, type, valueClass, itemClass, blockClass}) =>
+        `UPSTREAM_NATIVE_ICON_UNAVAILABLE id=${id} type=${type} ` +
+        `valueClass=${valueClass} itemClass=${itemClass ?? '<none>'} ` +
+        `blockClass=${blockClass ?? '<none>'} visiblePixels=0 ` +
+        'contract=audited fixture omission; exact native 16x16 render has zero visible ' +
+        'pixels; omitted PNG/icon field; named UI fallback used',
+    ),
+    ...Array.from(
+      {length: nativeIconCorrections},
+      (_, index) =>
+        `${MULTIBLOCK_MADNESS_2_118_ICON_CORRECTION_WARNING_PREFIXES[
+          index % MULTIBLOCK_MADNESS_2_118_ICON_CORRECTION_WARNING_PREFIXES.length
+        ]} ` +
+        `entry=fixture:corrected_${index}`,
+    ),
+    ...categoricalWarnings,
+  ];
+}
 
 test('accepts the exact MeatballCraft 1.12.2 exporter contract', () => {
   assert.deepEqual(
@@ -1359,7 +1390,12 @@ test('accepts dynamic complete Multiblock Madness profiles only at 48px icons an
             diagnostics,
           },
           failures: [],
-          ...(profile === MULTIBLOCK_MADNESS_112_PROFILE ? {warnings: []} : {}),
+          ...(profile === MULTIBLOCK_MADNESS_112_PROFILE
+            ? {warnings: []}
+            : {
+                warnings: validMm2Warnings(2),
+                iconlessItemIds: [...MULTIBLOCK_MADNESS_2_118_ICON_OMISSION_IDS],
+              }),
           semanticErrorRecipes: 0,
         },
         profile,
@@ -1367,6 +1403,186 @@ test('accepts dynamic complete Multiblock Madness profiles only at 48px icons an
       [],
     );
   }
+});
+
+test('Multiblock Madness 2 accepts only its 16 exact icon omissions and correction warnings', () => {
+  assert.deepEqual(MULTIBLOCK_MADNESS_2_118_WARNING_PREFIXES, [
+    'UPSTREAM_NATIVE_ICON_UNAVAILABLE ',
+    'Corrected transparent or quantity-clipped native REI catalog icon:',
+    'Canonicalized animated native REI catalog icon to its first physical source keyframe:',
+    'CATEGORICAL_UNIT_CARDINALITY ',
+  ]);
+  assert.deepEqual(MULTIBLOCK_MADNESS_2_118_ICON_OMISSION_IDS, [
+    'ae2:cable_bus',
+    'ae2:matrix_frame',
+    'ae2:paint',
+    'ars_nouveau:debug',
+    'ars_nouveau:light_block',
+    'ars_nouveau:portal',
+    'integrateddynamics:block_liquid_chorus',
+    'integrateddynamics:block_menril_resin',
+    'integrateddynamics:invisible_light',
+    'mcjtylib:multipart',
+    'mekanism:bounding_block',
+    'mininggadgets:minerslight',
+    'multiblocked:dummy_component',
+    'multiblocked:symbol',
+    'reliquary:cure',
+    'reliquary:pacification',
+  ]);
+  const manifest = {
+    ...validManifest,
+    minecraft: '1.18.2',
+    pack: {
+      name: 'Multiblock Madness 2',
+      version: '1.0.0',
+      identitySource: 'explicit-request',
+    },
+    settings: {iconScale: 3, recipeScale: 2},
+    counts: {failures: 0},
+    diagnostics: {
+      failureEvents: 0,
+      failureEventsOmitted: 0,
+      nativeIconCorrections: 2,
+      transparentIcons: 0,
+    },
+  };
+  assert.deepEqual(
+    exportQualityIssues(
+      {
+        manifest,
+        failures: [],
+        warnings: validMm2Warnings(2),
+        iconlessItemIds: [...MULTIBLOCK_MADNESS_2_118_ICON_OMISSION_IDS],
+      },
+      MULTIBLOCK_MADNESS_2_118_PROFILE,
+    ),
+    [],
+  );
+
+  const issues = exportQualityIssues(
+    {
+      manifest,
+      failures: [],
+      warnings: [
+        ...validMm2Warnings(1).slice(1),
+        'Canonicalized animated native REI catalog icon to its first declared frame: ' +
+          'entry=fixture:near_miss',
+      ],
+      iconlessItemIds: [
+        ...MULTIBLOCK_MADNESS_2_118_ICON_OMISSION_IDS,
+        'fixture:unexpected_iconless_item',
+      ],
+    },
+    MULTIBLOCK_MADNESS_2_118_PROFILE,
+  );
+  assert.match(issues.join('\n'), /unrecognized warning class/);
+  assert.match(issues.join('\n'), /nativeIconCorrections \(2\).*correction warnings \(1\)/);
+  assert.match(issues.join('\n'), /omission warnings must contain the exact 16 audited/);
+  assert.match(issues.join('\n'), /iconless items must be exactly/);
+});
+
+test('Multiblock Madness 2 rejects class drift for an otherwise audited transparent id', () => {
+  const manifest = {
+    ...validManifest,
+    minecraft: '1.18.2',
+    pack: {
+      name: 'Multiblock Madness 2',
+      version: '1.0.0',
+      identitySource: 'explicit-request',
+    },
+    settings: {iconScale: 3, recipeScale: 2},
+    counts: {failures: 0},
+    diagnostics: {
+      failureEvents: 0,
+      failureEventsOmitted: 0,
+      nativeIconCorrections: 2,
+      transparentIcons: 0,
+    },
+  };
+  const warnings = validMm2Warnings(2);
+  warnings[0] = warnings[0].replace(
+    'itemClass=appeng.block.AEBaseBlockItem',
+    'itemClass=appeng.block.UnreviewedReplacement',
+  );
+  const issues = exportQualityIssues(
+    {
+      manifest,
+      failures: [],
+      warnings,
+      iconlessItemIds: [...MULTIBLOCK_MADNESS_2_118_ICON_OMISSION_IDS],
+    },
+    MULTIBLOCK_MADNESS_2_118_PROFILE,
+  );
+  assert.match(issues.join('\n'), /exact 16 audited type\/id\/value\/item\/block identities/);
+});
+
+test('Multiblock Madness 2 categorical warnings are exact, unique, and complete outside samples', () => {
+  assert.equal(
+    MULTIBLOCK_MADNESS_2_118_CATEGORICAL_WARNING_PREFIX,
+    'CATEGORICAL_UNIT_CARDINALITY ',
+  );
+  assert.equal(MULTIBLOCK_MADNESS_2_118_CATEGORICAL_WARNINGS.length, 5);
+  const manifest = {
+    ...validManifest,
+    minecraft: '1.18.2',
+    pack: {
+      name: 'Multiblock Madness 2',
+      version: '1.0.0',
+      identitySource: 'explicit-request',
+    },
+    settings: {iconScale: 3, recipeScale: 2},
+    counts: {failures: 0},
+    diagnostics: {
+      failureEvents: 0,
+      failureEventsOmitted: 0,
+      nativeIconCorrections: 2,
+      transparentIcons: 0,
+    },
+  };
+  const input = warnings => ({
+    manifest,
+    failures: [],
+    warnings,
+    iconlessItemIds: [...MULTIBLOCK_MADNESS_2_118_ICON_OMISSION_IDS],
+  });
+
+  const missing = exportQualityIssues(
+    input(validMm2Warnings(2, MULTIBLOCK_MADNESS_2_118_CATEGORICAL_WARNINGS.slice(1))),
+    MULTIBLOCK_MADNESS_2_118_PROFILE,
+  );
+  assert.match(missing.join('\n'), /full export must contain all five exact categorical/);
+
+  const duplicateWarning = MULTIBLOCK_MADNESS_2_118_CATEGORICAL_WARNINGS[0];
+  const duplicate = exportQualityIssues(
+    input(validMm2Warnings(2, [...MULTIBLOCK_MADNESS_2_118_CATEGORICAL_WARNINGS, duplicateWarning])),
+    MULTIBLOCK_MADNESS_2_118_PROFILE,
+  );
+  assert.match(duplicate.join('\n'), /duplicate warning detected/);
+
+  const crossed = MULTIBLOCK_MADNESS_2_118_CATEGORICAL_WARNINGS[0].replace(
+    /valueClass=[^ ]+/,
+    'valueClass=java.lang.Object',
+  );
+  const unknown = exportQualityIssues(
+    input(
+      validMm2Warnings(2, [
+        crossed,
+        ...MULTIBLOCK_MADNESS_2_118_CATEGORICAL_WARNINGS.slice(1),
+      ]),
+    ),
+    MULTIBLOCK_MADNESS_2_118_PROFILE,
+  );
+  assert.match(unknown.join('\n'), /exactly match one of the five audited/);
+
+  const sample = exportQualityIssues(
+    {
+      ...input(validMm2Warnings(2, [MULTIBLOCK_MADNESS_2_118_CATEGORICAL_WARNINGS[2]])),
+      manifest: {...manifest, qualitySample: {}},
+    },
+    MULTIBLOCK_MADNESS_2_118_PROFILE,
+  );
+  assert.deepEqual(sample, []);
 });
 
 test('Multiblock Madness 1.12 audits only the pinned complete warning classes', () => {
