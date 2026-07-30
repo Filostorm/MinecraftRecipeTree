@@ -1,0 +1,12 @@
+[
+  {
+    "modid": "gtnhneiexport",
+    "name": "Recipe Tree GTNH NEI Exporter",
+    "description": "Client-only deterministic NEI recipe snapshot exporter for GT New Horizons ${packPin}.",
+    "version": "${version}",
+    "mcversion": "${minecraftPin}",
+    "dependencies": ["required-after:NotEnoughItems@[${neiPin}]"],
+    "clientSideOnly": true,
+    "serverSideOnly": false
+  }
+]
