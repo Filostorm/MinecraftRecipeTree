@@ -1,0 +1,6 @@
+/.gradle/
+/build/
+/logs/
+/run/
+/.DS_Store
+/*.log

@@ -1,0 +1,161 @@
+plugins {
+    id 'eclipse'
+    id 'idea'
+    id 'net.minecraftforge.gradle' version '[6.0,6.2)'
+}
+
+apply from: 'gradle/exporter-provenance.gradle'
+
+version = mod_version
+group = mod_group_id
+
+base {
+    archivesName = 'recipe-export-mod-1.18.2'
+}
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(17)
+
+minecraft {
+    mappings channel: 'official', version: minecraft_version
+    copyIdeResources = true
+
+    runs {
+        configureEach {
+            workingDirectory project.findProperty('run_directory') ?: project.file('run')
+            property 'forge.logging.console.level', 'info'
+            property 'mixin.env.disableRefMap', 'true'
+            jvmArg '-Xmx8G'
+            mods {
+                "${mod_id}" {
+                    source sourceSets.main
+                }
+            }
+        }
+
+        client {
+            jvmArg '-Xdock:name=Minecraft REI Export'
+        }
+    }
+}
+
+repositories {
+    maven {
+        name = 'Shedaniel'
+        url = 'https://maven.shedaniel.me/'
+    }
+}
+
+def mm2ModsDir = file(
+        providers.gradleProperty('mm2ModsDir')
+                .orElse(providers.environmentVariable('MM2_MODS_DIR'))
+                .orElse('../export-instances/multiblock-madness-2/mods')
+                .get()
+)
+logger.lifecycle("[reiexport] Using Multiblock Madness 2 dependencies from ${mm2ModsDir}")
+if (!mm2ModsDir.isDirectory()) {
+    throw new GradleException(
+            "Multiblock Madness 2 dependencies were not found at ${mm2ModsDir}. " +
+                    "Set -Pmm2ModsDir=/path/to/mods or MM2_MODS_DIR."
+    )
+}
+def mm2Mod = { String fileName -> new File(mm2ModsDir, fileName) }
+
+dependencies {
+    minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+    compileOnly fg.deobf("me.shedaniel:RoughlyEnoughItems-api-forge:${rei_version}")
+    // The MM2 lifecycle gate is intentionally bound to this exact REI implementation JAR.
+    // Its SHA-256 and every touched implementation class are verified before the gate arms.
+    compileOnly files(mm2Mod("RoughlyEnoughItems-8.4.778-forge.jar"))
+    compileOnly fg.deobf("me.shedaniel.cloth:cloth-config-forge:6.5.133")
+    compileOnly fg.deobf("dev.architectury:architectury-forge:4.12.94")
+    compileOnly files(mm2Mod("REIPluginCompatibilities-forge-8.0.89.jar"))
+    compileOnly files(mm2Mod("Capsule-1.18.2-6.0.99.jar"))
+    compileOnly files(mm2Mod("kubejs-forge-1802.5.5-build.569.jar"))
+    compileOnly files(mm2Mod("Botania-1.18.2-435.jar"))
+    compileOnly files(mm2Mod("elementalcraft-1.18.2-4.4.30b.jar"))
+    compileOnly files(mm2Mod("relics-1.18.2-0.6.2.4.jar"))
+    compileOnly files(mm2Mod("appliedenergistics2-forge-11.7.6.jar"))
+    compileOnly files(mm2Mod("tombstone-1.18.2-7.7.6.jar"))
+    compileOnly files(mm2Mod("industrial-foregoing-1.18.2-3.3.1.7-11.jar"))
+    compileOnly files(mm2Mod("titanium-1.18.2-3.5.11-47.jar"))
+    compileOnly files(mm2Mod("ProjectRed-1.18.2-4.16.0-integration.jar"))
+    compileOnly files(mm2Mod("LowDragLib-1.18.2-1.0.8.jar"))
+    compileOnly files(mm2Mod("ImmersiveEngineering-1.18.2-8.4.0-161.jar"))
+    runtimeOnly fg.deobf("me.shedaniel:RoughlyEnoughItems-forge:${rei_version}")
+    runtimeOnly fg.deobf("me.shedaniel.cloth:cloth-config-forge:6.5.133")
+    runtimeOnly fg.deobf("dev.architectury:architectury-forge:4.12.94")
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+    testCompileOnly fg.deobf("me.shedaniel:RoughlyEnoughItems-api-forge:${rei_version}")
+    testCompileOnly files(mm2Mod("REIPluginCompatibilities-forge-8.0.89.jar"))
+    testRuntimeOnly files(mm2Mod("RoughlyEnoughItems-8.4.778-forge.jar"))
+    testRuntimeOnly files(mm2Mod("LowDragLib-1.18.2-1.0.8.jar"))
+    testRuntimeOnly files(mm2Mod("Multiblocked-1.18.2-1.0.10.jar"))
+    testRuntimeOnly files(mm2Mod("Capsule-1.18.2-6.0.99.jar"))
+    testRuntimeOnly files(mm2Mod("kubejs-forge-1802.5.5-build.569.jar"))
+    testRuntimeOnly files(mm2Mod("REIPluginCompatibilities-forge-8.0.89.jar"))
+    testRuntimeOnly files(mm2Mod("Botania-1.18.2-435.jar"))
+    testRuntimeOnly files(mm2Mod("elementalcraft-1.18.2-4.4.30b.jar"))
+    testRuntimeOnly files(mm2Mod("relics-1.18.2-0.6.2.4.jar"))
+    testRuntimeOnly files(mm2Mod("appliedenergistics2-forge-11.7.6.jar"))
+    testRuntimeOnly files(mm2Mod("tombstone-1.18.2-7.7.6.jar"))
+    testRuntimeOnly files(mm2Mod("industrial-foregoing-1.18.2-3.3.1.7-11.jar"))
+    testRuntimeOnly files(mm2Mod("titanium-1.18.2-3.5.11-47.jar"))
+    testRuntimeOnly files(mm2Mod("spirit-forge-1.18.2-2.1.8.jar"))
+    testRuntimeOnly files(mm2Mod("ProjectRed-1.18.2-4.16.0-integration.jar"))
+    testRuntimeOnly files(mm2Mod("ProjectRed-1.18.2-4.16.0-fabrication.jar"))
+    testRuntimeOnly files(mm2Mod("ImmersiveEngineering-1.18.2-8.4.0-161.jar"))
+    testRuntimeOnly files(mm2Mod("create-1.18.2-0.5.1.i.jar"))
+    testRuntimeOnly files(mm2Mod("Mekanism-1.18.2-10.2.5.465.jar"))
+}
+
+tasks.named('processResources', ProcessResources).configure {
+    def replaceProperties = [
+            minecraft_version_range: minecraft_version_range,
+            forge_version_range: forge_version_range,
+            loader_version_range: loader_version_range,
+            rei_version: rei_version,
+            mod_id: mod_id,
+            mod_name: mod_name,
+            mod_license: mod_license,
+            mod_version: mod_version,
+            mod_authors: mod_authors,
+            mod_description: mod_description,
+    ]
+    inputs.properties replaceProperties
+    filesMatching('META-INF/mods.toml') {
+        expand replaceProperties
+    }
+}
+
+tasks.named('jar', Jar).configure {
+    manifest {
+        attributes([
+                'Specification-Title': mod_id,
+                'Specification-Vendor': mod_authors,
+                'Specification-Version': '1',
+                'Implementation-Title': project.name,
+                'Implementation-Version': archiveVersion,
+                'Implementation-Vendor': mod_authors,
+                'MixinConfigs': 'reiexport.mixins.json',
+        ])
+    }
+    finalizedBy 'reobfJar'
+}
+
+tasks.matching { it.name == 'reobfJar' }.configureEach {
+    doLast {
+        embedMrtExporterBuildIdentity(
+                tasks.named('jar', Jar).get().archiveFile.get().asFile,
+                'forge-rei-1.18.2',
+                '1.18.2')
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+tasks.named('test', Test).configure {
+    useJUnitPlatform()
+}

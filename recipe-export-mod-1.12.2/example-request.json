@@ -1,0 +1,17 @@
+{
+  "packName": "My Modpack",
+  "packVersion": "1.0.0",
+  "output": "jei-exports",
+  "iconScale": 4,
+  "recipeScale": 2,
+  "maxMillisPerTick": 30,
+  "pngThreads": 2,
+  "pngQueueCapacity": 128,
+  "requireWorld": true,
+  "createWorld": true,
+  "worldFolder": "JEI-Export-Automation",
+  "worldName": "JEI Export Automation",
+  "waitAfterWorldTicks": 200,
+  "worldTimeoutTicks": 12000,
+  "exitOnComplete": true
+}
