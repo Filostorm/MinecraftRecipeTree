@@ -24,6 +24,15 @@ final class IngredientKeysTest {
         assertNotEquals(IngredientKeys.typePrefix(FIRST), IngredientKeys.typePrefix(SECOND));
     }
 
+    @Test
+    void canonicalFallbackDigestIsStableAndCollisionResistantInShape() {
+        String digest = Naming.sha256("{tag:{example:1b}}");
+
+        assertEquals(digest, Naming.sha256("{tag:{example:1b}}"));
+        assertTrue(digest.matches("[0-9a-f]{64}"));
+        assertNotEquals(digest, Naming.sha256("{tag:{example:2b}}"));
+    }
+
     private static final class First {
         private static final class SharedName {
         }

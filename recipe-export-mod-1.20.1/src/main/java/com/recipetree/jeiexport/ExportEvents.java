@@ -2,11 +2,21 @@ package com.recipetree.jeiexport;
 
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
+import net.minecraft.world.Difficulty;
+import net.minecraft.world.level.GameRules;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.LevelSettings;
+import net.minecraft.world.level.WorldDataConfiguration;
+import net.minecraft.world.level.levelgen.WorldOptions;
+import net.minecraft.world.level.levelgen.presets.WorldPresets;
 import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 import net.minecraftforge.client.event.RegisterClientCommandsEvent;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.Path;
 import java.util.EnumSet;
 import java.util.Locale;
 
@@ -16,7 +26,9 @@ public final class ExportEvents {
 
     /** Ticks spent in a loaded level, for the auto-export delay. */
     private static int ticksInLevel;
+    private static int ticksWithoutLevel;
     private static boolean autoStartAttempted;
+    private static boolean autoWorldAttempted;
     private static final int AUTO_START_DELAY_TICKS = 100;
 
     @SubscribeEvent
@@ -29,16 +41,62 @@ public final class ExportEvents {
         if (event.phase != TickEvent.Phase.END) {
             return;
         }
-        if (Minecraft.getInstance().level == null) {
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.level == null) {
             ticksInLevel = 0;
+            ticksWithoutLevel++;
+            maybeCreateAutomationWorld(minecraft);
             return;
         }
+        ticksWithoutLevel = 0;
         ticksInLevel++;
         ExportJob job = ExportJob.current();
         if (job != null) {
             job.tick();
         } else {
             maybeAutoStart();
+        }
+    }
+
+    private static void maybeCreateAutomationWorld(Minecraft minecraft) {
+        if (autoWorldAttempted
+                || ticksWithoutLevel < AUTO_START_DELAY_TICKS
+                || System.getProperty("jeiexport.auto") == null
+                || minecraft.screen == null
+                || minecraft.getOverlay() != null) {
+            return;
+        }
+        try {
+            if (!AutomationOptions.createWorldEnabled()) {
+                autoWorldAttempted = true;
+                return;
+            }
+            String worldFolder = AutomationOptions.worldFolder();
+            String worldName = AutomationOptions.worldName();
+            Path save = minecraft.getLevelSource().getBaseDir().resolve(worldFolder);
+            if (Files.exists(save, LinkOption.NOFOLLOW_LINKS)) {
+                throw new IllegalStateException(
+                        "Automation world already exists; choose a new -Djeiexport.worldFolder: " + save);
+            }
+            autoWorldAttempted = true;
+            LevelSettings settings = new LevelSettings(
+                    worldName,
+                    GameType.CREATIVE,
+                    false,
+                    Difficulty.PEACEFUL,
+                    true,
+                    new GameRules(),
+                    WorldDataConfiguration.DEFAULT);
+            JeiExportMod.LOGGER.info(
+                    "[jeiexport] Creating disposable automation world '{}' ({})", worldName, worldFolder);
+            minecraft.createWorldOpenFlows().createFreshLevel(
+                    worldFolder,
+                    settings,
+                    WorldOptions.defaultWithRandomSeed(),
+                    WorldPresets::createNormalWorldDimensions);
+        } catch (Exception e) {
+            autoWorldAttempted = true;
+            JeiExportMod.LOGGER.error("[jeiexport] Failed to create the automation world", e);
         }
     }
 

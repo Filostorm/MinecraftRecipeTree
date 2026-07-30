@@ -12,6 +12,8 @@ import net.minecraft.Util;
 import net.minecraftforge.fml.ModList;
 import org.jetbrains.annotations.Nullable;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
@@ -111,6 +113,15 @@ final class ExportContext {
                 try {
                     Files.createDirectories(file.getParent());
                     image.writeToFile(file);
+                    try {
+                        PngIntegrity.verify(file);
+                    } catch (IOException nativeWriteFailure) {
+                        JeiExportMod.LOGGER.warn(
+                                "[jeiexport] Native PNG verification failed for {}; retrying with Java ImageIO",
+                                root.relativize(file), nativeWriteFailure);
+                        writePngWithImageIo(image, file);
+                        PngIntegrity.verify(file);
+                    }
                 } catch (Throwable t) {
                     failure("write " + root.relativize(file) + ": " + t);
                 } finally {
@@ -124,6 +135,26 @@ final class ExportContext {
             pendingWrites.decrementAndGet();
             imageWritePermits.release();
             failure("write scheduling " + root.relativize(file) + ": " + e);
+        }
+    }
+
+    private static void writePngWithImageIo(NativeImage image, Path file) throws IOException {
+        int width = image.getWidth();
+        int height = image.getHeight();
+        BufferedImage buffered = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        int[] row = new int[width];
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int abgr = image.getPixelRGBA(x, y);
+                row[x] = (abgr & 0xFF000000)
+                        | ((abgr & 0x000000FF) << 16)
+                        | (abgr & 0x0000FF00)
+                        | ((abgr & 0x00FF0000) >>> 16);
+            }
+            buffered.setRGB(0, y, width, 1, row, 0, width);
+        }
+        if (!ImageIO.write(buffered, "PNG", file.toFile())) {
+            throw new IOException("No Java ImageIO PNG writer is available");
         }
     }
 

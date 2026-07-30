@@ -2,6 +2,7 @@ import {isRecord} from './export-data-utils.mjs';
 import {requirePackIdentity} from './pack-identity.mjs';
 
 export const GENERIC_JEI_120_PROFILE = 'generic-jei-1.20.1';
+export const GENERIC_JEI_121_PROFILE = 'generic-jei-1.21.1';
 export const MEATBALLCRAFT_112_PROFILE = 'meatballcraft-1.12.2';
 export const MULTIBLOCK_MADNESS_112_PROFILE = 'multiblock-madness-1.12.2';
 export const MULTIBLOCK_MADNESS_2_118_PROFILE = 'multiblock-madness-2-1.18.2';
@@ -215,6 +216,20 @@ const GTNH_DIAGNOSTIC_KEYS = Object.freeze([
 ]);
 
 const profileRequirements = new Map([
+  [
+    GENERIC_JEI_121_PROFILE,
+    Object.freeze({
+      id: GENERIC_JEI_121_PROFILE,
+      label: 'Generic JEI 1.21.1',
+      minecraft: '1.21.1',
+      format: 1,
+      iconScale: 4,
+      recipeScale: 2,
+      recipeViewer: 'JEI',
+      corpus: 'dynamic-complete',
+      requiresPackIdentity: true,
+    }),
+  ],
   [
     GENERIC_JEI_120_PROFILE,
     Object.freeze({
@@ -1042,7 +1057,10 @@ export function exportQualityIssues(
 
   if (resolvedProfile === GTNH_1710_PROFILE) {
     issues.push(...gtnhManifestQualityIssues(manifest, label));
-  } else if (resolvedProfile === GENERIC_JEI_120_PROFILE) {
+  } else if (
+    resolvedProfile === GENERIC_JEI_120_PROFILE ||
+    resolvedProfile === GENERIC_JEI_121_PROFILE
+  ) {
     issues.push(...genericJeiManifestQualityIssues(manifest, label));
   }
 

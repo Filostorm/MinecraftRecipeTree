@@ -267,6 +267,17 @@
   background: linear-gradient(145deg, #1a2029, #141920);
 }
 
+.testBuildCard {
+  border-color: #406d4e;
+  background:
+    linear-gradient(145deg, rgba(88, 196, 123, 0.12), rgba(20, 25, 32, 0.98)),
+    #141920;
+}
+
+.testBuildGrid {
+  margin-bottom: 18px;
+}
+
 .releaseTopline {
   display: flex;
   flex-wrap: wrap;

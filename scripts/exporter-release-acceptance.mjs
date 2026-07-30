@@ -81,7 +81,7 @@ const ACCEPTANCE_POLICY_FILES = Object.freeze([
     path: join(SCRIPT_DIRECTORY, 'export-tree-digest.mjs'),
   }),
 ]);
-export const DEFAULT_EXPORTER_WORKSPACE_ROOT = resolve(SCRIPT_DIRECTORY, '..', '..');
+export const DEFAULT_EXPORTER_WORKSPACE_ROOT = resolve(SCRIPT_DIRECTORY, '..');
 export const DEFAULT_EXPORTER_ACCEPTANCE_ROOT = resolve(
   SCRIPT_DIRECTORY,
   '..',

@@ -103,8 +103,16 @@ temporarily require disk space for both snapshots.
 ## Headless / automatic export
 
 Launching the game with `-Djeiexport.auto=all` (or `items`/`recipes`/`mobs`, plus optional
-`-Djeiexport.iconScale=N`, `-Djeiexport.packName=...`, and `-Djeiexport.packVersion=...`) starts the export automatically ~5s after world load — no command
-needed. In this dev workspace there's a one-shot task that boots straight into a test world
+`-Djeiexport.iconScale=N`, `-Djeiexport.packName=...`, and `-Djeiexport.packVersion=...`) starts
+the export automatically ~5s after world load — no command needed.
+
+For an unattended CurseForge smoke test, also add
+`-Djeiexport.createWorld=true -Djeiexport.worldFolder=RecipeTree-Exporter-Test
+-Djeiexport.worldName=RecipeTreeExport -Djeiexport.exitOnComplete=true` to the profile JVM
+arguments. The exporter creates one new disposable single-player world, exports after JEI is
+ready, and closes Minecraft only after success. It refuses to reuse an existing world folder.
+
+In this dev workspace there's a one-shot task that boots straight into a test world
 and exports everything:
 
 ```bash

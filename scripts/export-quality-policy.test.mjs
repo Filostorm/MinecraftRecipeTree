@@ -5,6 +5,7 @@ import {
   EXPORT_QUALITY_PROFILE_IDS,
   exportQualityIssues,
   GENERIC_JEI_120_PROFILE,
+  GENERIC_JEI_121_PROFILE,
   GTNH_DATA_ATTRIBUTION,
   GTNH_284_HANDLER_POLICIES,
   GTNH_NEI_DIAGNOSTIC_KEYS,
@@ -38,12 +39,24 @@ test('accepts the exact MeatballCraft 1.12.2 exporter contract', () => {
 
 test('registers explicit immutable requirements for all production pack profiles', () => {
   assert.deepEqual(EXPORT_QUALITY_PROFILE_IDS, [
+    GENERIC_JEI_121_PROFILE,
     GENERIC_JEI_120_PROFILE,
     MEATBALLCRAFT_112_PROFILE,
     MULTIBLOCK_MADNESS_112_PROFILE,
     MULTIBLOCK_MADNESS_2_118_PROFILE,
     GTNH_1710_PROFILE,
   ]);
+  assert.deepEqual(qualityProfileRequirementsFor(GENERIC_JEI_121_PROFILE), {
+    id: GENERIC_JEI_121_PROFILE,
+    label: 'Generic JEI 1.21.1',
+    minecraft: '1.21.1',
+    format: 1,
+    iconScale: 4,
+    recipeScale: 2,
+    recipeViewer: 'JEI',
+    corpus: 'dynamic-complete',
+    requiresPackIdentity: true,
+  });
   assert.deepEqual(qualityProfileRequirementsFor(GENERIC_JEI_120_PROFILE), {
     id: GENERIC_JEI_120_PROFILE,
     label: 'Generic JEI 1.20.1',
@@ -136,10 +149,10 @@ test('registers explicit immutable requirements for all production pack profiles
   });
 });
 
-function validGenericJeiManifest() {
+function validGenericJeiManifest(minecraft = '1.20.1') {
   return {
     format: 1,
-    minecraft: '1.20.1',
+    minecraft,
     pack: {
       name: 'Example Modern Pack',
       version: '4.2.0',
@@ -163,6 +176,34 @@ test('accepts the strict generic JEI 1.20.1 manifest telemetry and pack identity
       GENERIC_JEI_120_PROFILE,
     ),
     [],
+  );
+});
+
+test('accepts the strict generic JEI 1.21.1 manifest telemetry and pack identity', () => {
+  assert.deepEqual(
+    exportQualityIssues(
+      {
+        manifest: validGenericJeiManifest('1.21.1'),
+        failures: ['mob example:missing_renderer: renderer unavailable'],
+        semanticErrorRecipes: 0,
+      },
+      GENERIC_JEI_121_PROFILE,
+    ),
+    [],
+  );
+});
+
+test('generic JEI 1.21.1 rejects a 1.20.1 export', () => {
+  assert.match(
+    exportQualityIssues(
+      {
+        manifest: validGenericJeiManifest(),
+        failures: [],
+        semanticErrorRecipes: 0,
+      },
+      GENERIC_JEI_121_PROFILE,
+    ).join('\n'),
+    /manifest\.minecraft "1\.21\.1"/,
   );
 });
 

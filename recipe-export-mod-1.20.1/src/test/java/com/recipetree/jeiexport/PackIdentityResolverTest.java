@@ -55,6 +55,20 @@ final class PackIdentityResolverTest {
     }
 
     @Test
+    void resolvesContemporaryMultiMegabyteCurseForgeMetadata() throws Exception {
+        Path gameDirectory = Files.createDirectory(temporaryDirectory.resolve("large-curseforge-pack"));
+        Files.writeString(gameDirectory.resolve("minecraftinstance.json"),
+                "{\"name\":\"Large CurseForge Pack\",\"profileVersion\":\"v60\",\"ignored\":\""
+                        + "x".repeat(3 * 1024 * 1024) + "\"}");
+
+        PackIdentity identity = resolveWithoutProperties(gameDirectory, new TestDiagnostics());
+
+        assertEquals("Large CurseForge Pack", identity.name());
+        assertEquals("v60", identity.version());
+        assertEquals("curseforge", identity.identitySource());
+    }
+
+    @Test
     void prismManagedPackFieldsTakePriorityAndConflictIsLogged() throws Exception {
         Path instanceDirectory = Files.createDirectory(temporaryDirectory.resolve("prism-pack"));
         Path gameDirectory = Files.createDirectory(instanceDirectory.resolve(".minecraft"));

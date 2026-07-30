@@ -62,6 +62,8 @@ final class RecipeExporter implements ExportJob.PhaseRunner {
     private String catTitle = "";
     @Nullable
     private JsonArray recipesJson;
+    @Nullable
+    private JsonObject categoryJson;
     private int exportedTotal;
     private final Set<Class<?>> warnedHelperAmountTypes = new LinkedHashSet<>();
     private final Set<Class<?>> warnedUnknownAmountTypes = new LinkedHashSet<>();
@@ -153,6 +155,9 @@ final class RecipeExporter implements ExportJob.PhaseRunner {
             }
             Set<String> catalystKeys = new LinkedHashSet<>();
             for (ITypedIngredient<?> typed : allCatalysts) {
+                if (ItemCatalog.isEmptyIngredient(typed)) {
+                    continue;
+                }
                 catalystKeys.add(catalog.ensure(typed));
             }
             catalystKeys.forEach(catalysts::add);
@@ -160,17 +165,24 @@ final class RecipeExporter implements ExportJob.PhaseRunner {
             ctx.failure("category catalysts " + uid + ": " + t);
         }
         cj.add("catalysts", catalysts);
+        categoryJson = cj;
         registeredCatIndex = ctx.registerCategory(cj);
     }
 
     private void exportOne(IRecipeCategory<?> category, Object recipe, int idx) {
+        int exportedIndex = recipesJson.size();
         JsonObject rj = new JsonObject();
         Set<String> inputKeys = new LinkedHashSet<>();
         Set<String> outputKeys = new LinkedHashSet<>();
         try {
             Optional<IRecipeLayoutDrawable<?>> drawableOpt = createDrawable(category, recipe);
             if (drawableOpt.isEmpty()) {
-                throw new IllegalStateException("JEI returned no layout drawable");
+                ctx.failure(String.format(
+                        Locale.ROOT,
+                        "recipe %s #%d: JEI returned no layout drawable; omitting the non-renderable placeholder",
+                        catDir,
+                        idx));
+                return;
             }
             IRecipeLayoutDrawable<?> drawable = drawableOpt.get();
             drawable.setPosition(PAD, PAD);
@@ -189,7 +201,7 @@ final class RecipeExporter implements ExportJob.PhaseRunner {
                     g.pose().popPose();
                 }
             });
-            String imageName = "r" + idx + ".png";
+            String imageName = "r" + exportedIndex + ".png";
             ctx.saveImage(image, ctx.root.resolve(catDir).resolve(imageName));
 
             ResourceLocation registryName = registryName(category, recipe);
@@ -218,6 +230,9 @@ final class RecipeExporter implements ExportJob.PhaseRunner {
                 JsonArray slotArr = new JsonArray();
                 Set<String> seenPairs = new LinkedHashSet<>();
                 for (ITypedIngredient<?> typed : ingredients) {
+                    if (ItemCatalog.isEmptyIngredient(typed)) {
+                        continue;
+                    }
                     String key = catalog.ensure(typed);
                     long amount = amountOf(typed);
                     if (!seenPairs.add(key + "\u0000" + amount)) {
@@ -236,6 +251,9 @@ final class RecipeExporter implements ExportJob.PhaseRunner {
                         default -> {
                         }
                     }
+                }
+                if (slotArr.isEmpty()) {
+                    continue;
                 }
                 switch (slot.getRole()) {
                     case INPUT -> in.add(slotArr);
@@ -259,10 +277,10 @@ final class RecipeExporter implements ExportJob.PhaseRunner {
         }
         recipesJson.add(rj);
         for (String key : inputKeys) {
-            ctx.indexRecipe(key, false, registeredCatIndex, idx);
+            ctx.indexRecipe(key, false, registeredCatIndex, exportedIndex);
         }
         for (String key : outputKeys) {
-            ctx.indexRecipe(key, true, registeredCatIndex, idx);
+            ctx.indexRecipe(key, true, registeredCatIndex, exportedIndex);
         }
         exportedTotal++;
     }
@@ -291,6 +309,9 @@ final class RecipeExporter implements ExportJob.PhaseRunner {
     }
 
     private void flushCategory() throws IOException {
+        if (categoryJson != null) {
+            categoryJson.addProperty("count", recipesJson.size());
+        }
         Path file = ctx.root.resolve(catDir).resolve("recipes.json");
         Files.createDirectories(file.getParent());
         try (Writer writer = Files.newBufferedWriter(file)) {
@@ -298,6 +319,7 @@ final class RecipeExporter implements ExportJob.PhaseRunner {
         }
         ctx.recipeCount += recipesJson.size();
         recipesJson = null;
+        categoryJson = null;
     }
 
     /** Flush partial output if the export gets cancelled mid-category. */

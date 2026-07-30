@@ -39,3 +39,9 @@ Recipe Tree uses data exported directly from each supported modpack so item name
 machines, and crafting layouts reflect the selected Minecraft version.
 
 Minecraft and third-party mod content belong to their respective creators.
+
+## Exporter projects
+
+Maintained exporter sources live in this repository for Minecraft 1.12.2, 1.18.2, 1.20.1, and
+1.21.1. The 1.21.1 exporter targets NeoForge 21.1 and JEI 19; see
+`recipe-export-mod-1.21.1/README.md` for build and usage details.

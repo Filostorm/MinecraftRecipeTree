@@ -61,6 +61,8 @@
     "package:exporter:1.7.10": "node scripts/package-exporter-releases.mjs --release forge-nei-gtnh-1.7.10",
     "package:exporter:1.12.2": "node scripts/package-exporter-releases.mjs --release forge-hei-1.12.2",
     "package:exporter:1.18.2": "node scripts/package-exporter-releases.mjs --release forge-rei-1.18.2",
+    "package:exporter:1.20.1": "node scripts/package-exporter-releases.mjs --release forge-jei-1.20.1",
+    "package:exporter:1.21.1": "node scripts/package-exporter-releases.mjs --release neoforge-jei-1.21.1",
     "test:generic-jei": "node --test scripts/export-quality-policy.test.mjs scripts/generic-jei-profile.test.mjs scripts/pack-identity.test.mjs",
     "test:catalog-presentation": "node --test src/data/catalogPresentation.test.mjs",
     "test:cold-dataset": "node --test scripts/benchmark-cold-dataset.test.mjs",

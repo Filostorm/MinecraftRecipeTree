@@ -17,6 +17,7 @@ import {
   EXPORT_QUALITY_PROFILE_IDS,
   exportQualityIssues,
   GENERIC_JEI_120_PROFILE,
+  GENERIC_JEI_121_PROFILE,
   GTNH_DATA_ATTRIBUTION,
   GTNH_284_HANDLER_POLICIES,
   GTNH_1710_PROFILE,
@@ -347,7 +348,7 @@ function validateProfileManifestExtensions(manifest, profile, label) {
       );
     }
   }
-  if (profile === GENERIC_JEI_120_PROFILE) {
+  if (profile === GENERIC_JEI_120_PROFILE || profile === GENERIC_JEI_121_PROFILE) {
     requirePackIdentity(manifest.pack, `${label}.pack`);
   }
   if (profile === GTNH_1710_PROFILE) {

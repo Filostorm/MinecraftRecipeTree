@@ -2,13 +2,19 @@ package com.recipetree.jeiexport;
 
 import com.google.gson.stream.JsonWriter;
 import com.mojang.blaze3d.platform.NativeImage;
+import mezz.jei.api.constants.VanillaTypes;
+import mezz.jei.api.forge.ForgeTypes;
 import mezz.jei.api.ingredients.IIngredientHelper;
 import mezz.jei.api.ingredients.IIngredientRenderer;
 import mezz.jei.api.ingredients.IIngredientType;
 import mezz.jei.api.ingredients.ITypedIngredient;
 import mezz.jei.api.ingredients.subtypes.UidContext;
 import mezz.jei.api.runtime.IIngredientManager;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.ItemStack;
+import net.minecraftforge.fluids.FluidStack;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
@@ -28,6 +34,7 @@ final class ItemCatalog {
     final IIngredientManager manager;
     private final JsonWriter writer;
     private final Set<String> known = new HashSet<>();
+    private final Set<ResourceLocation> warnedFallbackItemIds = new HashSet<>();
     private int count;
 
     ItemCatalog(ExportContext ctx, IIngredientManager manager) throws IOException {
@@ -45,7 +52,20 @@ final class ItemCatalog {
 
     /** Returns the stable key for this ingredient, writing catalog entry + icon on first sight. */
     String ensure(ITypedIngredient<?> typed) {
+        if (isEmptyIngredient(typed)) {
+            throw new IllegalArgumentException("Empty item/fluid placeholders are not catalog ingredients");
+        }
         return ensureTyped(typed);
+    }
+
+    static boolean isEmptyIngredient(ITypedIngredient<?> typed) {
+        Object ingredient = typed.getIngredient();
+        return (typed.getType() == VanillaTypes.ITEM_STACK
+                && ingredient instanceof ItemStack stack
+                && stack.isEmpty())
+                || (typed.getType() == ForgeTypes.FLUID_STACK
+                && ingredient instanceof FluidStack fluidStack
+                && fluidStack.isEmpty());
     }
 
     private <V> String ensureTyped(ITypedIngredient<V> typed) {
@@ -58,8 +78,7 @@ final class ItemCatalog {
         try {
             uid = helper.getUniqueId(ingredient, UidContext.Ingredient);
         } catch (Throwable t) {
-            throw new IllegalStateException("ITEM_IDENTITY: JEI helper failed to identify "
-                    + ingredient.getClass().getName(), t);
+            uid = fallbackItemStackUid(type, ingredient, t);
         }
         if (uid == null || uid.isBlank()) {
             throw new IllegalStateException("ITEM_IDENTITY: JEI helper returned a null/blank id for "
@@ -74,35 +93,39 @@ final class ItemCatalog {
         try {
             name = helper.getDisplayName(ingredient);
         } catch (Throwable t) {
-            ctx.failure("ingredient display name " + key + ": " + t + "; using unique id");
+            JeiExportMod.LOGGER.warn(
+                    "[jeiexport] ingredient display name {} failed; using unique id", key, t);
             name = uid;
         }
         if (name == null || name.isBlank()) {
-            ctx.failure("ingredient display name " + key + " was null/blank; using unique id");
+            JeiExportMod.LOGGER.warn(
+                    "[jeiexport] ingredient display name {} was null/blank; using unique id", key);
             name = uid;
         }
         ResourceLocation rl = null;
         try {
             rl = helper.getResourceLocation(ingredient);
         } catch (Throwable t) {
-            ctx.failure("ingredient resource id " + key + ": " + t + "; using unique id");
+            JeiExportMod.LOGGER.warn(
+                    "[jeiexport] ingredient resource id {} failed; using unique id", key, t);
         }
         String mod;
         try {
             mod = helper.getDisplayModId(ingredient);
         } catch (Throwable t) {
-            ctx.failure("ingredient mod id " + key + ": " + t + "; deriving namespace");
+            JeiExportMod.LOGGER.warn(
+                    "[jeiexport] ingredient mod id {} failed; deriving namespace", key, t);
             mod = rl != null ? rl.getNamespace() : "unknown";
         }
         if (mod == null || mod.isBlank()) {
-            ctx.failure("ingredient mod id " + key
-                    + " was null/blank; deriving namespace");
+            JeiExportMod.LOGGER.warn(
+                    "[jeiexport] ingredient mod id {} was null/blank; deriving namespace", key);
             mod = rl != null ? rl.getNamespace() : "unknown";
         }
 
         String icon = null;
         try {
-            icon = renderIcon(type, ingredient, prefix, rl, uid);
+            icon = renderIcon(type, ingredient, prefix, rl, uid, key);
         } catch (Throwable t) {
             ctx.failure("icon " + key + ": " + t);
         }
@@ -127,9 +150,36 @@ final class ItemCatalog {
         return key;
     }
 
+    private <V> String fallbackItemStackUid(IIngredientType<V> type, V ingredient, Throwable helperFailure) {
+        if (type != VanillaTypes.ITEM_STACK
+                || !(ingredient instanceof ItemStack stack)
+                || stack.isEmpty()) {
+            throw new IllegalStateException("ITEM_IDENTITY: JEI helper failed to identify "
+                    + ingredient.getClass().getName(), helperFailure);
+        }
+        ResourceLocation itemId = BuiltInRegistries.ITEM.getKey(stack.getItem());
+        if (itemId == null) {
+            throw new IllegalStateException(
+                    "ITEM_IDENTITY: fallback could not resolve the ItemStack registry id", helperFailure);
+        }
+        String uid = itemId.toString();
+        CompoundTag tag = stack.getTag();
+        if (tag != null && !tag.isEmpty()) {
+            uid += "#mrt-nbt-" + Naming.sha256(tag.getAsString());
+        }
+        if (warnedFallbackItemIds.add(itemId)) {
+            JeiExportMod.LOGGER.warn(
+                    "[jeiexport] JEI helper could not identify an ItemStack for {}; using the "
+                            + "registry id plus a canonical NBT digest",
+                    itemId,
+                    helperFailure);
+        }
+        return uid;
+    }
+
     @Nullable
     private <V> String renderIcon(IIngredientType<V> type, V ingredient, String prefix,
-                                  @Nullable ResourceLocation rl, String uid) {
+                                  @Nullable ResourceLocation rl, String uid, String key) {
         IIngredientRenderer<V> renderer = manager.getIngredientRenderer(type);
         int w = Math.max(16, renderer.getWidth());
         int h = Math.max(16, renderer.getHeight());
@@ -152,6 +202,20 @@ final class ItemCatalog {
                 g.pose().popPose();
             }
         });
+        ImageVisibility.Result visibility = ImageVisibility.repairHiddenRgbAlpha(image);
+        if (visibility == ImageVisibility.Result.EMPTY) {
+            image.close();
+            ctx.failure("ingredient icon " + key
+                    + ": rendered image is fully transparent; omitting the PNG and JSON icon "
+                    + "reference so the viewer uses its named fallback");
+            return null;
+        }
+        if (visibility == ImageVisibility.Result.REPAIRED_HIDDEN_RGB) {
+            JeiExportMod.LOGGER.warn(
+                    "[jeiexport] ingredient icon {} rendered RGB with a zero alpha channel; "
+                            + "recovered alpha from the native RGB coverage",
+                    key);
+        }
         ctx.saveImage(image, ctx.root.resolve(rel));
         return rel;
     }
