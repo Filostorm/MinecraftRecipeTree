@@ -30,7 +30,6 @@ type UploadState =
       status: 'ready';
       filename: string;
       bytes: number;
-      manifestPath: string;
       summary: LocalPackManifestSummary;
     }
   | {status: 'error'; filename: string | null; message: string};
@@ -197,7 +196,7 @@ export function PackUploadDropzone() {
       setState({
         status: 'error',
         filename: file.name,
-        message: 'Choose a .zip archive containing the completed exporter output.',
+        message: 'Choose the ZIP made from your completed jei-exports folder.',
       });
       return;
     }
@@ -219,7 +218,6 @@ export function PackUploadDropzone() {
         status: 'ready',
         filename: file.name,
         bytes: file.size,
-        manifestPath: result.manifestPath,
         summary: result.summary,
       });
     } catch (error) {
@@ -302,8 +300,7 @@ export function PackUploadDropzone() {
       </label>
 
       <p className={styles.uploadHelp} id="upload-help">
-        Add one <code>.zip</code> containing the completed exporter folder. The check happens
-        locally in your browser; this step does not publish the archive or send it to storage.
+        Your ZIP stays on this device while we check it. Nothing is uploaded yet.
       </p>
 
       <div className={styles.uploadResult} aria-live="polite">
@@ -316,13 +313,13 @@ export function PackUploadDropzone() {
             }>
             <div className={styles.uploadResultTopline}>
               <span>
-                {state.summary.readyForHandoff ? 'READY FOR HANDOFF' : 'NEEDS ATTENTION'}
+                {state.summary.readyForHandoff ? 'READY TO SHARE' : 'CHECK THIS EXPORT'}
               </span>
               <button type="button" onClick={reset}>Choose another file</button>
             </div>
             <h3>{state.summary.packName}</h3>
             <p className={styles.uploadFilename}>
-              {state.filename} · {formatBytes(state.bytes)} · {state.manifestPath}
+              {state.filename} · {formatBytes(state.bytes)}
             </p>
             <dl className={styles.uploadFacts}>
               <div>
@@ -356,8 +353,8 @@ export function PackUploadDropzone() {
               </ul>
             ) : (
               <p className={styles.uploadSuccessCopy}>
-                The export is complete, identifies its pack version, and reports no failures.
-                Keep this ZIP unchanged for the operator-reviewed import.
+                Everything looks good. Keep this ZIP unchanged and send it to the Recipe Tree
+                team when you&apos;re ready.
               </p>
             )}
           </article>
