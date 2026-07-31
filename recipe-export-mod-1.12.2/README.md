@@ -5,6 +5,10 @@ Had Enough Items (HEI) fork. It exports the
 `items + recipes` subset of Recipe Tree viewer format v1. It deliberately does not modify or
 share source with the 1.20 exporter.
 
+Recipe records include `durationTicks` when the HEI wrapper exposes a conventional processing-time
+accessor. Wrappers that display total energy and energy per tick are also converted to an exact tick
+duration when those values divide evenly, allowing the site viewer to recommend parallel machines.
+
 The generic runtime contract is Minecraft 1.12.2 with JEI/HEI
 `[4.12.0.214, 5.0.0)`. The upper bound prevents Forge from loading this legacy integration
 against an incompatible future major API. The default build compiles against standard JEI

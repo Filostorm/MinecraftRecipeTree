@@ -32,6 +32,18 @@ export interface PickerOption {
   imageH?: number;
   inputs?: SlotSummary[];
   outputs?: SlotSummary[];
+  /** Exact JEI/export duration when known. */
+  durationTicks?: number;
+  /** Duration used for planning, including safe vanilla fallbacks. */
+  cycleSeconds?: number;
+  outputPerCycle?: number;
+  machineKey?: string;
+  machineLabel?: string;
+}
+
+export interface PickerProductionPlan {
+  amount: number;
+  windowSeconds: number;
 }
 
 export interface PickerGroupProgress {
@@ -61,6 +73,9 @@ export function PickerModal({
   groupProgress,
   onLoadGroup,
   onSelectAlternative,
+  productionPlan,
+  onProductionPlanChange,
+  onOpenMachine,
   onSelect,
   onClose,
   interfaceZoom = 1,
@@ -88,6 +103,9 @@ export function PickerModal({
     selectionKey: string,
     selectedKey: string,
   ) => void;
+  productionPlan?: PickerProductionPlan;
+  onProductionPlanChange?: (plan: PickerProductionPlan) => void;
+  onOpenMachine?: (itemKey: string) => void;
   onSelect: (index: number) => void;
   onClose: () => void;
   /** The web UI scale applied to recipe imagery without shrinking the modal viewport. */
@@ -148,6 +166,80 @@ export function PickerModal({
                   </TouchableOpacity>
                 );
               })}
+            </View>
+          ) : null}
+          {productionPlan && onProductionPlanChange ? (
+            <View style={styles.productionTarget}>
+              <View style={styles.productionHeading}>
+                <View style={styles.productionCopy}>
+                  <Text style={styles.productionTitle}>Production target</Text>
+                  <Text style={styles.productionHint}>
+                    Recipe cards update their suggested parallel machines.
+                  </Text>
+                </View>
+                <View style={styles.amountStepper}>
+                  <TouchableOpacity
+                    {...signalTarget('graph.source-picker.production.decrease')}
+                    accessibilityRole="button"
+                    accessibilityLabel="Decrease requested amount"
+                    style={styles.amountButton}
+                    onPress={() =>
+                      onProductionPlanChange({
+                        ...productionPlan,
+                        amount: Math.max(1, productionPlan.amount - 1),
+                      })
+                    }>
+                    <Text style={styles.amountButtonText}>−</Text>
+                  </TouchableOpacity>
+                  <View style={styles.amountValue}>
+                    <Text style={styles.amountValueLabel}>AMOUNT</Text>
+                    <Text style={styles.amountValueText}>{productionPlan.amount}</Text>
+                  </View>
+                  <TouchableOpacity
+                    {...signalTarget('graph.source-picker.production.increase')}
+                    accessibilityRole="button"
+                    accessibilityLabel="Increase requested amount"
+                    style={styles.amountButton}
+                    onPress={() =>
+                      onProductionPlanChange({
+                        ...productionPlan,
+                        amount: productionPlan.amount + 1,
+                      })
+                    }>
+                    <Text style={styles.amountButtonText}>+</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+              <View style={styles.deadlineRow}>
+                <Text style={styles.deadlineLabel}>Finish within</Text>
+                {[60, 300, 900, 3600].map(seconds => {
+                  const selected = productionPlan.windowSeconds === seconds;
+                  const label = seconds < 3600 ? `${seconds / 60}m` : '1h';
+                  return (
+                    <TouchableOpacity
+                      {...signalTarget('graph.source-picker.production.deadline')}
+                      key={seconds}
+                      accessibilityRole="button"
+                      accessibilityState={{selected}}
+                      accessibilityLabel={`Finish within ${label}`}
+                      style={[styles.deadlineChip, selected && styles.deadlineChipSelected]}
+                      onPress={() =>
+                        onProductionPlanChange({
+                          ...productionPlan,
+                          windowSeconds: seconds,
+                        })
+                      }>
+                      <Text
+                        style={[
+                          styles.deadlineChipText,
+                          selected && styles.deadlineChipTextSelected,
+                        ]}>
+                        {label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
             </View>
           ) : null}
           {onRememberSourceChange && (
@@ -303,6 +395,19 @@ export function PickerModal({
                             interfaceZoom,
                           )
                         : null;
+                      const cycleSeconds = opt.cycleSeconds;
+                      const cyclesPerMachine =
+                        productionPlan && cycleSeconds
+                          ? Math.floor(productionPlan.windowSeconds / cycleSeconds)
+                          : 0;
+                      const cyclesRequired =
+                        productionPlan && opt.outputPerCycle
+                          ? Math.ceil(productionPlan.amount / opt.outputPerCycle)
+                          : 0;
+                      const machineCount =
+                        cyclesPerMachine > 0 && cyclesRequired > 0
+                          ? Math.max(1, Math.ceil(cyclesRequired / cyclesPerMachine))
+                          : null;
                       return (
                         <TouchableOpacity
                           {...signalTarget('graph.source-picker.source.select')}
@@ -311,6 +416,42 @@ export function PickerModal({
                           onPress={() => onSelect(i)}>
                           <Text style={styles.optionLabel}>{opt.label}</Text>
                           {opt.sublabel ? <Text style={styles.optionSub}>{opt.sublabel}</Text> : null}
+                          {(opt.durationTicks ||
+                            opt.machineLabel ||
+                            (productionPlan && opt.outputPerCycle !== undefined)) && (
+                            <View style={styles.recipeFacts}>
+                              {opt.durationTicks ? (
+                                <View style={styles.recipeFactChip}>
+                                  <Text style={styles.recipeFactText}>
+                                    {opt.durationTicks} ticks · {(opt.durationTicks / 20).toLocaleString()} sec
+                                  </Text>
+                                </View>
+                              ) : cycleSeconds ? (
+                                <View style={styles.recipeFactChip}>
+                                  <Text style={styles.recipeFactText}>
+                                    {(cycleSeconds * 20).toLocaleString()} ticks · {cycleSeconds.toLocaleString()} sec
+                                  </Text>
+                                </View>
+                              ) : null}
+                              {productionPlan && opt.outputPerCycle !== undefined ? (
+                                <View
+                                  style={[
+                                    styles.parallelChip,
+                                    machineCount !== null && styles.parallelChipReady,
+                                  ]}>
+                                  <Text
+                                    style={[
+                                      styles.parallelText,
+                                      machineCount !== null && styles.parallelTextReady,
+                                    ]}>
+                                    {machineCount
+                                      ? `${machineCount} parallel ${machineCount === 1 ? 'machine' : 'machines'}`
+                                      : 'Timing unavailable in this export'}
+                                  </Text>
+                                </View>
+                              ) : null}
+                            </View>
+                          )}
                           {opt.imageUri && imageSize ? (
                             <RecipePreviewImage
                               uri={opt.imageUri}
@@ -374,6 +515,27 @@ export function PickerModal({
                                   />
                                 ))}
                               </View>
+                            </View>
+                          ) : null}
+                          {opt.machineKey && opt.machineLabel && onOpenMachine ? (
+                            <View style={styles.machineRow}>
+                              <View style={styles.machineCopy}>
+                                <Text style={styles.machineLabel}>CRAFTING MACHINE</Text>
+                                <Text style={styles.machineName} numberOfLines={1}>
+                                  {opt.machineLabel}
+                                </Text>
+                              </View>
+                              <TouchableOpacity
+                                {...signalTarget('graph.source-picker.machine.open')}
+                                accessibilityRole="button"
+                                accessibilityLabel={`View recipe for ${opt.machineLabel}`}
+                                style={styles.machineButton}
+                                onPress={event => {
+                                  event.stopPropagation();
+                                  onOpenMachine(opt.machineKey!);
+                                }}>
+                                <Text style={styles.machineButtonText}>View machine recipe</Text>
+                              </TouchableOpacity>
                             </View>
                           ) : null}
                         </TouchableOpacity>
@@ -514,6 +676,55 @@ const styles = StyleSheet.create({
     padding: 10,
     marginBottom: 10,
   },
+  productionTarget: {
+    backgroundColor: theme.panelAlt,
+    borderColor: theme.radialRoot,
+    borderWidth: 1,
+    borderRadius: 9,
+    padding: 10,
+    marginBottom: 10,
+    gap: 9,
+  },
+  productionHeading: {flexDirection: 'row', alignItems: 'center', gap: 10},
+  productionCopy: {flex: 1},
+  productionTitle: {color: theme.radialRoot, fontSize: 12, fontWeight: '800'},
+  productionHint: {color: theme.textDim, fontSize: 9, marginTop: 2},
+  amountStepper: {flexDirection: 'row', alignItems: 'stretch'},
+  amountButton: {
+    width: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderColor: theme.borderLight,
+    borderWidth: 1,
+    backgroundColor: theme.panel,
+  },
+  amountButtonText: {color: theme.radialRoot, fontSize: 20, fontWeight: '700'},
+  amountValue: {
+    minWidth: 54,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderTopColor: theme.borderLight,
+    borderBottomColor: theme.borderLight,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    backgroundColor: theme.panel,
+    paddingHorizontal: 8,
+  },
+  amountValueLabel: {color: theme.textDim, fontSize: 7, fontWeight: '800'},
+  amountValueText: {color: theme.text, fontSize: 14, fontWeight: '800'},
+  deadlineRow: {flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6},
+  deadlineLabel: {color: theme.textDim, fontSize: 10, fontWeight: '700', marginRight: 2},
+  deadlineChip: {
+    borderColor: theme.border,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    backgroundColor: theme.panel,
+  },
+  deadlineChipSelected: {borderColor: theme.radialRoot, backgroundColor: theme.radialRootPanel},
+  deadlineChipText: {color: theme.textDim, fontSize: 9, fontWeight: '700'},
+  deadlineChipTextSelected: {color: theme.radialRoot},
   recipeStageFilters: {
     borderTopColor: theme.border,
     borderTopWidth: 1,
@@ -638,6 +849,27 @@ const styles = StyleSheet.create({
   },
   optionLabel: {color: theme.text, fontSize: 13, fontWeight: '600'},
   optionSub: {color: theme.textDim, fontSize: 11, marginTop: 2},
+  recipeFacts: {flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 7},
+  recipeFactChip: {
+    borderRadius: 999,
+    backgroundColor: theme.panelAlt,
+    borderColor: theme.border,
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  recipeFactText: {color: theme.text, fontSize: 9, fontWeight: '700'},
+  parallelChip: {
+    borderRadius: 999,
+    backgroundColor: theme.panelAlt,
+    borderColor: theme.border,
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  parallelChipReady: {borderColor: theme.accent, backgroundColor: '#1c2b22'},
+  parallelText: {color: theme.textDim, fontSize: 9, fontWeight: '700'},
+  parallelTextReady: {color: theme.accent},
   optionImage: {marginTop: 8, borderRadius: 4},
   ingredientGroup: {marginTop: 9, gap: 5},
   ingredientLabel: {
@@ -647,6 +879,27 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   ingredientChips: {flexDirection: 'row', flexWrap: 'wrap', gap: 5},
+  machineRow: {
+    marginTop: 10,
+    paddingTop: 9,
+    borderTopColor: theme.border,
+    borderTopWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  machineCopy: {flex: 1, minWidth: 0},
+  machineLabel: {color: theme.textDim, fontSize: 8, fontWeight: '800'},
+  machineName: {color: theme.text, fontSize: 10, fontWeight: '700', marginTop: 2},
+  machineButton: {
+    borderColor: theme.accent,
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+    backgroundColor: '#1c2b22',
+  },
+  machineButtonText: {color: theme.accent, fontSize: 9, fontWeight: '800'},
   alternativeBackdrop: {
     position: 'absolute',
     top: 0,

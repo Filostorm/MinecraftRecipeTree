@@ -18,7 +18,6 @@ import mezz.jei.api.recipe.category.IRecipeCategory;
 import mezz.jei.api.runtime.IJeiRuntime;
 import net.minecraft.client.renderer.Rect2i;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.item.crafting.AbstractCookingRecipe;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
@@ -209,9 +208,9 @@ final class RecipeExporter implements ExportJob.PhaseRunner {
             if (registryName != null) {
                 rj.addProperty("id", registryName.toString());
             }
-            if (recipe instanceof AbstractCookingRecipe cookingRecipe
-                    && cookingRecipe.getCookingTime() > 0) {
-                rj.addProperty("durationTicks", cookingRecipe.getCookingTime());
+            var durationTicks = RecipeDuration.ticks(recipe);
+            if (durationTicks.isPresent()) {
+                rj.addProperty("durationTicks", durationTicks.getAsLong());
             }
             rj.addProperty("img", imageName);
             rj.addProperty("w", w);

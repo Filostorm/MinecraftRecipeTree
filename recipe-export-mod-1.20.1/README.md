@@ -8,11 +8,13 @@ Press **G** while holding an item or hovering an item in JEI to open its Recipe 
 The key is configurable under Minecraft's **Controls → Recipe Tree** category. The planner:
 
 - draws recipes with JEI's own renderer, so modded layouts and ingredient alternatives remain familiar;
-- exports exact vanilla cooking durations for production planning in the site viewer;
+- exports exact vanilla cooking durations and common modded JEI recipe timing accessors for
+  production planning in the site viewer; recipes that expose total energy and energy per tick are
+  converted to an exact cycle length when the ratio is integral;
 - lets you click an ingredient slot to continue planning that next resource;
 - calculates the minimum parallel machines for an output amount, recipe cycle time, and deadline;
-- uses the exact vanilla cooking duration when the recipe exposes one and leaves other machine cycle
-  times editable because JEI has no universal duration field;
+- uses exported JEI/mod timing when available and leaves other machine cycle times editable because
+  JEI has no universal duration field;
 - remembers observed inventory items and can treat a machine as unlocked when one of its JEI crafting
   recipes uses only observed items (for example, a furnace after cobblestone is observed);
 - lets players manually check a machine or disable progression gating entirely; and

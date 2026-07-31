@@ -164,6 +164,7 @@ interface PickerState {
   target: ItemTreeNode;
   byproductCoverage?: NodeByproductCoverage;
   rememberSource: boolean;
+  productionPlan?: ProductionPlan;
   collapsedGroupKeys: Set<string>;
 }
 
@@ -976,6 +977,19 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
               presentedRecipe && direction === 'outputs'
                 ? slotSummary(presentedRecipe.out)
                 : undefined,
+            durationTicks: presentedRecipe?.durationTicks,
+            cycleSeconds:
+              presentedRecipe && category
+                ? recipeCycleSeconds(presentedRecipe, category.id) ?? undefined
+                : undefined,
+            outputPerCycle:
+              presentedRecipe && direction === 'inputs'
+                ? selectedRecipeOutput(presentedRecipe, targetKey) ?? undefined
+                : undefined,
+            machineKey: category?.catalysts[0],
+            machineLabel: category?.catalysts[0]
+              ? itemName(category.catalysts[0])
+              : undefined,
           },
         };
       }
@@ -1140,6 +1154,13 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
         target,
         byproductCoverage,
         rememberSource: direction === 'inputs',
+        productionPlan:
+          target.id === 'root' && direction === 'inputs'
+            ? target.productionPlan ?? {
+                amount: Math.max(1, target.amount ?? 1),
+                windowSeconds: 60,
+              }
+            : undefined,
         collapsedGroupKeys: loadCollapsedRecipeCategories(),
       });
     },
@@ -2427,6 +2448,19 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
               return {...current, fluidTransferEntries};
             });
           }}
+          productionPlan={picker.productionPlan}
+          onProductionPlanChange={
+            picker.productionPlan
+              ? productionPlan =>
+                  setPicker(current =>
+                    current ? {...current, productionPlan} : current,
+                  )
+              : undefined
+          }
+          onOpenMachine={machineKey => {
+            setPicker(null);
+            openItem(machineKey);
+          }}
           onSelect={i => {
             const p = picker;
             const entries = visiblePickerEntries(p, hiddenRecipeStages);
@@ -2442,6 +2476,9 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
             if (blockRecursiveExpansion(p.target, 'select picker source')) {
               setPicker(null);
               return;
+            }
+            if (p.productionPlan && choice.t === 'recipe') {
+              p.target.productionPlan = {...p.productionPlan};
             }
             if (p.target.id === 'root' && p.direction === 'outputs') {
               if (choice.t !== 'recipe' || !selectedEntry.recipe) {
@@ -3136,6 +3173,25 @@ function SourceNodeView({
   const machineName = machineKey
     ? data.itemsByKey.get(machineKey)?.n ?? machineKey
     : 'machine';
+  const headerCopy = (
+    <Text style={[styles.sourceHeaderText, noSelect]} numberOfLines={1}>
+      {name}
+      <Text style={[styles.sourceHeaderAmount, noSelect]}>{amountText}</Text>
+      <Text style={[styles.sourceHeaderContext, noSelect]}> · {context}</Text>
+      {byproductCoverage && (
+        <Text style={[styles.sourceHeaderByproduct, noSelect]}>
+          {' · '}
+          {formatIngredientQuantity(item.key, byproductCoverage.creditedAmount)} byproduct
+        </Text>
+      )}
+      {machineEstimate && (
+        <Text style={[styles.sourceHeaderParallel, noSelect]}>
+          {' · '}
+          {machineEstimate.machines}× {machineName}
+        </Text>
+      )}
+    </Text>
+  );
 
   return (
     <View
@@ -3181,23 +3237,21 @@ function SourceNodeView({
         ) : (
           <ItemIcon item={catalogItem} itemKey={item.key} size={16} />
         )}
-        <Text style={[styles.sourceHeaderText, noSelect]} numberOfLines={1}>
-          {name}
-          <Text style={[styles.sourceHeaderAmount, noSelect]}>{amountText}</Text>
-          <Text style={[styles.sourceHeaderContext, noSelect]}> · {context}</Text>
-          {byproductCoverage && (
-            <Text style={[styles.sourceHeaderByproduct, noSelect]}>
-              {' · '}
-              {formatIngredientQuantity(item.key, byproductCoverage.creditedAmount)} byproduct
-            </Text>
-          )}
-          {machineEstimate && (
-            <Text style={[styles.sourceHeaderParallel, noSelect]}>
-              {' · '}
-              {machineEstimate.machines}× {machineName}
-            </Text>
-          )}
-        </Text>
+        {isRoot && onPlanProduction ? (
+          <TouchableOpacity
+            {...signalTarget('graph.node.production-plan.label')}
+            accessibilityRole="button"
+            accessibilityLabel={`Plan requested amount and parallel machines for ${name}`}
+            style={styles.sourceHeaderLabelButton}
+            onPress={event => {
+              event.stopPropagation();
+              onPlanProduction();
+            }}>
+            {headerCopy}
+          </TouchableOpacity>
+        ) : (
+          headerCopy
+        )}
         {canSwap && (
           <TouchableOpacity
             {...signalTarget(`graph.node.swap.${nodeDepthBucket(item)}`)}
@@ -3501,6 +3555,7 @@ const styles = StyleSheet.create({
     marginBottom: 3,
   },
   sourceHeaderText: {color: theme.text, fontSize: 11, fontWeight: '600', flex: 1},
+  sourceHeaderLabelButton: {flex: 1, minWidth: 0},
   sourceHeaderAmount: {color: theme.accent, fontWeight: '700'},
   sourceHeaderContext: {color: theme.textDim, fontWeight: '400'},
   sourceHeaderByproduct: {color: theme.accentAlt, fontWeight: '600'},

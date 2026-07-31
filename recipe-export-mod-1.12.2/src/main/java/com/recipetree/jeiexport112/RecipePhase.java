@@ -147,6 +147,7 @@ final class RecipePhase implements ExportPhase {
         if (registryName != null) {
             data.id = registryName.toString();
         }
+        RecipeDuration.ticks(recipe).ifPresent(value -> data.durationTicks = value);
 
         int semanticFailuresBefore = context.failureCount();
         try {
@@ -683,6 +684,9 @@ final class RecipePhase implements ExportPhase {
         if (data.error) {
             recipesWriter.name("err").value(true);
         }
+        if (data.durationTicks != null) {
+            recipesWriter.name("durationTicks").value(data.durationTicks.longValue());
+        }
         if (data.image != null) {
             recipesWriter.name("img").value(data.image);
             recipesWriter.name("w").value(data.width);
@@ -759,6 +763,7 @@ final class RecipePhase implements ExportPhase {
         int height;
         boolean error;
         boolean excluded;
+        Long durationTicks;
         final List<SlotData> inputs = new ArrayList<SlotData>();
         final List<SlotData> outputs = new ArrayList<SlotData>();
         final List<SlotData> catalysts = new ArrayList<SlotData>();
