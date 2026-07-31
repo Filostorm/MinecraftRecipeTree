@@ -1,31 +1,7 @@
-'use client';
-
-import {useState} from 'react';
 import {PackUploadDropzone} from './PackUploadDropzone';
 import styles from './publish.module.css';
 
-const VERSION_GUIDES = [
-  {
-    version: '1.21.1',
-    command: '/jeiexport all',
-  },
-  {
-    version: '1.20.1',
-    command: '/jeiexport all',
-  },
-  {
-    version: '1.12.2',
-    command: '/jeiexport',
-  },
-] as const;
-
-type SupportedVersion = (typeof VERSION_GUIDES)[number]['version'];
-
 export default function PublishPage() {
-  const [selectedVersion, setSelectedVersion] = useState<SupportedVersion>('1.21.1');
-  const guide = VERSION_GUIDES.find(entry => entry.version === selectedVersion)
-    ?? VERSION_GUIDES[0];
-
   return (
     <main className={styles.page}>
       <div className={styles.shell}>
@@ -39,18 +15,17 @@ export default function PublishPage() {
         </header>
 
         <section className={styles.hero} aria-labelledby="publish-title">
-          <p className={styles.eyebrow}>SHARE YOUR MODPACK</p>
+          <p className={styles.eyebrow}>ADD YOUR MODPACK</p>
           <h1 id="publish-title">Bring your pack to Recipe Tree.</h1>
           <p className={styles.heroCopy}>
-            Follow the short guide for your Minecraft version, then check the ZIP before you
-            share it.
+            Follow five short steps to export your pack and open it in the viewer.
           </p>
           <div className={styles.heroActions}>
             <a className={styles.primaryAction} href="#instructions">
               Get started
             </a>
             <a className={styles.secondaryAction} href="#upload">
-              Check your ZIP
+              Add your ZIP
             </a>
           </div>
         </section>
@@ -59,40 +34,27 @@ export default function PublishPage() {
           <div className={styles.sectionHeading}>
             <div>
               <p className={styles.stepLabel}>YOUR GUIDE</p>
-              <h2 id="instructions-title">Choose your Minecraft version</h2>
-              <p>We&apos;ll only show the steps you need for that version.</p>
-            </div>
-            <div className={styles.filter}>
-              <label htmlFor="minecraft-version">Minecraft version</label>
-              <select
-                id="minecraft-version"
-                value={selectedVersion}
-                onChange={event => setSelectedVersion(event.target.value as SupportedVersion)}>
-                {VERSION_GUIDES.map(entry => (
-                  <option value={entry.version} key={entry.version}>
-                    Minecraft {entry.version}
-                  </option>
-                ))}
-              </select>
+              <h2 id="instructions-title">Export your modpack</h2>
+              <p>These steps work for Minecraft 1.12.2, 1.20.1, and 1.21.1.</p>
             </div>
           </div>
 
           <article className={styles.guideCard}>
             <div className={styles.guideTopline}>
-              <span>Minecraft {guide.version}</span>
-              <span>4 easy steps</span>
+              <span>CurseForge</span>
+              <span>5 easy steps</span>
             </div>
-            <h3>Export your modpack</h3>
+            <h3>Get your pack ready</h3>
             <p className={styles.curseForgeNotice}>
-              The exporter will be available through CurseForge. There are no mod downloads on
-              this site.
+              Recipe Tree Exporter will be available through CurseForge. There are no mod
+              downloads on this site.
             </p>
             <ol className={styles.guideSteps}>
               <li>
                 <span className={styles.number}>1</span>
                 <div>
                   <h4>Add the exporter</h4>
-                  <p>In CurseForge, add Recipe Tree Exporter to the modpack you want to share.</p>
+                  <p>In CurseForge, add Recipe Tree Exporter to the modpack you want to use.</p>
                 </div>
               </li>
               <li>
@@ -106,8 +68,17 @@ export default function PublishPage() {
                 <span className={styles.number}>3</span>
                 <div>
                   <h4>Run the export</h4>
-                  <p>Open chat and enter:</p>
-                  <code className={styles.command}>{guide.command}</code>
+                  <p>Open chat and use the command for your Minecraft version:</p>
+                  <div className={styles.commands}>
+                    <span>
+                      <strong>1.20.1 or 1.21.1</strong>
+                      <code className={styles.command}>/jeiexport all</code>
+                    </span>
+                    <span>
+                      <strong>1.12.2</strong>
+                      <code className={styles.command}>/jeiexport</code>
+                    </span>
+                  </div>
                 </div>
               </li>
               <li>
@@ -120,24 +91,20 @@ export default function PublishPage() {
                   </p>
                 </div>
               </li>
+              <li className={styles.uploadStep} id="upload">
+                <span className={styles.number}>5</span>
+                <div className={styles.uploadStepContent}>
+                  <h4>Add your exporter ZIP</h4>
+                  <p>Drag it into the box or tap the box to choose it.</p>
+                  <PackUploadDropzone />
+                </div>
+              </li>
             </ol>
           </article>
         </section>
 
-        <section className={styles.section} id="upload" aria-labelledby="upload-title">
-          <div className={styles.sectionHeading}>
-            <div>
-              <p className={styles.stepLabel}>CHECK YOUR FILE</p>
-              <h2 id="upload-title">Add your exporter ZIP</h2>
-              <p>Drag it here or tap to choose it. We&apos;ll tell you if it&apos;s ready.</p>
-            </div>
-          </div>
-          <PackUploadDropzone />
-        </section>
-
         <footer className={styles.footer}>
           <a href="/">← Return to Recipe Tree</a>
-          <span>Your ZIP stays on your device while it is checked.</span>
         </footer>
       </div>
     </main>

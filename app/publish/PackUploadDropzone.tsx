@@ -355,7 +355,6 @@ export function PackUploadDropzone() {
           onChange={onInput}
           disabled={state.status === 'checking'}
           aria-label="Add an exporter ZIP archive"
-          aria-describedby="upload-help"
         />
         <span className={styles.uploadIcon} aria-hidden="true">↑</span>
         <strong>
@@ -382,10 +381,6 @@ export function PackUploadDropzone() {
           />
         )}
       </label>
-
-      <p className={styles.uploadHelp} id="upload-help">
-        Your ZIP stays on this device. Nothing is sent to a server.
-      </p>
 
       <div className={styles.uploadResult} aria-live="polite">
         {state.status === 'ready' && (
