@@ -117,11 +117,13 @@ export function DatasetSwitcher({
     <View style={[styles.bar, compact && styles.barCompact]}>
       {compact ? (
         <View style={styles.compactRows}>
-          <View style={styles.compactTitleRow}>{brand}</View>
+          <View style={styles.compactTitleRow}>
+            {brand}
+            {datasetButton}
+          </View>
           <View style={styles.compactControlRow}>
             {uploadButton}
             {leadingAction}
-            {datasetButton}
             {expandButton}
           </View>
         </View>
@@ -167,12 +169,13 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   brand: {flexGrow: 1, flexShrink: 1, minWidth: 140},
-  brandCompact: {minWidth: 0},
+  brandCompact: {flexGrow: 0, flexShrink: 0, minWidth: 0},
   title: {color: theme.text, fontSize: 17, fontWeight: '800'},
   compactRows: {gap: 7},
   compactTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 8,
     minHeight: 26,
   },
   compactControlRow: {
