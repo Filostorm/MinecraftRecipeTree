@@ -2,13 +2,16 @@
 
 Read the exact versioned docs at https://docs.expo.dev/versions/v56.0.0/ before writing any code.
 
-# Beta web environment
+# Release environments
 
-- Use `beta` as the source branch for requested application changes and deploy every completed, validated change to the separate beta Sites project configured in `.openai/hosting.json`.
-- A successful beta deployment is not authorization to change the public application. Do not update or deploy the production Sites project unless the user explicitly requests production promotion.
-- The beta Site must set `BETA_DATA_ORIGIN=https://minecraftrecipetree.craftsmannsoftware.com`. Its Worker may proxy only public read requests for the dataset catalog, immutable publications, immutable preview sets, and legacy modpack verification. Never proxy cookies, authorization, feedback, administration, or mutation methods.
-- After every beta deployment, verify the beta URL hydrates in a fresh browser tab, exposes the stage controls, serves a hashed application asset, and returns `X-MRT-Beta-Data-Origin: https://minecraftrecipetree.craftsmannsoftware.com` on `/api/datasets`.
-- When the user explicitly requests production promotion, promote the exact validated beta application changes while preserving the production project configuration, then run the production verification below.
+- Use `beta` as the integration branch for application changes and `main` as the production branch.
+- Validate and deploy application changes to the private beta Site before asking for explicit production promotion.
+- The beta Sites project is `appgprj_6a6a505e7bc08191acada3d05fa5d18d` at `https://minecraft-recipe-tree-beta.gtjoe51.chatgpt.site`. The `beta` branch's `.openai/hosting.json` must point to this project.
+- The production Sites project is `appgprj_6a5a5da437248191a0f8accf3fb92d5d`. The `main` branch's `.openai/hosting.json` must point to this project. Never deploy with the other environment's project ID.
+- The beta Site must remain private and set `BETA_DATA_ORIGIN=https://minecraftrecipetree.craftsmannsoftware.com`. Its Worker may proxy only public read requests for the dataset catalog, immutable publications, immutable preview sets, and legacy modpack verification. Never proxy cookies, authorization, feedback, administration, or mutation methods.
+- After every beta deployment, verify that the beta URL hydrates in a fresh browser tab, the changed feature works, a hashed application asset loads, and `/api/datasets` returns `X-MRT-Beta-Data-Origin: https://minecraftrecipetree.craftsmannsoftware.com`.
+- A successful beta deployment is not authorization to change production. Promote only after the user explicitly approves production deployment, and preserve the production project configuration while transferring the exact validated application changes.
+- The complete release procedure and environment inventory are in `docs/hosting-environments.md`.
 
 # Production publishing
 

@@ -31,6 +31,37 @@ import {
 
 const quietLogger = Object.freeze({info() {}, warn() {}, error() {}});
 
+test('NeoForge 1.21.1 release is isolated and uses the strict generic JEI profile', () => {
+  const release = EXPORTER_RELEASE_DEFINITIONS.find(
+    candidate => candidate.id === 'neoforge-jei-1.21.1',
+  );
+  assert.ok(release);
+  assert.deepEqual(
+    {
+      minecraftVersion: release.minecraftVersion,
+      recipeViewer: release.recipeViewer,
+      loader: release.loader,
+      version: release.version,
+      source: release.source,
+      filename: release.filename,
+      qualityProfiles: release.qualityProfiles,
+      artifactProvenance: release.artifactProvenance,
+      acceptanceCorpora: release.acceptanceCorpora,
+    },
+    {
+      minecraftVersion: '1.21.1',
+      recipeViewer: 'JEI 19',
+      loader: 'NeoForge 21.1',
+      version: '1.0.0',
+      source: 'recipe-export-mod-1.21.1/build/libs/jeiexport-1.0.0.jar',
+      filename: 'recipe-tree-exporter-neoforge-1.21.1-1.0.0.jar',
+      qualityProfiles: ['generic-jei-1.21.1'],
+      artifactProvenance: null,
+      acceptanceCorpora: {'generic-jei-1.21.1': null},
+    },
+  );
+});
+
 test('Multiblock Madness exporter releases remain isolated across independent versions', () => {
   const mm1 = EXPORTER_RELEASE_DEFINITIONS.find(
     candidate => candidate.id === 'forge-hei-1.12.2',

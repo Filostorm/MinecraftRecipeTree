@@ -6,10 +6,46 @@ import {
   type ExporterReleaseManifest,
   requireExporterReleaseManifest,
 } from '../../src/data/exporterReleases';
+import {PackUploadDropzone} from './PackUploadDropzone';
 import styles from './publish.module.css';
 
 const MAX_RELEASE_MANIFEST_BYTES = 128 * 1024;
 const ALL_VERSIONS = 'all';
+const MANUAL_TEST_BUILDS = Object.freeze([
+  {
+    minecraftVersion: '1.21.1',
+    title: 'JEI 19 · NeoForge 21.1',
+    compatibility: 'NeoForge 21.1.x with JEI 19.21–19.x',
+    filename: 'recipe-tree-exporter-neoforge-1.21.1-1.0.0.jar',
+    href: '/exporters/recipe-tree-exporter-neoforge-1.21.1-1.0.0.jar',
+    sha256: 'b3eb6d4b0e97da5708d6dde4a97434d65d64bbceef2e3ab7949ec36824f715dd',
+    bytes: 108_121,
+    qualityProfile: 'generic-jei-1.21.1',
+    command: '/jeiexport all',
+  },
+  {
+    minecraftVersion: '1.20.1',
+    title: 'JEI 15 · Forge 47',
+    compatibility: 'Forge 47.x with JEI 15.x',
+    filename: 'recipe-tree-exporter-forge-1.20.1-1.1.0.jar',
+    href: '/exporters/recipe-tree-exporter-forge-1.20.1-1.1.0.jar',
+    sha256: '00934e9b1fe207833faa5574cd052d997375ea0e2eb376427b1ba82358108bf0',
+    bytes: 108_625,
+    qualityProfile: 'generic-jei-1.20.1',
+    command: '/jeiexport all',
+  },
+  {
+    minecraftVersion: '1.12.2',
+    title: 'JEI or HEI 4 · Forge 14.23.5',
+    compatibility: 'Forge 14.23.5.x with JEI or HEI 4.x',
+    filename: 'recipe-tree-exporter-forge-1.12.2-1.1.0.jar',
+    href: '/exporters/recipe-tree-exporter-forge-1.12.2-1.1.0.jar',
+    sha256: '1b133b2de6b7939c943d1c4e2819dfabf20d7e1edc07e65a8af00ff233693dbd',
+    bytes: 257_201,
+    qualityProfile: 'pack-specific 1.12.2 approval',
+    command: '/jeiexport',
+  },
+]);
 
 type ManifestState =
   | {status: 'loading'}
@@ -85,9 +121,19 @@ export default function PublishPage() {
 
   const versions = useMemo(() => {
     if (manifestState.status !== 'ready') return [];
-    return [...new Set(manifestState.manifest.releases.map(release => release.minecraftVersion))]
+    return [...new Set([
+      ...MANUAL_TEST_BUILDS.map(build => build.minecraftVersion),
+      ...manifestState.manifest.releases.map(release => release.minecraftVersion),
+    ])]
       .sort((left, right) => right.localeCompare(left, undefined, {numeric: true}));
   }, [manifestState]);
+
+  const visibleManualTestBuilds = useMemo(
+    () => selectedVersion === ALL_VERSIONS
+      ? MANUAL_TEST_BUILDS
+      : MANUAL_TEST_BUILDS.filter(build => build.minecraftVersion === selectedVersion),
+    [selectedVersion],
+  );
 
   const visibleReleases = useMemo(() => {
     if (manifestState.status !== 'ready') return [];
@@ -119,13 +165,28 @@ export default function PublishPage() {
             durable Recipe Tree link.
           </p>
           <div className={styles.heroActions}>
-            <a className={styles.primaryAction} href="#downloads">
+            <a className={styles.primaryAction} href="#upload">
+              Upload pack
+            </a>
+            <a className={styles.secondaryAction} href="#downloads">
               Identify an exporter
             </a>
-            <a className={styles.secondaryAction} href="#workflow">
-              Read the full workflow
-            </a>
           </div>
+        </section>
+
+        <section className={styles.section} id="upload" aria-labelledby="upload-title">
+          <div className={styles.sectionHeading}>
+            <div>
+              <p className={styles.stepLabel}>PACK UPLOAD</p>
+              <h2 id="upload-title">Add your completed exporter ZIP</h2>
+              <p>
+                Drop the archive here or tap to choose it. Recipe Tree reads the exporter manifest
+                in your browser and tells you whether the pack is ready for operator-reviewed
+                import.
+              </p>
+            </div>
+          </div>
+          <PackUploadDropzone />
         </section>
 
         <aside className={styles.operatorNotice} aria-labelledby="operator-notice-title">
@@ -145,11 +206,11 @@ export default function PublishPage() {
           <div className={styles.sectionHeading}>
             <div>
               <p className={styles.stepLabel}>STEP 1</p>
-              <h2 id="downloads-title">Identify the exact externally distributed exporter</h2>
+              <h2 id="downloads-title">Download the exporter that exactly matches your pack</h2>
               <p>
                 Minecraft, mod loader, and JEI/REI/HEI/NEI APIs are version-specific. A near match
-                is not compatible. The records below are verification metadata, not hosted
-                downloads.
+                is not compatible. Hands-on tester JARs for 1.12.2, 1.20.1, and 1.21.1 are hosted
+                here; older catalog records remain verification metadata for external builds.
               </p>
             </div>
             {manifestState.status === 'ready' && (
@@ -169,6 +230,54 @@ export default function PublishPage() {
               </div>
             )}
           </div>
+
+          {visibleManualTestBuilds.length > 0 && (
+            <div className={`${styles.releaseGrid} ${styles.testBuildGrid}`}>
+              {visibleManualTestBuilds.map(build => (
+                <article
+                  className={`${styles.releaseCard} ${styles.testBuildCard}`}
+                  key={build.minecraftVersion}>
+                  <div className={styles.releaseTopline}>
+                    <span>Minecraft {build.minecraftVersion}</span>
+                    <span>Manual-test build</span>
+                  </div>
+                  <h3>{build.title}</h3>
+                  <p className={styles.compatibility}>
+                    Built for {build.compatibility}. Use it on a copy of your pack and report any
+                    failed export phase with the generated diagnostics.
+                  </p>
+                  <dl className={styles.releaseFacts}>
+                    <div>
+                      <dt>Status</dt>
+                      <dd>Preview for hands-on pack testing</dd>
+                    </div>
+                    <div>
+                      <dt>Size</dt>
+                      <dd>{formatBytes(build.bytes)}</dd>
+                    </div>
+                    <div>
+                      <dt>Quality profile</dt>
+                      <dd>{build.qualityProfile}</dd>
+                    </div>
+                    <div>
+                      <dt>Command</dt>
+                      <dd><code>{build.command}</code></dd>
+                    </div>
+                  </dl>
+                  <a
+                    className={styles.downloadButton}
+                    href={build.href}
+                    download={build.filename}>
+                    Download {build.minecraftVersion} exporter JAR
+                  </a>
+                  <div className={styles.checksum}>
+                    <span>SHA-256</span>
+                    <code>{build.sha256}</code>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
 
           {manifestState.status === 'loading' && (
             <div className={styles.statusPanel} role="status" aria-live="polite">
@@ -242,7 +351,8 @@ export default function PublishPage() {
                   {new Date(manifestState.manifest.generatedAt).toLocaleString()}
                 </time>
                 . Every filename and checksum above passed the viewer&apos;s exact release contract.
-                Exporter JARs are intentionally not hosted by Recipe Tree.
+                Catalog-only JARs remain externally distributed; the clearly labeled manual-test
+                builds above are hosted by Recipe Tree.
               </p>
             </>
           )}
@@ -263,11 +373,11 @@ export default function PublishPage() {
               <div>
                 <h3>Verify and install the JAR</h3>
                 <p>
-                  Obtain the JAR from the operator&apos;s external distribution channel, compare it
-                  against the SHA-256 above, close Minecraft, and put
-                  the JAR in the target instance&apos;s <code>mods</code> directory—not the
-                  launcher&apos;s global directory. Confirm the matching recipe viewer is already
-                  installed.
+                  Download the hosted 1.12.2, 1.20.1, or 1.21.1 tester above, or obtain another
+                  cataloged JAR from the operator&apos;s external distribution channel. Compare it
+                  against the listed SHA-256, close Minecraft, and put the JAR in the target
+                  instance&apos;s <code>mods</code> directory—not the launcher&apos;s global
+                  directory. Confirm the matching recipe viewer is already installed.
                 </p>
                 <div className={styles.commandGrid}>
                   <pre><code>shasum -a 256 &quot;/path/to/exporter.jar&quot;</code></pre>
@@ -281,9 +391,9 @@ export default function PublishPage() {
                 <h3>Export inside a disposable single-player world</h3>
                 <p>
                   A loaded world lets the exporter capture world-dependent mob drops, block drops,
-                  staged recipes, and server-backed integrations. For Minecraft 1.20.1 + JEI 15,
-                  run <code>/jeiexport all</code>. Older releases consume their exact request file
-                  from the instance root:
+                  staged recipes, and server-backed integrations. For Minecraft 1.21.1 + JEI 19
+                  or 1.20.1 + JEI 15, run <code>/jeiexport all</code>. Older releases consume their
+                  exact request file from the instance root:
                 </p>
                 <ul>
                   <li><code>reiexport-request.json</code> for 1.18.2</li>

@@ -29,12 +29,25 @@ const RELEASE_ID_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
 
 export const EXPORTER_RELEASE_DEFINITIONS = Object.freeze([
   Object.freeze({
+    id: 'neoforge-jei-1.21.1',
+    minecraftVersion: '1.21.1',
+    recipeViewer: 'JEI 19',
+    loader: 'NeoForge 21.1',
+    version: '1.0.0',
+    source: 'recipe-export-mod-1.21.1/build/libs/jeiexport-1.0.0.jar',
+    filename: 'recipe-tree-exporter-neoforge-1.21.1-1.0.0.jar',
+    qualityProfiles: Object.freeze(['generic-jei-1.21.1']),
+    artifactProvenance: null,
+    acceptanceCorpora: Object.freeze({'generic-jei-1.21.1': null}),
+    compatibility: 'NeoForge 21.1.x with JEI 19.21–19.x',
+  }),
+  Object.freeze({
     id: 'forge-jei-1.20.1',
     minecraftVersion: '1.20.1',
     recipeViewer: 'JEI 15',
     loader: 'Forge 47',
     version: '1.1.0',
-    source: 'recipe-export-mod/build/libs/jeiexport-1.1.0.jar',
+    source: 'recipe-export-mod-1.20.1/build/libs/jeiexport-1.1.0.jar',
     filename: 'recipe-tree-exporter-forge-1.20.1-1.1.0.jar',
     qualityProfiles: Object.freeze(['generic-jei-1.20.1']),
     artifactProvenance: null,

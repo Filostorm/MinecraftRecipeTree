@@ -10,25 +10,25 @@ viewer URL. A publication has two identities:
 The viewer's pack switcher reads those channel records. Switching packs changes `?pack=<slug>` in
 the URL, so a selected pack can be bookmarked or shared.
 
-## 1. Identify the matching externally distributed exporter
+## 1. Identify the matching exporter
 
 Do not install an exporter for a different Minecraft/recipe-viewer API. The current source tree
 contains these client-only builds:
 
 | Minecraft | Recipe viewer | Exporter project | Identity configuration |
 |---|---|---|---|
-| 1.20.1 | JEI 15 | `recipe-export-mod` | `jeiexport.packName` / `jeiexport.packVersion` JVM properties, or bounded launcher metadata detection |
+| 1.21.1 | JEI 19 | `recipe-export-mod-1.21.1` | `jeiexport.packName` / `jeiexport.packVersion` JVM properties, or bounded launcher metadata detection |
+| 1.20.1 | JEI 15 | `recipe-export-mod-1.20.1` | `jeiexport.packName` / `jeiexport.packVersion` JVM properties, or bounded launcher metadata detection |
 | 1.18.2 | REI 8 | `recipe-export-mod-1.18.2` | required `packName` and `packVersion` in `reiexport-request.json` |
 | 1.12.2 | HEI/JEI 4 | `recipe-export-mod-1.12.2` | `packName` and `packVersion` in `jeiexport-request.json` or matching JVM properties |
 | 1.7.10 | NEI 2.8.44-GTNH | `recipe-export-mod-1.7.10` | exact pinned `pack` object in `neiexport-request.json` (currently GT New Horizons 2.8.4) |
 
 Download the version-matched release from the public
 [export and publishing guide](https://minecraftrecipetree.craftsmannsoftware.com/publish). The
-guide obtains each JAR filename, byte length, compatibility statement, and SHA-256 from a bounded
-exact release manifest. Recipe Tree intentionally exposes no JAR URL and hosts no exporter binary;
-obtain the file through the operator's external distribution channel, then verify its checksum
-before installation. Development and `sources` JARs are
-explicitly excluded from that manifest.
+guide directly hosts clearly labeled Minecraft 1.12.2, 1.20.1, and 1.21.1 manual-test builds and
+publishes every exact byte length and SHA-256. Other release records remain bounded verification
+metadata for builds obtained through the operator's external distribution channel. Verify every
+checksum before installation. Development and `sources` JARs are explicitly excluded.
 
 ## 2. Install the exporter
 

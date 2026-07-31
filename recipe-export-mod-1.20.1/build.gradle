@@ -1,0 +1,137 @@
+plugins {
+    id 'eclipse'
+    id 'idea'
+    id 'net.minecraftforge.gradle' version '[6.0,6.2)'
+}
+
+version = mod_version
+group = mod_group_id
+
+base {
+    archivesName = mod_id
+}
+
+// Mojang ships official compiled-for-Java-17 code since 1.18, so mods need Java 17.
+java.toolchain.languageVersion = JavaLanguageVersion.of(17)
+
+minecraft {
+    // Official mojang mappings.
+    mappings channel: 'official', version: minecraft_version
+    accessTransformer = file('src/main/resources/META-INF/accesstransformer.cfg')
+    copyIdeResources = true
+
+    runs {
+        configureEach {
+            workingDirectory project.file('run')
+            property 'forge.logging.markers', 'REGISTRIES'
+            property 'forge.logging.console.level', 'debug'
+            // Content mods (below) need more than the 1G default.
+            jvmArg '-Xmx4G'
+            // Production mods' mixin refmaps point at SRG names; the dev runtime uses
+            // official names. Ignoring refmaps makes mixin use the source-written
+            // (mojmap) names, which match the dev runtime.
+            property 'mixin.env.disableRefMap', 'true'
+            mods {
+                "${mod_id}" {
+                    source sourceSets.main
+                }
+            }
+        }
+
+        client {
+            property 'forge.enabledGameTestNamespaces', mod_id
+            // Give the dev client a proper macOS app name (Dock, window manager).
+            jvmArg '-Xdock:name=Minecraft'
+        }
+
+        server {
+            args '--nogui'
+        }
+
+        // Headless end-to-end export: boots straight into the 'export-test' world
+        // and runs the full export automatically. World must exist in run/saves/.
+        exportClient {
+            parent runs.client
+            property 'jeiexport.auto', 'all'
+            args '--quickPlaySingleplayer', 'export-test'
+        }
+    }
+}
+
+repositories {
+    mavenCentral()
+    maven {
+        name = 'BlameJared (JEI)'
+        url = 'https://maven.blamejared.com'
+    }
+    maven {
+        name = 'Modrinth'
+        url = 'https://api.modrinth.com/maven'
+        content { includeGroup 'maven.modrinth' }
+    }
+}
+
+dependencies {
+    minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+
+    // JEI API for compiling, full JEI at runtime (dev runs).
+    compileOnly fg.deobf("mezz.jei:jei-${minecraft_version}-common-api:${jei_api_version}")
+    compileOnly fg.deobf("mezz.jei:jei-${minecraft_version}-forge-api:${jei_api_version}")
+    runtimeOnly fg.deobf("mezz.jei:jei-${minecraft_version}-forge:${jei_runtime_version}")
+
+    testImplementation fg.deobf("mezz.jei:jei-${minecraft_version}-common-api:${jei_api_version}")
+    testImplementation fg.deobf("mezz.jei:jei-${minecraft_version}-forge-api:${jei_api_version}")
+    // Real content mods for exercising the exporter like a modpack would (dev runs only;
+    // these are production jars from Modrinth, deobfuscated by ForgeGradle).
+    runtimeOnly fg.deobf("maven.modrinth:create:8amzvn9x")            // Create mc1.20.1-6.0.8
+    runtimeOnly fg.deobf("maven.modrinth:mekanism:uxe1WQp4")          // Mekanism 10.4.16.80
+    runtimeOnly fg.deobf("maven.modrinth:farmers-delight:CsjS7EkP")   // Farmer's Delight 1.3.2
+    runtimeOnly fg.deobf("maven.modrinth:alexs-mobs:XoIASRVU")        // Alex's Mobs 1.22.9
+    runtimeOnly fg.deobf("maven.modrinth:citadel:lTAAe4sZ")           // Citadel 2.6.3 (Alex's Mobs dep)
+
+    testImplementation "org.junit.jupiter:junit-jupiter:5.10.2"
+}
+
+tasks.named('test', Test).configure {
+    useJUnitPlatform()
+}
+
+tasks.named('processResources', ProcessResources).configure {
+    var replaceProperties = [
+            minecraft_version      : minecraft_version,
+            minecraft_version_range: minecraft_version_range,
+            forge_version          : forge_version,
+            forge_version_range    : forge_version_range,
+            loader_version_range   : loader_version_range,
+            jei_version_range      : jei_version_range,
+            mod_id                 : mod_id,
+            mod_name               : mod_name,
+            mod_license            : mod_license,
+            mod_version            : mod_version,
+            mod_authors            : mod_authors,
+            mod_description        : mod_description,
+    ]
+    inputs.properties replaceProperties
+
+    filesMatching(['META-INF/mods.toml']) {
+        expand replaceProperties + [project: project]
+    }
+}
+
+tasks.named('jar', Jar).configure {
+    manifest {
+        attributes([
+                'Specification-Title'     : mod_id,
+                'Specification-Vendor'    : mod_authors,
+                'Specification-Version'   : '1',
+                'Implementation-Title'    : project.name,
+                'Implementation-Version'  : project.jar.archiveVersion,
+                'Implementation-Vendor'   : mod_authors
+        ])
+    }
+    finalizedBy 'reobfJar'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}

@@ -1,5 +1,6 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {
+  Linking,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -13,6 +14,13 @@ import type {Manifest} from '../types';
 import {DatasetDisclaimer} from './DatasetDisclaimer';
 
 type CatalogStatus = 'loading' | 'ready' | 'error';
+
+function openPackUpload() {
+  const url = '/publish#upload';
+  void Linking.openURL(url).catch(error => {
+    console.error('Could not open the modpack upload page.', {url, error});
+  });
+}
 
 export function DatasetSwitcher({
   status,
@@ -93,6 +101,17 @@ export function DatasetSwitcher({
       </Text>
     </TouchableOpacity>
   ) : null;
+  const uploadButton = (
+    <TouchableOpacity
+      style={[styles.uploadButton, compact && styles.uploadButtonCompact]}
+      onPress={openPackUpload}
+      accessibilityRole="link"
+      accessibilityLabel="Upload a modpack exporter ZIP"
+      accessibilityHint="Opens the drag-and-drop pack upload page"
+      focusable>
+      <Text style={styles.uploadButtonText}>{compact ? 'Upload' : 'Upload pack'}</Text>
+    </TouchableOpacity>
+  );
 
   return (
     <View style={[styles.bar, compact && styles.barCompact]}>
@@ -100,6 +119,7 @@ export function DatasetSwitcher({
         <View style={styles.compactRows}>
           <View style={styles.compactTitleRow}>{brand}</View>
           <View style={styles.compactControlRow}>
+            {uploadButton}
             {leadingAction}
             {datasetButton}
             {expandButton}
@@ -109,6 +129,7 @@ export function DatasetSwitcher({
         <View style={styles.fullRows}>
           <View style={styles.fullTitleRow}>{brand}</View>
           <View style={styles.fullControlRow}>
+            {uploadButton}
             {leadingAction}
             {datasetButton}
             {fullWidthControls}
@@ -160,6 +181,24 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   expandedContent: {gap: 8, paddingTop: 8},
+  uploadButton: {
+    minHeight: 34,
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 13,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: theme.accent,
+    backgroundColor: theme.accent,
+  },
+  uploadButtonCompact: {paddingHorizontal: 10},
+  uploadButtonText: {
+    color: theme.bg,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '900',
+  },
   compactDatasetButton: {
     minWidth: 0,
     maxWidth: 220,
