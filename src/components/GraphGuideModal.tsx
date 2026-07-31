@@ -26,6 +26,11 @@ const controls = [
     description: 'Collapse that branch back into a compact item node.',
   },
   {
+    title: 'Tap the purple source item',
+    description:
+      'Set the amount you want and a deadline, then see the suggested number of parallel machines.',
+  },
+  {
     title: 'Swap recipe  ⇄',
     description: 'Choose a different source for an expanded item.',
   },

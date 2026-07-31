@@ -345,8 +345,9 @@ export function calculateTreeTotals(
       phase: 'enter',
       node: root,
       nodeId: root.id,
-      required: root.amount === undefined ? 1 : root.amount,
-      grossRequired: root.amount === undefined ? 1 : root.amount,
+      required: root.productionPlan?.amount ?? (root.amount === undefined ? 1 : root.amount),
+      grossRequired:
+        root.productionPlan?.amount ?? (root.amount === undefined ? 1 : root.amount),
       virtual: false,
     },
   ];

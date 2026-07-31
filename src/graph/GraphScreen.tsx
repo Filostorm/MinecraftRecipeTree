@@ -6,6 +6,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -124,6 +125,12 @@ import {
   findTreeTotalTarget,
   type TreeTotalTargetKind,
 } from './treeTotalTargets';
+import {
+  estimateParallelMachines,
+  recipeCycleSeconds,
+  selectedRecipeOutput,
+  type ProductionPlan,
+} from './machineParallels';
 
 /** One way to obtain an item: craft it, kill for it, or mine for it. */
 type SourceChoice =
@@ -418,9 +425,18 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
   const [picker, setPicker] = useState<PickerState | null>(null);
   const pickerRef = useRef<PickerState | null>(null);
   pickerRef.current = picker;
+  const [productionTarget, setProductionTarget] = useState<{
+    node: ItemTreeNode;
+    source: SourceTreeNode;
+    requiredAmount: number | null;
+  } | null>(null);
   useSignalSurface(
-    tab === 'graph' && picker ? 'graph/source-picker' : tab,
-    tab === 'graph' && picker ? 'modal' : 'screen',
+    tab === 'graph' && (picker || productionTarget)
+      ? picker
+        ? 'graph/source-picker'
+        : 'graph/production-planner'
+      : tab,
+    tab === 'graph' && (picker || productionTarget) ? 'modal' : 'screen',
   );
   const pickerGroupLoadsRef = useRef(new Set<string>());
   const pickerRequestIdRef = useRef(0);
@@ -815,6 +831,9 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
           );
         }
         const restoredNodesByPath = new Map<string, ItemTreeNode>();
+        newRoot.productionPlan = session.productionPlan
+          ? {...session.productionPlan}
+          : undefined;
         for (const selection of session.selections) {
           const node = nodeForStoredSelection(
             newRoot,
@@ -2171,6 +2190,18 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
                 onCollapse={() => onItemTap(n.item)}
                 onSwap={() => openPickerWithErrorHandling(n.item)}
                 onInfo={() => openItem(n.item.key)}
+                onPlanProduction={
+                  n.item.id === 'root' &&
+                  graphDirection === 'inputs' &&
+                  n.source?.kind === 'recipe'
+                    ? () =>
+                        setProductionTarget({
+                          node: n.item,
+                          source: n.source!,
+                          requiredAmount: displayedAmountFor(n.item),
+                        })
+                    : undefined
+                }
               />
             ),
           )}
@@ -2245,6 +2276,24 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
           onExportTree={() => void exportTreeImage()}
           onIngredientTap={handleTreeTotalIngredientTap}
           onOpenItem={openItem}
+        />
+      )}
+      {productionTarget && productionTarget.source.recipe && (
+        <ProductionPlannerModal
+          node={productionTarget.node}
+          source={productionTarget.source}
+          requiredAmount={productionTarget.requiredAmount}
+          onClose={() => setProductionTarget(null)}
+          onApply={plan => {
+            productionTarget.node.productionPlan = plan;
+            setProductionTarget(null);
+            bump();
+          }}
+          onClear={() => {
+            productionTarget.node.productionPlan = undefined;
+            setProductionTarget(null);
+            bump();
+          }}
         />
       )}
       {picker && (
@@ -2455,6 +2504,220 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
         />
       )}
     </View>
+  );
+}
+
+function ProductionPlannerModal({
+  node,
+  source,
+  requiredAmount,
+  onClose,
+  onApply,
+  onClear,
+}: {
+  node: ItemTreeNode;
+  source: SourceTreeNode;
+  requiredAmount: number | null;
+  onClose: () => void;
+  onApply: (plan: ProductionPlan) => void;
+  onClear: () => void;
+}) {
+  const data = useData();
+  const recipe = source.recipe!;
+  const category = source.ref ? data.categories[source.ref[0]] : undefined;
+  const exportedCycleSeconds = recipeCycleSeconds(recipe, category?.id);
+  const outputPerCycle = selectedRecipeOutput(recipe, node.key);
+  const initialAmount = node.productionPlan?.amount ?? requiredAmount ?? outputPerCycle ?? 1;
+  const [amountText, setAmountText] = useState(String(initialAmount));
+  const [minutesText, setMinutesText] = useState(
+    String((node.productionPlan?.windowSeconds ?? 60) / 60),
+  );
+  const [cycleText, setCycleText] = useState(
+    String(node.productionPlan?.cycleSeconds ?? exportedCycleSeconds ?? ''),
+  );
+  const amount = Number(amountText);
+  const minutes = Number(minutesText);
+  const enteredCycle = cycleText.trim() === '' ? undefined : Number(cycleText);
+  const cycleSeconds = enteredCycle ?? exportedCycleSeconds;
+  const validAmount = Number.isFinite(amount) && amount > 0;
+  const validMinutes = Number.isFinite(minutes) && minutes > 0;
+  const validCycle =
+    enteredCycle === undefined || (Number.isFinite(enteredCycle) && enteredCycle > 0);
+  const plan: ProductionPlan | null =
+    validAmount && validMinutes && validCycle
+      ? {
+          amount,
+          windowSeconds: minutes * 60,
+          ...(enteredCycle !== undefined &&
+          (exportedCycleSeconds == null || Math.abs(enteredCycle - exportedCycleSeconds) > 1e-9)
+            ? {cycleSeconds: enteredCycle}
+            : {}),
+        }
+      : null;
+  const estimate = plan
+    ? estimateParallelMachines(recipe, node.key, category?.id, plan)
+    : null;
+  const machineKey = category?.catalysts[0];
+  const machineName = machineKey
+    ? data.itemsByKey.get(machineKey)?.n ?? machineKey
+    : 'machine';
+  const step = outputPerCycle ?? 1;
+  const adjustAmount = (direction: -1 | 1) => {
+    const current = validAmount ? amount : step;
+    setAmountText(String(Math.max(step, current + direction * step)));
+  };
+  const estimateMessage = estimate
+    ? `${estimate.machines} × ${machineName}`
+    : cycleSeconds == null
+      ? 'Enter the recipe time to calculate machines.'
+      : outputPerCycle == null
+        ? 'This recipe has no guaranteed output amount.'
+        : validMinutes && minutes * 60 < cycleSeconds
+          ? 'The deadline is shorter than one complete recipe cycle.'
+          : 'Enter valid planning values.';
+
+  return (
+    <Pressable
+      style={styles.plannerBackdrop}
+      onPress={onClose}
+      accessible={false}>
+      <Pressable
+        style={styles.plannerCard}
+        onPress={() => {}}
+        accessible={false}>
+        <ScrollView
+          style={styles.plannerScroll}
+          contentContainerStyle={styles.plannerContent}
+          keyboardShouldPersistTaps="handled">
+        <View style={styles.plannerHeader}>
+          <View style={styles.plannerTarget}>
+            <ItemIcon itemKey={node.key} size={28} />
+            <View style={{flex: 1}}>
+              <Text style={styles.plannerEyebrow}>PRODUCTION TARGET</Text>
+              <Text style={styles.plannerTitle} numberOfLines={1}>
+                {data.itemsByKey.get(node.key)?.n ?? node.key}
+              </Text>
+            </View>
+          </View>
+          <TouchableOpacity
+            {...signalTarget('graph.production.close')}
+            accessibilityRole="button"
+            accessibilityLabel="Close production planner"
+            style={styles.plannerClose}
+            onPress={onClose}>
+            <Text style={styles.plannerCloseText}>×</Text>
+          </TouchableOpacity>
+        </View>
+
+        <Text style={styles.plannerLabel}>Amount requested</Text>
+        <View style={styles.plannerStepper}>
+          <TouchableOpacity
+            {...signalTarget('graph.production.amount.decrease')}
+            accessibilityRole="button"
+            accessibilityLabel={`Decrease requested amount by ${String(step)}`}
+            style={styles.plannerStepBtn}
+            onPress={() => adjustAmount(-1)}>
+            <Text style={styles.plannerStepText}>−</Text>
+          </TouchableOpacity>
+          <TextInput
+            accessibilityLabel="Amount requested"
+            style={styles.plannerInput}
+            value={amountText}
+            onChangeText={setAmountText}
+            keyboardType="decimal-pad"
+            inputMode="decimal"
+            selectTextOnFocus
+          />
+          <TouchableOpacity
+            {...signalTarget('graph.production.amount.increase')}
+            accessibilityRole="button"
+            accessibilityLabel={`Increase requested amount by ${String(step)}`}
+            style={styles.plannerStepBtn}
+            onPress={() => adjustAmount(1)}>
+            <Text style={styles.plannerStepText}>+</Text>
+          </TouchableOpacity>
+        </View>
+        {outputPerCycle != null && (
+          <Text style={styles.plannerHint}>{outputPerCycle} output per recipe cycle</Text>
+        )}
+
+        <View style={styles.plannerFields}>
+          <View style={styles.plannerField}>
+            <Text style={styles.plannerLabel}>Finish within</Text>
+            <View style={styles.plannerInputWrap}>
+              <TextInput
+                accessibilityLabel="Production deadline in minutes"
+                style={[styles.plannerInput, styles.plannerFieldInput]}
+                value={minutesText}
+                onChangeText={setMinutesText}
+                keyboardType="decimal-pad"
+                inputMode="decimal"
+                selectTextOnFocus
+              />
+              <Text style={styles.plannerUnit}>min</Text>
+            </View>
+          </View>
+          <View style={styles.plannerField}>
+            <Text style={styles.plannerLabel}>Recipe time</Text>
+            <View style={styles.plannerInputWrap}>
+              <TextInput
+                accessibilityLabel="Recipe cycle time in seconds"
+                style={[styles.plannerInput, styles.plannerFieldInput]}
+                value={cycleText}
+                onChangeText={setCycleText}
+                keyboardType="decimal-pad"
+                inputMode="decimal"
+                selectTextOnFocus
+                placeholder="Unknown"
+                placeholderTextColor={theme.textDim}
+              />
+              <Text style={styles.plannerUnit}>sec</Text>
+            </View>
+          </View>
+        </View>
+        <Text style={styles.plannerHint}>
+          {recipe.durationTicks !== undefined
+            ? 'Recipe time supplied by the modpack export.'
+            : exportedCycleSeconds !== null
+              ? 'Using the built-in Minecraft cooking time.'
+              : 'This export has no timing data; enter the cycle time shown by the machine.'}
+        </Text>
+
+        <View style={[styles.plannerEstimate, estimate && styles.plannerEstimateReady]}>
+          <Text style={styles.plannerEstimateLabel}>SUGGESTED PARALLELS</Text>
+          <Text style={[styles.plannerEstimateValue, estimate && styles.plannerEstimateValueReady]}>
+            {estimateMessage}
+          </Text>
+          {estimate && (
+            <Text style={styles.plannerEstimateDetail}>
+              {estimate.cyclesRequired} cycles total · {estimate.cyclesPerMachine} per machine
+            </Text>
+          )}
+        </View>
+
+        <View style={styles.plannerActions}>
+          {node.productionPlan && (
+            <TouchableOpacity
+              {...signalTarget('graph.production.clear')}
+              accessibilityRole="button"
+              style={styles.plannerSecondaryBtn}
+              onPress={onClear}>
+              <Text style={styles.plannerSecondaryText}>Reset</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity
+            {...signalTarget('graph.production.apply')}
+            accessibilityRole="button"
+            accessibilityState={{disabled: plan == null}}
+            disabled={plan == null}
+            style={[styles.plannerApplyBtn, plan == null && styles.plannerApplyBtnDisabled]}
+            onPress={() => plan && onApply(plan)}>
+            <Text style={styles.plannerApplyText}>Apply target</Text>
+          </TouchableOpacity>
+        </View>
+        </ScrollView>
+      </Pressable>
+    </Pressable>
   );
 }
 
@@ -2816,6 +3079,7 @@ function SourceNodeView({
   onCollapse,
   onSwap,
   onInfo,
+  onPlanProduction,
 }: {
   x: number;
   y: number;
@@ -2833,6 +3097,7 @@ function SourceNodeView({
   onCollapse: () => void;
   onSwap: () => void;
   onInfo: () => void;
+  onPlanProduction?: () => void;
 }) {
   const data = useData();
   const catalogItem = data.itemsByKey.get(item.key);
@@ -2857,6 +3122,20 @@ function SourceNodeView({
       : source.kind === 'mob'
         ? 'Mob drop'
         : 'Mining';
+  const category = source.ref ? data.categories[source.ref[0]] : undefined;
+  const machineEstimate =
+    source.kind === 'recipe' && source.recipe && item.productionPlan
+      ? estimateParallelMachines(
+          source.recipe,
+          item.key,
+          category?.id,
+          item.productionPlan,
+        )
+      : null;
+  const machineKey = category?.catalysts[0];
+  const machineName = machineKey
+    ? data.itemsByKey.get(machineKey)?.n ?? machineKey
+    : 'machine';
 
   return (
     <View
@@ -2879,10 +3158,26 @@ function SourceNodeView({
         onPress={onCollapse}
         style={styles.sourceHeader}>
         {isRoot ? (
-          <View style={styles.rootSourceIconFrame}>
-            <View pointerEvents="none" style={styles.rootSourceIconDiamond} />
-            <ItemIcon item={catalogItem} itemKey={item.key} size={16} />
-          </View>
+          onPlanProduction ? (
+            <TouchableOpacity
+              {...signalTarget('graph.node.production-plan')}
+              accessibilityRole="button"
+              accessibilityLabel={`Plan requested amount and parallel machines for ${name}`}
+              onPress={event => {
+                event.stopPropagation();
+                onPlanProduction();
+              }}
+              hitSlop={5}
+              style={styles.rootSourceIconFrame}>
+              <View pointerEvents="none" style={styles.rootSourceIconDiamond} />
+              <ItemIcon item={catalogItem} itemKey={item.key} size={16} />
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.rootSourceIconFrame}>
+              <View pointerEvents="none" style={styles.rootSourceIconDiamond} />
+              <ItemIcon item={catalogItem} itemKey={item.key} size={16} />
+            </View>
+          )
         ) : (
           <ItemIcon item={catalogItem} itemKey={item.key} size={16} />
         )}
@@ -2894,6 +3189,12 @@ function SourceNodeView({
             <Text style={[styles.sourceHeaderByproduct, noSelect]}>
               {' · '}
               {formatIngredientQuantity(item.key, byproductCoverage.creditedAmount)} byproduct
+            </Text>
+          )}
+          {machineEstimate && (
+            <Text style={[styles.sourceHeaderParallel, noSelect]}>
+              {' · '}
+              {machineEstimate.machines}× {machineName}
             </Text>
           )}
         </Text>
@@ -3203,10 +3504,112 @@ const styles = StyleSheet.create({
   sourceHeaderAmount: {color: theme.accent, fontWeight: '700'},
   sourceHeaderContext: {color: theme.textDim, fontWeight: '400'},
   sourceHeaderByproduct: {color: theme.accentAlt, fontWeight: '600'},
+  sourceHeaderParallel: {color: theme.warn, fontWeight: '700'},
   headerBtn: {paddingHorizontal: 2},
   dropRow: {flexDirection: 'row', alignItems: 'center', flex: 1, paddingHorizontal: 4},
   dropName: {color: theme.text, fontSize: 12},
   dropStat: {color: theme.textDim, fontSize: 10, marginTop: 2},
+  plannerBackdrop: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: 'rgba(3,5,8,0.76)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 18,
+  },
+  plannerCard: {
+    width: 430,
+    maxWidth: '100%',
+    backgroundColor: theme.panel,
+    borderColor: theme.borderLight,
+    borderWidth: 1,
+    borderRadius: 12,
+    maxHeight: '94%',
+    overflow: 'hidden',
+  },
+  plannerScroll: {flexShrink: 1},
+  plannerContent: {padding: 16},
+  plannerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  plannerTarget: {flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10},
+  plannerEyebrow: {color: theme.accent, fontSize: 9, fontWeight: '800', letterSpacing: 0.8},
+  plannerTitle: {color: theme.text, fontSize: 16, fontWeight: '700', marginTop: 2},
+  plannerClose: {width: 32, height: 32, alignItems: 'center', justifyContent: 'center'},
+  plannerCloseText: {color: theme.textDim, fontSize: 24, lineHeight: 26},
+  plannerLabel: {color: theme.textDim, fontSize: 10, fontWeight: '700', marginBottom: 6},
+  plannerStepper: {flexDirection: 'row', alignItems: 'stretch', gap: 6},
+  plannerStepBtn: {
+    width: 42,
+    minHeight: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.panelAlt,
+    borderColor: theme.border,
+    borderWidth: 1,
+    borderRadius: 7,
+  },
+  plannerStepText: {color: theme.text, fontSize: 20, fontWeight: '700'},
+  plannerInput: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 42,
+    backgroundColor: '#0f141b',
+    borderColor: theme.border,
+    borderWidth: 1,
+    borderRadius: 7,
+    color: theme.text,
+    fontSize: 15,
+    fontWeight: '700',
+    paddingHorizontal: 12,
+    textAlign: 'center',
+  },
+  plannerHint: {color: theme.textDim, fontSize: 10, lineHeight: 14, marginTop: 6},
+  plannerFields: {flexDirection: 'row', gap: 10, marginTop: 16},
+  plannerField: {flex: 1},
+  plannerInputWrap: {position: 'relative', flexDirection: 'row', alignItems: 'center'},
+  plannerFieldInput: {paddingRight: 42, textAlign: 'left'},
+  plannerUnit: {position: 'absolute', right: 10, color: theme.textDim, fontSize: 10},
+  plannerEstimate: {
+    backgroundColor: '#111720',
+    borderColor: theme.border,
+    borderWidth: 1,
+    borderRadius: 9,
+    padding: 12,
+    marginTop: 16,
+  },
+  plannerEstimateReady: {backgroundColor: '#202017', borderColor: '#6c642b'},
+  plannerEstimateLabel: {color: theme.textDim, fontSize: 9, fontWeight: '800', letterSpacing: 0.7},
+  plannerEstimateValue: {color: theme.textDim, fontSize: 14, fontWeight: '700', marginTop: 4},
+  plannerEstimateValueReady: {color: theme.warn, fontSize: 18},
+  plannerEstimateDetail: {color: theme.textDim, fontSize: 10, marginTop: 3},
+  plannerActions: {flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 16},
+  plannerSecondaryBtn: {
+    minHeight: 38,
+    paddingHorizontal: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderColor: theme.border,
+    borderWidth: 1,
+    borderRadius: 7,
+  },
+  plannerSecondaryText: {color: theme.textDim, fontSize: 11, fontWeight: '700'},
+  plannerApplyBtn: {
+    minHeight: 38,
+    paddingHorizontal: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.accent,
+    borderRadius: 7,
+  },
+  plannerApplyBtnDisabled: {opacity: 0.45},
+  plannerApplyText: {color: '#0b2613', fontSize: 11, fontWeight: '800'},
   controls: {
     position: 'absolute',
     top: 10,

@@ -2,6 +2,29 @@
 
 Client-side mod that exports everything JEI knows about to `<gameDir>/jei-exports/`:
 
+## In-game recipe planner
+
+Press **G** while holding an item or hovering an item in JEI to open its Recipe Tree planner.
+The key is configurable under Minecraft's **Controls → Recipe Tree** category. The planner:
+
+- draws recipes with JEI's own renderer, so modded layouts and ingredient alternatives remain familiar;
+- exports exact vanilla cooking durations for production planning in the site viewer;
+- lets you click an ingredient slot to continue planning that next resource;
+- calculates the minimum parallel machines for an output amount, recipe cycle time, and deadline;
+- uses the exact vanilla cooking duration when the recipe exposes one and leaves other machine cycle
+  times editable because JEI has no universal duration field;
+- remembers observed inventory items and can treat a machine as unlocked when one of its JEI crafting
+  recipes uses only observed items (for example, a furnace after cobblestone is observed);
+- lets players manually check a machine or disable progression gating entirely; and
+- saves the most recent plan for each target locally in `config/recipe-tree-plans.json`.
+
+The planner only scans the player's small inventory once per second and resolves machine recipes
+lazily, keeping the normal game loop independent from large JEI recipe catalogs. Account sync is not
+part of this first release; the local plan file is the migration boundary for a later opt-in sync
+service.
+
+## Exporting a pack
+
 - **Recipes** — every recipe of every visible JEI category, rendered offscreen through JEI's own
   `IRecipeLayoutDrawable` into PNGs (it looks exactly like the in-game recipe screen), plus
   per-category `recipes.json` with inputs/outputs/catalysts.
@@ -20,7 +43,7 @@ Client-side mod that exports everything JEI knows about to `<gameDir>/jei-export
 
 ```bash
 JAVA_HOME=$(/usr/libexec/java_home -v 17) ./gradlew build
-# -> build/libs/jeiexport-1.1.0.jar
+# -> build/libs/jeiexport-1.2.0-beta.1.jar
 ```
 
 Gradle 8.1.1 / ForgeGradle 6 / Forge 1.20.1. The release accepts Forge 47.1–47.x and

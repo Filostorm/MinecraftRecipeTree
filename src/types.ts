@@ -173,6 +173,8 @@ export interface Recipe {
   stage?: string;
   /** Optional legacy screenshot filename or packed coordinate; absent in structured publications. */
   img?: string;
+  /** Processing duration in game ticks when the exporter can determine it exactly. */
+  durationTicks?: number;
   /** Logical (GUI-pixel) size of the image; actual PNG is scaled up */
   w?: number;
   h?: number;

@@ -11,7 +11,7 @@ const scope = {slug: 'meatballcraft', publicationId: 'a'.repeat(64)};
 test('isolates the saved graph by immutable modpack publication', () => {
   assert.equal(
     graphSessionStorageKey(scope),
-    `graphSession:v1:meatballcraft:${'a'.repeat(64)}`,
+    `graphSession:v2:meatballcraft:${'a'.repeat(64)}`,
   );
   assert.notEqual(
     graphSessionStorageKey(scope),
@@ -23,6 +23,7 @@ test('serializes only expanded source identities and tree paths', () => {
   const root = {
     id: 'root',
     key: 'item|example:machine',
+    productionPlan: {amount: 128, windowSeconds: 120, cycleSeconds: 2.5},
     ancestors: [],
     source: {
       id: 'root.s',
@@ -53,9 +54,10 @@ test('serializes only expanded source identities and tree paths', () => {
     },
   };
   assert.deepEqual(serializeGraphSession(root, 'inputs'), {
-    version: 1,
+    version: 2,
     rootKey: 'item|example:machine',
     direction: 'inputs',
+    productionPlan: {amount: 128, windowSeconds: 120, cycleSeconds: 2.5},
     selections: [
       {
         path: [],
@@ -78,9 +80,25 @@ test('serializes only expanded source identities and tree paths', () => {
   });
 });
 
+test('rejects invalid production planning bounds', () => {
+  assert.throws(
+    () =>
+      parseGraphSession(
+        JSON.stringify({
+          version: 2,
+          rootKey: 'item|example:root',
+          direction: 'inputs',
+          productionPlan: {amount: 0, windowSeconds: 60},
+          selections: [],
+        }),
+      ),
+    /invalid production plan/,
+  );
+});
+
 test('parses a validated output-directed saved graph', () => {
   const session = {
-    version: 1,
+    version: 2,
     rootKey: 'item|example:input',
     direction: 'outputs',
     selections: [
@@ -137,7 +155,7 @@ test('persists a deferred duplicate recipe without expanding its descendants', (
 
 test('rejects malformed, duplicated, and orphaned expansion paths', () => {
   assert.throws(
-    () => parseGraphSession('{"version":1,"rootKey":"x","direction":"inputs","selections":{} }'),
+    () => parseGraphSession('{"version":2,"rootKey":"x","direction":"inputs","selections":{} }'),
     /storage contract/,
   );
   const root = {
@@ -149,7 +167,7 @@ test('rejects malformed, duplicated, and orphaned expansion paths', () => {
     () =>
       parseGraphSession(
         JSON.stringify({
-          version: 1,
+          version: 2,
           rootKey: 'item|example:root',
           direction: 'inputs',
           selections: [root, root],
@@ -161,7 +179,7 @@ test('rejects malformed, duplicated, and orphaned expansion paths', () => {
     () =>
       parseGraphSession(
         JSON.stringify({
-          version: 1,
+          version: 2,
           rootKey: 'item|example:root',
           direction: 'inputs',
           selections: [{...root, path: [1]}],
@@ -182,7 +200,7 @@ test('rejects a deferred root or descendants beneath a deferred recipe', () => {
     () =>
       parseGraphSession(
         JSON.stringify({
-          version: 1,
+          version: 2,
           rootKey: 'item|example:root',
           direction: 'inputs',
           selections: [deferredRoot],
@@ -194,7 +212,7 @@ test('rejects a deferred root or descendants beneath a deferred recipe', () => {
     () =>
       parseGraphSession(
         JSON.stringify({
-          version: 1,
+          version: 2,
           rootKey: 'item|example:root',
           direction: 'inputs',
           selections: [

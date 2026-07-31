@@ -11,6 +11,23 @@ const item = (id, key, amount, options = {}) => ({
   ...options,
 });
 
+test('a root production target scales every downstream ingredient by recipe yield', () => {
+  const root = item('root', 'item|test:plate', 2, {
+    productionPlan: {amount: 25, windowSeconds: 60},
+    source: {
+      id: 'root.s',
+      kind: 'recipe',
+      recipe: {out: [[['item|test:plate', 2]]]},
+      inputs: [item('root.s.0', 'item|test:ingot', 3)],
+    },
+  });
+
+  const totals = calculateTreeTotals(root);
+  assert.equal(totals.requiredByNode.get('root'), 25);
+  assert.equal(totals.requiredByNode.get('root.s.0'), 39);
+  assert.equal(totals.inputs[0].amount, 39);
+});
+
 test('retained items normalize to one in both the tree and prerequisite totals', () => {
   const catalystA = item('root.s.0', 'item|test:catalyst', 2, {
     nonConsumed: true,
