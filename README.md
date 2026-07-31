@@ -6,6 +6,12 @@ plan.
 
 [Open Minecraft Recipe Tree](https://minecraftrecipetree.craftsmannsoftware.com/)
 
+## Release environments
+
+Application changes are tested on the private beta Site before an explicitly approved production
+promotion. See [Hosting environments](docs/hosting-environments.md) for the environment inventory
+and release checklist.
+
 ## What you can do
 
 - Search complete modpack item catalogs
