@@ -6,6 +6,7 @@ import {
   type ExporterReleaseManifest,
   requireExporterReleaseManifest,
 } from '../../src/data/exporterReleases';
+import {PackUploadDropzone} from './PackUploadDropzone';
 import styles from './publish.module.css';
 
 const MAX_RELEASE_MANIFEST_BYTES = 128 * 1024;
@@ -164,13 +165,28 @@ export default function PublishPage() {
             durable Recipe Tree link.
           </p>
           <div className={styles.heroActions}>
-            <a className={styles.primaryAction} href="#downloads">
+            <a className={styles.primaryAction} href="#upload">
+              Upload pack
+            </a>
+            <a className={styles.secondaryAction} href="#downloads">
               Identify an exporter
             </a>
-            <a className={styles.secondaryAction} href="#workflow">
-              Read the full workflow
-            </a>
           </div>
+        </section>
+
+        <section className={styles.section} id="upload" aria-labelledby="upload-title">
+          <div className={styles.sectionHeading}>
+            <div>
+              <p className={styles.stepLabel}>PACK UPLOAD</p>
+              <h2 id="upload-title">Add your completed exporter ZIP</h2>
+              <p>
+                Drop the archive here or tap to choose it. Recipe Tree reads the exporter manifest
+                in your browser and tells you whether the pack is ready for operator-reviewed
+                import.
+              </p>
+            </div>
+          </div>
+          <PackUploadDropzone />
         </section>
 
         <aside className={styles.operatorNotice} aria-labelledby="operator-notice-title">
