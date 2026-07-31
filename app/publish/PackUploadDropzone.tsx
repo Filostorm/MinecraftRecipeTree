@@ -18,7 +18,10 @@ import {
 } from '../../src/data/localPackArchive';
 import styles from './publish.module.css';
 
-const ARCHIVE_READ_CHUNK_BYTES = 4 * 1024 * 1024;
+// Keep each synchronous fflate push small enough for archives containing long
+// runs of tiny entries. Larger batches can recurse through thousands of local
+// file headers before returning and overflow the browser call stack.
+const ARCHIVE_READ_CHUNK_BYTES = 1024 * 1024;
 
 type UploadState =
   | {status: 'idle'}
