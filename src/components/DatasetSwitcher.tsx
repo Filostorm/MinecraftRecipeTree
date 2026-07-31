@@ -103,13 +103,13 @@ export function DatasetSwitcher({
   ) : null;
   const uploadButton = (
     <TouchableOpacity
-      style={[styles.uploadButton, compact && styles.uploadButtonCompact]}
+      style={styles.uploadButton}
       onPress={openPackUpload}
       accessibilityRole="link"
       accessibilityLabel="Upload a modpack exporter ZIP"
       accessibilityHint="Opens the drag-and-drop pack upload page"
       focusable>
-      <Text style={styles.uploadButtonText}>{compact ? 'Upload' : 'Upload pack'}</Text>
+      <Text style={styles.uploadButtonText}>Upload pack</Text>
     </TouchableOpacity>
   );
 
@@ -122,7 +122,6 @@ export function DatasetSwitcher({
             {datasetButton}
           </View>
           <View style={styles.compactControlRow}>
-            {uploadButton}
             {leadingAction}
             {expandButton}
           </View>
@@ -195,7 +194,6 @@ const styles = StyleSheet.create({
     borderColor: theme.accent,
     backgroundColor: theme.accent,
   },
-  uploadButtonCompact: {paddingHorizontal: 10},
   uploadButtonText: {
     color: theme.bg,
     fontSize: 12,
