@@ -1,148 +1,30 @@
 'use client';
 
-import {useEffect, useMemo, useState} from 'react';
-import {
-  EXPORTER_RELEASE_MANIFEST_PATH,
-  type ExporterReleaseManifest,
-  requireExporterReleaseManifest,
-} from '../../src/data/exporterReleases';
+import {useState} from 'react';
 import {PackUploadDropzone} from './PackUploadDropzone';
 import styles from './publish.module.css';
 
-const MAX_RELEASE_MANIFEST_BYTES = 128 * 1024;
-const ALL_VERSIONS = 'all';
-const MANUAL_TEST_BUILDS = Object.freeze([
+const VERSION_GUIDES = [
   {
-    minecraftVersion: '1.21.1',
-    title: 'JEI 19 · NeoForge 21.1',
-    compatibility: 'NeoForge 21.1.x with JEI 19.21–19.x',
-    filename: 'recipe-tree-exporter-neoforge-1.21.1-1.0.0.jar',
-    href: '/exporters/recipe-tree-exporter-neoforge-1.21.1-1.0.0.jar',
-    sha256: 'b3eb6d4b0e97da5708d6dde4a97434d65d64bbceef2e3ab7949ec36824f715dd',
-    bytes: 108_121,
-    qualityProfile: 'generic-jei-1.21.1',
+    version: '1.21.1',
     command: '/jeiexport all',
   },
   {
-    minecraftVersion: '1.20.1',
-    title: 'JEI 15 · Forge 47',
-    compatibility: 'Forge 47.x with JEI 15.x',
-    filename: 'recipe-tree-exporter-forge-1.20.1-1.1.0.jar',
-    href: '/exporters/recipe-tree-exporter-forge-1.20.1-1.1.0.jar',
-    sha256: '00934e9b1fe207833faa5574cd052d997375ea0e2eb376427b1ba82358108bf0',
-    bytes: 108_625,
-    qualityProfile: 'generic-jei-1.20.1',
+    version: '1.20.1',
     command: '/jeiexport all',
   },
   {
-    minecraftVersion: '1.12.2',
-    title: 'JEI or HEI 4 · Forge 14.23.5',
-    compatibility: 'Forge 14.23.5.x with JEI or HEI 4.x',
-    filename: 'recipe-tree-exporter-forge-1.12.2-1.1.0.jar',
-    href: '/exporters/recipe-tree-exporter-forge-1.12.2-1.1.0.jar',
-    sha256: '1b133b2de6b7939c943d1c4e2819dfabf20d7e1edc07e65a8af00ff233693dbd',
-    bytes: 257_201,
-    qualityProfile: 'pack-specific 1.12.2 approval',
+    version: '1.12.2',
     command: '/jeiexport',
   },
-]);
+] as const;
 
-type ManifestState =
-  | {status: 'loading'}
-  | {status: 'ready'; manifest: ExporterReleaseManifest}
-  | {status: 'error'; message: string};
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ['KiB', 'MiB', 'GiB'];
-  let value = bytes / 1024;
-  let unit = units[0];
-  for (let index = 1; index < units.length && value >= 1024; index += 1) {
-    value /= 1024;
-    unit = units[index];
-  }
-  return `${value.toFixed(value >= 10 ? 1 : 2)} ${unit}`;
-}
-
-async function fetchReleaseManifest(signal: AbortSignal): Promise<ExporterReleaseManifest> {
-  const response = await fetch(EXPORTER_RELEASE_MANIFEST_PATH, {
-    cache: 'no-store',
-    headers: {accept: 'application/json'},
-    signal,
-  });
-  if (!response.ok) {
-    throw new Error(`Release catalog request failed with HTTP ${response.status}.`);
-  }
-  const contentLength = response.headers.get('content-length');
-  if (contentLength !== null) {
-    const declaredBytes = Number(contentLength);
-    if (!Number.isSafeInteger(declaredBytes) || declaredBytes < 0) {
-      throw new Error('Release catalog returned an invalid Content-Length header.');
-    }
-    if (declaredBytes > MAX_RELEASE_MANIFEST_BYTES) {
-      throw new Error(`Release catalog exceeds the ${MAX_RELEASE_MANIFEST_BYTES}-byte limit.`);
-    }
-  }
-  const body = await response.text();
-  if (new TextEncoder().encode(body).byteLength > MAX_RELEASE_MANIFEST_BYTES) {
-    throw new Error(`Release catalog exceeds the ${MAX_RELEASE_MANIFEST_BYTES}-byte limit.`);
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(body);
-  } catch (error) {
-    throw new Error(`Release catalog is not valid JSON: ${errorMessage(error)}`);
-  }
-  return requireExporterReleaseManifest(parsed);
-}
+type SupportedVersion = (typeof VERSION_GUIDES)[number]['version'];
 
 export default function PublishPage() {
-  const [manifestState, setManifestState] = useState<ManifestState>({status: 'loading'});
-  const [selectedVersion, setSelectedVersion] = useState(ALL_VERSIONS);
-  const [requestRevision, setRequestRevision] = useState(0);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    setManifestState({status: 'loading'});
-    fetchReleaseManifest(controller.signal)
-      .then(manifest => setManifestState({status: 'ready', manifest}))
-      .catch(error => {
-        if (controller.signal.aborted) return;
-        const message = errorMessage(error);
-        console.error('Exporter release manifest could not be loaded or validated.', error);
-        setManifestState({status: 'error', message});
-      });
-    return () => controller.abort();
-  }, [requestRevision]);
-
-  const versions = useMemo(() => {
-    if (manifestState.status !== 'ready') return [];
-    return [...new Set([
-      ...MANUAL_TEST_BUILDS.map(build => build.minecraftVersion),
-      ...manifestState.manifest.releases.map(release => release.minecraftVersion),
-    ])]
-      .sort((left, right) => right.localeCompare(left, undefined, {numeric: true}));
-  }, [manifestState]);
-
-  const visibleManualTestBuilds = useMemo(
-    () => selectedVersion === ALL_VERSIONS
-      ? MANUAL_TEST_BUILDS
-      : MANUAL_TEST_BUILDS.filter(build => build.minecraftVersion === selectedVersion),
-    [selectedVersion],
-  );
-
-  const visibleReleases = useMemo(() => {
-    if (manifestState.status !== 'ready') return [];
-    return selectedVersion === ALL_VERSIONS
-      ? manifestState.manifest.releases
-      : manifestState.manifest.releases.filter(
-          release => release.minecraftVersion === selectedVersion,
-        );
-  }, [manifestState, selectedVersion]);
+  const [selectedVersion, setSelectedVersion] = useState<SupportedVersion>('1.21.1');
+  const guide = VERSION_GUIDES.find(entry => entry.version === selectedVersion)
+    ?? VERSION_GUIDES[0];
 
   return (
     <main className={styles.page}>
@@ -157,353 +39,105 @@ export default function PublishPage() {
         </header>
 
         <section className={styles.hero} aria-labelledby="publish-title">
-          <p className={styles.eyebrow}>MODPACK IMPORT WORKFLOW</p>
-          <h1 id="publish-title">Import a modpack into Recipe Tree.</h1>
+          <p className={styles.eyebrow}>SHARE YOUR MODPACK</p>
+          <h1 id="publish-title">Bring your pack to Recipe Tree.</h1>
           <p className={styles.heroCopy}>
-            Create an integrity-checked snapshot with the exporter that exactly matches your
-            Minecraft and recipe-viewer versions, then submit it for validated import and a
-            durable Recipe Tree link.
+            Follow the short guide for your Minecraft version, then check the ZIP before you
+            share it.
           </p>
           <div className={styles.heroActions}>
-            <a className={styles.primaryAction} href="#upload">
-              Upload pack
+            <a className={styles.primaryAction} href="#instructions">
+              Get started
             </a>
-            <a className={styles.secondaryAction} href="#downloads">
-              Identify an exporter
+            <a className={styles.secondaryAction} href="#upload">
+              Check your ZIP
             </a>
           </div>
+        </section>
+
+        <section className={styles.section} id="instructions" aria-labelledby="instructions-title">
+          <div className={styles.sectionHeading}>
+            <div>
+              <p className={styles.stepLabel}>YOUR GUIDE</p>
+              <h2 id="instructions-title">Choose your Minecraft version</h2>
+              <p>We&apos;ll only show the steps you need for that version.</p>
+            </div>
+            <div className={styles.filter}>
+              <label htmlFor="minecraft-version">Minecraft version</label>
+              <select
+                id="minecraft-version"
+                value={selectedVersion}
+                onChange={event => setSelectedVersion(event.target.value as SupportedVersion)}>
+                {VERSION_GUIDES.map(entry => (
+                  <option value={entry.version} key={entry.version}>
+                    Minecraft {entry.version}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <article className={styles.guideCard}>
+            <div className={styles.guideTopline}>
+              <span>Minecraft {guide.version}</span>
+              <span>4 easy steps</span>
+            </div>
+            <h3>Export your modpack</h3>
+            <p className={styles.curseForgeNotice}>
+              The exporter will be available through CurseForge. There are no mod downloads on
+              this site.
+            </p>
+            <ol className={styles.guideSteps}>
+              <li>
+                <span className={styles.number}>1</span>
+                <div>
+                  <h4>Add the exporter</h4>
+                  <p>In CurseForge, add Recipe Tree Exporter to the modpack you want to share.</p>
+                </div>
+              </li>
+              <li>
+                <span className={styles.number}>2</span>
+                <div>
+                  <h4>Open your pack</h4>
+                  <p>Start the pack and enter any single-player world.</p>
+                </div>
+              </li>
+              <li>
+                <span className={styles.number}>3</span>
+                <div>
+                  <h4>Run the export</h4>
+                  <p>Open chat and enter:</p>
+                  <code className={styles.command}>{guide.command}</code>
+                </div>
+              </li>
+              <li>
+                <span className={styles.number}>4</span>
+                <div>
+                  <h4>Make your ZIP</h4>
+                  <p>
+                    Wait for the export to finish. In CurseForge, choose Open Folder, find
+                    the <code>jei-exports</code> folder, and zip it.
+                  </p>
+                </div>
+              </li>
+            </ol>
+          </article>
         </section>
 
         <section className={styles.section} id="upload" aria-labelledby="upload-title">
           <div className={styles.sectionHeading}>
             <div>
-              <p className={styles.stepLabel}>PACK UPLOAD</p>
-              <h2 id="upload-title">Add your completed exporter ZIP</h2>
-              <p>
-                Drop the archive here or tap to choose it. Recipe Tree reads the exporter manifest
-                in your browser and tells you whether the pack is ready for operator-reviewed
-                import.
-              </p>
+              <p className={styles.stepLabel}>CHECK YOUR FILE</p>
+              <h2 id="upload-title">Add your exporter ZIP</h2>
+              <p>Drag it here or tap to choose it. We&apos;ll tell you if it&apos;s ready.</p>
             </div>
           </div>
           <PackUploadDropzone />
         </section>
 
-        <aside className={styles.operatorNotice} aria-labelledby="operator-notice-title">
-          <div className={styles.noticeMarker} aria-hidden="true">CURRENT IMPORT MODEL</div>
-          <div>
-            <h2 id="operator-notice-title">Durable imports are operator-mediated</h2>
-            <p>
-              Contributors can download, export, validate, and prepare a pack themselves. A site
-              operator performs the final authenticated import; production tokens never belong on
-              contributor machines. Fully self-service publishing requires authenticated,
-              quota-bound, short-lived submission sessions and is not available yet.
-            </p>
-          </div>
-        </aside>
-
-        <section className={styles.section} id="downloads" aria-labelledby="downloads-title">
-          <div className={styles.sectionHeading}>
-            <div>
-              <p className={styles.stepLabel}>STEP 1</p>
-              <h2 id="downloads-title">Download the exporter that exactly matches your pack</h2>
-              <p>
-                Minecraft, mod loader, and JEI/REI/HEI/NEI APIs are version-specific. A near match
-                is not compatible. Hands-on tester JARs for 1.12.2, 1.20.1, and 1.21.1 are hosted
-                here; older catalog records remain verification metadata for external builds.
-              </p>
-            </div>
-            {manifestState.status === 'ready' && (
-              <div className={styles.filter}>
-                <label htmlFor="minecraft-version">Minecraft version</label>
-                <select
-                  id="minecraft-version"
-                  value={selectedVersion}
-                  onChange={event => setSelectedVersion(event.target.value)}>
-                  <option value={ALL_VERSIONS}>All supported versions</option>
-                  {versions.map(version => (
-                    <option value={version} key={version}>
-                      Minecraft {version}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-          </div>
-
-          {visibleManualTestBuilds.length > 0 && (
-            <div className={`${styles.releaseGrid} ${styles.testBuildGrid}`}>
-              {visibleManualTestBuilds.map(build => (
-                <article
-                  className={`${styles.releaseCard} ${styles.testBuildCard}`}
-                  key={build.minecraftVersion}>
-                  <div className={styles.releaseTopline}>
-                    <span>Minecraft {build.minecraftVersion}</span>
-                    <span>Manual-test build</span>
-                  </div>
-                  <h3>{build.title}</h3>
-                  <p className={styles.compatibility}>
-                    Built for {build.compatibility}. Use it on a copy of your pack and report any
-                    failed export phase with the generated diagnostics.
-                  </p>
-                  <dl className={styles.releaseFacts}>
-                    <div>
-                      <dt>Status</dt>
-                      <dd>Preview for hands-on pack testing</dd>
-                    </div>
-                    <div>
-                      <dt>Size</dt>
-                      <dd>{formatBytes(build.bytes)}</dd>
-                    </div>
-                    <div>
-                      <dt>Quality profile</dt>
-                      <dd>{build.qualityProfile}</dd>
-                    </div>
-                    <div>
-                      <dt>Command</dt>
-                      <dd><code>{build.command}</code></dd>
-                    </div>
-                  </dl>
-                  <a
-                    className={styles.downloadButton}
-                    href={build.href}
-                    download={build.filename}>
-                    Download {build.minecraftVersion} exporter JAR
-                  </a>
-                  <div className={styles.checksum}>
-                    <span>SHA-256</span>
-                    <code>{build.sha256}</code>
-                  </div>
-                </article>
-              ))}
-            </div>
-          )}
-
-          {manifestState.status === 'loading' && (
-            <div className={styles.statusPanel} role="status" aria-live="polite">
-              <span className={styles.spinner} aria-hidden="true" />
-              Loading the checksummed release catalog…
-            </div>
-          )}
-
-          {manifestState.status === 'error' && (
-            <div className={styles.errorPanel} role="alert">
-              <div>
-                <strong>Exporter release metadata is unavailable.</strong>
-                <p>{manifestState.message}</p>
-                <p>No unverified fallback download has been substituted.</p>
-              </div>
-              <button type="button" onClick={() => setRequestRevision(revision => revision + 1)}>
-                Retry catalog
-              </button>
-            </div>
-          )}
-
-          {manifestState.status === 'ready' && (
-            <>
-              {visibleReleases.length === 0 ? (
-                <div className={styles.statusPanel} role="status">
-                  No published exporter matches Minecraft {selectedVersion}. Choose another
-                  version from the filter.
-                </div>
-              ) : (
-                <div className={styles.releaseGrid}>
-                  {visibleReleases.map(release => (
-                    <article className={styles.releaseCard} key={release.id}>
-                      <div className={styles.releaseTopline}>
-                        <span>Minecraft {release.minecraftVersion}</span>
-                        <span>Exporter {release.version}</span>
-                      </div>
-                      <h3>{release.recipeViewer}</h3>
-                      <p className={styles.compatibility}>{release.compatibility}</p>
-                      <dl className={styles.releaseFacts}>
-                        <div>
-                          <dt>Loader</dt>
-                          <dd>{release.loader}</dd>
-                        </div>
-                        <div>
-                          <dt>Size</dt>
-                          <dd>{formatBytes(release.bytes)}</dd>
-                        </div>
-                        <div>
-                          <dt>Quality profile</dt>
-                          <dd>{release.qualityProfiles.join(', ')}</dd>
-                        </div>
-                        <div>
-                          <dt>Release ID</dt>
-                          <dd><code>{release.id}</code></dd>
-                        </div>
-                      </dl>
-                      <div className={styles.downloadButton} aria-label="Exporter distributed off-site">
-                        External distribution only · {release.filename}
-                      </div>
-                      <div className={styles.checksum}>
-                        <span>SHA-256</span>
-                        <code>{release.sha256}</code>
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              )}
-              <p className={styles.catalogStamp}>
-                Release index generated{' '}
-                <time dateTime={manifestState.manifest.generatedAt}>
-                  {new Date(manifestState.manifest.generatedAt).toLocaleString()}
-                </time>
-                . Every filename and checksum above passed the viewer&apos;s exact release contract.
-                Catalog-only JARs remain externally distributed; the clearly labeled manual-test
-                builds above are hosted by Recipe Tree.
-              </p>
-            </>
-          )}
-        </section>
-
-        <section className={styles.section} id="workflow" aria-labelledby="workflow-title">
-          <div className={styles.sectionHeading}>
-            <div>
-              <p className={styles.stepLabel}>STEPS 2–6</p>
-              <h2 id="workflow-title">Install, export, validate, and import</h2>
-              <p>Keep the raw export unchanged; publication preparation works from a staged copy.</p>
-            </div>
-          </div>
-
-          <ol className={styles.workflow}>
-            <li>
-              <span className={styles.number}>2</span>
-              <div>
-                <h3>Verify and install the JAR</h3>
-                <p>
-                  Download the hosted 1.12.2, 1.20.1, or 1.21.1 tester above, or obtain another
-                  cataloged JAR from the operator&apos;s external distribution channel. Compare it
-                  against the listed SHA-256, close Minecraft, and put the JAR in the target
-                  instance&apos;s <code>mods</code> directory—not the launcher&apos;s global
-                  directory. Confirm the matching recipe viewer is already installed.
-                </p>
-                <div className={styles.commandGrid}>
-                  <pre><code>shasum -a 256 &quot;/path/to/exporter.jar&quot;</code></pre>
-                  <pre><code>Get-FileHash &quot;C:\path\to\exporter.jar&quot; -Algorithm SHA256</code></pre>
-                </div>
-              </div>
-            </li>
-            <li>
-              <span className={styles.number}>3</span>
-              <div>
-                <h3>Export inside a disposable single-player world</h3>
-                <p>
-                  A loaded world lets the exporter capture world-dependent mob drops, block drops,
-                  staged recipes, and server-backed integrations. For Minecraft 1.21.1 + JEI 19
-                  or 1.20.1 + JEI 15, run <code>/jeiexport all</code>. Older releases consume their
-                  exact request file from the instance root:
-                </p>
-                <ul>
-                  <li><code>reiexport-request.json</code> for 1.18.2</li>
-                  <li><code>jeiexport-request.json</code> for 1.12.2</li>
-                  <li><code>neiexport-request.json</code> for the pinned GTNH 1.7.10 release</li>
-                </ul>
-                <p>
-                  The Multiblock Madness profiles require native <code>iconScale: 1</code> item
-                  canvases and complete <code>recipeScale: 2</code> layouts. The 1.18.2 request also
-                  requires the exact <code>multiblock-madness-2-1.18.2</code> profile,
-                  {' '}<code>failOnError: true</code>, and a bounded <code>pngQueueCapacity</code> from
-                  8 through 128. The 1.12.2 request has no <code>profile</code> field; select its
-                  listed profile during validation and publication preparation.
-                </p>
-                <p>
-                  Omit <code>qualitySample</code> from a full request. That field identifies a
-                  diagnostic mini export, and the production publisher rejects it rather than
-                  exposing an incomplete recipe corpus.
-                </p>
-                <p>
-                  Wait for the success message or completion marker. Never copy an export while
-                  Minecraft is still writing it.
-                </p>
-              </div>
-            </li>
-            <li>
-              <span className={styles.number}>4</span>
-              <div>
-                <h3>Validate identity and completeness</h3>
-                <p>
-                  Open <code>manifest.json</code>. Require <code>aborted: false</code>, the correct
-                  {' '}<code>pack.name</code> and <code>pack.version</code>, and the expected Minecraft
-                  version. Review <code>failures.json</code>; do not ignore or delete diagnostics to
-                  make an export appear complete.
-                </p>
-                <p>
-                  The strict profile checks item/fluid/gas amounts, tag and OreDictionary
-                  alternatives, non-consumed catalysts, byproducts, custom ingredient renderers,
-                  recipe previews, mobs, and drops. Unsupported or ambiguous semantics must be
-                  reported and fixed—they are never silently converted to quantity 1.
-                </p>
-              </div>
-            </li>
-            <li>
-              <span className={styles.number}>5</span>
-              <div>
-                <h3>Have the operator prepare an immutable publication workspace</h3>
-                <p>
-                  The current fail-closed preparer requires the operator&apos;s local acceptance receipt
-                  and configured source JAR. Use the quality profile and release ID shown on the
-                  exporter card, and pick the stable isolated slug assigned to this pack.
-                </p>
-                <pre><code>{`npm install
-npm run publish:modpack -- prepare \\
-  --source "/absolute/path/to/export" \\
-  --workspace "/absolute/path/to/new-workspace" \\
-  --profile "<quality-profile-from-download-card>" \\
-  --release "<release-id-from-download-card>" \\
-  --slug "stable-pack-slug"`}</code></pre>
-                <p>
-                  Preparation requires the operator&apos;s exact accepted release receipt, hashes the
-                  staged raw snapshot against it, validates cross-references, computes immutable
-                  content IDs, and writes the receipt identity into <code>publication-plan.json</code>
-                  last. It never substitutes a different profile, release, or receipt.
-                  If it fails, keep the workspace for diagnosis and prepare a new one after fixing
-                  the exporter or source data.
-                </p>
-              </div>
-            </li>
-            <li>
-              <span className={styles.number}>6</span>
-              <div>
-                <h3>Submit the completed raw export for import</h3>
-                <p>
-                  Transfer the completed raw export and its completion evidence through the
-                  operator&apos;s approved channel. The operator creates the acceptance-bound prepared
-                  workspace. Do not request, store, or transmit production upload tokens or provide
-                  an untrusted replacement acceptance receipt.
-                </p>
-                <p>
-                  The operator authenticates both exact ingestion targets, resumes immutable
-                  uploads, verifies public hashes and byte lengths, and then atomically points the
-                  stable pack channel at the new content. After activation, the pack appears in the
-                  viewer switcher and receives a shareable <code>?pack=stable-pack-slug</code> URL.
-                </p>
-              </div>
-            </li>
-          </ol>
-        </section>
-
-        <section className={styles.securitySection} aria-labelledby="self-service-title">
-          <p className={styles.stepLabel}>WHY THE HANDOFF EXISTS</p>
-          <h2 id="self-service-title">Safe self-service needs bounded publication sessions</h2>
-          <p>
-            Large modpacks can produce hundreds of thousands of files and multiple GiB of data.
-            Anonymous browser uploads would expose storage and egress denial-of-service, channel
-            spam, abandoned objects, and inconsistent mobile/browser hashing behavior.
-          </p>
-          <p>
-            The parallel self-service design is sign-in plus a short-lived credential bound to one
-            declared object inventory, with byte/object quotas, ownership, rate limits, server-side
-            hash verification, expiration, moderation state, and orphan cleanup. That adds account
-            and lifecycle complexity, but removes the operator handoff without placing durable
-            production credentials on user devices.
-          </p>
-        </section>
-
         <footer className={styles.footer}>
           <a href="/">← Return to Recipe Tree</a>
-          <span>Imported data stays immutable; stable pack channels make updates easy to share.</span>
+          <span>Your ZIP stays on your device while it is checked.</span>
         </footer>
       </div>
     </main>
