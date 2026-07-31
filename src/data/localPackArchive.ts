@@ -145,29 +145,29 @@ export function requireLocalPackManifest(value: unknown): LocalPackManifestSumma
 
   const findings: string[] = [];
   if (value.aborted) {
-    findings.push('The exporter marked this run as aborted. Run a fresh, complete export.');
+    findings.push('The export stopped before it finished. Run it again and upload the new ZIP.');
   }
   if (value.qualitySample !== undefined) {
-    findings.push('This is a diagnostic quality sample, not a complete pack export.');
+    findings.push('This ZIP only contains a small test. Run a full export and upload that ZIP.');
   }
   if (packVersion === null) {
-    findings.push('The pack version is missing. Set packVersion and export again.');
+    findings.push('The pack version is missing. Open the pack through CurseForge and export it again.');
   }
   if (identitySource === 'game-directory') {
-    findings.push('Confirm the pack identity explicitly instead of using the game-directory name.');
+    findings.push('The pack name could not be confirmed. Open it through CurseForge and export it again.');
   }
   if (counts.failures > 0) {
     findings.push(
-      `The exporter recorded ${counts.failures.toLocaleString()} failure${
+      `${counts.failures.toLocaleString()} recipe${
         counts.failures === 1 ? '' : 's'
-      }. Review failures.json before handoff.`,
+      } could not be exported. Run the export again before sharing this pack.`,
     );
   }
   if (warningEvents > 0) {
     findings.push(
-      `Review ${warningEvents.toLocaleString()} exporter warning${
+      `${warningEvents.toLocaleString()} warning${
         warningEvents === 1 ? '' : 's'
-      } before handoff.`,
+      } appeared while exporting. Some recipes may be missing.`,
     );
   }
 

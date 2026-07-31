@@ -15,6 +15,7 @@ async function exists(path: string): Promise<boolean> {
 }
 
 const MAX_FAVICON_BYTES = 64 * 1024;
+const MAX_LOCAL_PACK_SERVICE_WORKER_BYTES = 64 * 1024;
 const MAX_PACK_ICON_BYTES = 256 * 1024;
 const PACK_ICON_FILES = Object.freeze([
   'gt-new-horizons.webp',
@@ -58,6 +59,27 @@ async function copyFavicon(root: string): Promise<void> {
   await appendHeaderBlock(
     root,
     '/favicon.svg\n  Content-Type: image/svg+xml\n  Cache-Control: public, max-age=86400',
+  );
+}
+
+async function copyLocalPackServiceWorker(root: string): Promise<void> {
+  const source = resolve(root, 'public', 'local-pack-sw.js');
+  const destination = resolve(root, 'dist', 'client', 'local-pack-sw.js');
+  const metadata = await lstat(source);
+  if (
+    !metadata.isFile() ||
+    metadata.nlink !== 1 ||
+    metadata.size <= 0 ||
+    metadata.size > MAX_LOCAL_PACK_SERVICE_WORKER_BYTES
+  ) {
+    console.error(`Sites build failed: local pack worker is not a bounded single-link file: ${source}`);
+    throw new Error('Local pack worker violates its deployment contract');
+  }
+  await mkdir(resolve(root, 'dist', 'client'), {recursive: true});
+  await copyFile(source, destination);
+  await appendHeaderBlock(
+    root,
+    '/local-pack-sw.js\n  Content-Type: application/javascript; charset=utf-8\n  Cache-Control: no-cache, no-store, must-revalidate\n  Service-Worker-Allowed: /',
   );
 }
 
@@ -124,6 +146,7 @@ export function sites(): Plugin {
       }
 
       await copyFavicon(root);
+      await copyLocalPackServiceWorker(root);
       await copyPackIcons(root);
       await appendHeaderBlock(root, STATIC_SECURITY_HEADERS);
 

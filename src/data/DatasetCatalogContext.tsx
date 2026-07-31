@@ -17,6 +17,11 @@ import {
   searchWithDatasetSlug,
   selectDataset,
 } from './datasetCatalog';
+import {
+  listLocalPackDescriptors,
+  localDatasetSource,
+  registerLocalPackServiceWorker,
+} from './localPackStorage';
 
 const PRODUCTION_ORIGIN = 'https://minecraftrecipetree.craftsmannsoftware.com';
 
@@ -126,6 +131,15 @@ export function DatasetCatalogProvider({children}: {children: React.ReactNode}) 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const selectedSlugRef = useRef<string | null>(null);
+  const localPublicationIdsRef = useRef(new Set<string>());
+
+  const sourceFor = useCallback(
+    (descriptor: DatasetDescriptor, origin: string): DatasetSource =>
+      localPublicationIdsRef.current.has(descriptor.publicationId)
+        ? localDatasetSource(descriptor)
+        : datasetSource(descriptor, origin),
+    [],
+  );
 
   useEffect(() => {
     const controller = new AbortController();
@@ -148,16 +162,31 @@ export function DatasetCatalogProvider({children}: {children: React.ReactNode}) 
         } catch (cause) {
           throw new Error(`Dataset catalog returned invalid JSON: ${errorMessage(cause)}`);
         }
-        const nextDatasets = requireDatasetCatalog(value);
+        const publishedDatasets = requireDatasetCatalog(value);
+        let localDatasets: readonly DatasetDescriptor[] = [];
+        if (Platform.OS === 'web') {
+          try {
+            await registerLocalPackServiceWorker();
+            localDatasets = await listLocalPackDescriptors();
+          } catch (localError) {
+            console.warn('Saved packs are unavailable in this browser.', localError);
+          }
+        }
+        const publishedSlugs = new Set(publishedDatasets.map(dataset => dataset.slug));
+        localDatasets = localDatasets.filter(dataset => !publishedSlugs.has(dataset.slug));
+        localPublicationIdsRef.current = new Set(
+          localDatasets.map(dataset => dataset.publicationId),
+        );
+        const nextDatasets = [...localDatasets, ...publishedDatasets];
         const defaultDataset = selectDataset(nextDatasets, null);
-        datasetSource(defaultDataset, configuration.assetOrigin);
+        sourceFor(defaultDataset, configuration.assetOrigin);
         if (!alive) return;
         // Retain the validated catalog when only the requested ?pack value is invalid. The error
         // boundary can then offer explicit, user-selected recovery instead of choosing a fallback.
         setDatasets(nextDatasets);
         setAssetOrigin(configuration.assetOrigin);
         const nextSelected = selectDataset(nextDatasets, currentWebRequestSlug());
-        datasetSource(nextSelected, configuration.assetOrigin);
+        sourceFor(nextSelected, configuration.assetOrigin);
         if (!alive) return;
         selectedSlugRef.current = nextSelected.slug;
         setSelected(nextSelected);
@@ -175,7 +204,7 @@ export function DatasetCatalogProvider({children}: {children: React.ReactNode}) 
       alive = false;
       controller.abort();
     };
-  }, []);
+  }, [sourceFor]);
 
   const select = useCallback(
     (slug: string) => {
@@ -184,7 +213,7 @@ export function DatasetCatalogProvider({children}: {children: React.ReactNode}) 
           throw new Error('Dataset selection was requested before a valid catalog was loaded.');
         }
         const nextSelected = selectDataset(datasets, slug);
-        datasetSource(nextSelected, assetOrigin);
+        sourceFor(nextSelected, assetOrigin);
         if (selectedSlugRef.current === nextSelected.slug) {
           setError(null);
           return;
@@ -201,7 +230,7 @@ export function DatasetCatalogProvider({children}: {children: React.ReactNode}) 
         setError(message);
       }
     },
-    [assetOrigin, datasets],
+    [assetOrigin, datasets, sourceFor],
   );
 
   useEffect(() => {
@@ -209,7 +238,7 @@ export function DatasetCatalogProvider({children}: {children: React.ReactNode}) 
     const handlePopState = () => {
       try {
         const nextSelected = selectDataset(datasets, currentWebRequestSlug());
-        datasetSource(nextSelected, assetOrigin);
+        sourceFor(nextSelected, assetOrigin);
         selectedSlugRef.current = nextSelected.slug;
         setSelected(nextSelected);
         setError(null);
@@ -223,7 +252,7 @@ export function DatasetCatalogProvider({children}: {children: React.ReactNode}) 
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, [assetOrigin, datasets]);
+  }, [assetOrigin, datasets, sourceFor]);
 
   const state = useMemo<DatasetCatalogState>(() => {
     if (loading) return {status: 'loading'};
@@ -238,9 +267,9 @@ export function DatasetCatalogProvider({children}: {children: React.ReactNode}) 
       status: 'ready',
       datasets,
       selected,
-      source: datasetSource(selected, assetOrigin),
+      source: sourceFor(selected, assetOrigin),
     };
-  }, [assetOrigin, datasets, error, loading, selected]);
+  }, [assetOrigin, datasets, error, loading, selected, sourceFor]);
 
   const value = useMemo<DatasetCatalogContextValue>(() => ({state, select}), [select, state]);
   return <DatasetCatalogContext.Provider value={value}>{children}</DatasetCatalogContext.Provider>;
