@@ -5,6 +5,10 @@ import {
   requireLocalPackManifest,
   requireSafeArchivePath,
 } from './localPackArchive.ts';
+import {
+  isLocalPackDescriptor,
+  localDatasetSource,
+} from './localPackStorage.ts';
 
 function manifest(overrides = {}) {
   return {
@@ -63,9 +67,9 @@ test('keeps structurally valid incomplete exports visible with actionable findin
   }));
   assert.equal(summary.readyForHandoff, false);
   assert.equal(summary.findings.length, 6);
-  assert.match(summary.findings.join('\n'), /aborted/);
-  assert.match(summary.findings.join('\n'), /quality sample/);
-  assert.match(summary.findings.join('\n'), /4 failures/);
+  assert.match(summary.findings.join('\n'), /stopped before it finished/);
+  assert.match(summary.findings.join('\n'), /small test/);
+  assert.match(summary.findings.join('\n'), /4 recipes could not be exported/);
 });
 
 test('rejects malformed manifest metadata instead of inventing fallback values', () => {
@@ -103,4 +107,23 @@ test('accepts only a root or one-folder exporter manifest and rejects unsafe ZIP
   assert.throws(() => requireSafeArchivePath('../manifest.json'), /unsafe file path/);
   assert.throws(() => requireSafeArchivePath('folder\\manifest.json'), /unsafe file path/);
   assert.throws(() => requireSafeArchivePath('/manifest.json'), /unsafe file path/);
+});
+
+test('maps an installed device-local pack to its isolated viewer route', () => {
+  const publicationId = 'a'.repeat(64);
+  const descriptor = {
+    slug: 'local-aaaaaaaaaaaaaaaa',
+    displayName: 'Local Test Pack',
+    minecraftVersion: '1.21.1',
+    packVersion: '1.0.0',
+    publicationId,
+    previewAssetSetId: publicationId,
+    isDefault: false,
+  };
+  assert.equal(isLocalPackDescriptor(descriptor), true);
+  assert.deepEqual(localDatasetSource(descriptor), {
+    descriptor,
+    base: `/__local-packs/${publicationId}/exports`,
+    previewBase: '',
+  });
 });

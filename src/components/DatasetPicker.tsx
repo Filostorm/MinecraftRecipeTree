@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import type {DatasetDescriptor} from '../data/datasetCatalog';
 import {datasetPackIconPath} from '../data/datasetPresentation';
+import {isLocalPackDescriptor} from '../data/localPackStorage';
 import {theme} from '../theme';
 
 const PRODUCTION_ORIGIN = 'https://minecraftrecipetree.craftsmannsoftware.com';
@@ -23,7 +24,7 @@ function PackIcon({dataset}: {dataset: DatasetDescriptor}) {
   const path = datasetPackIconPath(dataset.slug);
 
   useEffect(() => {
-    if (path !== null) return;
+    if (path !== null || isLocalPackDescriptor(dataset)) return;
     console.error('Published modpack has no configured picker icon.', {
       slug: dataset.slug,
       displayName: dataset.displayName,
@@ -143,7 +144,7 @@ export function DatasetPicker({
               autoCapitalize="none"
               autoCorrect={false}
               returnKeyType="search"
-              accessibilityLabel="Search published modpacks"
+              accessibilityLabel="Search modpacks"
               accessibilityHint="Filters by pack name, identifier, Minecraft version, or pack version"
               onSubmitEditing={() => {
                 if (filteredDatasets.length === 1) onSelect(filteredDatasets[0].slug);
@@ -170,7 +171,7 @@ export function DatasetPicker({
             contentContainerStyle={styles.listContent}
             keyboardShouldPersistTaps="handled"
             accessibilityRole="list"
-            accessibilityLabel="Published modpacks">
+            accessibilityLabel="Modpacks">
             {filteredDatasets.length === 0 ? (
               <View style={styles.emptyState}>
                 <Text style={styles.emptyTitle}>No matching modpacks</Text>
@@ -196,6 +197,7 @@ export function DatasetPicker({
                       {dataset.displayName}
                     </Text>
                     <Text style={styles.optionMeta}>
+                      {isLocalPackDescriptor(dataset) ? 'On this device · ' : ''}
                       Minecraft {dataset.minecraftVersion} · pack {dataset.packVersion}
                     </Text>
                   </View>

@@ -81,7 +81,7 @@ export function DatasetSwitcher({
       accessibilityLabel={
         selected
           ? `Change modpack. Current pack is ${selected.displayName}`
-          : 'Choose a published modpack'
+          : 'Choose a modpack'
       }>
       <Text style={styles.compactDatasetText} numberOfLines={1}>
         {selectedLabel}

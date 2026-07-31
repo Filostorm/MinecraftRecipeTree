@@ -16,6 +16,7 @@ import {
   requireSafeArchivePath,
   type LocalPackManifestSummary,
 } from '../../src/data/localPackArchive';
+import {installLocalPackArchive} from '../../src/data/localPackStorage';
 import styles from './publish.module.css';
 
 // Keep each synchronous fflate push small enough for archives containing long
@@ -25,17 +26,54 @@ const ARCHIVE_READ_CHUNK_BYTES = 1024 * 1024;
 
 type UploadState =
   | {status: 'idle'}
-  | {status: 'checking'; filename: string; progress: number}
+  | {
+      status: 'checking';
+      filename: string;
+      progress: number;
+      phase: 'checking' | 'adding';
+    }
   | {
       status: 'ready';
       filename: string;
       bytes: number;
       summary: LocalPackManifestSummary;
+      viewerHref: string;
+      saved: boolean;
+      findings: readonly string[];
     }
   | {status: 'error'; filename: string | null; message: string};
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function plainUploadError(error: unknown): string {
+  const message = errorMessage(error);
+  if (message.includes('empty')) {
+    return 'This ZIP is empty. Run the exporter again and choose the new ZIP.';
+  }
+  if (message.includes('manifest.json') || message.includes('exporter information')) {
+    return 'We could not find the pack information in this ZIP. Run the exporter again and choose the new ZIP.';
+  }
+  if (
+    message.includes('too many files') ||
+    message.includes('too large') ||
+    message.includes('browser storage')
+  ) {
+    return message;
+  }
+  if (
+    message.includes('unsafe file path') ||
+    message.includes('file path that cannot be opened safely')
+  ) {
+    return 'This ZIP contains a file we cannot open safely. Make a fresh export and try again.';
+  }
+  if (message.includes('not a readable ZIP') || message.includes('could not be opened')) {
+    return 'This file is not a readable ZIP. Choose the ZIP made by the exporter.';
+  }
+  if (message.startsWith('The ZIP is missing ')) return message;
+  console.error('The exporter ZIP could not be prepared for the viewer.', error);
+  return 'We could not read this export. Run the exporter again and try the new ZIP.';
 }
 
 function joinChunks(chunks: readonly Uint8Array[], totalBytes: number): Uint8Array {
@@ -52,7 +90,12 @@ async function inspectPackArchive(
   file: File,
   onProgress: (fraction: number) => void,
   isCurrent: () => boolean,
-): Promise<{manifestPath: string; summary: LocalPackManifestSummary}> {
+): Promise<{
+  manifestPath: string;
+  manifestBytes: Uint8Array;
+  manifest: unknown;
+  summary: LocalPackManifestSummary;
+}> {
   if (file.size === 0) throw new Error('The selected ZIP file is empty.');
   if (!Number.isSafeInteger(file.size)) throw new Error('The selected file size is invalid.');
 
@@ -151,11 +194,10 @@ async function inspectPackArchive(
   }
   if (manifestBytes === 0) throw new Error('manifest.json is empty.');
 
+  const manifestData = joinChunks(manifestChunks, manifestBytes);
   let manifestText: string;
   try {
-    manifestText = new TextDecoder('utf-8', {fatal: true}).decode(
-      joinChunks(manifestChunks, manifestBytes),
-    );
+    manifestText = new TextDecoder('utf-8', {fatal: true}).decode(manifestData);
   } catch (error) {
     throw new Error(`manifest.json is not valid UTF-8: ${errorMessage(error)}`);
   } finally {
@@ -168,7 +210,12 @@ async function inspectPackArchive(
   } catch (error) {
     throw new Error(`manifest.json is not valid JSON: ${errorMessage(error)}`);
   }
-  return {manifestPath, summary: requireLocalPackManifest(manifest)};
+  return {
+    manifestPath,
+    manifestBytes: manifestData,
+    manifest,
+    summary: requireLocalPackManifest(manifest),
+  };
 }
 
 function formatBytes(bytes: number): string {
@@ -203,26 +250,65 @@ export function PackUploadDropzone() {
 
     const operation = operationRef.current + 1;
     operationRef.current = operation;
-    setState({status: 'checking', filename: file.name, progress: 0});
+    setState({status: 'checking', filename: file.name, progress: 0, phase: 'checking'});
     try {
       const result = await inspectPackArchive(
         file,
         fraction => {
           if (operationRef.current !== operation) return;
-          setState({status: 'checking', filename: file.name, progress: fraction});
+          setState({
+            status: 'checking',
+            filename: file.name,
+            progress: fraction,
+            phase: 'checking',
+          });
         },
         () => operationRef.current === operation,
       );
+      if (operationRef.current !== operation) return;
+      let viewerHref = '/';
+      let saved = false;
+      let findings = result.summary.findings;
+      if (result.summary.readyForHandoff) {
+        setState({status: 'checking', filename: file.name, progress: 0, phase: 'adding'});
+        try {
+          const installed = await installLocalPackArchive(
+            file,
+            result.manifestPath,
+            result.manifestBytes,
+            result.manifest,
+            result.summary,
+            fraction => {
+              if (operationRef.current !== operation) return;
+              setState({
+                status: 'checking',
+                filename: file.name,
+                progress: fraction,
+                phase: 'adding',
+              });
+            },
+          );
+          viewerHref = installed.viewerHref;
+          saved = true;
+        } catch (error) {
+          console.error('The checked pack could not be added to the viewer.', error);
+          findings = Object.freeze([...findings, plainUploadError(error)]);
+        }
+      }
       if (operationRef.current !== operation) return;
       setState({
         status: 'ready',
         filename: file.name,
         bytes: file.size,
         summary: result.summary,
+        viewerHref,
+        saved,
+        findings,
       });
     } catch (error) {
       if (operationRef.current !== operation) return;
-      setState({status: 'error', filename: file.name, message: errorMessage(error)});
+      console.error('The exporter ZIP check failed.', error);
+      setState({status: 'error', filename: file.name, message: plainUploadError(error)});
     } finally {
       if (inputRef.current) inputRef.current.value = '';
     }
@@ -236,12 +322,6 @@ export function PackUploadDropzone() {
     event.preventDefault();
     if (state.status === 'checking') return;
     void addFile(event.dataTransfer.files?.[0]);
-  };
-
-  const reset = () => {
-    operationRef.current += 1;
-    setState({status: 'idle'});
-    inputRef.current?.focus();
   };
 
   return (
@@ -280,14 +360,18 @@ export function PackUploadDropzone() {
         <span className={styles.uploadIcon} aria-hidden="true">↑</span>
         <strong>
           {state.status === 'checking'
-            ? `Checking ${state.filename}`
+            ? state.phase === 'adding'
+              ? `Adding ${state.filename} to your viewer`
+              : `Checking ${state.filename}`
             : dragging
               ? 'Drop the exporter ZIP here'
               : 'Drag and drop your exporter ZIP'}
         </strong>
         <span>
           {state.status === 'checking'
-            ? `${Math.round(state.progress * 100)}% read`
+            ? `${Math.round(state.progress * 100)}% ${
+                state.phase === 'adding' ? 'saved' : 'checked'
+              }`
             : 'or tap to add a file'}
         </span>
         {state.status === 'checking' && (
@@ -300,22 +384,22 @@ export function PackUploadDropzone() {
       </label>
 
       <p className={styles.uploadHelp} id="upload-help">
-        Your ZIP stays on this device while we check it. Nothing is uploaded yet.
+        Your ZIP stays on this device. Nothing is sent to a server.
       </p>
 
       <div className={styles.uploadResult} aria-live="polite">
         {state.status === 'ready' && (
           <article
             className={
-              state.summary.readyForHandoff
+              state.saved
                 ? styles.uploadReady
                 : styles.uploadNeedsAttention
             }>
             <div className={styles.uploadResultTopline}>
               <span>
-                {state.summary.readyForHandoff ? 'READY TO SHARE' : 'CHECK THIS EXPORT'}
+                {state.saved ? 'READY IN VIEWER' : 'WE FOUND A PROBLEM'}
               </span>
-              <button type="button" onClick={reset}>Choose another file</button>
+              <a href={state.viewerHref}>Return to viewer</a>
             </div>
             <h3>{state.summary.packName}</h3>
             <p className={styles.uploadFilename}>
@@ -347,14 +431,13 @@ export function PackUploadDropzone() {
                 <dd>{state.summary.counts.failures.toLocaleString()}</dd>
               </div>
             </dl>
-            {state.summary.findings.length > 0 ? (
+            {state.findings.length > 0 ? (
               <ul className={styles.uploadFindings}>
-                {state.summary.findings.map(finding => <li key={finding}>{finding}</li>)}
+                {state.findings.map(finding => <li key={finding}>{finding}</li>)}
               </ul>
             ) : (
               <p className={styles.uploadSuccessCopy}>
-                Everything looks good. Keep this ZIP unchanged and send it to the Recipe Tree
-                team when you&apos;re ready.
+                No errors found. This pack is now in your modpack list.
               </p>
             )}
           </article>
@@ -367,7 +450,7 @@ export function PackUploadDropzone() {
               {state.filename && <span>{state.filename}</span>}
               <p>{state.message}</p>
             </div>
-            <button type="button" onClick={reset}>Try another file</button>
+            <a href="/">Return to viewer</a>
           </div>
         )}
       </div>
