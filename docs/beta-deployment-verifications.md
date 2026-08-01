@@ -23,3 +23,16 @@ Deployment status was `succeeded`. The application production build, TypeScript 
 Owner-authenticated HTTP verification passed for the application document, `/api/datasets`, the hashed page bundle, and the lazy-loaded hashed graph-viewer bundle. `/api/datasets` returned `X-MRT-Beta-Data-Origin: https://minecraftrecipetree.craftsmannsoftware.com`. The deployed graph bundle contains the new `Production target`, `View machine recipe`, timing-unavailable fallback, and parallel-machine guidance copy.
 
 The automated interactive browser cannot attach the private Sites owner-verification header and still stops at the sign-in gate. Hydrated tap/click acceptance therefore remains pending a signed-in browser session. Production was not changed.
+
+## 2026-07-31 — Multiblock previews and block counts
+
+- Application commit: `0e068dec04bbdd5cee79a42bbf5b6d0f4572737c`
+- Sites version: `appgprj_6a6a505e7bc08191acada3d05fa5d18d~appgver_8f2fed70110c8191904553fc6a62f455` (version 10)
+- Deployment: `appgdep_6a6d3e768dfc8191b8f25fa976fb7cad`
+- URL: `https://minecraft-recipe-tree-beta.gtjoe51.chatgpt.site`
+
+Deployment status was `succeeded`. The application production build, TypeScript validation, 24 focused multiblock/export-validation tests, and the Forge 1.12.2 exporter test/build passed before deployment.
+
+Owner-authenticated HTTP verification passed for the application document, `/api/datasets`, the hashed application and graph-viewer bundles, and the lazy-loaded 69,553-byte Multiblock Madness 3.2.3 structure bundle. `/api/datasets` returned `X-MRT-Beta-Data-Origin: https://minecraftrecipetree.craftsmannsoftware.com`, and the deployed structure bundle contains the expected low-gravity deposition chamber data.
+
+A fresh interactive browser tab reached the private Sites sign-in flow, but the automation does not have a signed-in owner session and no account credentials were entered. Hydrated tap/click acceptance on the private URL therefore remains pending a signed-in browser session; the renderer, rotation/capping behavior, structure validation, exact block counts, and current-pack compatibility data are covered by the focused tests. Production was not changed.
