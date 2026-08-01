@@ -1,5 +1,6 @@
-import React from 'react';
+import React, {useEffect, useState} from 'react';
 import {
+  Linking,
   Modal,
   Platform,
   ScrollView,
@@ -9,9 +10,11 @@ import {
   View,
 } from 'react-native';
 import {theme} from '../theme';
+import {copyText} from '../ui/clipboard';
 import {SafeAreaProvider, SafeAreaView, initialWindowMetrics} from '../ui/safeArea';
 
 const DESKTOP_UPLOAD_URL = 'minecraftrecipetree.craftsmannsoftware.com/publish';
+const DESKTOP_UPLOAD_HREF = `https://${DESKTOP_UPLOAD_URL}`;
 
 export function MobileUploadGuide({
   visible,
@@ -20,6 +23,27 @@ export function MobileUploadGuide({
   visible: boolean;
   onClose(): void;
 }) {
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!visible) setCopied(false);
+  }, [visible]);
+
+  const openDesktopUpload = () => {
+    void Linking.openURL(DESKTOP_UPLOAD_HREF).catch(error => {
+      console.error('Could not open the desktop upload page.', error);
+    });
+  };
+
+  const copyDesktopUpload = async () => {
+    try {
+      await copyText(DESKTOP_UPLOAD_HREF);
+      setCopied(true);
+    } catch (error) {
+      console.error('Could not copy the desktop upload address.', error);
+    }
+  };
+
   return (
     <Modal
       visible={visible}
@@ -52,38 +76,57 @@ export function MobileUploadGuide({
             </View>
             <Text style={styles.title}>Continue on your computer</Text>
             <Text style={styles.body}>
-              Modpack exports can be large, so creating and uploading an exporter ZIP is handled by
-              the desktop website. You can keep using the mobile app after the pack is published.
+              Creating the exporter ZIP and publishing a pack still requires desktop Minecraft.
+              Exporter downloads are not available from the mobile app yet.
             </Text>
 
             <View style={styles.urlCard}>
               <Text style={styles.urlLabel}>Open this address on your desktop</Text>
-              <Text
-                style={styles.url}
-                selectable
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.72}
-                accessibilityLabel={`Desktop upload address ${DESKTOP_UPLOAD_URL}`}>
-                {DESKTOP_UPLOAD_URL}
-              </Text>
+              <TouchableOpacity
+                style={styles.urlOpenTarget}
+                onPress={openDesktopUpload}
+                accessibilityRole="link"
+                accessibilityLabel={`Open ${DESKTOP_UPLOAD_URL}`}>
+                <Text
+                  style={styles.url}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.68}>
+                  {DESKTOP_UPLOAD_URL}
+                </Text>
+                <Text style={styles.urlOpenIcon}>↗</Text>
+              </TouchableOpacity>
+              <View style={styles.urlActions}>
+                <Text style={styles.urlHint}>Tap the address to open it.</Text>
+                <TouchableOpacity
+                  style={[styles.copyButton, copied && styles.copyButtonCopied]}
+                  onPress={() => void copyDesktopUpload()}
+                  accessibilityRole="button"
+                  accessibilityLabel={copied ? 'Desktop upload link copied' : 'Copy desktop upload link'}>
+                  <Text
+                    style={[styles.copyButtonText, copied && styles.copyButtonTextCopied]}
+                    accessibilityLiveRegion="polite">
+                    {copied ? '✓ Copied' : 'Copy link'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
             <View style={styles.steps}>
               <UploadStep
                 number="1"
-                title="Run the exporter in Minecraft"
-                body="Use the exporter version that matches your Minecraft and recipe-viewer version, then let it finish creating the ZIP."
+                title="Add the exporter to the modpack instance"
+                body="In your launcher, open the modpack's installation or instance folder. With Minecraft closed, place the matching exporter .jar in its mods folder if it is not already there. Exporter downloads are not available yet."
               />
               <UploadStep
                 number="2"
-                title="Open Recipe Tree on desktop"
-                body={`Visit ${DESKTOP_UPLOAD_URL} in a desktop browser.`}
+                title="Run Minecraft and create the ZIP"
+                body="Launch that modpack instance, open the exporter, and let it finish creating the ZIP. It must match your Minecraft and recipe-viewer versions."
               />
               <UploadStep
                 number="3"
-                title="Drop in the exporter ZIP"
-                body="Drag the completed ZIP onto the upload page and follow the validation prompts to publish the pack."
+                title="Upload from your desktop"
+                body={`Open ${DESKTOP_UPLOAD_URL}, drag in the completed exporter ZIP, and follow the validation prompts.`}
               />
               <UploadStep
                 number="4"
@@ -186,7 +229,40 @@ const styles = StyleSheet.create({
     backgroundColor: theme.panel,
   },
   urlLabel: {color: theme.textDim, fontSize: 11, fontWeight: '700'},
-  url: {color: theme.accent, fontSize: 14, lineHeight: 20, fontWeight: '800'},
+  urlOpenTarget: {
+    minHeight: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  url: {flex: 1, color: theme.accent, fontSize: 14, lineHeight: 20, fontWeight: '800'},
+  urlOpenIcon: {color: theme.accent, fontSize: 18, lineHeight: 20, fontWeight: '800'},
+  urlActions: {
+    minHeight: 38,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginTop: 2,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: theme.border,
+  },
+  urlHint: {flex: 1, color: theme.textDim, fontSize: 11, lineHeight: 15},
+  copyButton: {
+    minWidth: 88,
+    minHeight: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: theme.accent,
+    backgroundColor: theme.panelAlt,
+  },
+  copyButtonCopied: {backgroundColor: theme.accent},
+  copyButtonText: {color: theme.accent, fontSize: 12, fontWeight: '900'},
+  copyButtonTextCopied: {color: theme.bg},
   steps: {marginTop: 26},
   step: {flexDirection: 'row', minHeight: 94},
   stepRail: {width: 38, alignItems: 'center'},
