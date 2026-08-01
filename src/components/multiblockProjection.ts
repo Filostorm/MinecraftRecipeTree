@@ -10,6 +10,17 @@ export interface ProjectedStructureCell {
   layer: number;
 }
 
+const LARGE_BLOCK_SPRITE = 32;
+const COMPACT_BLOCK_SPRITE = 16;
+const PREVIEW_PADDING = 10;
+
+interface RawProjection {
+  source: RecipeStructure['cells'][number];
+  x: number;
+  y: number;
+  depth: number;
+}
+
 function rotatedXZ(x: number, z: number, rotation: number): [number, number] {
   switch (((rotation % 4) + 4) % 4) {
     case 1:
@@ -60,35 +71,51 @@ export function projectStructureCells(
   rotation: number,
 ): ProjectedStructureCell[] {
   if (cells.length === 0 || width <= 0 || height <= 0) return [];
-  const raw = cells.map(source => {
+  const raw: RawProjection[] = cells.map(source => {
     const [x, y, z] = source;
     const [rotatedX, rotatedZ] = rotatedXZ(x, z, rotation);
     return {
       source,
-      x: rotatedX - rotatedZ,
-      y: (rotatedX + rotatedZ) * 0.52 - y * 0.92,
-      layer: rotatedX + rotatedZ + y * 0.01,
+      // Minecraft's inventory block renders are already isometric. Moving adjacent sprites by
+      // half their width and a quarter of their height makes those block faces meet like a placed
+      // world volume instead of scattering icons across a diagram.
+      x: (rotatedX - rotatedZ) * 0.5,
+      y: (rotatedX + rotatedZ) * 0.25 - y * 0.5,
+      depth: rotatedX + rotatedZ + y * 0.01,
     };
   });
   const minX = Math.min(...raw.map(cell => cell.x));
   const maxX = Math.max(...raw.map(cell => cell.x));
   const minY = Math.min(...raw.map(cell => cell.y));
   const maxY = Math.max(...raw.map(cell => cell.y));
-  const spanX = Math.max(1, maxX - minX);
-  const spanY = Math.max(1, maxY - minY);
-  const padding = 10;
-  const scale = Math.min((width - padding * 2) / spanX, (height - padding * 2) / spanY);
-  const size = 20;
-  const usedWidth = spanX * scale;
-  const usedHeight = spanY * scale;
+  const spanX = Math.max(0, maxX - minX);
+  const spanY = Math.max(0, maxY - minY);
+  const availableWidth = Math.max(1, width - PREVIEW_PADDING * 2);
+  const availableHeight = Math.max(1, height - PREVIEW_PADDING * 2);
+  const largeWidth = spanX * LARGE_BLOCK_SPRITE + LARGE_BLOCK_SPRITE;
+  const largeHeight = spanY * LARGE_BLOCK_SPRITE + LARGE_BLOCK_SPRITE;
+  const size =
+    largeWidth <= availableWidth && largeHeight <= availableHeight
+      ? LARGE_BLOCK_SPRITE
+      : COMPACT_BLOCK_SPRITE;
+  // Very large structures retain a 16px pixel-aligned block sprite while their centers compress
+  // uniformly. The overlap remains volumetric and avoids non-integral ItemIcon scaling.
+  const spacing = Math.min(
+    size,
+    spanX > 0 ? (availableWidth - size) / spanX : size,
+    spanY > 0 ? (availableHeight - size) / spanY : size,
+  );
+  const safeSpacing = Math.max(1, spacing);
+  const usedWidth = spanX * safeSpacing + size;
+  const usedHeight = spanY * safeSpacing + size;
   const offsetX = (width - usedWidth) / 2;
   const offsetY = (height - usedHeight) / 2;
   return raw
-    .sort((a, b) => a.layer - b.layer || a.y - b.y || a.x - b.x)
+    .sort((a, b) => a.depth - b.depth || a.y - b.y || a.x - b.x)
     .map((cell, layer) => ({
       source: cell.source,
-      left: offsetX + (cell.x - minX) * scale - size / 2,
-      top: offsetY + (cell.y - minY) * scale - size / 2,
+      left: offsetX + (cell.x - minX) * safeSpacing,
+      top: offsetY + (cell.y - minY) * safeSpacing,
       size,
       layer,
     }));

@@ -12,7 +12,7 @@ import {
   projectStructureCells,
 } from './multiblockProjection';
 
-const PREVIEW_HEIGHT = 190;
+const PREVIEW_HEIGHT = 220;
 
 export function MultiblockPreview({
   structure,
@@ -75,14 +75,14 @@ export function MultiblockPreview({
         accessibilityRole="image"
         accessibilityLabel={`${structure.size.join(' by ')} multiblock containing ${structure.total} blocks`}
         style={[styles.canvas, {width, height: PREVIEW_HEIGHT}]}>
+        <View pointerEvents="none" style={styles.groundShadow} />
         {projected.map((cell, index) => {
           const [x, y, z, itemKey] = cell.source;
           return (
             <View
               key={`${x}:${y}:${z}:${itemKey}:${index}`}
               style={[
-                styles.cell,
-                itemKey === structure.controller && styles.controllerCell,
+                styles.blockSprite,
                 {
                   left: cell.left,
                   top: cell.top,
@@ -94,8 +94,11 @@ export function MultiblockPreview({
               <ItemIcon
                 item={data.itemsByKey.get(itemKey)}
                 itemKey={itemKey}
-                size={16}
+                size={cell.size}
               />
+              {itemKey === structure.controller ? (
+                <View pointerEvents="none" style={styles.controllerMarker} />
+              ) : null}
             </View>
           );
         })}
@@ -134,8 +137,8 @@ export function MultiblockPreview({
         })}
       </View>
       <Text style={styles.partsNote}>
-        Green marks the controller. Alternative positions use the same deterministic representative
-        block as the in-game structure preview.
+        The green dot marks the controller. Alternative positions use the same deterministic
+        representative block as the in-game structure preview.
       </Text>
     </View>
   );
@@ -170,18 +173,34 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     borderColor: theme.border,
-    backgroundColor: '#0d1218',
+    backgroundColor: '#0b1016',
   },
-  cell: {
+  groundShadow: {
+    position: 'absolute',
+    left: '18%',
+    right: '18%',
+    bottom: 14,
+    height: 18,
+    borderRadius: 999,
+    backgroundColor: 'rgba(0, 0, 0, 0.42)',
+    transform: [{scaleY: 0.45}],
+  },
+  blockSprite: {
     position: 'absolute',
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 2,
-    borderWidth: 1,
-    borderColor: '#657180',
-    backgroundColor: '#202a35',
   },
-  controllerCell: {borderColor: theme.accent, backgroundColor: '#163327'},
+  controllerMarker: {
+    position: 'absolute',
+    top: 1,
+    right: 1,
+    width: 7,
+    height: 7,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#c8ffe0',
+    backgroundColor: theme.accent,
+  },
   previewNote: {color: theme.textDim, fontSize: 9, marginTop: 5},
   partsHeading: {
     color: theme.textDim,

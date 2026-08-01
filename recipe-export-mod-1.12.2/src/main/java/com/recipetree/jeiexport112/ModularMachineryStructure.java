@@ -11,6 +11,7 @@ import net.minecraftforge.fml.common.registry.ForgeRegistries;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -66,7 +67,7 @@ final class ModularMachineryStructure {
         });
 
         Data data = new Data();
-        Block controller = ForgeRegistries.BLOCKS.getValue(CONTROLLER_ID);
+        Block controller = resolveController(machine);
         if (controller == null) {
             throw new IOException("Modular Machinery controller block is absent from Forge registry");
         }
@@ -100,6 +101,51 @@ final class ModularMachineryStructure {
         }
         data.finish();
         return data;
+    }
+
+    /**
+     * MMCE registers one controller block per machine and its JEI preview calls
+     * {@code BlockController.getControllerWithMachine(machine)}. Prefer that exact stack source;
+     * the original Modular Machinery release has no such factory and keeps using its generic
+     * {@code blockcontroller}, which remains the compatibility fallback below.
+     */
+    private static Block resolveController(Object machine) throws Exception {
+        String[] ownerNames = {
+                "hellfirepvp.modularmachinery.common.block.BlockController",
+                "hellfirepvp.modularmachinery.common.block.BlockFactoryController"
+        };
+        String[] methodNames = {"getControllerWithMachine", "getMocControllerWithMachine"};
+        ClassLoader loader = machine.getClass().getClassLoader();
+        for (String ownerName : ownerNames) {
+            Class<?> owner;
+            try {
+                owner = Class.forName(ownerName, false, loader);
+            } catch (ClassNotFoundException ignored) {
+                continue;
+            }
+            for (Method method : owner.getMethods()) {
+                if (!Modifier.isStatic(method.getModifiers()) || method.getParameterTypes().length != 1) {
+                    continue;
+                }
+                boolean named = false;
+                for (String methodName : methodNames) {
+                    if (methodName.equals(method.getName())) {
+                        named = true;
+                        break;
+                    }
+                }
+                if (!named || !method.getParameterTypes()[0].isAssignableFrom(machine.getClass())) {
+                    continue;
+                }
+                Object resolved = method.invoke(null, machine);
+                if (resolved instanceof Block) {
+                    return (Block) resolved;
+                }
+                throw new IOException(ownerName + "." + method.getName() +
+                        " did not return a controller block");
+            }
+        }
+        return ForgeRegistries.BLOCKS.getValue(CONTROLLER_ID);
     }
 
     private static Object invokeNoArgs(Object target, String name) throws Exception {
