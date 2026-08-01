@@ -49,3 +49,16 @@ Deployment status was `succeeded`. The application production build, TypeScript 
 Owner-authenticated HTTP verification passed for the application document, `/api/datasets`, and the hashed graph-viewer bundle. `/api/datasets` returned `X-MRT-Beta-Data-Origin: https://minecraftrecipetree.craftsmannsoftware.com`. The deployed graph bundle contains `STARTING ITEM`, `Change recipe`, and `Add used by`, and does not contain `Finish within`.
 
 A fresh interactive browser tab reached the private Sites sign-in flow, but no signed-in owner session was available and no account credentials were entered. Hydrated tap/click acceptance therefore remains pending a signed-in browser session. Production was not changed.
+
+## 2026-07-31 — Placed-block MM2 and MeatballCraft multiblocks
+
+- Application commit: `aff453bc5224e92224faa31a2858dede6a4ee864`
+- Sites version: `appgprj_6a6a505e7bc08191acada3d05fa5d18d~appgver_057bde881fec81918bb9092f7de83120` (version 12)
+- Deployment: `appgdep_6a6d4ce7df648191b8f35c5f82311c25`
+- URL: `https://minecraft-recipe-tree-beta.gtjoe51.chatgpt.site`
+
+Deployment status was `succeeded`. The application production build, TypeScript validation, 28 focused multiblock/export-validation tests, and the Forge 1.12.2 exporter test/build passed before deployment. The compatibility tests validate exact counted geometry for all 38 Multiblocked structures in Multiblock Madness 2 and all 260 Modular Machinery Community Edition structures in MeatballCraft 0.18.6.
+
+A mobile-width, hydrated, end-to-end Worker session passed interactive acceptance for both packs. MeatballCraft loaded the lazy MMCE structure bundle and rendered a 7 × 3 × 7, 54-block blueprint as overlapping placed-block sprites with an exact eight-type block count and working rotation. Multiblock Madness 2 loaded the lazy Multiblocked structure bundle and rendered Galactic Trade Outpost as a 5 × 9 × 5, 80-block structure with the exact seven-type count, including 51 Space Age Casings. The corresponding block-count entries are interactive buttons. The same session loaded the hashed application/graph bundles and both lazy compatibility bundles. `/api/datasets` returned HTTP 200 with `X-MRT-Beta-Data-Origin: https://minecraftrecipetree.craftsmannsoftware.com`.
+
+A fresh tab to the deployed private URL reached the Sites sign-in flow, so the automated browser could not repeat the hydrated interaction against the deployed hostname without an owner session. The locally verified Worker used the exact production archive deployed as version 12 and the required beta data origin. Production was not changed.
