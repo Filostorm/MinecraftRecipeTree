@@ -36,3 +36,16 @@ Deployment status was `succeeded`. The application production build, TypeScript 
 Owner-authenticated HTTP verification passed for the application document, `/api/datasets`, the hashed application and graph-viewer bundles, and the lazy-loaded 69,553-byte Multiblock Madness 3.2.3 structure bundle. `/api/datasets` returned `X-MRT-Beta-Data-Origin: https://minecraftrecipetree.craftsmannsoftware.com`, and the deployed structure bundle contains the expected low-gravity deposition chamber data.
 
 A fresh interactive browser tab reached the private Sites sign-in flow, but the automation does not have a signed-in owner session and no account credentials were entered. Hydrated tap/click acceptance on the private URL therefore remains pending a signed-in browser session; the renderer, rotation/capping behavior, structure validation, exact block counts, and current-pack compatibility data are covered by the focused tests. Production was not changed.
+
+## 2026-07-31 — Starting-item quick controls
+
+- Application commit: `de726a6d04c6ec198bb88b54cf17382331a591dd`
+- Sites version: `appgprj_6a6a505e7bc08191acada3d05fa5d18d~appgver_13d2c61ec5dc8191942b624cb88e510f` (version 11)
+- Deployment: `appgdep_6a6d4321b5908191b8c4ee5f4cc6395e`
+- URL: `https://minecraft-recipe-tree-beta.gtjoe51.chatgpt.site`
+
+Deployment status was `succeeded`. The application production build, TypeScript validation, and 25 focused graph, timing, picker, totals, and saved-session tests passed before deployment. The timing tests explicitly verify 20 ticks per second and one-tick/20-tick conversions.
+
+Owner-authenticated HTTP verification passed for the application document, `/api/datasets`, and the hashed graph-viewer bundle. `/api/datasets` returned `X-MRT-Beta-Data-Origin: https://minecraftrecipetree.craftsmannsoftware.com`. The deployed graph bundle contains `STARTING ITEM`, `Change recipe`, and `Add used by`, and does not contain `Finish within`.
+
+A fresh interactive browser tab reached the private Sites sign-in flow, but no signed-in owner session was available and no account credentials were entered. Hydrated tap/click acceptance therefore remains pending a signed-in browser session. Production was not changed.
