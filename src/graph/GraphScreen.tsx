@@ -2426,7 +2426,8 @@ export function GraphScreen({
           <View style={styles.controlOptions}>
             {graphDirection === 'inputs' && (
               <CtrlBtn
-                label="Totals"
+                label={`Totals ${showTreeTotals ? '⌃' : '⌄'}`}
+                accessibilityLabel={showTreeTotals ? 'Collapse tree totals' : 'Expand tree totals'}
                 metricsId="graph.control.totals"
                 active={showTreeTotals}
                 onPress={() => setShowTreeTotals(value => !value)}
