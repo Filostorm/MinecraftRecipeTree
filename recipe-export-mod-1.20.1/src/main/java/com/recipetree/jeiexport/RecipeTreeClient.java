@@ -20,7 +20,6 @@ public final class RecipeTreeClient {
             InputConstants.Type.KEYSYM,
             GLFW.GLFW_KEY_G,
             "key.categories.jeiexport");
-    private static int inventoryScanTicks;
 
     private RecipeTreeClient() {
     }
@@ -34,14 +33,6 @@ public final class RecipeTreeClient {
         if (event.phase != TickEvent.Phase.END) return;
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.player == null) return;
-
-        if (++inventoryScanTicks >= 20) {
-            inventoryScanTicks = 0;
-            if (RecipeTreeProgress.get().observe(minecraft.player.getInventory())
-                    && minecraft.screen instanceof RecipeTreeScreen planner) {
-                planner.onDiscoveriesChanged();
-            }
-        }
 
         while (OPEN_PLANNER.consumeClick()) {
             openForCurrentItem(minecraft);

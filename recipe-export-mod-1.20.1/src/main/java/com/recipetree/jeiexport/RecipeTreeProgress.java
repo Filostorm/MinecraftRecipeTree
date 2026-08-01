@@ -3,7 +3,6 @@ package com.recipetree.jeiexport;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.fml.loading.FMLPaths;
 
@@ -14,9 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Map;
-import java.util.Set;
 
 /** Small client-local state. Cloud sync can replace this store without changing the planner UI. */
 public final class RecipeTreeProgress {
@@ -24,12 +21,11 @@ public final class RecipeTreeProgress {
     private static final Path FILE = FMLPaths.CONFIGDIR.get().resolve("recipe-tree-plans.json");
     private static RecipeTreeProgress instance;
 
-    private Set<String> discoveredItems = new HashSet<>();
-    private Set<String> manuallyAvailableMachines = new HashSet<>();
     private Map<String, SavedPlan> plans = new HashMap<>();
-    private boolean progressionEnabled = true;
+    private Map<String, String> favoriteRecipes = new HashMap<>();
+    private Map<String, Boolean> collapsedRecipeTypes = new HashMap<>();
 
-    public record SavedPlan(long amount, double minutes, double cycleSeconds, String recipeKey) {
+    public record SavedPlan(long amount, String recipeKey) {
     }
 
     private RecipeTreeProgress() {
@@ -38,43 +34,6 @@ public final class RecipeTreeProgress {
     public static synchronized RecipeTreeProgress get() {
         if (instance == null) instance = load();
         return instance;
-    }
-
-    public boolean observe(Inventory inventory) {
-        boolean changed = false;
-        for (ItemStack stack : inventory.items) changed |= observe(stack);
-        for (ItemStack stack : inventory.armor) changed |= observe(stack);
-        for (ItemStack stack : inventory.offhand) changed |= observe(stack);
-        if (changed) save();
-        return changed;
-    }
-
-    private boolean observe(ItemStack stack) {
-        return !stack.isEmpty() && discoveredItems.add(itemKey(stack));
-    }
-
-    public boolean isDiscovered(ItemStack stack) {
-        return !stack.isEmpty() && discoveredItems.contains(itemKey(stack));
-    }
-
-    public boolean isMachineManuallyAvailable(ItemStack stack) {
-        return !stack.isEmpty() && manuallyAvailableMachines.contains(itemKey(stack));
-    }
-
-    public void setMachineManuallyAvailable(ItemStack stack, boolean available) {
-        if (stack.isEmpty()) return;
-        if (available) manuallyAvailableMachines.add(itemKey(stack));
-        else manuallyAvailableMachines.remove(itemKey(stack));
-        save();
-    }
-
-    public boolean isProgressionEnabled() {
-        return progressionEnabled;
-    }
-
-    public void setProgressionEnabled(boolean enabled) {
-        progressionEnabled = enabled;
-        save();
     }
 
     public SavedPlan plan(ItemStack target) {
@@ -87,7 +46,31 @@ public final class RecipeTreeProgress {
         save();
     }
 
-    public static String itemKey(ItemStack stack) {
+    public String favoriteRecipe(ItemStack output) {
+        return output.isEmpty() ? null : favoriteRecipes.get(itemKey(output));
+    }
+
+    public void saveFavoriteRecipe(ItemStack output, String recipeKey) {
+        if (output.isEmpty() || recipeKey == null || recipeKey.isBlank()) return;
+        favoriteRecipes.put(itemKey(output), recipeKey);
+        save();
+    }
+
+    public boolean isRecipeTypeCollapsed(String recipeType) {
+        return recipeType != null && Boolean.TRUE.equals(collapsedRecipeTypes.get(recipeType));
+    }
+
+    public void setRecipeTypeCollapsed(String recipeType, boolean collapsed) {
+        if (recipeType == null || recipeType.isBlank()) return;
+        if (collapsed) {
+            collapsedRecipeTypes.put(recipeType, true);
+        } else {
+            collapsedRecipeTypes.remove(recipeType);
+        }
+        save();
+    }
+
+    private static String itemKey(ItemStack stack) {
         return BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
     }
 
@@ -96,9 +79,9 @@ public final class RecipeTreeProgress {
         try (Reader reader = Files.newBufferedReader(FILE)) {
             RecipeTreeProgress loaded = GSON.fromJson(reader, RecipeTreeProgress.class);
             if (loaded == null) return new RecipeTreeProgress();
-            if (loaded.discoveredItems == null) loaded.discoveredItems = new HashSet<>();
-            if (loaded.manuallyAvailableMachines == null) loaded.manuallyAvailableMachines = new HashSet<>();
             if (loaded.plans == null) loaded.plans = new HashMap<>();
+            if (loaded.favoriteRecipes == null) loaded.favoriteRecipes = new HashMap<>();
+            if (loaded.collapsedRecipeTypes == null) loaded.collapsedRecipeTypes = new HashMap<>();
             return loaded;
         } catch (Exception error) {
             JeiExportMod.LOGGER.warn("Could not load local recipe-tree plans from {}", FILE, error);

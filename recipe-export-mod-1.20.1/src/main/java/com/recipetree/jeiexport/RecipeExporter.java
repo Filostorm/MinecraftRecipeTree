@@ -88,11 +88,9 @@ final class RecipeExporter implements ExportJob.PhaseRunner {
      * ("Item Tags", "Block Tags", ...). Skipped by default; re-enable with
      * -Djeiexport.includeMetaCategories=true.
      */
-    private static boolean isMetaCategory(ResourceLocation uid) {
-        if (!"jei".equals(uid.getNamespace())) {
-            return false;
-        }
-        return uid.getPath().startsWith("tag_recipes") || "information".equals(uid.getPath());
+    static boolean isMetaCategory(ResourceLocation uid) {
+        return uid.getPath().startsWith("tag_recipes")
+                || ("jei".equals(uid.getNamespace()) && "information".equals(uid.getPath()));
     }
 
     @Override

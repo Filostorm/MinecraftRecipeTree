@@ -1,0 +1,69 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+  buildPortableTree,
+  parsePortableTree,
+  portableSelectionAsStored,
+} from './portableTree.ts';
+
+const descriptor = {
+  slug: 'test-pack',
+  displayName: 'Test Pack',
+  minecraftVersion: '1.20.1',
+  packVersion: '1.0.0',
+  publicationId: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  previewAssetSetId: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+  isDefault: false,
+};
+
+test('round-trips a portable recipe tree with stable JEI recipe identities', () => {
+  const session = {
+    version: 2,
+    rootKey: 'item|minecraft:stone',
+    direction: 'inputs',
+    productionPlan: {amount: 64, windowSeconds: 1},
+    selections: [
+      {
+        path: [],
+        itemKey: 'item|minecraft:stone',
+        source: {kind: 'recipe', ref: [3, 7]},
+      },
+    ],
+  };
+  const share = buildPortableTree(
+    session,
+    descriptor,
+    new Map([['3:7', 'minecraft:crafting|minecraft:stone']]),
+    '2026-08-01T00:00:00.000Z',
+  );
+  const parsed = parsePortableTree(JSON.stringify(share));
+  assert.equal(parsed.selections[0].source.recipeKey, 'minecraft:crafting|minecraft:stone');
+  assert.deepEqual(portableSelectionAsStored(parsed.selections[0], [3, 7]), session.selections[0]);
+});
+
+test('rejects oversized and unsupported payloads', () => {
+  assert.throws(() => parsePortableTree('{}'), /not a supported/);
+  assert.throws(() => parsePortableTree('x'.repeat(1_048_577)), /1 MiB/);
+});
+
+test('accepts the ref-free payload emitted by the in-game JEI viewer', () => {
+  const parsed = parsePortableTree(JSON.stringify({
+    format: 'minecraft-recipe-tree',
+    version: 1,
+    createdAt: '2026-08-01T00:00:00Z',
+    pack: {minecraftVersion: '1.20.1', name: 'In-game JEI'},
+    rootKey: 'item|minecraft:stone',
+    direction: 'inputs',
+    productionPlan: {amount: 64, windowSeconds: 1},
+    selections: [{
+      path: [],
+      itemKey: 'item|minecraft:stone',
+      source: {kind: 'recipe', recipeKey: 'minecraft:crafting|minecraft:stone'},
+    }],
+  }));
+  assert.equal(parsed.selections[0].source.ref, undefined);
+  assert.deepEqual(
+    portableSelectionAsStored(parsed.selections[0], [3, 7]).source,
+    {kind: 'recipe', ref: [3, 7]},
+  );
+});

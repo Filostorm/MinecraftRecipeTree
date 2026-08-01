@@ -4,6 +4,11 @@ import {
   COMPACT_LABEL_HEIGHT,
   COMPACT_ROOT_DIAMOND_SIZE,
   COMPACT_ROOT_SIZE,
+  ROOT_SOURCE_ACTIONS_HEIGHT,
+  ROOT_SOURCE_ACTIONS_WIDTH,
+  ROOT_ATTACHED_ACTIONS_HEIGHT,
+  ROOT_ATTACHED_ACTIONS_WIDTH,
+  attachedRootVisualX,
   layoutTree,
 } from './layout.ts';
 
@@ -62,6 +67,60 @@ test('preserves left-to-right preorder placement and child-to-parent edge orderi
   );
   assert.equal(graph.edges.length, 6);
   assert.ok(graph.nodes[1].x < graph.nodes[2].x);
+});
+
+test('reserves node space for starting-item controls instead of overlaying the tree', () => {
+  const root = {
+    id: 'root',
+    key: 'item|test:root',
+    ancestors: [],
+    source: {
+      id: 'root.source',
+      kind: 'recipe',
+      recipe: {w: 160, h: 60, out: [[['item|test:root', 1]]]},
+      inputs: [{id: 'input', key: 'item|test:input', ancestors: []}],
+    },
+  };
+
+  const closed = layoutTree(root, false, true, false);
+  const open = layoutTree(root, false, true, true);
+  assert.equal(open.nodes[0].w, closed.nodes[0].w + ROOT_SOURCE_ACTIONS_WIDTH);
+  assert.equal(open.nodes[0].h, closed.nodes[0].h + ROOT_SOURCE_ACTIONS_HEIGHT);
+  assert.ok(open.nodes[1].y >= closed.nodes[1].y + ROOT_SOURCE_ACTIONS_HEIGHT);
+});
+
+test('reserves standalone control space around an open compact starting item', () => {
+  const root = {
+    id: 'root',
+    key: 'item|test:root',
+    ancestors: [],
+    source: {
+      id: 'root.source',
+      kind: 'recipe',
+      inputs: [{id: 'input', key: 'item|test:input', ancestors: []}],
+    },
+  };
+
+  const closed = layoutTree(root, true, true, false);
+  const open = layoutTree(root, true, true, true);
+  assert.equal(open.nodes[0].w, ROOT_ATTACHED_ACTIONS_WIDTH);
+  assert.equal(
+    open.nodes[0].h,
+    COMPACT_ROOT_SIZE + ROOT_ATTACHED_ACTIONS_HEIGHT,
+  );
+  assert.ok(open.nodes[1].y > closed.nodes[1].y);
+});
+
+test('keeps radial starting item anchored when its attached controls open', () => {
+  const radialX = -51;
+  assert.equal(
+    attachedRootVisualX(radialX, 102, true, true),
+    radialX,
+  );
+  assert.equal(
+    attachedRootVisualX(0, ROOT_ATTACHED_ACTIONS_WIDTH, false, true),
+    (ROOT_ATTACHED_ACTIONS_WIDTH - COMPACT_ROOT_SIZE) / 2,
+  );
 });
 
 test('reserves horizontal and export space for persistent compact item names', () => {

@@ -13,11 +13,33 @@ export const COMPACT_ROOT_LABEL_GAP = 8;
 export const COMPACT_ROOT_LABEL_HEIGHT = COMPACT_ROOT_LABEL_GAP + 12;
 /** Header strip on source nodes: icon + "Name ×N · Category". */
 export const SOURCE_HEADER = 22;
+/** Extra space inside an expanded root recipe while its inline controls are open. */
+export const ROOT_SOURCE_ACTIONS_WIDTH = 44;
+export const ROOT_SOURCE_ACTIONS_HEIGHT = 46;
+/** Standalone controls shown around a collapsed/compact starting item. */
+export const ROOT_ATTACHED_ACTIONS_WIDTH = 220;
+export const ROOT_ATTACHED_ACTIONS_HEIGHT = 62;
 /** Vertical gap between tree levels (rows). */
 const LEVEL_GAP = 48;
 /** Horizontal gap between siblings. */
 const SIBLING_GAP = 18;
 const EDGE_T = 2;
+
+/**
+ * Keep the starting item's visual center independent from the extra collision
+ * space reserved for its controls. Radial layout already returns the visual
+ * node bounds, so applying the tidy-tree correction there would move the item
+ * away from the connector's center.
+ */
+export function attachedRootVisualX(
+  layoutX: number,
+  layoutWidth: number,
+  radialLayout: boolean,
+  showRootActions: boolean,
+): number {
+  if (radialLayout || !showRootActions) return layoutX;
+  return layoutX + (layoutWidth - COMPACT_ROOT_SIZE) / 2;
+}
 
 export interface LaidNode {
   id: string;
@@ -61,29 +83,48 @@ export function recipeImageDisplay(recipe: Recipe): {w: number; h: number} {
   return pixelArtDisplaySize(w, h, 280, 220);
 }
 
-export function sourceNodeSize(source: SourceTreeNode): {w: number; h: number} {
+export function sourceNodeSize(
+  source: SourceTreeNode,
+  showRootActions = false,
+): {w: number; h: number} {
+  const actionWidth = showRootActions ? ROOT_SOURCE_ACTIONS_WIDTH : 0;
+  const actionHeight = showRootActions ? ROOT_SOURCE_ACTIONS_HEIGHT : 0;
   if (source.kind === 'recipe' && source.recipe) {
     const img = recipeImageDisplay(source.recipe);
-    return {w: Math.max(180, img.w + 12), h: img.h + SOURCE_HEADER + 12};
+    return {
+      w: Math.max(180, img.w + 12) + actionWidth,
+      h: img.h + SOURCE_HEADER + 12 + actionHeight,
+    };
   }
   if (source.kind === 'mob') {
-    return {w: 210, h: SOURCE_HEADER + 66};
+    return {w: 210 + actionWidth, h: SOURCE_HEADER + 66 + actionHeight};
   }
-  return {w: 210, h: SOURCE_HEADER + 44};
+  return {w: 210 + actionWidth, h: SOURCE_HEADER + 44 + actionHeight};
 }
 
 function treeNodeSize(
   node: ItemTreeNode,
   compact: boolean,
   isRoot = false,
+  showRootActions = false,
 ): {w: number; h: number} {
   if (compact) {
     if (isRoot) {
-      return {w: COMPACT_ROOT_SIZE, h: COMPACT_ROOT_SIZE};
+      return showRootActions
+        ? {
+            w: ROOT_ATTACHED_ACTIONS_WIDTH,
+            h: COMPACT_ROOT_SIZE + ROOT_ATTACHED_ACTIONS_HEIGHT,
+          }
+        : {w: COMPACT_ROOT_SIZE, h: COMPACT_ROOT_SIZE};
     }
     return {w: COMPACT_ITEM_SIZE, h: COMPACT_ITEM_SIZE};
   }
-  return node.source ? sourceNodeSize(node.source) : {w: ITEM_W, h: ITEM_H};
+  if (node.source) {
+    return sourceNodeSize(node.source, isRoot && showRootActions);
+  }
+  return isRoot && showRootActions
+    ? {w: ITEM_W + ROOT_SOURCE_ACTIONS_WIDTH, h: ITEM_H + ROOT_ATTACHED_ACTIONS_HEIGHT}
+    : {w: ITEM_W, h: ITEM_H};
 }
 
 /**
@@ -96,6 +137,7 @@ export function layoutTree(
   root: ItemTreeNode,
   compact = false,
   showCompactLabels = false,
+  showRootActions = false,
 ): GraphLayout {
   const nodes: LaidNode[] = [];
   const edges: EdgeRect[] = [];
@@ -109,7 +151,7 @@ export function layoutTree(
   while (rowStack.length > 0) {
     const {node, depth} = rowStack.pop()!;
     if (node.source) {
-      seeH(depth, treeNodeSize(node, compact, depth === 0).h);
+      seeH(depth, treeNodeSize(node, compact, depth === 0, showRootActions).h);
       for (let index = node.source.inputs.length - 1; index >= 0; index -= 1) {
         rowStack.push({node: node.source.inputs[index], depth: depth + 1});
       }
@@ -150,7 +192,7 @@ export function layoutTree(
   ): LayoutRecord => {
     const record = {
       node,
-      size: treeNodeSize(node, compact, parent === undefined),
+      size: treeNodeSize(node, compact, parent === undefined, showRootActions),
       parent,
       children: [],
       index,

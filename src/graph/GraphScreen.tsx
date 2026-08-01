@@ -14,7 +14,6 @@ import {formatDropStat} from '../components/DropList';
 import {ItemIcon, pixelated} from '../components/ItemIcon';
 import {
   RADIAL_ROOT_ITEM_ICON_SIZE,
-  ROOT_QUICK_ACTION_ITEM_ICON_SIZE,
 } from '../components/itemIconSizing';
 import {MobSprite} from '../components/MobSprite';
 import {
@@ -57,7 +56,10 @@ import {
   COMPACT_ROOT_SIZE,
   ITEM_H,
   ITEM_W,
+  ROOT_ATTACHED_ACTIONS_WIDTH,
+  ROOT_SOURCE_ACTIONS_WIDTH,
   SOURCE_HEADER,
+  attachedRootVisualX,
   layoutTree,
   recipeImageDisplay,
 } from './layout';
@@ -94,10 +96,24 @@ import {
 import {
   clearGraphSession,
   loadGraphSession,
+  parseGraphSession,
   persistGraphSession,
+  serializeGraphSession,
   type GraphSession,
   type StoredGraphSelection,
 } from './graphSession';
+import {
+  buildPortableTree,
+  parsePortableTree,
+  portableSelectionAsStored,
+  type PortableTreeSelection,
+} from './portableTree';
+import {
+  pickPortableTreeFile,
+  savePortableTreeToInstance,
+  sharePortableTree,
+} from './portableTreeTransfer';
+import {TreeShareModal} from './TreeShareModal';
 import {
   createDeferredRecipeSourceResolver,
   deferredRecipeExpansionNodes,
@@ -130,7 +146,6 @@ import {
 } from './treeTotalTargets';
 import {
   estimateParallelMachines,
-  MINECRAFT_TICKS_PER_SECOND,
   recipeCycleSeconds,
   selectedRecipeOutput,
   type ProductionPlan,
@@ -431,6 +446,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
   const pickerRef = useRef<PickerState | null>(null);
   pickerRef.current = picker;
   const [showRootActions, setShowRootActions] = useState(false);
+  const [showTreeShare, setShowTreeShare] = useState(false);
   useEffect(() => setShowRootActions(false), [graphRequestId]);
   useEffect(() => {
     if (tab !== 'graph') setShowRootActions(false);
@@ -1603,8 +1619,9 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
                 ? item => usagesFor(item.key).length === 0
                 : undefined,
               true,
+              showRootActions,
             )
-          : layoutTree(root, compactMode, true)
+          : layoutTree(root, compactMode, true, showRootActions)
         : null,
     [
       root,
@@ -1613,6 +1630,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
       radialLayout,
       graphDirection,
       usagesFor,
+      showRootActions,
     ],
   );
   const graphRef = useRef(graph);
@@ -1745,6 +1763,120 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
       return safeExportFilename(data.itemsByKey.get(rootKey)?.n ?? rootKey);
     },
     [data.itemsByKey, root?.key],
+  );
+
+  const portableTreeJson = useCallback(async () => {
+    const currentRoot = rootRef.current;
+    if (!currentRoot) throw new Error('There is no recipe tree to share.');
+    const session = serializeGraphSession(currentRoot, graphDirection);
+    const recipeRefs = session.selections
+      .filter(selection => selection.source.kind === 'recipe')
+      .map(selection => selection.source.kind === 'recipe' ? selection.source.ref : null)
+      .filter((ref): ref is RecipeRef => ref !== null);
+    const uniqueRefs = [...new Map(recipeRefs.map(ref => [ref.join(':'), ref])).values()];
+    const recipes = await data.getRecipes(uniqueRefs);
+    const recipeKeys = new Map<string, string>();
+    uniqueRefs.forEach((ref, index) => {
+      const category = data.categories[ref[0]];
+      const recipe = recipes[index];
+      if (!category || !recipe?.id) return;
+      recipeKeys.set(ref.join(':'), `${category.id}|${recipe.id}`);
+    });
+    return JSON.stringify(
+      buildPortableTree(session, data.descriptor, recipeKeys),
+      null,
+      2,
+    );
+  }, [data, graphDirection]);
+
+  const shareCurrentTree = useCallback(async () => {
+    const json = await portableTreeJson();
+    return sharePortableTree(`${rootExportName}-tree.mrtree.json`, json);
+  }, [portableTreeJson, rootExportName]);
+
+  const saveCurrentTreeToInstance = useCallback(async () => {
+    const json = await portableTreeJson();
+    return savePortableTreeToInstance(`${rootExportName}-tree.mrtree.json`, json);
+  }, [portableTreeJson, rootExportName]);
+
+  const importPortableTree = useCallback(
+    async (raw: string) => {
+      const share = parsePortableTree(raw);
+      if (share.pack.minecraftVersion !== data.descriptor.minecraftVersion) {
+        throw new Error(
+          `This tree is for Minecraft ${share.pack.minecraftVersion}; the selected pack uses ${data.descriptor.minecraftVersion}.`,
+        );
+      }
+      if (!data.itemsByKey.has(share.rootKey)) {
+        throw new Error('The shared starting item is not available in the selected modpack.');
+      }
+      const recipeRefCache = new Map<string, RecipeRef>();
+      const resolveRecipeRef = async (selection: PortableTreeSelection): Promise<RecipeRef> => {
+        if (selection.source.kind !== 'recipe') {
+          throw new Error('Only recipe sources have recipe references.');
+        }
+        const recipeSource = selection.source;
+        const cacheKey = `${selection.itemKey}\n${recipeSource.recipeKey}`;
+        const cached = recipeRefCache.get(cacheKey);
+        if (cached) return [...cached];
+        const candidates = choicesFor(selection.itemKey, share.direction)
+          .filter((choice): choice is RecipeSourceChoice => choice.t === 'recipe');
+        const ordered = recipeSource.ref
+          ? [
+              ...candidates.filter(choice =>
+                choice.ref[0] === recipeSource.ref?.[0] &&
+                choice.ref[1] === recipeSource.ref?.[1],
+              ),
+              ...candidates.filter(choice =>
+                choice.ref[0] !== recipeSource.ref?.[0] ||
+                choice.ref[1] !== recipeSource.ref?.[1],
+              ),
+            ]
+          : candidates;
+        const recipes = await data.getRecipes(ordered.map(choice => choice.ref));
+        for (let index = 0; index < ordered.length; index += 1) {
+          const candidate = ordered[index];
+          const category = data.categories[candidate.ref[0]];
+          const recipe = recipes[index];
+          if (
+            category &&
+            recipe?.id &&
+            `${category.id}|${recipe.id}` === recipeSource.recipeKey
+          ) {
+            recipeRefCache.set(cacheKey, candidate.ref);
+            return [...candidate.ref];
+          }
+        }
+        throw new Error(
+          `Recipe ${recipeSource.recipeKey} for ${selection.itemKey} is unavailable in this modpack.`,
+        );
+      };
+
+      const selections: StoredGraphSelection[] = [];
+      for (const selection of share.selections) {
+        selections.push(
+          portableSelectionAsStored(
+            selection,
+            selection.source.kind === 'recipe'
+              ? await resolveRecipeRef(selection)
+              : undefined,
+          ),
+        );
+      }
+      const session = parseGraphSession(JSON.stringify({
+        version: 2,
+        rootKey: share.rootKey,
+        direction: share.direction,
+        ...(share.productionPlan ? {productionPlan: share.productionPlan} : {}),
+        selections,
+      }));
+      pendingGraphSessionRef.current = session;
+      restoringGraphSessionRef.current = true;
+      setShowTreeShare(false);
+      setExportMessage('Shared tree imported.');
+      restoreGraph(session.rootKey, session.direction);
+    },
+    [choicesFor, data, restoreGraph],
   );
 
   const exportTotals = useCallback(() => {
@@ -2104,6 +2236,15 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
     );
   }
 
+  const rootNodeActions: RootNodeActionProps | undefined = showRootActions
+    ? {
+        amount: root.productionPlan?.amount ?? root.amount ?? 1,
+        onAmountChange: updateRootRequestedAmount,
+        onChangeRecipe: () => openRootPicker('inputs'),
+        onAddUsedBy: () => openRootPicker('outputs'),
+      }
+    : undefined;
+
   return (
     <View style={styles.root}>
       <View
@@ -2123,8 +2264,10 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
         {/* 0x0 anchor so translate/scale apply around the top-left origin */}
         <View
           ref={anchorRef}
+          collapsable={false}
           style={[
             styles.anchor,
+            Platform.OS !== 'web' && styles.nativeAnchor,
             {
               transform: [
                 {translateX: transform.x},
@@ -2155,7 +2298,16 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
             compactMode || n.radial ? (
               <CompactItemNodeView
                 key={n.id}
-                x={n.x}
+                x={
+                  compactMode && n.item.id === 'root'
+                    ? attachedRootVisualX(
+                        n.x,
+                        n.w,
+                        radialLayout,
+                        showRootActions,
+                      )
+                    : n.x
+                }
                 y={n.y}
                 node={n.item}
                 requiredAmount={displayedAmountFor(n.item)}
@@ -2185,6 +2337,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
                 branchLabel={n.compactBranch === true}
                 showLabel
                 deferredDuplicate={!!n.item.deferredRecipeExpansion}
+                rootActions={n.item.id === 'root' ? rootNodeActions : undefined}
                 onTap={() =>
                   n.item.id === 'root'
                     ? setShowRootActions(value => !value)
@@ -2217,6 +2370,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
                       ? 'no outputs'
                       : 'no inputs'
                 }
+                rootActions={n.item.id === 'root' ? rootNodeActions : undefined}
                 onTap={() =>
                   n.item.id === 'root'
                     ? setShowRootActions(value => !value)
@@ -2239,6 +2393,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
                 radialRoot={radialLayout && n.item.id === 'root'}
                 focused={n.source?.id === focusedSourceId}
                 animateMobs={animateMobs}
+                rootActions={n.item.id === 'root' ? rootNodeActions : undefined}
                 canSwap={
                   n.item.id !== 'root' &&
                   !isRecursiveItemNode(n.item) &&
@@ -2287,6 +2442,11 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
               active={expandRecipesOnce}
               onPress={() => updateExpandRecipesOnce(!expandRecipesOnce)}
             />
+            <CtrlBtn
+              label="Share"
+              metricsId="graph.control.share"
+              onPress={() => setShowTreeShare(true)}
+            />
           </View>
         )}
         <TouchableOpacity
@@ -2325,16 +2485,6 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
           onExportTree={() => void exportTreeImage()}
           onIngredientTap={handleTreeTotalIngredientTap}
           onOpenItem={openItem}
-        />
-      )}
-      {showRootActions && root && (
-        <RootQuickActions
-          root={root}
-          amount={root.productionPlan?.amount ?? root.amount ?? 1}
-          onAmountChange={updateRootRequestedAmount}
-          onChangeRecipe={() => openRootPicker('inputs')}
-          onAddUsedBy={() => openRootPicker('outputs')}
-          onClose={() => setShowRootActions(false)}
         />
       )}
       {picker && (
@@ -2552,46 +2702,31 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
           }}
         />
       )}
+      <TreeShareModal
+        visible={showTreeShare}
+        onClose={() => setShowTreeShare(false)}
+        onShare={shareCurrentTree}
+        onImport={importPortableTree}
+        onChooseFile={pickPortableTreeFile}
+        onSaveToInstance={saveCurrentTreeToInstance}
+      />
     </View>
   );
 }
 
-function RootQuickActions({
-  root,
-  amount,
-  onAmountChange,
-  onChangeRecipe,
-  onAddUsedBy,
-  onClose,
-}: {
-  root: ItemTreeNode;
+type RootNodeActionProps = {
   amount: number;
   onAmountChange: (amount: number) => void;
   onChangeRecipe: () => void;
   onAddUsedBy: () => void;
-  onClose: () => void;
-}) {
-  const data = useData();
+};
+
+function RootAmountStepper({
+  amount,
+  onAmountChange,
+}: Pick<RootNodeActionProps, 'amount' | 'onAmountChange'>) {
   const [amountText, setAmountText] = useState(String(amount));
   useEffect(() => setAmountText(String(amount)), [amount]);
-  const recipe = root.source?.kind === 'recipe' ? root.source.recipe : undefined;
-  const category = root.source?.ref ? data.categories[root.source.ref[0]] : undefined;
-  const cycleSeconds = recipe ? recipeCycleSeconds(recipe, category?.id) : null;
-  const durationTicks =
-    cycleSeconds == null
-      ? null
-      : recipe?.durationTicks ?? cycleSeconds * MINECRAFT_TICKS_PER_SECOND;
-  const estimate = recipe
-    ? estimateParallelMachines(recipe, root.key, category?.id, {
-        amount,
-        windowSeconds: 1,
-      })
-    : null;
-  const machineKey = category?.catalysts[0];
-  const machineName = machineKey
-    ? data.itemsByKey.get(machineKey)?.n ?? machineKey
-    : 'machine';
-  const outputPerCycle = recipe ? selectedRecipeOutput(recipe, root.key) : null;
   const adjustAmount = (direction: -1 | 1) => {
     onAmountChange(amount + direction);
   };
@@ -2602,84 +2737,103 @@ function RootQuickActions({
   };
 
   return (
-    <View style={styles.rootActions}>
-      <View style={styles.rootActionsHeader}>
-        <View style={styles.rootActionsIdentity}>
-          <ItemIcon itemKey={root.key} size={ROOT_QUICK_ACTION_ITEM_ICON_SIZE} />
-          <View style={styles.rootActionsTitleWrap}>
-            <Text style={styles.rootActionsEyebrow}>STARTING ITEM</Text>
-            <Text style={styles.rootActionsTitle} numberOfLines={1}>
-              {data.itemsByKey.get(root.key)?.n ?? root.key}
-            </Text>
-          </View>
-        </View>
-        <TouchableOpacity
-          {...signalTarget('graph.root-actions.close')}
-          accessibilityRole="button"
-          accessibilityLabel="Close starting item controls"
-          style={styles.rootActionsClose}
-          onPress={onClose}>
-          <Text style={styles.rootActionsCloseText}>×</Text>
-        </TouchableOpacity>
+    <View style={styles.rootNodeAmountRail}>
+      <TouchableOpacity
+        {...signalTarget('graph.root-actions.amount.increase')}
+        accessibilityRole="button"
+        accessibilityLabel="Increase requested amount"
+        style={[styles.rootNodeStepButton, styles.rootNodeIncreaseButton]}
+        onPress={() => adjustAmount(1)}>
+        <Text style={[styles.rootNodeStepText, styles.rootNodeIncreaseText]}>+</Text>
+      </TouchableOpacity>
+      <TextInput
+        accessibilityLabel="Amount requested"
+        style={styles.rootNodeAmountInput}
+        value={amountText}
+        onChangeText={updateAmountText}
+        onBlur={() => setAmountText(String(amount))}
+        keyboardType="number-pad"
+        inputMode="numeric"
+        selectTextOnFocus
+      />
+      <TouchableOpacity
+        {...signalTarget('graph.root-actions.amount.decrease')}
+        accessibilityRole="button"
+        accessibilityLabel="Decrease requested amount"
+        style={styles.rootNodeStepButton}
+        onPress={() => adjustAmount(-1)}>
+        <Text style={styles.rootNodeStepText}>−</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+function RootActionButtons({
+  onChangeRecipe,
+  onAddUsedBy,
+}: Pick<RootNodeActionProps, 'onChangeRecipe' | 'onAddUsedBy'>) {
+  return (
+    <View style={styles.rootNodeActionButtons}>
+      <TouchableOpacity
+        {...signalTarget('graph.root-actions.change-recipe')}
+        accessibilityRole="button"
+        style={styles.rootNodeSecondaryAction}
+        onPress={onChangeRecipe}>
+        <Text style={styles.rootNodeSecondaryActionText}>Change recipe</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        {...signalTarget('graph.root-actions.add-used-by')}
+        accessibilityRole="button"
+        style={styles.rootNodePrimaryAction}
+        onPress={onAddUsedBy}>
+        <Text style={styles.rootNodePrimaryActionText}>Add used by</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+function AttachedRootActions({
+  actions,
+  nodeX,
+  nodeY,
+  nodeWidth,
+  nodeHeight,
+  buttonWidth,
+}: {
+  actions: RootNodeActionProps;
+  nodeX: number;
+  nodeY: number;
+  nodeWidth: number;
+  nodeHeight: number;
+  buttonWidth: number;
+}) {
+  const wrapperLeft = nodeX - (buttonWidth - nodeWidth) / 2;
+  const nodeLeft = (buttonWidth - nodeWidth) / 2;
+  return (
+    <View
+      pointerEvents="box-none"
+      style={[
+        styles.attachedRootActions,
+        {
+          left: wrapperLeft,
+          top: nodeY,
+          width: Math.max(buttonWidth, nodeLeft + nodeWidth + 40),
+          height: nodeHeight + 62,
+        },
+      ]}>
+      <View
+        style={[
+          styles.attachedRootStepper,
+          {left: nodeLeft + nodeWidth + 6, top: Math.max(0, (nodeHeight - 86) / 2)},
+        ]}>
+        <RootAmountStepper {...actions} />
       </View>
-
-      <Text style={styles.rootActionsLabel}>Amount requested</Text>
-      <View style={styles.rootActionsStepper}>
-        <TouchableOpacity
-          {...signalTarget('graph.root-actions.amount.decrease')}
-          accessibilityRole="button"
-          accessibilityLabel="Decrease requested amount"
-          style={styles.rootActionsStepButton}
-          onPress={() => adjustAmount(-1)}>
-          <Text style={styles.rootActionsStepText}>−</Text>
-        </TouchableOpacity>
-        <TextInput
-          accessibilityLabel="Amount requested"
-          style={styles.rootActionsInput}
-          value={amountText}
-          onChangeText={updateAmountText}
-          onBlur={() => setAmountText(String(amount))}
-          keyboardType="number-pad"
-          inputMode="numeric"
-          selectTextOnFocus
-        />
-        <TouchableOpacity
-          {...signalTarget('graph.root-actions.amount.increase')}
-          accessibilityRole="button"
-          accessibilityLabel="Increase requested amount"
-          style={styles.rootActionsStepButton}
-          onPress={() => adjustAmount(1)}>
-          <Text style={styles.rootActionsStepText}>+</Text>
-        </TouchableOpacity>
-      </View>
-
-      {estimate && cycleSeconds != null && durationTicks != null ? (
-        <Text style={styles.rootActionsEstimate}>
-          Suggested: {estimate.machines} × {machineName} · {durationTicks.toLocaleString()} ticks / {cycleSeconds.toLocaleString()} sec per batch
-        </Text>
-      ) : recipe && outputPerCycle == null ? (
-        <Text style={styles.rootActionsHint}>This recipe has no guaranteed output count.</Text>
-      ) : recipe ? (
-        <Text style={styles.rootActionsHint}>Recipe timing is unavailable in this export.</Text>
-      ) : (
-        <Text style={styles.rootActionsHint}>Choose a recipe to see its batch time and suggested parallels.</Text>
-      )}
-
-      <View style={styles.rootActionsButtons}>
-        <TouchableOpacity
-          {...signalTarget('graph.root-actions.change-recipe')}
-          accessibilityRole="button"
-          style={styles.rootActionsSecondary}
-          onPress={onChangeRecipe}>
-          <Text style={styles.rootActionsSecondaryText}>Change recipe</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          {...signalTarget('graph.root-actions.add-used-by')}
-          accessibilityRole="button"
-          style={styles.rootActionsPrimary}
-          onPress={onAddUsedBy}>
-          <Text style={styles.rootActionsPrimaryText}>Add used by</Text>
-        </TouchableOpacity>
+      <View
+        style={[
+          styles.attachedRootButtons,
+          {left: 0, top: nodeHeight + 24, width: buttonWidth},
+        ]}>
+        <RootActionButtons {...actions} />
       </View>
     </View>
   );
@@ -2819,6 +2973,7 @@ function CompactItemNodeView({
   branchLabel = false,
   showLabel,
   deferredDuplicate,
+  rootActions,
   onTap,
 }: {
   x: number;
@@ -2835,6 +2990,7 @@ function CompactItemNodeView({
   branchLabel?: boolean;
   showLabel: boolean;
   deferredDuplicate: boolean;
+  rootActions?: RootNodeActionProps;
   onTap: () => void;
 }) {
   const data = useData();
@@ -2854,7 +3010,8 @@ function CompactItemNodeView({
       : `${formatIngredientQuantity(node.key, byproductCoverage.creditedAmount)} supplied by byproduct, ${formatIngredientQuantity(node.key, byproductCoverage.remainingAmount)} still needed`
     : null;
   return (
-    <Pressable
+    <>
+      <Pressable
       {...signalTarget(`graph.node.expand.${nodeDepthBucket(node)}`)}
       accessibilityRole={selectable ? 'button' : undefined}
       accessibilityLabel={`${name}, quantity ${formatIngredientQuantity(node.key, requiredAmount)}${terminal ? `, ${terminalLabel}` : ''}${deferredDuplicate ? ', recipe expanded elsewhere, tap to move expansion here' : ''}${byproductLabel ? `, ${byproductLabel}` : ''}${node.nonConsumed ? ', not consumed' : ''}${node.consumptionProbability !== undefined ? `, ${node.consumptionProbability == null ? 'unknown' : `${String(Math.round(node.consumptionProbability * 10_000) / 100)} percent`} consume chance` : ''}${node.productionProbability !== undefined ? `, ${node.productionProbability == null ? 'unknown' : `${String(Math.round(node.productionProbability * 10_000) / 100)} percent`} produce chance` : ''}${isRoot ? ', open amount and recipe controls' : selectable && !deferredDuplicate ? byproductCoverage?.remainingAmount === 0 ? ', navigate to producing recipe' : ', choose source' : ''}`}
@@ -2916,7 +3073,18 @@ function CompactItemNodeView({
           </Text>
         </View>
       )}
-    </Pressable>
+      </Pressable>
+      {isRoot && rootActions && (
+        <AttachedRootActions
+          actions={rootActions}
+          nodeX={x}
+          nodeY={y}
+          nodeWidth={radialRoot ? RADIAL_ROOT_SIZE : COMPACT_ROOT_SIZE}
+          nodeHeight={radialRoot ? RADIAL_ROOT_SIZE : COMPACT_ROOT_SIZE}
+          buttonWidth={ROOT_ATTACHED_ACTIONS_WIDTH}
+        />
+      )}
+    </>
   );
 }
 
@@ -2930,6 +3098,7 @@ function ItemNodeView({
   expandable,
   deferredDuplicate,
   terminalLabel,
+  rootActions,
   onTap,
   onInfo,
 }: {
@@ -2942,6 +3111,7 @@ function ItemNodeView({
   expandable: boolean;
   deferredDuplicate: boolean;
   terminalLabel: string;
+  rootActions?: RootNodeActionProps;
   onTap: () => void;
   onInfo: () => void;
 }) {
@@ -2968,7 +3138,8 @@ function ItemNodeView({
       : `  ${formatIngredientQuantity(node.key, byproductCoverage.remainingAmount)} needed · ${formatIngredientQuantity(node.key, byproductCoverage.creditedAmount)} byproduct`
     : '';
   return (
-    <Pressable
+    <>
+      <Pressable
       {...signalTarget(`graph.node.expand.${nodeDepthBucket(node)}`)}
       onPress={onTap}
       accessibilityRole="button"
@@ -2987,9 +3158,8 @@ function ItemNodeView({
         isRoot && styles.nodeRoot,
       ]}>
       {isRoot ? (
-          <View style={styles.rootItemIconFrame}>
-            <View pointerEvents="none" style={styles.rootItemIconDiamond} />
-            <ItemIcon item={item} itemKey={node.key} size={32} />
+        <View style={styles.rootItemIconFrame}>
+          <ItemIcon item={item} itemKey={node.key} size={32} />
         </View>
       ) : (
         <ItemIcon item={item} itemKey={node.key} size={32} />
@@ -3021,7 +3191,18 @@ function ItemNodeView({
         hitSlop={6}>
         <Text style={[styles.smallBtnText, noSelect]}>ⓘ</Text>
       </TouchableOpacity>
-    </Pressable>
+      </Pressable>
+      {isRoot && rootActions && (
+        <AttachedRootActions
+          actions={rootActions}
+          nodeX={x}
+          nodeY={y}
+          nodeWidth={ITEM_W}
+          nodeHeight={ITEM_H}
+          buttonWidth={ITEM_W}
+        />
+      )}
+    </>
   );
 }
 
@@ -3039,6 +3220,7 @@ function SourceNodeView({
   radialRoot,
   focused,
   animateMobs,
+  rootActions,
   canSwap,
   onCollapse,
   onSwap,
@@ -3056,6 +3238,7 @@ function SourceNodeView({
   radialRoot: boolean;
   focused: boolean;
   animateMobs: boolean;
+  rootActions?: RootNodeActionProps;
   canSwap: boolean;
   onCollapse: () => void;
   onSwap: () => void;
@@ -3098,6 +3281,8 @@ function SourceNodeView({
   const machineName = machineKey
     ? data.itemsByKey.get(machineKey)?.n ?? machineKey
     : 'machine';
+  const sourceCardWidth =
+    isRoot && rootActions ? w - ROOT_SOURCE_ACTIONS_WIDTH : w;
   const headerCopy = (
     <Text style={[styles.sourceHeaderText, noSelect]} numberOfLines={1}>
       {name}
@@ -3122,7 +3307,7 @@ function SourceNodeView({
     <View
       style={[
         styles.sourceNode,
-        {left: x, top: y, width: w, height: h},
+        {left: x, top: y, width: sourceCardWidth, height: h},
         item.nonConsumed && styles.nodePrerequisite,
         isRecursiveItemNode(item) && styles.nodeCyclic,
         source.inputs.length === 0 && !isRecursiveItemNode(item) && styles.nodeTerminal,
@@ -3142,7 +3327,6 @@ function SourceNodeView({
         style={styles.sourceHeader}>
         {isRoot ? (
           <View style={styles.rootSourceIconFrame}>
-            <View pointerEvents="none" style={styles.rootSourceIconDiamond} />
             <ItemIcon item={catalogItem} itemKey={item.key} size={16} />
           </View>
         ) : (
@@ -3212,6 +3396,16 @@ function SourceNodeView({
           </View>
         </View>
       )}
+      {isRoot && rootActions && (
+        <>
+          <View style={styles.rootSourceAmountStepper}>
+            <RootAmountStepper {...rootActions} />
+          </View>
+          <View style={styles.rootSourceActionButtons}>
+            <RootActionButtons {...rootActions} />
+          </View>
+        </>
+      )}
     </View>
   );
 }
@@ -3246,6 +3440,7 @@ const styles = StyleSheet.create({
   root: {flex: 1},
   canvas: {flex: 1, overflow: 'hidden', backgroundColor: theme.bg},
   anchor: {position: 'absolute', left: 0, top: 0, width: 0, height: 0},
+  nativeAnchor: {width: 1, height: 1},
   edge: {position: 'absolute', backgroundColor: theme.borderLight},
   itemNode: {
     position: 'absolute',
@@ -3406,31 +3601,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  rootItemIconDiamond: {
-    position: 'absolute',
-    width: 31,
-    height: 31,
-    borderRadius: 8,
-    borderColor: theme.radialRoot,
-    borderWidth: 2,
-    backgroundColor: theme.radialRootPanel,
-    transform: [{rotate: '45deg'}],
-  },
   rootSourceIconFrame: {
     width: 24,
     height: 24,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  rootSourceIconDiamond: {
-    position: 'absolute',
-    width: 19,
-    height: 19,
-    borderRadius: 5,
-    borderColor: theme.radialRoot,
-    borderWidth: 2,
-    backgroundColor: theme.radialRootPanel,
-    transform: [{rotate: '45deg'}],
   },
   itemNodeName: {color: theme.text, fontSize: 11, lineHeight: 14},
   itemNodeSub: {color: theme.textDim, fontSize: 10, marginTop: 2},
@@ -3460,86 +3635,82 @@ const styles = StyleSheet.create({
   dropRow: {flexDirection: 'row', alignItems: 'center', flex: 1, paddingHorizontal: 4},
   dropName: {color: theme.text, fontSize: 12},
   dropStat: {color: theme.textDim, fontSize: 10, marginTop: 2},
-  rootActions: {
+  rootSourceAmountStepper: {
     position: 'absolute',
-    zIndex: 20,
-    bottom: 72,
-    left: 12,
-    width: 360,
-    maxWidth: '92%',
-    alignSelf: 'center',
-    backgroundColor: 'rgba(23,29,38,0.98)',
-    borderColor: theme.radialRoot,
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 12,
-    gap: 8,
+    top: SOURCE_HEADER + 3,
+    right: -40,
   },
-  rootActionsHeader: {
-    flexDirection: 'row',
+  rootSourceActionButtons: {
+    position: 'absolute',
+    left: 6,
+    right: 6,
+    bottom: 6,
+  },
+  attachedRootActions: {
+    position: 'absolute',
+    zIndex: 12,
+  },
+  attachedRootStepper: {
+    position: 'absolute',
+  },
+  attachedRootButtons: {
+    position: 'absolute',
+  },
+  rootNodeAmountRail: {
+    width: 34,
     alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: 4,
   },
-  rootActionsIdentity: {flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8},
-  rootActionsTitleWrap: {flex: 1, minWidth: 0},
-  rootActionsEyebrow: {
-    color: theme.radialRoot,
-    fontSize: 8,
-    fontWeight: '800',
-    letterSpacing: 0.7,
-  },
-  rootActionsTitle: {color: theme.text, fontSize: 13, fontWeight: '700', marginTop: 1},
-  rootActionsClose: {width: 30, height: 30, alignItems: 'center', justifyContent: 'center'},
-  rootActionsCloseText: {color: theme.textDim, fontSize: 22, lineHeight: 24},
-  rootActionsLabel: {color: theme.textDim, fontSize: 9, fontWeight: '700'},
-  rootActionsStepper: {flexDirection: 'row', alignItems: 'stretch', gap: 6},
-  rootActionsStepButton: {
-    width: 40,
-    minHeight: 40,
+  rootNodeStepButton: {
+    width: 34,
+    height: 26,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: theme.panelAlt,
     borderColor: theme.border,
     borderWidth: 1,
-    borderRadius: 7,
+    borderRadius: 6,
   },
-  rootActionsStepText: {color: theme.radialRoot, fontSize: 20, fontWeight: '700'},
-  rootActionsInput: {
-    flex: 1,
-    minWidth: 0,
-    minHeight: 40,
+  rootNodeStepText: {color: theme.radialRoot, fontSize: 17, fontWeight: '700'},
+  rootNodeIncreaseButton: {
+    backgroundColor: theme.radialRoot,
+    borderColor: theme.radialRoot,
+  },
+  rootNodeIncreaseText: {color: '#0b1610'},
+  rootNodeAmountInput: {
+    width: 34,
+    height: 26,
     backgroundColor: '#0f141b',
     borderColor: theme.border,
     borderWidth: 1,
     borderRadius: 7,
     color: theme.text,
-    fontSize: 15,
+    fontSize: 11,
     fontWeight: '700',
-    paddingHorizontal: 12,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
     textAlign: 'center',
   },
-  rootActionsEstimate: {color: theme.warn, fontSize: 10, lineHeight: 14, fontWeight: '700'},
-  rootActionsHint: {color: theme.textDim, fontSize: 10, lineHeight: 14},
-  rootActionsButtons: {flexDirection: 'row', gap: 8, marginTop: 2},
-  rootActionsSecondary: {
+  rootNodeActionButtons: {flex: 1, flexDirection: 'row', gap: 6},
+  rootNodeSecondaryAction: {
     flex: 1,
-    minHeight: 38,
+    minHeight: 34,
     alignItems: 'center',
     justifyContent: 'center',
     borderColor: theme.borderLight,
     borderWidth: 1,
-    borderRadius: 7,
+    borderRadius: 6,
   },
-  rootActionsSecondaryText: {color: theme.text, fontSize: 10, fontWeight: '800'},
-  rootActionsPrimary: {
+  rootNodeSecondaryActionText: {color: theme.text, fontSize: 9, fontWeight: '800'},
+  rootNodePrimaryAction: {
     flex: 1,
-    minHeight: 38,
+    minHeight: 34,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: theme.radialRoot,
-    borderRadius: 7,
+    borderRadius: 6,
   },
-  rootActionsPrimaryText: {color: '#0b1610', fontSize: 10, fontWeight: '800'},
+  rootNodePrimaryActionText: {color: '#0b1610', fontSize: 9, fontWeight: '800'},
   controls: {
     position: 'absolute',
     top: 10,

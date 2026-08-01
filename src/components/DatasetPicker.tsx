@@ -12,6 +12,7 @@ import {
   View,
   type ImageErrorEvent,
 } from 'react-native';
+import {useSafeAreaInsets} from '../ui/safeArea';
 import type {DatasetDescriptor} from '../data/datasetCatalog';
 import {datasetPackIconPath} from '../data/datasetPresentation';
 import {isLocalPackDescriptor} from '../data/localPackStorage';
@@ -81,6 +82,7 @@ export function DatasetPicker({
   onClose(): void;
 }) {
   const [query, setQuery] = useState('');
+  const safeAreaInsets = useSafeAreaInsets();
 
   useEffect(() => {
     if (!visible) setQuery('');
@@ -109,15 +111,19 @@ export function DatasetPicker({
     <Modal
       visible={visible}
       transparent
-      animationType="fade"
+      animationType={Platform.OS === 'web' ? 'fade' : 'slide'}
       onRequestClose={onClose}
       accessibilityViewIsModal>
       <Pressable
-        style={styles.backdrop}
+        style={[styles.backdrop, Platform.OS !== 'web' && styles.backdropNative]}
         onPress={onClose}
         accessible={false}>
         <Pressable
-          style={styles.card}
+          style={[
+            styles.card,
+            Platform.OS !== 'web' && styles.cardNative,
+            Platform.OS !== 'web' && {paddingBottom: safeAreaInsets.bottom},
+          ]}
           onPress={() => {}}
           accessible={false}>
           <View style={styles.header}>
@@ -222,6 +228,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 18,
   },
+  backdropNative: {
+    justifyContent: 'flex-end',
+    padding: 0,
+  },
   card: {
     width: '100%',
     maxWidth: 620,
@@ -232,6 +242,13 @@ const styles = StyleSheet.create({
     borderColor: theme.border,
     backgroundColor: theme.panel,
     overflow: 'hidden',
+  },
+  cardNative: {
+    maxWidth: '100%',
+    maxHeight: '92%',
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    borderBottomWidth: 0,
   },
   header: {
     flexDirection: 'row',

@@ -1,6 +1,7 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {
   Linking,
+  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -12,11 +13,14 @@ import {loadedDatasetAttribution} from '../data/datasetAttribution';
 import {theme} from '../theme';
 import type {Manifest} from '../types';
 import {DatasetDisclaimer} from './DatasetDisclaimer';
+import {MobileUploadGuide} from './MobileUploadGuide';
 
 type CatalogStatus = 'loading' | 'ready' | 'error';
 
 function openPackUpload() {
-  const url = '/publish#upload';
+  const url = Platform.OS === 'web'
+    ? '/publish#upload'
+    : 'https://minecraftrecipetree.craftsmannsoftware.com/publish#upload';
   void Linking.openURL(url).catch(error => {
     console.error('Could not open the modpack upload page.', {url, error});
   });
@@ -42,9 +46,11 @@ export function DatasetSwitcher({
   details?: React.ReactNode;
 }) {
   const {width} = useWindowDimensions();
-  const [hasHydrated, setHasHydrated] = useState(false);
+  const nativeHeader = Platform.OS !== 'web';
+  const [hasHydrated, setHasHydrated] = useState(nativeHeader);
   const compact = hasHydrated && width < 720;
   const [expanded, setExpanded] = useState(!compact);
+  const [showMobileUploadGuide, setShowMobileUploadGuide] = useState(false);
   const priorCompact = useRef(compact);
   useEffect(() => {
     setHasHydrated(true);
@@ -63,7 +69,7 @@ export function DatasetSwitcher({
   );
   const brand = (
     <View style={[styles.brand, compact && styles.brandCompact]}>
-      <Text style={styles.title}>⛏ Recipe Tree</Text>
+      {!nativeHeader && <Text style={styles.title}>⛏ Recipe Tree</Text>}
       {loadedAttribution && <DatasetDisclaimer attribution={loadedAttribution} />}
     </View>
   );
@@ -71,7 +77,9 @@ export function DatasetSwitcher({
     <TouchableOpacity
       style={[
         styles.compactDatasetButton,
+        Platform.OS !== 'web' && styles.nativeTouchTarget,
         compact && styles.compactDatasetButtonExpanded,
+        nativeHeader && styles.nativeDatasetButton,
         !compact && styles.fullDatasetButton,
         !canOpen && styles.disabled,
       ]}
@@ -89,61 +97,105 @@ export function DatasetSwitcher({
       <Text style={styles.compactDatasetChevron}>⌄</Text>
     </TouchableOpacity>
   );
-  const expandButton = compact ? (
+  const expandButton = compact || nativeHeader ? (
     <TouchableOpacity
-      style={[styles.expandButton, expanded && styles.expandButtonActive]}
+      style={[
+        styles.expandButton,
+        Platform.OS !== 'web' && styles.nativeSquareTouchTarget,
+        expanded && styles.expandButtonActive,
+      ]}
       onPress={() => setExpanded(value => !value)}
       accessibilityRole="button"
-      accessibilityLabel={expanded ? 'Collapse site header' : 'Expand site header'}
+      accessibilityLabel={expanded ? 'Close app menu' : 'Open app menu'}
       accessibilityState={{expanded}}>
       <Text style={[styles.expandButtonText, expanded && styles.expandButtonTextActive]}>
-        {expanded ? '⌃' : '☰'}
+        {expanded ? '✕' : '☰'}
       </Text>
     </TouchableOpacity>
   ) : null;
   const uploadButton = (
     <TouchableOpacity
-      style={styles.uploadButton}
-      onPress={openPackUpload}
-      accessibilityRole="link"
-      accessibilityLabel="Upload a modpack exporter ZIP"
-      accessibilityHint="Opens the drag-and-drop pack upload page"
+      style={[styles.uploadButton, nativeHeader && styles.nativeUploadButton]}
+      onPress={
+        nativeHeader
+          ? () => {
+              setExpanded(false);
+              setShowMobileUploadGuide(true);
+            }
+          : openPackUpload
+      }
+      accessibilityRole={nativeHeader ? 'button' : 'link'}
+      accessibilityLabel={nativeHeader ? 'How to upload a modpack on desktop' : 'Upload a modpack exporter ZIP'}
+      accessibilityHint={
+        nativeHeader
+          ? 'Opens desktop upload instructions'
+          : 'Opens the drag-and-drop pack upload page'
+      }
       focusable>
-      <Text style={styles.uploadButtonText}>Upload pack</Text>
+      <Text style={[styles.uploadButtonText, nativeHeader && styles.nativeUploadButtonText]}>
+        {nativeHeader ? '⇧  Upload pack' : 'Upload pack'}
+      </Text>
     </TouchableOpacity>
   );
 
   return (
-    <View style={[styles.bar, compact && styles.barCompact]}>
-      {compact ? (
-        <View style={styles.compactRows}>
-          <View style={styles.compactTitleRow}>
-            {brand}
-            {datasetButton}
+    <>
+      <View style={[styles.bar, compact && styles.barCompact, nativeHeader && styles.barNative]}>
+        {nativeHeader ? (
+          <View style={styles.nativeRows}>
+            <View style={styles.nativePickerRow}>
+              {datasetButton}
+              {expandButton}
+            </View>
+            {expanded && (
+              <View style={styles.nativeMenu} accessibilityRole="menu">
+                <View style={styles.nativeMenuActions}>
+                  {leadingAction}
+                  {details && <View style={styles.nativeMenuDetails}>{details}</View>}
+                  {loadedAttribution && (
+                    <DatasetDisclaimer attribution={loadedAttribution} variant="menu" />
+                  )}
+                  {uploadButton}
+                </View>
+              </View>
+            )}
           </View>
-          <View style={styles.compactControlRow}>
-            {leadingAction}
-            {expandButton}
+        ) : compact ? (
+          <View style={styles.compactRows}>
+            <View style={styles.compactTitleRow}>
+              {brand}
+              {datasetButton}
+            </View>
+            <View style={styles.compactControlRow}>
+              {leadingAction}
+              {expandButton}
+            </View>
           </View>
-        </View>
-      ) : (
-        <View style={styles.fullRows}>
-          <View style={styles.fullTitleRow}>{brand}</View>
-          <View style={styles.fullControlRow}>
-            {uploadButton}
-            {leadingAction}
-            {datasetButton}
-            {fullWidthControls}
+        ) : (
+          <View style={styles.fullRows}>
+            <View style={styles.fullTitleRow}>{brand}</View>
+            <View style={styles.fullControlRow}>
+              {uploadButton}
+              {leadingAction}
+              {datasetButton}
+              {fullWidthControls}
+            </View>
           </View>
-        </View>
-      )}
+        )}
 
-      {details && (!compact || expanded) && (
-        <View style={styles.expandedContent}>
-          {details}
-        </View>
+        {!nativeHeader && details && (!compact || expanded) && (
+          <View style={styles.expandedContent}>
+            {details}
+          </View>
+        )}
+      </View>
+      {nativeHeader && (
+        <MobileUploadGuide
+          visible={showMobileUploadGuide}
+          onClose={() => setShowMobileUploadGuide(false)}
+        />
       )}
-    </View>
+    </>
   );
 }
 
@@ -156,6 +208,7 @@ const styles = StyleSheet.create({
     backgroundColor: theme.panel,
   },
   barCompact: {paddingHorizontal: 10, paddingVertical: 7},
+  barNative: {paddingVertical: 7, zIndex: 100, overflow: 'visible'},
   fullRows: {gap: 7},
   fullTitleRow: {
     flexDirection: 'row',
@@ -171,6 +224,36 @@ const styles = StyleSheet.create({
   brandCompact: {flexGrow: 0, flexShrink: 0, minWidth: 0},
   title: {color: theme.text, fontSize: 17, fontWeight: '800'},
   compactRows: {gap: 7},
+  nativeRows: {position: 'relative', zIndex: 100},
+  nativePickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  nativeMenu: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    zIndex: 101,
+    elevation: 16,
+    marginTop: 7,
+    gap: 8,
+    padding: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.panelAlt,
+    shadowColor: '#000',
+    shadowOpacity: 0.34,
+    shadowRadius: 18,
+    shadowOffset: {width: 0, height: 10},
+  },
+  nativeMenuActions: {
+    alignItems: 'stretch',
+    gap: 8,
+  },
+  nativeMenuDetails: {width: '100%', gap: 8},
   compactTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -200,6 +283,15 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     fontWeight: '900',
   },
+  nativeUploadButton: {
+    width: '100%',
+    minHeight: 44,
+    alignItems: 'flex-start',
+    paddingHorizontal: 12,
+    borderColor: theme.borderLight,
+    backgroundColor: theme.panelAlt,
+  },
+  nativeUploadButtonText: {color: theme.text, fontSize: 12},
   compactDatasetButton: {
     minWidth: 0,
     maxWidth: 220,
@@ -214,6 +306,9 @@ const styles = StyleSheet.create({
     borderColor: theme.borderLight,
     backgroundColor: theme.panelAlt,
   },
+  nativeTouchTarget: {minHeight: 44},
+  nativeDatasetButton: {flex: 1, maxWidth: '100%'},
+  nativeSquareTouchTarget: {width: 44, minHeight: 44},
   compactDatasetButtonExpanded: {
     flex: 1,
     maxWidth: '100%',

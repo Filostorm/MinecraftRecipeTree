@@ -11,19 +11,38 @@ The key is configurable under Minecraft's **Controls → Recipe Tree** category.
 - exports exact vanilla cooking durations and common modded JEI recipe timing accessors for
   production planning in the site viewer; recipes that expose total energy and energy per tick are
   converted to an exact cycle length when the ratio is integral;
-- lets you click an ingredient slot to continue planning that next resource;
-- calculates the minimum parallel machines for an output amount, recipe cycle time, and deadline;
-- uses exported JEI/mod timing when available and leaves other machine cycle times editable because
-  JEI has no universal duration field;
-- remembers observed inventory items and can treat a machine as unlocked when one of its JEI crafting
-  recipes uses only observed items (for example, a furnace after cobblestone is observed);
-- lets players manually check a machine or disable progression gating entirely; and
+- lets you left-click an item to choose its input recipe and right-click it to choose a recipe
+  output that consumes it;
+- attaches chosen input recipes to persistent branches instead of replacing the current recipe;
+- uses JEI's native recipe box as every expanded Details-mode node, while Compact mode keeps the
+  tree item-only and reveals the hovered node in a responsive, fitted top-right preview that never
+  overlaps the tree viewport;
+- supports background-drag panning and cursor-centered wheel zoom, with the arrow buttons reserved
+  for moving backward and forward through recent output targets;
+- shares the current plan with the web/mobile viewers using portable `.mrtree.json` JSON, copied to
+  the clipboard and backed up at `config/recipe-tree-shares/last-tree.mrtree.json`, and imports the
+  newest tree placed in that folder (falling back to the clipboard when the folder is empty);
+- wraps the current tree when a new output is chosen from the root, preserving the existing plan as
+  the matching input branch; selected recipes are persisted as per-output favorites and promoted to
+  the front of future recipe choosers, and favorited recipes automatically expand whenever their
+  output appears as an ingredient;
+- keeps the requested amount editable in both display modes and multiplies every expanded input
+  branch by the required craft count, including recipes that produce more than one output;
+- packs differently sized recipe choices closely in one vertically scrolling list and only renders
+  or ticks the visible JEI boxes, grouped under collapsible JEI recipe-type headers whose state is
+  remembered locally;
+- renders tree recipes and items beneath the foreground controls and reserves the footer so item
+  depth cannot cover buttons or status messages;
+- groups repeated ingredients into one tree node with a quantity such as `9x`, and excludes JEI's
+  informational tag pages from planner recipe choices; and
 - saves the most recent plan for each target locally in `config/recipe-tree-plans.json`.
 
-The planner only scans the player's small inventory once per second and resolves machine recipes
-lazily, keeping the normal game loop independent from large JEI recipe catalogs. Account sync is not
-part of this first release; the local plan file is the migration boundary for a later opt-in sync
-service.
+JEI recipe queries remain lazy and bounded, keeping the normal game loop independent from large JEI
+recipe catalogs. Account sync is not part of this first release; the local plan file is the migration
+boundary for a later opt-in sync service.
+
+The portable format and compatibility limits are documented in
+[`docs/portable-recipe-trees.md`](../docs/portable-recipe-trees.md).
 
 ## Exporting a pack
 
@@ -45,7 +64,7 @@ service.
 
 ```bash
 JAVA_HOME=$(/usr/libexec/java_home -v 17) ./gradlew build
-# -> build/libs/jeiexport-1.2.0-beta.1.jar
+# -> build/libs/jeiexport-1.2.0-beta.14.jar
 ```
 
 Gradle 8.1.1 / ForgeGradle 6 / Forge 1.20.1. The release accepts Forge 47.1–47.x and

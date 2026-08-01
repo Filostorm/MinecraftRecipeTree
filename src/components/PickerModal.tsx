@@ -1,6 +1,7 @@
 import React, {useMemo, useState} from 'react';
 import {
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -9,6 +10,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import {useSafeAreaInsets} from '../ui/safeArea';
 import type {SlotSummary} from '../data/slotSummary';
 import {signalTarget} from '../analytics/signal';
 import {theme} from '../theme';
@@ -113,6 +115,7 @@ export function PickerModal({
   /** The web UI scale applied to recipe imagery without shrinking the modal viewport. */
   interfaceZoom?: number;
 }) {
+  const safeAreaInsets = useSafeAreaInsets();
   const [alternativePicker, setAlternativePicker] = useState<{
     optionIndex: number;
     slot: SlotSummary;
@@ -133,9 +136,21 @@ export function PickerModal({
     immediateGroups.reduce((sum, group) => sum + group.entries.length, 0);
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.card} onPress={() => {}}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType={Platform.OS === 'web' ? 'fade' : 'slide'}
+      onRequestClose={onClose}>
+      <Pressable
+        style={[styles.backdrop, Platform.OS !== 'web' && styles.backdropNative]}
+        onPress={onClose}>
+        <Pressable
+          style={[
+            styles.card,
+            Platform.OS !== 'web' && styles.cardNative,
+            Platform.OS !== 'web' && {paddingBottom: Math.max(14, safeAreaInsets.bottom)},
+          ]}
+          onPress={() => {}}>
           <Text style={styles.title}>{title}</Text>
           {direction && onDirectionChange ? (
             <View
@@ -548,6 +563,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 16,
   },
+  backdropNative: {
+    justifyContent: 'flex-end',
+    padding: 0,
+  },
   card: {
     backgroundColor: theme.panel,
     borderColor: theme.border,
@@ -559,6 +578,14 @@ const styles = StyleSheet.create({
     maxHeight: '92%' as never,
     minHeight: 0,
     padding: 14,
+  },
+  cardNative: {
+    maxWidth: '100%',
+    height: '94%',
+    maxHeight: '94%',
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    borderBottomWidth: 0,
   },
   title: {color: theme.text, fontSize: 15, fontWeight: '700', marginBottom: 10},
   directionTabs: {
