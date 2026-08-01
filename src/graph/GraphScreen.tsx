@@ -2472,7 +2472,7 @@ export function GraphScreen({
                 styles.controlMenuBtnText,
                 showGraphControls && styles.ctrlBtnTextActive,
               ]}>
-              {showGraphControls ? '›' : '‹'}
+              {showGraphControls ? '⌃' : '⌄'}
             </Text>
           </TouchableOpacity>
         )}
@@ -2732,6 +2732,8 @@ type RootNodeActionProps = {
   onAddUsedBy: () => void;
 };
 
+const ROOT_AMOUNT_STEPPER_HEIGHT = 86;
+
 function RootAmountStepper({
   amount,
   onAmountChange,
@@ -2835,7 +2837,10 @@ function AttachedRootActions({
       <View
         style={[
           styles.attachedRootStepper,
-          {left: nodeLeft + nodeWidth + 6, top: Math.max(0, (nodeHeight - 86) / 2)},
+          {
+            left: nodeLeft + nodeWidth + 6,
+            top: Math.max(0, (nodeHeight - ROOT_AMOUNT_STEPPER_HEIGHT) / 2),
+          },
         ]}>
         <RootAmountStepper {...actions} />
       </View>
@@ -3423,7 +3428,11 @@ function SourceNodeView({
       )}
       {isRoot && rootActions && (
         <>
-          <View style={styles.rootSourceAmountStepper}>
+          <View
+            style={[
+              styles.rootSourceAmountStepper,
+              {top: Math.max(0, (h - ROOT_AMOUNT_STEPPER_HEIGHT) / 2)},
+            ]}>
             <RootAmountStepper {...rootActions} />
           </View>
           <View style={styles.rootSourceActionButtons}>
@@ -3665,7 +3674,6 @@ const styles = StyleSheet.create({
   dropStat: {color: theme.textDim, fontSize: 10, marginTop: 2},
   rootSourceAmountStepper: {
     position: 'absolute',
-    top: SOURCE_HEADER + 3,
     right: -40,
   },
   rootSourceActionButtons: {
