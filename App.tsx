@@ -76,6 +76,7 @@ function DatasetRoot() {
     details?: React.ReactNode,
     leadingAction?: React.ReactNode,
     fullWidthControls?: React.ReactNode,
+    trailingAction?: React.ReactNode,
   ) => (
     <>
       <DatasetSwitcher
@@ -85,6 +86,7 @@ function DatasetRoot() {
         loadedManifest={loadedManifest}
         onOpenPicker={() => setShowDatasetPicker(true)}
         leadingAction={leadingAction}
+        trailingAction={trailingAction}
         fullWidthControls={fullWidthControls}
         details={details}
       />
@@ -161,6 +163,7 @@ function LoadedDatasetLayout({
     details?: React.ReactNode,
     leadingAction?: React.ReactNode,
     fullWidthControls?: React.ReactNode,
+    trailingAction?: React.ReactNode,
   ): React.ReactNode;
 }) {
   return (
@@ -183,6 +186,7 @@ function Root({
     details?: React.ReactNode,
     leadingAction?: React.ReactNode,
     fullWidthControls?: React.ReactNode,
+    trailingAction?: React.ReactNode,
   ): React.ReactNode;
 }) {
   const state = useLoadState();
@@ -249,6 +253,7 @@ function Shell({
     details?: React.ReactNode,
     leadingAction?: React.ReactNode,
     fullWidthControls?: React.ReactNode,
+    trailingAction?: React.ReactNode,
   ): React.ReactNode;
 }) {
   const data = useData();
@@ -260,6 +265,7 @@ function Shell({
   const [showRecipeHistory, setShowRecipeHistory] = useState(false);
   const [showRecipeStages, setShowRecipeStages] = useState(false);
   const [showGraphGuide, setShowGraphGuide] = useState(false);
+  const [showGraphControls, setShowGraphControls] = useState(false);
   const [showDatasetDetails, setShowDatasetDetails] = useState(false);
   const [interfaceZoom, setInterfaceZoom] = useState(1);
   const shellSurface = showRecipeStages
@@ -462,6 +468,32 @@ function Shell({
       </TouchableOpacity>
     </View>
   );
+  const graphControlsHeaderAction =
+    compactHeader && tab === 'graph' && data.indexStatus === 'ready' ? (
+      <TouchableOpacity
+        {...signalTarget('graph.control.menu')}
+        accessibilityRole="button"
+        accessibilityLabel={
+          showGraphControls ? 'Collapse graph controls' : 'Expand graph controls'
+        }
+        accessibilityState={{expanded: showGraphControls}}
+        style={[
+          styles.graphControlsHeaderButton,
+          showGraphControls && styles.headerUtilityButtonActive,
+        ]}
+        onPress={() => {
+          lightImpactFeedback();
+          setShowGraphControls(value => !value);
+        }}>
+        <Text
+          style={[
+            styles.graphControlsHeaderButtonText,
+            showGraphControls && styles.graphControlsHeaderButtonTextActive,
+          ]}>
+          {showGraphControls ? '⌃' : '⌄'}
+        </Text>
+      </TouchableOpacity>
+    ) : null;
   return (
     <View style={styles.shell}>
       {renderControls(
@@ -469,6 +501,7 @@ function Shell({
         headerDetails,
         headerActions,
         fullWidthHeaderControls,
+        graphControlsHeaderAction,
       )}
       <View style={styles.workspaceViewport}>
         <View style={styles.workspace}>
@@ -510,7 +543,14 @@ function Shell({
                     <Text style={styles.loadingText}>loading graph workspace…</Text>
                   </View>
                 }>
-                <LazyGraphScreen interfaceZoom={interfaceZoom} />
+                <LazyGraphScreen
+                  interfaceZoom={interfaceZoom}
+                  showGraphControls={showGraphControls}
+                  onToggleGraphControls={() =>
+                    setShowGraphControls(value => !value)
+                  }
+                  controlsToggleInHeader={compactHeader}
+                />
               </Suspense>
             ) : (
               <View style={styles.center}>
@@ -779,6 +819,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   headerUtilityButtonActive: {borderColor: theme.accent},
+  graphControlsHeaderButton: {
+    width: 44,
+    minHeight: 44,
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: theme.borderLight,
+    backgroundColor: theme.panelAlt,
+  },
+  graphControlsHeaderButtonText: {
+    color: theme.textDim,
+    fontSize: 20,
+    lineHeight: 22,
+    fontWeight: '800',
+  },
+  graphControlsHeaderButtonTextActive: {color: theme.accent},
   historyHeaderIcon: {color: theme.text, fontSize: 17, fontWeight: '700'},
   recipeStagesHeaderButton: {width: 'auto', minWidth: 72, paddingHorizontal: 8},
   recipeStagesHeaderText: {color: theme.text, fontSize: 11, fontWeight: '800'},

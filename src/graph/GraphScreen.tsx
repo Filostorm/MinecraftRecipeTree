@@ -417,7 +417,17 @@ function nodeDepthBucket(
   return 'depth-3-plus';
 }
 
-export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
+export function GraphScreen({
+  interfaceZoom = 1,
+  showGraphControls,
+  onToggleGraphControls,
+  controlsToggleInHeader = false,
+}: {
+  interfaceZoom?: number;
+  showGraphControls: boolean;
+  onToggleGraphControls(): void;
+  controlsToggleInHeader?: boolean;
+}) {
   const data = useData();
   const {
     hiddenStages: hiddenRecipeStages,
@@ -468,7 +478,6 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
   const [compactMode, setCompactMode] = useState(loadCompactMode);
   const [radialLayout, setRadialLayout] = useState(loadRadialLayout);
   const [showTreeTotals, setShowTreeTotals] = useState(true);
-  const [showGraphControls, setShowGraphControls] = useState(false);
   const [useByproducts, setUseByproducts] = useState(loadUseByproducts);
   const [expandRecipesOnce, setExpandRecipesOnce] = useState(loadExpandRecipesOnce);
   const expandRecipesOnceRef = useRef(expandRecipesOnce);
@@ -2449,22 +2458,24 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
             />
           </View>
         )}
-        <TouchableOpacity
-          {...signalTarget('graph.control.menu')}
-          accessibilityRole="button"
-          accessibilityLabel={showGraphControls ? 'Collapse graph controls' : 'Expand graph controls'}
-          accessibilityState={{expanded: showGraphControls}}
-          style={[styles.ctrlBtn, styles.controlMenuBtn, showGraphControls && styles.ctrlBtnActive]}
-          onPress={() => setShowGraphControls(value => !value)}>
-          <Text
-            style={[
-              styles.ctrlBtnText,
-              styles.controlMenuBtnText,
-              showGraphControls && styles.ctrlBtnTextActive,
-            ]}>
-            {showGraphControls ? '›' : '‹'}
-          </Text>
-        </TouchableOpacity>
+        {!controlsToggleInHeader && (
+          <TouchableOpacity
+            {...signalTarget('graph.control.menu')}
+            accessibilityRole="button"
+            accessibilityLabel={showGraphControls ? 'Collapse graph controls' : 'Expand graph controls'}
+            accessibilityState={{expanded: showGraphControls}}
+            style={[styles.ctrlBtn, styles.controlMenuBtn, showGraphControls && styles.ctrlBtnActive]}
+            onPress={onToggleGraphControls}>
+            <Text
+              style={[
+                styles.ctrlBtnText,
+                styles.controlMenuBtnText,
+                showGraphControls && styles.ctrlBtnTextActive,
+              ]}>
+              {showGraphControls ? '›' : '‹'}
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
       <TouchableOpacity
         {...signalTarget('graph.control.fit')}

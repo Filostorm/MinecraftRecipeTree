@@ -33,6 +33,7 @@ export function DatasetSwitcher({
   loadedManifest,
   onOpenPicker,
   leadingAction,
+  trailingAction,
   fullWidthControls,
   details,
 }: {
@@ -42,6 +43,7 @@ export function DatasetSwitcher({
   loadedManifest: Manifest | null;
   onOpenPicker(): void;
   leadingAction?: React.ReactNode;
+  trailingAction?: React.ReactNode;
   fullWidthControls?: React.ReactNode;
   details?: React.ReactNode;
 }) {
@@ -146,6 +148,7 @@ export function DatasetSwitcher({
             <View style={styles.nativePickerRow}>
               {datasetButton}
               {expandButton}
+              {trailingAction}
             </View>
             {expanded && (
               <View style={styles.nativeMenu} accessibilityRole="menu">
@@ -169,6 +172,7 @@ export function DatasetSwitcher({
             <View style={styles.compactControlRow}>
               {leadingAction}
               {expandButton}
+              {trailingAction}
             </View>
           </View>
         ) : (
