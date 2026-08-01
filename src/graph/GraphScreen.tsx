@@ -89,6 +89,7 @@ import {
   graphWheelZoomFactor,
   transformForPanGesture,
 } from './panGesture';
+import {normalizeRootAmount, rootAmountWheelStep} from './rootAmount';
 import type {GraphTransform, PanGestureOrigin} from './panGesture';
 import {recordRecipeHistory} from './recipeHistory';
 import {planRecipePickerChoices} from './recipePickerPlan';
@@ -1365,8 +1366,19 @@ export function GraphScreen({
   const updateRootRequestedAmount = useCallback(
     (requestedAmount: number) => {
       const currentRoot = rootRef.current;
-      if (!currentRoot || !Number.isFinite(requestedAmount)) return;
-      const amount = Math.min(1_000_000_000_000, Math.max(1, Math.floor(requestedAmount)));
+      if (!currentRoot) {
+        console.error('The requested root amount could not be applied because no graph root exists.', {
+          requestedAmount,
+        });
+        return;
+      }
+      let amount: number;
+      try {
+        amount = normalizeRootAmount(requestedAmount);
+      } catch (error) {
+        console.error('The requested root amount was rejected.', {requestedAmount, error});
+        return;
+      }
       currentRoot.productionPlan = {
         ...currentRoot.productionPlan,
         amount,
@@ -2791,7 +2803,39 @@ function RootAmountStepper({
   onAmountChange,
 }: Pick<RootNodeActionProps, 'amount' | 'onAmountChange'>) {
   const [amountText, setAmountText] = useState(String(amount));
+  const amountRef = useRef(amount);
+  const onAmountChangeRef = useRef(onAmountChange);
+  amountRef.current = amount;
+  onAmountChangeRef.current = onAmountChange;
   useEffect(() => setAmountText(String(amount)), [amount]);
+  const amountInputCleanup = useRef<(() => void) | null>(null);
+  const setAmountInputRef = useCallback((input: TextInput | null) => {
+    amountInputCleanup.current?.();
+    amountInputCleanup.current = null;
+    if (Platform.OS !== 'web' || !input) return;
+    const element = input as unknown as HTMLElement;
+    if (typeof element.addEventListener !== 'function') {
+      console.error('The amount input could not attach its wheel handler.');
+      return;
+    }
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      let step: -1 | 0 | 1;
+      try {
+        step = rootAmountWheelStep(event.deltaY);
+      } catch (error) {
+        console.error('The amount input ignored an invalid wheel event.', {
+          deltaY: event.deltaY,
+          error,
+        });
+        return;
+      }
+      if (step !== 0) onAmountChangeRef.current(amountRef.current + step);
+    };
+    element.addEventListener('wheel', onWheel, {passive: false});
+    amountInputCleanup.current = () => element.removeEventListener('wheel', onWheel);
+  }, []);
   const adjustAmount = (direction: -1 | 1) => {
     onAmountChange(amount + direction);
   };
@@ -2812,6 +2856,7 @@ function RootAmountStepper({
         <Text style={[styles.rootNodeStepText, styles.rootNodeIncreaseText]}>+</Text>
       </TouchableOpacity>
       <TextInput
+        ref={setAmountInputRef}
         accessibilityLabel="Amount requested"
         style={styles.rootNodeAmountInput}
         value={amountText}
