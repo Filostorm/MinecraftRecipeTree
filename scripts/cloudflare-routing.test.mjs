@@ -24,6 +24,26 @@ const d1Migrations = await Promise.all([
 test('Cloudflare routes catalog, immutable datasets, and administration through the Worker', () => {
   assert.match(
     viteConfig,
+    /MRT_DEPLOY_TARGET\s*===\s*['"]cloudflare-beta['"]/,
+    'the standalone Cloudflare beta build must be selected explicitly',
+  );
+  assert.match(
+    viteConfig,
+    /name:\s*['"]minecraft-recipe-tree-beta['"][\s\S]*?vars:\s*\{BETA_DATA_ORIGIN\}/,
+    'the standalone beta Worker must have an isolated name and read-only production data origin',
+  );
+  assert.match(
+    viteConfig,
+    /d1_databases:\s*!isCloudflareBeta\s*&&\s*hostingConfig\.d1/,
+    'the standalone beta Worker must not inherit the Sites-managed D1 binding',
+  );
+  assert.match(
+    viteConfig,
+    /r2_buckets:\s*!isCloudflareBeta\s*&&\s*hostingConfig\.r2/,
+    'the standalone beta Worker must not inherit the Sites-managed R2 binding',
+  );
+  assert.match(
+    viteConfig,
     /publicDir:\s*false(?:\s+as\s+const)?/,
     'production builds must not copy the retired public/exports corpus into dist',
   );

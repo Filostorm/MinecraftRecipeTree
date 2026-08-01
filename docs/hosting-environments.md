@@ -6,7 +6,7 @@ overwrite production.
 
 | Environment | Source branch | Sites project ID | URL | Access |
 | --- | --- | --- | --- | --- |
-| Beta | `beta` | `appgprj_6a6a505e7bc08191acada3d05fa5d18d` | [minecraft-recipe-tree-beta.gtjoe51.chatgpt.site](https://minecraft-recipe-tree-beta.gtjoe51.chatgpt.site) | Private, owner-only |
+| Beta | `beta` | Cloudflare Worker `minecraft-recipe-tree-beta` | Cloudflare Workers development URL | Private release candidate |
 | Production | `main` | `appgprj_6a5a5da437248191a0f8accf3fb92d5d` | [minecraftrecipetree.craftsmannsoftware.com](https://minecraftrecipetree.craftsmannsoftware.com/) | Public |
 
 The production Sites origin is
@@ -14,6 +14,11 @@ The production Sites origin is
 origin by the `craftsmann-app-subdomain-router` Cloudflare Worker.
 
 ## Branch-specific configuration
+
+The `beta` branch retains its `.openai/hosting.json` only for compatibility with historical Sites
+builds. Active beta releases use `npm run deploy:cloudflare-beta`, which builds an isolated
+Cloudflare Worker without the Sites-managed D1 or R2 bindings. Production continues to use the
+production Sites project and is not changed by this beta deployment path.
 
 Each branch stores its own `.openai/hosting.json`:
 
@@ -42,11 +47,12 @@ exercise production-shaped data without sharing production bindings or accepting
 1. Reconcile the latest `main` application changes into `beta` while retaining the beta project ID
    and beta-only data proxy.
 2. Implement and validate the change on `beta`.
-3. Save and deploy the exact tested commit to the beta Sites project.
+3. Mirror the exact tested commit into `Filostorm/CraftsmannSoftware` and deploy it with
+   `npm run deploy:cloudflare-beta` from `sites/minecraft-recipe-tree`.
 4. Verify the beta page hydrates in a fresh browser tab, the changed feature works, a hashed
    application asset loads, and `/api/datasets` returns
    `X-MRT-Beta-Data-Origin: https://minecraftrecipetree.craftsmannsoftware.com`.
-5. Share the private beta URL for acceptance testing. A successful beta deployment does not
+5. Share the Cloudflare beta URL for acceptance testing. A successful beta deployment does not
    authorize a production release.
 6. After explicit production approval, transfer the exact validated application changes to `main`
    while retaining the production `.openai/hosting.json`.
