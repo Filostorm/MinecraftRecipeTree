@@ -14,6 +14,7 @@ import {
 import {ModInfo} from '../data/DataContext';
 import {signalTarget} from '../analytics/signal';
 import {theme} from '../theme';
+import {COLLAPSED_DISCLOSURE_CHEVRON} from '../ui/disclosureChevron';
 
 export function SearchBar({
   value,
@@ -114,7 +115,7 @@ export function ModFilter({
             {triggerLabel}
           </Text>
         </View>
-        <Text style={styles.filterChevron}>⌄</Text>
+        <Text style={styles.filterChevron}>{COLLAPSED_DISCLOSURE_CHEVRON}</Text>
       </TouchableOpacity>
 
       <Modal visible={open} transparent animationType="fade" onRequestClose={close}>

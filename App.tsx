@@ -35,6 +35,7 @@ import {theme} from './src/theme';
 import type {Manifest} from './src/types';
 import {Tab, UiProvider, useUi} from './src/ui/UiContext';
 import {lightImpactFeedback, selectionFeedback} from './src/ui/haptics';
+import {disclosureChevron} from './src/ui/disclosureChevron';
 import {
   INTERFACE_ZOOM_STEP,
   MAXIMUM_INTERFACE_ZOOM,
@@ -490,7 +491,7 @@ function Shell({
             styles.graphControlsHeaderButtonText,
             showGraphControls && styles.graphControlsHeaderButtonTextActive,
           ]}>
-          {showGraphControls ? '⌃' : '⌄'}
+          {disclosureChevron(showGraphControls)}
         </Text>
       </TouchableOpacity>
     ) : null;

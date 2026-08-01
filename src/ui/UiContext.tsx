@@ -1,4 +1,5 @@
 import React, {createContext, useCallback, useContext, useMemo, useState} from 'react';
+import {Platform} from 'react-native';
 import {RecipeRef} from '../types';
 import type {GraphDirection} from '../graph/direction';
 
@@ -69,7 +70,9 @@ export function UiProvider({children}: {children: React.ReactNode}) {
     ref: RecipeRef,
     direction: GraphDirection = 'inputs',
   ) => {
-    setItemStack([]);
+    // Native panes stay mounted behind the bottom tabs. Preserve the current
+    // item and its resolved recipe cards so returning to Browse is immediate.
+    if (Platform.OS === 'web') setItemStack([]);
     setGraphRootKey(key);
     setGraphRecipeRef(ref);
     setGraphDirection(direction);

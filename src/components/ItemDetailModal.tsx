@@ -36,6 +36,7 @@ import type {GraphDirection} from '../graph/direction';
 import {theme} from '../theme';
 import {Recipe, RecipeRef} from '../types';
 import {useUi} from '../ui/UiContext';
+import {disclosureChevron} from '../ui/disclosureChevron';
 import {signalTarget, useSignalSurface} from '../analytics/signal';
 import {DropList, DropRow, formatDropStat} from './DropList';
 import {ItemIcon} from './ItemIcon';
@@ -60,6 +61,7 @@ export function ItemDetailModal() {
   const {itemStack, popItem, closeItems, tab} = useUi();
   const safeAreaInsets = useSafeAreaInsets();
   const key = itemStack[itemStack.length - 1];
+  const itemDetailVisible = Boolean(key) && (Platform.OS === 'web' || tab === 'items');
   /** 'p' | 'u' | 'i' | 'd' | a secondary category index */
   const [side, setSide] = useState<'p' | 'u' | 'i' | 'd' | number>('p');
   const sideName =
@@ -73,8 +75,8 @@ export function ItemDetailModal() {
             ? 'drops'
             : 'secondary';
   useSignalSurface(
-    key ? `item-detail/${sideName}` : tab,
-    key ? 'modal' : 'screen',
+    itemDetailVisible ? `item-detail/${sideName}` : tab,
+    itemDetailVisible ? 'modal' : 'screen',
   );
 
   useEffect(() => setSide('p'), [key]);
@@ -89,7 +91,7 @@ export function ItemDetailModal() {
   if (data.indexStatus !== 'ready') {
     return (
       <Modal
-        visible
+        visible={itemDetailVisible}
         transparent
         animationType={Platform.OS === 'web' ? 'fade' : 'slide'}
         onRequestClose={popItem}>
@@ -173,7 +175,7 @@ export function ItemDetailModal() {
 
   return (
     <Modal
-      visible
+      visible={itemDetailVisible}
       transparent
       animationType={Platform.OS === 'web' ? 'fade' : 'slide'}
       onRequestClose={popItem}>
@@ -611,7 +613,7 @@ function RefsList({
                   onPress={() => setShowAllCollapsedCategoryTypes(show => !show)}
                   style={styles.showMoreTypesButton}>
                   <Text accessibilityElementsHidden style={styles.showMoreTypesChevron}>
-                    {showAllCollapsedCategoryTypes ? '⌃' : '⌄'}
+                    {disclosureChevron(showAllCollapsedCategoryTypes)}
                   </Text>
                 </TouchableOpacity>
               )}

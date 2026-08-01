@@ -49,6 +49,10 @@ import {theme} from '../theme';
 import {DropStat, Mob, Recipe, RecipeRef} from '../types';
 import {useUi} from '../ui/UiContext';
 import {
+  EXPANDED_DISCLOSURE_CHEVRON,
+  disclosureChevron,
+} from '../ui/disclosureChevron';
+import {
   COMPACT_LABEL_WIDTH,
   COMPACT_ITEM_SIZE,
   COMPACT_ROOT_DIAMOND_SIZE,
@@ -2426,7 +2430,7 @@ export function GraphScreen({
           <View style={styles.controlOptions}>
             {graphDirection === 'inputs' && (
               <CtrlBtn
-                label={`Totals ${showTreeTotals ? '⌃' : '⌄'}`}
+                label={`Totals ${disclosureChevron(showTreeTotals)}`}
                 accessibilityLabel={showTreeTotals ? 'Collapse tree totals' : 'Expand tree totals'}
                 metricsId="graph.control.totals"
                 active={showTreeTotals}
@@ -2473,7 +2477,7 @@ export function GraphScreen({
                 styles.controlMenuBtnText,
                 showGraphControls && styles.ctrlBtnTextActive,
               ]}>
-              {showGraphControls ? '⌃' : '⌄'}
+              {disclosureChevron(showGraphControls)}
             </Text>
           </TouchableOpacity>
         )}
@@ -3380,7 +3384,7 @@ function SourceNodeView({
           style={styles.headerBtn}>
           <Text style={[styles.smallBtnText, noSelect]}>ⓘ</Text>
         </TouchableOpacity>
-        <Text style={[styles.smallBtnText, noSelect]}>▴</Text>
+        <Text style={[styles.smallBtnText, noSelect]}>{EXPANDED_DISCLOSURE_CHEVRON}</Text>
       </Pressable>
 
       {source.kind === 'recipe' && source.recipe?.img && source.dir && (
