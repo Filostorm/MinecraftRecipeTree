@@ -1,4 +1,4 @@
-import React, {useEffect, useMemo, useState} from 'react';
+import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {
   FlatList,
   Platform,
@@ -14,6 +14,13 @@ import {
   isItemCatalogEligible,
 } from '../data/catalogPresentation';
 import {useRecipeStages} from '../data/RecipeStageContext';
+import {
+  buildFuzzyCandidateIndex,
+  directSearchScore,
+  fuzzyCandidateIndices,
+  fuzzySearchScore,
+  normalizeSearchText,
+} from '../data/fuzzySearch';
 import {signalTarget} from '../analytics/signal';
 import {theme} from '../theme';
 import {CatalogItem} from '../types';
@@ -36,6 +43,38 @@ export function ItemsScreen({interfaceZoom}: {interfaceZoom: number}) {
     () => data.items.filter(isItemCatalogEligible),
     [data.items],
   );
+  const searchableItems = useMemo(
+    () =>
+      catalogItems.map(item => {
+        const fields = [
+          normalizeSearchText(item.n),
+          normalizeSearchText(item.id),
+          normalizeSearchText(catalogTypePresentation(item.t)?.label ?? ''),
+        ];
+        return {
+          item,
+          fields,
+          words: fields.flatMap(field => field.split(' ').filter(Boolean)),
+        };
+      }),
+    [catalogItems],
+  );
+  const fuzzyIndexCache = useRef<{
+    source: typeof searchableItems;
+    index: ReturnType<typeof buildFuzzyCandidateIndex>;
+  } | null>(null);
+  const fuzzyEnabled = normalizeSearchText(query).length >= 3;
+  const fuzzyIndex = useMemo(() => {
+    if (!fuzzyEnabled) return null;
+    if (fuzzyIndexCache.current?.source === searchableItems) {
+      return fuzzyIndexCache.current.index;
+    }
+    const index = buildFuzzyCandidateIndex(
+      searchableItems.map(searchable => searchable.words),
+    );
+    fuzzyIndexCache.current = {source: searchableItems, index};
+    return index;
+  }, [fuzzyEnabled, searchableItems]);
   const unknownCatalogTypes = useMemo(() => {
     const unknown = new Set<string>();
     for (const item of catalogItems) {
@@ -55,32 +94,75 @@ export function ItemsScreen({interfaceZoom}: {interfaceZoom: number}) {
   }, [data.descriptor.slug, unknownCatalogTypes]);
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = normalizeSearchText(query);
+    const queryWords = q.split(' ').filter(Boolean);
     const out: CatalogItem[] = [];
-    for (const item of catalogItems) {
+    const ranked = new Map<number, CatalogItem[]>();
+    const eligible = (item: CatalogItem) => {
       const gatedStages = recipeStages.catalog.stagesByItemKey.get(item.k);
       if (
         recipeStages.selectedStage &&
         !gatedStages?.includes(recipeStages.selectedStage)
       ) {
-        continue;
+        return false;
       }
-      if (mod && item.m !== mod) continue;
-      const typeLabel = catalogTypePresentation(item.t)?.label.toLowerCase() ?? '';
-      if (
-        q &&
-        !item.n.toLowerCase().includes(q) &&
-        !item.id.toLowerCase().includes(q) &&
-        !typeLabel.includes(q)
-      ) {
-        continue;
+      return !mod || item.m === mod;
+    };
+    const addRanked = (score: number, item: CatalogItem) => {
+      const bucket = ranked.get(score);
+      if (bucket) {
+        if (bucket.length < MAX_RESULTS + 1) bucket.push(item);
+      } else {
+        ranked.set(score, [item]);
       }
-      out.push(item);
+    };
+
+    if (!q) {
+      for (const {item} of searchableItems) {
+        if (!eligible(item)) continue;
+        out.push(item);
+        if (out.length >= MAX_RESULTS + 1) break;
+      }
+      return out;
+    }
+
+    let directMatches = 0;
+    const directlyMatchedIndices = new Set<number>();
+    searchableItems.forEach((searchable, itemIndex) => {
+      if (!eligible(searchable.item)) return;
+      const score = directSearchScore(q, searchable.fields);
+      if (score != null) {
+        directMatches += 1;
+        directlyMatchedIndices.add(itemIndex);
+        addRanked(score, searchable.item);
+      }
+    });
+
+    if (directMatches < MAX_RESULTS + 1 && fuzzyIndex) {
+      for (const itemIndex of fuzzyCandidateIndices(
+        queryWords,
+        fuzzyIndex,
+        itemIndex => {
+          const searchable = searchableItems[itemIndex];
+          return Boolean(searchable && eligible(searchable.item));
+        },
+      )) {
+        if (directlyMatchedIndices.has(itemIndex)) continue;
+        const searchable = searchableItems[itemIndex];
+        if (!searchable || !eligible(searchable.item)) continue;
+        const score = fuzzySearchScore(q, searchable.fields, queryWords, searchable.words);
+        if (score != null) addRanked(score, searchable.item);
+      }
+    }
+
+    for (const score of [...ranked.keys()].sort((a, b) => a - b)) {
+      out.push(...ranked.get(score)!);
       if (out.length >= MAX_RESULTS + 1) break;
     }
     return out;
   }, [
-    catalogItems,
+    searchableItems,
+    fuzzyIndex,
     query,
     mod,
     recipeStages.catalog.stagesByItemKey,

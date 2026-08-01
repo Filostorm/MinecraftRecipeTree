@@ -11,6 +11,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import {ModInfo, useData} from '../data/DataContext';
+import {fuzzySearchScore, normalizeSearchText} from '../data/fuzzySearch';
 import {theme} from '../theme';
 import {Mob} from '../types';
 import {useUi} from '../ui/UiContext';
@@ -37,12 +38,17 @@ export function MobsScreen() {
   }, [data.mobs, data.manifest.mods]);
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return data.mobs.filter(
-      m =>
-        (!mod || m.m === mod) &&
-        (!q || m.n.toLowerCase().includes(q) || m.id.toLowerCase().includes(q)),
-    );
+    const q = normalizeSearchText(query);
+    return data.mobs
+      .map(m => ({
+        m,
+        score: q
+          ? fuzzySearchScore(q, [normalizeSearchText(m.n), normalizeSearchText(m.id)])
+          : 0,
+      }))
+      .filter(match => (!mod || match.m.m === mod) && match.score != null)
+      .sort((left, right) => left.score! - right.score!)
+      .map(match => match.m);
   }, [data.mobs, query, mod]);
 
   const columns = Math.max(2, Math.min(8, Math.floor(width / CELL_W)));

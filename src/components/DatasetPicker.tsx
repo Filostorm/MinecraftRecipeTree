@@ -16,6 +16,7 @@ import {useSafeAreaInsets} from '../ui/safeArea';
 import type {DatasetDescriptor} from '../data/datasetCatalog';
 import {datasetPackIconPath} from '../data/datasetPresentation';
 import {isLocalPackDescriptor} from '../data/localPackStorage';
+import {fuzzySearchScore, normalizeSearchText} from '../data/fuzzySearch';
 import {theme} from '../theme';
 
 const PRODUCTION_ORIGIN = 'https://minecraftrecipetree.craftsmannsoftware.com';
@@ -89,22 +90,31 @@ export function DatasetPicker({
   }, [visible]);
 
   const filteredDatasets = useMemo(() => {
-    const normalizedQuery = query.trim().toLocaleLowerCase();
-    const matches = normalizedQuery.length === 0
-      ? [...datasets]
-      : datasets.filter(dataset =>
-          [
-            dataset.displayName,
-            dataset.slug,
-            dataset.minecraftVersion,
-            dataset.packVersion,
-          ].some(value => value.toLocaleLowerCase().includes(normalizedQuery)),
-        );
+    const normalizedQuery = normalizeSearchText(query);
+    const matches = datasets
+      .map(dataset => ({
+        dataset,
+        score: normalizedQuery
+          ? fuzzySearchScore(
+              normalizedQuery,
+              [
+                dataset.displayName,
+                dataset.slug,
+                dataset.minecraftVersion,
+                dataset.packVersion,
+              ].map(normalizeSearchText),
+            )
+          : 0,
+      }))
+      .filter(match => match.score != null);
     return matches.sort((left, right) => {
-      if (left.slug === selectedSlug) return -1;
-      if (right.slug === selectedSlug) return 1;
-      return left.displayName.localeCompare(right.displayName, undefined, {sensitivity: 'base'});
-    });
+      if (left.dataset.slug === selectedSlug) return -1;
+      if (right.dataset.slug === selectedSlug) return 1;
+      if (left.score !== right.score) return left.score! - right.score!;
+      return left.dataset.displayName.localeCompare(right.dataset.displayName, undefined, {
+        sensitivity: 'base',
+      });
+    }).map(match => match.dataset);
   }, [datasets, query, selectedSlug]);
 
   return (

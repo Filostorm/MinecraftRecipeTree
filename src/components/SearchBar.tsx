@@ -15,6 +15,7 @@ import {ModInfo} from '../data/DataContext';
 import {signalTarget} from '../analytics/signal';
 import {theme} from '../theme';
 import {COLLAPSED_DISCLOSURE_CHEVRON} from '../ui/disclosureChevron';
+import {fuzzySearchScore, normalizeSearchText} from '../data/fuzzySearch';
 
 export function SearchBar({
   value,
@@ -70,14 +71,20 @@ export function ModFilter({
   const [query, setQuery] = useState('');
   const selectedMod = useMemo(() => mods.find(mod => mod.id === selected), [mods, selected]);
   const filteredMods = useMemo(() => {
-    const normalizedQuery = query.trim().toLocaleLowerCase();
+    const normalizedQuery = normalizeSearchText(query);
     if (!normalizedQuery) return mods;
 
-    return mods.filter(mod => {
-      const name = mod.name.toLocaleLowerCase();
-      const id = mod.id.toLocaleLowerCase();
-      return name.includes(normalizedQuery) || id.includes(normalizedQuery);
-    });
+    return mods
+      .map(mod => ({
+        mod,
+        score: fuzzySearchScore(normalizedQuery, [
+          normalizeSearchText(mod.name),
+          normalizeSearchText(mod.id),
+        ]),
+      }))
+      .filter(match => match.score != null)
+      .sort((left, right) => left.score! - right.score!)
+      .map(match => match.mod);
   }, [mods, query]);
 
   useEffect(() => {
