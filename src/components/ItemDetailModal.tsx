@@ -112,14 +112,24 @@ export function ItemDetailModal() {
                 ? `Recipe index unavailable: ${data.indexError ?? 'unknown error'}`
                 : 'Loading recipe index…'}
             </Text>
-            {data.indexStatus === 'error' && (
+            <View style={styles.lookupActions}>
+              {data.indexStatus === 'error' && (
+                <TouchableOpacity
+                  {...signalTarget('item-detail.retry-index')}
+                  style={styles.lookupSecondaryButton}
+                  onPress={() => void data.ensureIndex().catch(() => {})}>
+                  <Text style={styles.lookupSecondaryButtonText}>Retry</Text>
+                </TouchableOpacity>
+              )}
               <TouchableOpacity
-                {...signalTarget('item-detail.retry-index')}
-                style={styles.headerBtn}
-                onPress={() => void data.ensureIndex().catch(() => {})}>
-                <Text style={styles.headerBtnText}>Retry recipe index</Text>
+                {...signalTarget('item-detail.cancel-index')}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel recipe lookup"
+                style={styles.lookupCancelButton}
+                onPress={popItem}>
+                <Text style={styles.lookupCancelButtonText}>Cancel</Text>
               </TouchableOpacity>
-            )}
+            </View>
           </Pressable>
         </Pressable>
       </Modal>
@@ -878,6 +888,26 @@ const styles = StyleSheet.create({
   header: {flexDirection: 'row', alignItems: 'center'},
   headerBtn: {minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center'},
   headerBtnText: {color: theme.textDim, fontSize: 14},
+  lookupActions: {flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4},
+  lookupSecondaryButton: {
+    minHeight: 40,
+    justifyContent: 'center',
+    borderColor: theme.border,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 14,
+  },
+  lookupSecondaryButtonText: {color: theme.text, fontSize: 13, fontWeight: '700'},
+  lookupCancelButton: {
+    minHeight: 40,
+    justifyContent: 'center',
+    backgroundColor: theme.panelAlt,
+    borderColor: theme.borderLight,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 18,
+  },
+  lookupCancelButtonText: {color: theme.text, fontSize: 13, fontWeight: '700'},
   titleRow: {flexDirection: 'row', alignItems: 'center', marginTop: 2},
   title: {color: theme.text, fontSize: 18, fontWeight: '700'},
   subtitle: {color: theme.textDim, fontSize: 12, marginTop: 2},

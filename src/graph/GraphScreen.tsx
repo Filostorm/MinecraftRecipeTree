@@ -1,5 +1,6 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
+  ActivityIndicator,
   PanResponder,
   Platform,
   Pressable,
@@ -457,6 +458,10 @@ export function GraphScreen({
   const [version, setVersion] = useState(0);
   const bump = useCallback(() => setVersion(v => v + 1), []);
   const [picker, setPicker] = useState<PickerState | null>(null);
+  const [pickerLookup, setPickerLookup] = useState<{
+    requestId: number;
+    title: string;
+  } | null>(null);
   const pickerRef = useRef<PickerState | null>(null);
   pickerRef.current = picker;
   const [showRootActions, setShowRootActions] = useState(false);
@@ -466,8 +471,12 @@ export function GraphScreen({
     if (tab !== 'graph') setShowRootActions(false);
   }, [tab]);
   useSignalSurface(
-    tab === 'graph' && picker ? 'graph/source-picker' : tab,
-    tab === 'graph' && picker ? 'modal' : 'screen',
+    tab === 'graph' && picker
+      ? 'graph/source-picker'
+      : tab === 'graph' && pickerLookup
+        ? 'graph/source-lookup'
+        : tab,
+    tab === 'graph' && (picker || pickerLookup) ? 'modal' : 'screen',
   );
   const pickerGroupLoadsRef = useRef(new Set<string>());
   const pickerRequestIdRef = useRef(0);
@@ -1054,6 +1063,11 @@ export function GraphScreen({
     ) => {
       if (blockRecursiveExpansion(target, 'open source picker')) return;
       const requestId = ++pickerRequestIdRef.current;
+      const itemName = data.itemsByKey.get(target.key)?.n ?? target.key;
+      const lookupTitle =
+        direction === 'outputs' ? `Find uses for ${itemName}` : `Find recipes for ${itemName}`;
+      setPickerLookup({requestId, title: lookupTitle});
+      try {
       const currentPreferred =
         direction === 'inputs' ? preferredSourcesRef.current[target.key] : undefined;
       const allChoices = choicesFor(target.key, direction);
@@ -1120,7 +1134,6 @@ export function GraphScreen({
         };
       }
 
-      const itemName = data.itemsByKey.get(target.key)?.n ?? target.key;
       const withCurrentPreference = (
         choice: RecipeSourceChoice,
       ): RecipeSourceChoice =>
@@ -1192,6 +1205,11 @@ export function GraphScreen({
             : undefined,
         collapsedGroupKeys: loadCollapsedRecipeCategories(),
       });
+      } finally {
+        setPickerLookup(current =>
+          current?.requestId === requestId ? null : current,
+        );
+      }
     },
     [data, choicesFor, graphDirection, pickerEntryFor],
   );
@@ -1334,6 +1352,15 @@ export function GraphScreen({
     },
     [graphDirection, openPicker],
   );
+
+  const cancelPickerLookup = useCallback(() => {
+    pickerRequestIdRef.current += 1;
+    setPickerLookup(null);
+  }, []);
+
+  useEffect(() => {
+    if (tab !== 'graph' && pickerLookup) cancelPickerLookup();
+  }, [cancelPickerLookup, pickerLookup, tab]);
 
   const updateRootRequestedAmount = useCallback(
     (requestedAmount: number) => {
@@ -2502,6 +2529,26 @@ export function GraphScreen({
           onIngredientTap={handleTreeTotalIngredientTap}
           onOpenItem={openItem}
         />
+      )}
+      {pickerLookup && (
+        <View
+          style={styles.recipeLookupBackdrop}
+          accessibilityViewIsModal
+          accessibilityLabel={pickerLookup.title}>
+          <View style={styles.recipeLookupCard}>
+            <ActivityIndicator color={theme.accent} size="large" />
+            <Text style={styles.recipeLookupTitle}>{pickerLookup.title}</Text>
+            <Text style={styles.recipeLookupHint}>Loading recipe options…</Text>
+            <TouchableOpacity
+              {...signalTarget('graph.source-lookup.cancel')}
+              accessibilityRole="button"
+              accessibilityLabel="Cancel recipe lookup"
+              style={styles.recipeLookupCancel}
+              onPress={cancelPickerLookup}>
+              <Text style={styles.recipeLookupCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       )}
       {picker && (
         <PickerModal
@@ -3759,6 +3806,49 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 6,
   },
+  recipeLookupBackdrop: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    zIndex: 50,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(5,8,12,0.72)',
+    padding: 20,
+  },
+  recipeLookupCard: {
+    width: '100%',
+    maxWidth: 360,
+    alignItems: 'center',
+    backgroundColor: theme.panel,
+    borderColor: theme.border,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 22,
+  },
+  recipeLookupTitle: {
+    color: theme.text,
+    fontSize: 16,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginTop: 14,
+  },
+  recipeLookupHint: {color: theme.textDim, fontSize: 12, marginTop: 5},
+  recipeLookupCancel: {
+    minWidth: 120,
+    minHeight: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.panelAlt,
+    borderColor: theme.borderLight,
+    borderWidth: 1,
+    borderRadius: 8,
+    marginTop: 18,
+    paddingHorizontal: 18,
+  },
+  recipeLookupCancelText: {color: theme.text, fontSize: 13, fontWeight: '700'},
   controlOptions: {
     flexDirection: 'row',
     gap: 6,
