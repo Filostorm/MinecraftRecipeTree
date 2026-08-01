@@ -5,7 +5,9 @@ import mezz.jei.api.constants.VanillaTypes;
 import mezz.jei.api.runtime.IJeiRuntime;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
 import net.minecraftforge.event.TickEvent;
@@ -54,6 +56,12 @@ public final class RecipeTreeClient {
             target = runtime.getRecipesGui().getIngredientUnderMouse(VanillaTypes.ITEM_STACK)
                     .filter(stack -> !stack.isEmpty());
         }
+        if (target.isEmpty() && minecraft.screen instanceof AbstractContainerScreen<?> containerScreen) {
+            Slot hoveredSlot = containerScreen.hoveredSlot;
+            if (hoveredSlot != null && hoveredSlot.hasItem()) {
+                target = Optional.of(hoveredSlot.getItem()).filter(stack -> !stack.isEmpty());
+            }
+        }
         if (target.isEmpty()) {
             target = Optional.of(minecraft.player.getMainHandItem()).filter(stack -> !stack.isEmpty());
         }
@@ -63,7 +71,7 @@ public final class RecipeTreeClient {
 
         if (target.isEmpty()) {
             minecraft.player.displayClientMessage(
-                    Component.literal("Hover a JEI item or hold an item, then press G."), true);
+                    Component.literal("Hover a JEI or inventory item, or hold an item, then press G."), true);
             return;
         }
         minecraft.setScreen(new RecipeTreeScreen(target.get().copyWithCount(1), runtime));

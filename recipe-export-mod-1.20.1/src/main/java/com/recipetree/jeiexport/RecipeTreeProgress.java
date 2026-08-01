@@ -56,6 +56,11 @@ public final class RecipeTreeProgress {
         save();
     }
 
+    public void clearFavoriteRecipe(ItemStack output) {
+        if (output.isEmpty()) return;
+        if (favoriteRecipes.remove(itemKey(output)) != null) save();
+    }
+
     public boolean isRecipeTypeCollapsed(String recipeType) {
         return recipeType != null && Boolean.TRUE.equals(collapsedRecipeTypes.get(recipeType));
     }
