@@ -2,13 +2,16 @@
   "expo": {
     "name": "Recipe Tree",
     "slug": "recipe-tree",
+    "scheme": "minecraft-recipe-tree",
     "version": "1.0.0",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#0e1116",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.craftsmannsoftware.minecraftrecipetree",
+      "buildNumber": "1"
     },
     "android": {
       "adaptiveIcon": {

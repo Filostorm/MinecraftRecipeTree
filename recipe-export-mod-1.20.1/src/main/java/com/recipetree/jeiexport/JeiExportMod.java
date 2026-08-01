@@ -8,6 +8,7 @@ import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.loading.FMLEnvironment;
 import net.minecraftforge.network.NetworkConstants;
+import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import org.slf4j.Logger;
 
 @Mod(JeiExportMod.MOD_ID)
@@ -22,6 +23,8 @@ public class JeiExportMod {
 
         if (FMLEnvironment.dist == Dist.CLIENT) {
             MinecraftForge.EVENT_BUS.register(ExportEvents.class);
+            MinecraftForge.EVENT_BUS.register(RecipeTreeClient.class);
+            FMLJavaModLoadingContext.get().getModEventBus().addListener(RecipeTreeClient::registerKeys);
         }
     }
 }

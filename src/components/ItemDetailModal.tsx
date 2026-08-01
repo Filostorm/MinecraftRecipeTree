@@ -2,6 +2,7 @@ import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {
   ActivityIndicator,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -10,6 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import {useSafeAreaInsets} from '../ui/safeArea';
 import {useData} from '../data/DataContext';
 import {
   AUTOMATED_SHAPED_CATEGORY_ID,
@@ -34,6 +36,7 @@ import type {GraphDirection} from '../graph/direction';
 import {theme} from '../theme';
 import {Recipe, RecipeRef} from '../types';
 import {useUi} from '../ui/UiContext';
+import {disclosureChevron} from '../ui/disclosureChevron';
 import {signalTarget, useSignalSurface} from '../analytics/signal';
 import {DropList, DropRow, formatDropStat} from './DropList';
 import {ItemIcon} from './ItemIcon';
@@ -43,6 +46,7 @@ import {VisibilityIcon} from './VisibilityIcon';
 
 const PAGE = 15;
 const MAX_DEFAULT_FILTER_SCAN = 400;
+const INITIAL_VISIBLE_CATEGORY_TYPES = 8;
 
 function recipeRefKey([categoryIndex, recipeIndex]: RecipeRef): string {
   return `${categoryIndex}:${recipeIndex}`;
@@ -55,7 +59,9 @@ function toolLabel(tool: string): string {
 export function ItemDetailModal() {
   const data = useData();
   const {itemStack, popItem, closeItems, tab} = useUi();
+  const safeAreaInsets = useSafeAreaInsets();
   const key = itemStack[itemStack.length - 1];
+  const itemDetailVisible = Boolean(key) && (Platform.OS === 'web' || tab === 'items');
   /** 'p' | 'u' | 'i' | 'd' | a secondary category index */
   const [side, setSide] = useState<'p' | 'u' | 'i' | 'd' | number>('p');
   const sideName =
@@ -69,8 +75,8 @@ export function ItemDetailModal() {
             ? 'drops'
             : 'secondary';
   useSignalSurface(
-    key ? `item-detail/${sideName}` : tab,
-    key ? 'modal' : 'screen',
+    itemDetailVisible ? `item-detail/${sideName}` : tab,
+    itemDetailVisible ? 'modal' : 'screen',
   );
 
   useEffect(() => setSide('p'), [key]);
@@ -84,23 +90,46 @@ export function ItemDetailModal() {
   if (!key) return null;
   if (data.indexStatus !== 'ready') {
     return (
-      <Modal visible transparent animationType="fade" onRequestClose={popItem}>
-        <Pressable style={styles.backdrop} onPress={closeItems}>
-          <Pressable style={[styles.card, {alignItems: 'center', justifyContent: 'center'}]} onPress={() => {}}>
+      <Modal
+        visible={itemDetailVisible}
+        transparent
+        animationType={Platform.OS === 'web' ? 'fade' : 'slide'}
+        onRequestClose={popItem}>
+        <Pressable
+          style={[styles.backdrop, Platform.OS !== 'web' && styles.backdropNative]}
+          onPress={closeItems}>
+          <Pressable
+            style={[
+              styles.card,
+              Platform.OS !== 'web' && styles.cardNative,
+              Platform.OS !== 'web' && {paddingBottom: Math.max(14, safeAreaInsets.bottom)},
+              {alignItems: 'center', justifyContent: 'center'},
+            ]}
+            onPress={() => {}}>
             {data.indexStatus !== 'error' && <ActivityIndicator color={theme.accent} size="large" />}
             <Text style={data.indexStatus === 'error' ? styles.indexError : styles.emptyText}>
               {data.indexStatus === 'error'
                 ? `Recipe index unavailable: ${data.indexError ?? 'unknown error'}`
                 : 'Loading recipe index…'}
             </Text>
-            {data.indexStatus === 'error' && (
+            <View style={styles.lookupActions}>
+              {data.indexStatus === 'error' && (
+                <TouchableOpacity
+                  {...signalTarget('item-detail.retry-index')}
+                  style={styles.lookupSecondaryButton}
+                  onPress={() => void data.ensureIndex().catch(() => {})}>
+                  <Text style={styles.lookupSecondaryButtonText}>Retry</Text>
+                </TouchableOpacity>
+              )}
               <TouchableOpacity
-                {...signalTarget('item-detail.retry-index')}
-                style={styles.headerBtn}
-                onPress={() => void data.ensureIndex().catch(() => {})}>
-                <Text style={styles.headerBtnText}>Retry recipe index</Text>
+                {...signalTarget('item-detail.cancel-index')}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel recipe lookup"
+                style={styles.lookupCancelButton}
+                onPress={popItem}>
+                <Text style={styles.lookupCancelButtonText}>Cancel</Text>
               </TouchableOpacity>
-            )}
+            </View>
           </Pressable>
         </Pressable>
       </Modal>
@@ -155,9 +184,21 @@ export function ItemDetailModal() {
     + droppedBy.length + minedFrom.length;
 
   return (
-    <Modal visible transparent animationType="fade" onRequestClose={popItem}>
-      <Pressable style={styles.backdrop} onPress={closeItems}>
-        <Pressable style={styles.card} onPress={() => {}}>
+    <Modal
+      visible={itemDetailVisible}
+      transparent
+      animationType={Platform.OS === 'web' ? 'fade' : 'slide'}
+      onRequestClose={popItem}>
+      <Pressable
+        style={[styles.backdrop, Platform.OS !== 'web' && styles.backdropNative]}
+        onPress={closeItems}>
+        <Pressable
+          style={[
+            styles.card,
+            Platform.OS !== 'web' && styles.cardNative,
+            Platform.OS !== 'web' && {paddingBottom: Math.max(14, safeAreaInsets.bottom)},
+          ]}
+          onPress={() => {}}>
           <View style={styles.header}>
             {itemStack.length > 1 && (
               <TouchableOpacity
@@ -311,8 +352,7 @@ function RefsList({
   const {openRecipeInGraph} = useUi();
   const [visibleTarget, setVisibleTarget] = useState(PAGE);
   const [scanLimit, setScanLimit] = useState(PAGE);
-  const [categoryFilter, setCategoryFilter] = useState<number | null>(null);
-  const [sortMode, setSortMode] = useState<'type' | 'source'>('type');
+  const [showAllCollapsedCategoryTypes, setShowAllCollapsedCategoryTypes] = useState(false);
   const [showAutomatedShaped, setShowAutomatedShaped] = useState(false);
   const [showFluidTransfers, setShowFluidTransfers] = useState(false);
   const [collapsedCategoryIds, setCollapsedCategoryIds] = useState(
@@ -322,18 +362,15 @@ function RefsList({
   const [availableCardWidth, setAvailableCardWidth] = useState<number | null>(null);
 
   const categoryGroups = useMemo(() => {
-    const counts = new Map<number, {count: number; firstIndex: number}>();
-    refs.forEach(([catIdx], refIndex) => {
+    const counts = new Map<number, number>();
+    refs.forEach(([catIdx]) => {
       const current = counts.get(catIdx);
-      counts.set(catIdx, {
-        count: (current?.count ?? 0) + 1,
-        firstIndex: current?.firstIndex ?? refIndex,
-      });
+      counts.set(catIdx, (current ?? 0) + 1);
     });
     return [...counts.entries()]
-      .map(([catIdx, details]) => ({
+      .map(([catIdx, count]) => ({
         catIdx,
-        ...details,
+        count,
         category: data.categories[catIdx],
       }))
       .filter(group => Boolean(group.category))
@@ -347,36 +384,46 @@ function RefsList({
   const visibleCategoryGroups = categoryGroups.filter(
     group => showAutomatedShaped || !isDefaultDisabledRecipeCategory(group.category),
   );
-  const matchingRefs = useMemo(
+  const collapsedCategoryGroups = visibleCategoryGroups.filter(group =>
+    collapsedCategoryIds.has(group.category!.id),
+  );
+  const displayedCollapsedCategoryGroups = useMemo(() => {
+    if (
+      showAllCollapsedCategoryTypes ||
+      collapsedCategoryGroups.length <= INITIAL_VISIBLE_CATEGORY_TYPES
+    ) {
+      return collapsedCategoryGroups;
+    }
+    return collapsedCategoryGroups.slice(0, INITIAL_VISIBLE_CATEGORY_TYPES);
+  }, [collapsedCategoryGroups, showAllCollapsedCategoryTypes]);
+  const undisplayedCollapsedCategoryCount =
+    collapsedCategoryGroups.length - displayedCollapsedCategoryGroups.length;
+  const eligibleRefs = useMemo(
     () =>
       refs.filter(([catIdx]) => {
         const category = data.categories[catIdx];
         if (!showAutomatedShaped && isDefaultDisabledRecipeCategory(category)) return false;
-        return categoryFilter == null || catIdx === categoryFilter;
+        return true;
       }),
-    [refs, data.categories, categoryFilter, showAutomatedShaped],
+    [refs, data.categories, showAutomatedShaped],
   );
   const filteredRefs = useMemo(() => {
-    const expanded = matchingRefs.filter(([catIdx]) => {
+    const expanded = eligibleRefs.filter(([catIdx]) => {
       const category = data.categories[catIdx];
       return category ? !collapsedCategoryIds.has(category.id) : false;
     });
-    if (sortMode === 'source') return expanded;
     return [...expanded].sort(([aCat, aRecipe], [bCat, bRecipe]) => {
       const a = data.categories[aCat];
       const b = data.categories[bCat];
       if (!a || !b) return aCat - bCat || aRecipe - bRecipe;
       return compareRecipeCategories(a, b) || aRecipe - bRecipe;
     });
-  }, [matchingRefs, data.categories, collapsedCategoryIds, sortMode]);
+  }, [eligibleRefs, data.categories, collapsedCategoryIds]);
   const sectionGroups = useMemo(() => {
-    const visible = visibleCategoryGroups.filter(
-      group => categoryFilter == null || group.catIdx === categoryFilter,
+    return visibleCategoryGroups.filter(
+      group => !collapsedCategoryIds.has(group.category!.id),
     );
-    return sortMode === 'source'
-      ? [...visible].sort((a, b) => a.firstIndex - b.firstIndex)
-      : visible;
-  }, [visibleCategoryGroups, categoryFilter, sortMode]);
+  }, [visibleCategoryGroups, collapsedCategoryIds]);
   const refsToLoad = useMemo(
     () =>
       filteredRefs.slice(
@@ -454,10 +501,8 @@ function RefsList({
     setVisibleTarget(PAGE);
     setScanLimit(PAGE);
   }, [
-    categoryFilter,
     showAutomatedShaped,
     showFluidTransfers,
-    sortMode,
     collapsedCategoryIds,
     hiddenRecipeStages,
   ]);
@@ -496,9 +541,8 @@ function RefsList({
     console.warn('Item recipe filtering reached its bounded scan limit.', {
       scannedRecipeCount: MAX_DEFAULT_FILTER_SCAN,
       totalRecipeReferences: filteredRefs.length,
-      categoryFilter,
     });
-  }, [categoryFilter, filteredRefs.length, loadedScan, scanCapped]);
+  }, [filteredRefs.length, loadedScan, scanCapped]);
 
   // Retain resolved cards across pagination/filter changes, while the data layer keeps the
   // underlying parsed-shard cache bounded.
@@ -524,6 +568,15 @@ function RefsList({
     };
   }, [refsToLoad, recipesByRef, data]);
 
+  const showRecipeFilters =
+    informational ||
+    graphDirection === 'outputs' ||
+    collapsedCategoryGroups.length > 0 ||
+    automatedShapedCount > 0 ||
+    recipeStageCounts.length > 0 ||
+    showFluidTransfers ||
+    hiddenFluidTransferCount > 0;
+
   return (
     <View
       style={styles.recipeList}
@@ -537,7 +590,7 @@ function RefsList({
           current === measuredWidth ? current : measuredWidth,
         );
       }}>
-      <View style={styles.recipeFilters}>
+      {showRecipeFilters && <View style={styles.recipeFilters}>
         {!informational && graphDirection === 'outputs' && (
           <Text style={styles.usageTreeNotice}>
             Tap a usage to trace what {data.itemsByKey.get(itemKey)?.n ?? itemKey} can produce.
@@ -550,41 +603,48 @@ function RefsList({
               : 'Informational item associations are excluded from crafting graphs and material totals.'}
           </Text>
         )}
-        {categoryGroups.length > 1 && (
+        {collapsedCategoryGroups.length > 0 && (
           <>
-          <View style={styles.filterHeader}>
-            <Text style={styles.filterTitle}>
-              {informational ? 'Information type' : 'Crafting type'}
-            </Text>
-            <View style={styles.sortControls}>
-              <Text style={styles.sortLabel}>Sort</Text>
-              <FilterChip
-                label="Type"
-                active={sortMode === 'type'}
-                onPress={() => setSortMode('type')}
-              />
-              <FilterChip
-                label="Source order"
-                active={sortMode === 'source'}
-                onPress={() => setSortMode('source')}
-              />
+            <View style={styles.collapsedTypesHeader}>
+              <Text style={styles.filterTitle}>
+                {informational ? 'Information types' : 'Crafting types'}
+              </Text>
+              {collapsedCategoryGroups.length > INITIAL_VISIBLE_CATEGORY_TYPES && (
+                <TouchableOpacity
+                  {...signalTarget('item-detail.collapsed-types.show-more')}
+                  accessibilityRole="button"
+                  accessibilityState={{expanded: showAllCollapsedCategoryTypes}}
+                  accessibilityLabel={
+                    showAllCollapsedCategoryTypes
+                      ? 'Show fewer collapsed crafting types'
+                      : `Show ${undisplayedCollapsedCategoryCount} more collapsed crafting types`
+                  }
+                  hitSlop={{top: 7, right: 7, bottom: 7, left: 7}}
+                  onPress={() => setShowAllCollapsedCategoryTypes(show => !show)}
+                  style={styles.showMoreTypesButton}>
+                  <Text accessibilityElementsHidden style={styles.showMoreTypesChevron}>
+                    {disclosureChevron(showAllCollapsedCategoryTypes)}
+                  </Text>
+                </TouchableOpacity>
+              )}
             </View>
-          </View>
-          <View style={styles.filterChips}>
-            <FilterChip
-              label={`All (${visibleCategoryGroups.reduce((sum, group) => sum + group.count, 0)})`}
-              active={categoryFilter == null}
-              onPress={() => setCategoryFilter(null)}
-            />
-            {visibleCategoryGroups.map(group => (
-              <FilterChip
-                key={group.catIdx}
-                label={`${group.category!.title} (${group.count})`}
-                active={categoryFilter === group.catIdx}
-                onPress={() => setCategoryFilter(group.catIdx)}
-              />
-            ))}
-          </View>
+            <View style={styles.collapsedTypeChips}>
+              {displayedCollapsedCategoryGroups.map(group => (
+                <TouchableOpacity
+                  {...signalTarget('item-detail.recipe-category.expand-collapsed')}
+                  key={group.catIdx}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Show ${group.category!.title} recipes`}
+                  accessibilityState={{expanded: false}}
+                  onPress={() => toggleCategory(group.category!.id)}
+                  style={styles.collapsedTypeChip}>
+                  <VisibilityIcon visible={false} size={12} />
+                  <Text style={styles.collapsedTypeChipText}>
+                    {group.category!.title} ({group.count})
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
           </>
         )}
         {automatedShapedCount > 0 && (
@@ -598,10 +658,7 @@ function RefsList({
             <Switch
               accessibilityLabel="Show Automated Shaped Crafting recipes"
               value={showAutomatedShaped}
-              onValueChange={show => {
-                setShowAutomatedShaped(show);
-                if (!show) setCategoryFilter(null);
-              }}
+              onValueChange={setShowAutomatedShaped}
               trackColor={{false: theme.border, true: theme.accent}}
               thumbColor={theme.text}
             />
@@ -667,12 +724,10 @@ function RefsList({
             />
           </View>
         )}
-      </View>
-      {matchingRefs.length === 0 ? (
+      </View>}
+      {eligibleRefs.length === 0 ? (
         <Text style={styles.emptyText}>
-          {informational
-            ? 'No informational pages match this type.'
-            : 'No recipes match this crafting type.'}
+          {informational ? 'No informational pages are available.' : 'No recipe types are available.'}
         </Text>
       ) : null}
       {loadingVisiblePage ? (
@@ -691,35 +746,26 @@ function RefsList({
       ) : null}
       {scanCapped ? (
         <Text style={styles.loadingText}>
-          Filter scan stopped after {MAX_DEFAULT_FILTER_SCAN} candidates. Refine the crafting type
-          or enable container transfers to browse directly.
+          Filter scan stopped after {MAX_DEFAULT_FILTER_SCAN} candidates. Expand a collapsed
+          crafting type or enable container transfers to browse directly.
         </Text>
       ) : null}
       {sectionGroups.map(group => {
         const category = group.category!;
-        const collapsed = collapsedCategoryIds.has(category.id);
         const categoryRefs = shownByCategory.get(group.catIdx) ?? [];
         return (
           <View
             key={category.id}
-            style={[
-              styles.categorySection,
-              !collapsed && styles.categorySectionExpanded,
-            ]}>
+            style={[styles.categorySection, styles.categorySectionExpanded]}>
             <TouchableOpacity
               {...signalTarget('item-detail.recipe-category.toggle')}
               accessibilityRole="button"
-              accessibilityLabel={`${collapsed ? 'Expand' : 'Collapse'} ${category.title} recipes`}
-              accessibilityState={{expanded: !collapsed}}
-              style={[
-                styles.categoryHeader,
-                collapsed
-                  ? styles.categoryHeaderCollapsed
-                  : styles.categoryHeaderExpanded,
-              ]}
+              accessibilityLabel={`Collapse ${category.title} recipes`}
+              accessibilityState={{expanded: true}}
+              style={[styles.categoryHeader, styles.categoryHeaderExpanded]}
               onPress={() => toggleCategory(category.id)}>
               <View accessibilityElementsHidden style={styles.categoryVisibilityIcon}>
-                <VisibilityIcon visible={!collapsed} size={14} />
+                <VisibilityIcon visible size={14} />
               </View>
               <Text style={styles.categoryTitle} numberOfLines={1}>
                 {category.title}
@@ -728,7 +774,7 @@ function RefsList({
                 {group.count} {group.count === 1 ? 'recipe' : 'recipes'}
               </Text>
             </TouchableOpacity>
-            {!collapsed && categoryRefs.length > 0 ? (
+            {categoryRefs.length > 0 ? (
               <View style={styles.categoryRecipes}>
                 {categoryRefs.map(([catIdx, recipeIdx], recipePosition) => {
                   const recipe = recipesByRef.get(recipeRefKey([catIdx, recipeIdx]));
@@ -809,19 +855,6 @@ function RefsList({
   );
 }
 
-function FilterChip({label, active, onPress}: {label: string; active: boolean; onPress: () => void}) {
-  return (
-    <TouchableOpacity
-      {...signalTarget('item-detail.filter.change')}
-      accessibilityRole="button"
-      accessibilityState={{selected: active}}
-      onPress={onPress}
-      style={[styles.filterChip, active && styles.filterChipActive]}>
-      <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>{label}</Text>
-    </TouchableOpacity>
-  );
-}
-
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
@@ -829,6 +862,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: 16,
+  },
+  backdropNative: {
+    justifyContent: 'flex-end',
+    padding: 0,
   },
   card: {
     backgroundColor: theme.panel,
@@ -840,19 +877,49 @@ const styles = StyleSheet.create({
     maxHeight: '88%' as never,
     padding: 14,
   },
+  cardNative: {
+    maxWidth: '100%',
+    height: '92%',
+    maxHeight: '92%',
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    borderBottomWidth: 0,
+  },
   header: {flexDirection: 'row', alignItems: 'center'},
-  headerBtn: {padding: 6},
+  headerBtn: {minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center'},
   headerBtnText: {color: theme.textDim, fontSize: 14},
+  lookupActions: {flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4},
+  lookupSecondaryButton: {
+    minHeight: 40,
+    justifyContent: 'center',
+    borderColor: theme.border,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 14,
+  },
+  lookupSecondaryButtonText: {color: theme.text, fontSize: 13, fontWeight: '700'},
+  lookupCancelButton: {
+    minHeight: 40,
+    justifyContent: 'center',
+    backgroundColor: theme.panelAlt,
+    borderColor: theme.borderLight,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 18,
+  },
+  lookupCancelButtonText: {color: theme.text, fontSize: 13, fontWeight: '700'},
   titleRow: {flexDirection: 'row', alignItems: 'center', marginTop: 2},
   title: {color: theme.text, fontSize: 18, fontWeight: '700'},
   subtitle: {color: theme.textDim, fontSize: 12, marginTop: 2},
-  tabsRow: {flexDirection: 'row', marginTop: 12, gap: 8},
+  tabsRow: {flexDirection: 'row', flexWrap: 'wrap', marginTop: 12, gap: 8},
   sideTab: {
     borderColor: theme.border,
     borderWidth: 1,
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 6,
+    minHeight: 40,
+    justifyContent: 'center',
     backgroundColor: theme.panelAlt,
   },
   sideTabActive: {borderColor: theme.accent, backgroundColor: '#1c2b22'},
@@ -887,7 +954,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 7,
   },
-  categoryHeaderCollapsed: {borderColor: theme.border},
   categoryHeaderExpanded: {
     borderWidth: 0,
     borderBottomWidth: 1,
@@ -902,18 +968,13 @@ const styles = StyleSheet.create({
   categoryRecipeSeparated: {borderTopColor: theme.border, borderTopWidth: 1},
   informationNotice: {color: theme.textDim, fontSize: 12, lineHeight: 17},
   usageTreeNotice: {color: theme.accent, fontSize: 12, lineHeight: 17, fontWeight: '700'},
-  filterHeader: {
+  collapsedTypesHeader: {flexDirection: 'row', alignItems: 'center', gap: 2},
+  filterTitle: {color: theme.text, fontSize: 12, fontWeight: '700'},
+  collapsedTypeChips: {flexDirection: 'row', flexWrap: 'wrap', gap: 6},
+  collapsedTypeChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  filterTitle: {color: theme.text, fontSize: 12, fontWeight: '700'},
-  sortControls: {flexDirection: 'row', alignItems: 'center', gap: 5},
-  sortLabel: {color: theme.textDim, fontSize: 10, marginRight: 2},
-  filterChips: {flexDirection: 'row', flexWrap: 'wrap', gap: 6},
-  filterChip: {
+    gap: 5,
     borderColor: theme.border,
     borderWidth: 1,
     borderRadius: 7,
@@ -921,9 +982,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 5,
   },
-  filterChipActive: {borderColor: theme.accent, backgroundColor: '#1c2b22'},
-  filterChipText: {color: theme.textDim, fontSize: 10},
-  filterChipTextActive: {color: theme.accent, fontWeight: '700'},
+  collapsedTypeChipText: {color: theme.textDim, fontSize: 10},
+  showMoreTypesButton: {
+    width: 30,
+    height: 28,
+    borderRadius: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  showMoreTypesChevron: {
+    color: theme.accent,
+    fontSize: 20,
+    fontWeight: '700',
+    lineHeight: 20,
+  },
   disabledTypeRow: {
     flexDirection: 'row',
     alignItems: 'center',

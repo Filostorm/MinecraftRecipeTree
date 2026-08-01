@@ -4,7 +4,7 @@ import type {RecipeRef} from '../types';
 import type {GraphDirection} from './direction';
 import type {ItemTreeNode, SourceTreeNode} from './model';
 
-const GRAPH_SESSION_VERSION = 1;
+const GRAPH_SESSION_VERSION = 2;
 const MAX_ITEM_KEY_LENGTH = 512;
 const MAX_SOURCE_ID_LENGTH = 512;
 const MAX_TREE_DEPTH = 64;
@@ -31,6 +31,11 @@ export interface GraphSession {
   version: typeof GRAPH_SESSION_VERSION;
   rootKey: string;
   direction: GraphDirection;
+  productionPlan?: {
+    amount: number;
+    windowSeconds: number;
+    cycleSeconds?: number;
+  };
   selections: StoredGraphSelection[];
 }
 
@@ -166,9 +171,18 @@ function requireSelection(value: unknown, index: number): StoredGraphSelection {
 
 export function parseGraphSession(raw: string): GraphSession {
   const parsed = JSON.parse(raw) as unknown;
+  const expectedKeys = [
+    'direction',
+    ...(isRecord(parsed) && parsed.productionPlan !== undefined
+      ? ['productionPlan']
+      : []),
+    'rootKey',
+    'selections',
+    'version',
+  ];
   if (
     !isRecord(parsed) ||
-    !hasExactKeys(parsed, ['direction', 'rootKey', 'selections', 'version']) ||
+    !hasExactKeys(parsed, expectedKeys) ||
     parsed.version !== GRAPH_SESSION_VERSION ||
     !isBoundedString(parsed.rootKey, MAX_ITEM_KEY_LENGTH) ||
     (parsed.direction !== 'inputs' && parsed.direction !== 'outputs') ||
@@ -176,6 +190,41 @@ export function parseGraphSession(raw: string): GraphSession {
     parsed.selections.length > MAX_GRAPH_SESSION_SELECTIONS
   ) {
     throw new Error('Saved graph does not satisfy the versioned storage contract.');
+  }
+  let productionPlan: GraphSession['productionPlan'];
+  if (parsed.productionPlan !== undefined) {
+    const value = parsed.productionPlan;
+    const planKeys = [
+      'amount',
+      ...(isRecord(value) && value.cycleSeconds !== undefined ? ['cycleSeconds'] : []),
+      'windowSeconds',
+    ];
+    if (
+      !isRecord(value) ||
+      !hasExactKeys(value, planKeys) ||
+      typeof value.amount !== 'number' ||
+      !Number.isFinite(value.amount) ||
+      value.amount <= 0 ||
+      value.amount > 1_000_000_000_000 ||
+      typeof value.windowSeconds !== 'number' ||
+      !Number.isFinite(value.windowSeconds) ||
+      value.windowSeconds <= 0 ||
+      value.windowSeconds > 31_536_000 ||
+      (value.cycleSeconds !== undefined &&
+        (typeof value.cycleSeconds !== 'number' ||
+          !Number.isFinite(value.cycleSeconds) ||
+          value.cycleSeconds <= 0 ||
+          value.cycleSeconds > 31_536_000))
+    ) {
+      throw new Error('Saved graph has an invalid production plan.');
+    }
+    productionPlan = {
+      amount: value.amount,
+      windowSeconds: value.windowSeconds,
+      ...(value.cycleSeconds === undefined
+        ? {}
+        : {cycleSeconds: value.cycleSeconds}),
+    };
   }
   const selections = parsed.selections.map(requireSelection);
   const expandedPaths = new Set<string>();
@@ -206,6 +255,7 @@ export function parseGraphSession(raw: string): GraphSession {
     version: GRAPH_SESSION_VERSION,
     rootKey: parsed.rootKey,
     direction: parsed.direction,
+    ...(productionPlan ? {productionPlan} : {}),
     selections,
   };
 }
@@ -289,6 +339,7 @@ export function serializeGraphSession(
     version: GRAPH_SESSION_VERSION,
     rootKey: root.key,
     direction,
+    ...(root.productionPlan ? {productionPlan: {...root.productionPlan}} : {}),
     selections,
   };
 }

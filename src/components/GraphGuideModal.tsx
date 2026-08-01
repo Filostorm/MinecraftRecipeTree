@@ -1,6 +1,8 @@
 import React from 'react';
 import {
+  Linking,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -9,7 +11,10 @@ import {
   View,
 } from 'react-native';
 import {theme} from '../theme';
-import type {FeedbackKind} from './FeedbackModal';
+import {
+  buildGitHubIssueUrl,
+  type GitHubIssueKind,
+} from './githubIssues';
 
 const controls = [
   {
@@ -19,6 +24,11 @@ const controls = [
   {
     title: 'Tap an expanded recipe',
     description: 'Collapse that branch back into a compact item node.',
+  },
+  {
+    title: 'Tap the purple source item',
+    description:
+      'Set the amount you want and a deadline, then see the suggested number of parallel machines.',
   },
   {
     title: 'Swap recipe  ⇄',
@@ -87,12 +97,29 @@ const visualKey: ReadonlyArray<{
 export function GraphGuideModal({
   visible,
   onClose,
-  onOpenFeedback,
+  packSlug,
+  packName,
 }: {
   visible: boolean;
   onClose: () => void;
-  onOpenFeedback: (kind: FeedbackKind) => void;
+  packSlug: string;
+  packName: string;
 }) {
+  const openGitHubIssue = (kind: GitHubIssueKind) => {
+    const page =
+      Platform.OS === 'web' && typeof window !== 'undefined'
+        ? `${window.location.pathname}${window.location.search}`
+        : '';
+    const browser =
+      Platform.OS === 'web' && typeof navigator !== 'undefined'
+        ? navigator.userAgent
+        : Platform.OS;
+    const url = buildGitHubIssueUrl({kind, packSlug, packName, page, browser});
+    void Linking.openURL(url).catch(error => {
+      console.error(`Could not open the GitHub ${kind} issue form.`, {url, error});
+    });
+  };
+
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose}>
@@ -147,25 +174,28 @@ export function GraphGuideModal({
               ))}
             </View>
 
-            <Text style={[styles.sectionTitle, styles.feedbackTitle]}>Feedback</Text>
+            <Text style={[styles.sectionTitle, styles.feedbackTitle]}>GitHub Issues</Text>
             <Text style={styles.feedbackIntro}>
-              Report a problem or suggest an improvement. Submissions include the current modpack,
-              page, and browser details.
+              Report a problem or suggest an improvement in the project repository. GitHub will
+              open with the current modpack, page, and browser details prefilled.
             </Text>
             <View style={styles.feedbackChoiceRow}>
               <TouchableOpacity
                 style={styles.feedbackChoice}
-                onPress={() => onOpenFeedback('bug')}
-                accessibilityRole="button">
+                onPress={() => openGitHubIssue('bug')}
+                accessibilityRole="link"
+                accessibilityHint="Opens a prefilled bug report on GitHub">
                 <Text style={styles.feedbackChoiceText}>Report a bug</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.feedbackChoice}
-                onPress={() => onOpenFeedback('feature')}
-                accessibilityRole="button">
+                onPress={() => openGitHubIssue('feature')}
+                accessibilityRole="link"
+                accessibilityHint="Opens a prefilled feature request on GitHub">
                 <Text style={styles.feedbackChoiceText}>Request a feature</Text>
               </TouchableOpacity>
             </View>
+            <Text style={styles.githubRequirement}>A GitHub account is required to submit.</Text>
           </ScrollView>
         </Pressable>
       </Pressable>
@@ -272,4 +302,5 @@ const styles = StyleSheet.create({
     backgroundColor: theme.panelAlt,
   },
   feedbackChoiceText: {color: theme.accent, fontSize: 12, fontWeight: '700'},
+  githubRequirement: {color: theme.textDim, fontSize: 10, lineHeight: 14, marginTop: 7},
 });

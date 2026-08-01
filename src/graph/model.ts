@@ -1,6 +1,7 @@
 import type {DropStat, Mob, Recipe, RecipeRef} from '../types';
 import type {IngredientSelections} from '../data/ingredientAlternativeSelection';
 import type {GraphDirection} from './direction';
+import type {ProductionPlan} from './machineParallels';
 
 /**
  * The flowchart is a tree rooted at the item being crafted, growing downward.
@@ -57,6 +58,8 @@ export interface ItemTreeNode {
   /** Total amount required by the parent recipe (summed over merged slots) */
   /** null means the selected recipe did not export a usable quantity. */
   amount?: number | null;
+  /** User planning target. Currently applied to the graph root. */
+  productionPlan?: ProductionPlan;
   /** Number of interchangeable variants in the parent slot (tags) */
   variantCount?: number;
   /** Resolved members of a logical ingredient tag. */

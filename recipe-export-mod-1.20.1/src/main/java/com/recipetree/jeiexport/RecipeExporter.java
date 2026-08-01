@@ -88,11 +88,9 @@ final class RecipeExporter implements ExportJob.PhaseRunner {
      * ("Item Tags", "Block Tags", ...). Skipped by default; re-enable with
      * -Djeiexport.includeMetaCategories=true.
      */
-    private static boolean isMetaCategory(ResourceLocation uid) {
-        if (!"jei".equals(uid.getNamespace())) {
-            return false;
-        }
-        return uid.getPath().startsWith("tag_recipes") || "information".equals(uid.getPath());
+    static boolean isMetaCategory(ResourceLocation uid) {
+        return uid.getPath().startsWith("tag_recipes")
+                || ("jei".equals(uid.getNamespace()) && "information".equals(uid.getPath()));
     }
 
     @Override
@@ -207,6 +205,10 @@ final class RecipeExporter implements ExportJob.PhaseRunner {
             ResourceLocation registryName = registryName(category, recipe);
             if (registryName != null) {
                 rj.addProperty("id", registryName.toString());
+            }
+            var durationTicks = RecipeDuration.ticks(recipe);
+            if (durationTicks.isPresent()) {
+                rj.addProperty("durationTicks", durationTicks.getAsLong());
             }
             rj.addProperty("img", imageName);
             rj.addProperty("w", w);

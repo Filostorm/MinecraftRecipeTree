@@ -1,6 +1,7 @@
 import React, {useMemo, useState} from 'react';
 import {
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -9,11 +10,16 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import {useSafeAreaInsets} from '../ui/safeArea';
 import type {SlotSummary} from '../data/slotSummary';
 import {signalTarget} from '../analytics/signal';
 import {theme} from '../theme';
 import {uniformPickerRecipePreviewSize} from '../ui/interfaceZoom';
 import type {GraphDirection} from '../graph/direction';
+import {
+  MINECRAFT_TICKS_PER_SECOND,
+  parallelMachinesForOneCycle,
+} from '../graph/machineParallels';
 import {pixelated} from './ItemIcon';
 import {ItemChip} from './RecipeCard';
 import {RecipePreviewImage} from './RecipePreviewImage';
@@ -32,6 +38,18 @@ export interface PickerOption {
   imageH?: number;
   inputs?: SlotSummary[];
   outputs?: SlotSummary[];
+  /** Exact JEI/export duration when known. */
+  durationTicks?: number;
+  /** Duration used for planning, including safe vanilla fallbacks. */
+  cycleSeconds?: number;
+  outputPerCycle?: number;
+  machineKey?: string;
+  machineLabel?: string;
+}
+
+export interface PickerProductionPlan {
+  amount: number;
+  windowSeconds: number;
 }
 
 export interface PickerGroupProgress {
@@ -61,6 +79,8 @@ export function PickerModal({
   groupProgress,
   onLoadGroup,
   onSelectAlternative,
+  productionPlan,
+  onOpenMachine,
   onSelect,
   onClose,
   interfaceZoom = 1,
@@ -88,11 +108,14 @@ export function PickerModal({
     selectionKey: string,
     selectedKey: string,
   ) => void;
+  productionPlan?: PickerProductionPlan;
+  onOpenMachine?: (itemKey: string) => void;
   onSelect: (index: number) => void;
   onClose: () => void;
   /** The web UI scale applied to recipe imagery without shrinking the modal viewport. */
   interfaceZoom?: number;
 }) {
+  const safeAreaInsets = useSafeAreaInsets();
   const [alternativePicker, setAlternativePicker] = useState<{
     optionIndex: number;
     slot: SlotSummary;
@@ -113,9 +136,21 @@ export function PickerModal({
     immediateGroups.reduce((sum, group) => sum + group.entries.length, 0);
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.card} onPress={() => {}}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType={Platform.OS === 'web' ? 'fade' : 'slide'}
+      onRequestClose={onClose}>
+      <Pressable
+        style={[styles.backdrop, Platform.OS !== 'web' && styles.backdropNative]}
+        onPress={onClose}>
+        <Pressable
+          style={[
+            styles.card,
+            Platform.OS !== 'web' && styles.cardNative,
+            Platform.OS !== 'web' && {paddingBottom: Math.max(14, safeAreaInsets.bottom)},
+          ]}
+          onPress={() => {}}>
           <Text style={styles.title}>{title}</Text>
           {direction && onDirectionChange ? (
             <View
@@ -303,6 +338,14 @@ export function PickerModal({
                             interfaceZoom,
                           )
                         : null;
+                      const cycleSeconds = opt.cycleSeconds;
+                      const machineCount =
+                        productionPlan && opt.outputPerCycle
+                          ? parallelMachinesForOneCycle(
+                              productionPlan.amount,
+                              opt.outputPerCycle,
+                            )
+                          : null;
                       return (
                         <TouchableOpacity
                           {...signalTarget('graph.source-picker.source.select')}
@@ -311,6 +354,42 @@ export function PickerModal({
                           onPress={() => onSelect(i)}>
                           <Text style={styles.optionLabel}>{opt.label}</Text>
                           {opt.sublabel ? <Text style={styles.optionSub}>{opt.sublabel}</Text> : null}
+                          {(opt.durationTicks ||
+                            opt.machineLabel ||
+                            (productionPlan && opt.outputPerCycle !== undefined)) && (
+                            <View style={styles.recipeFacts}>
+                              {opt.durationTicks ? (
+                                <View style={styles.recipeFactChip}>
+                                  <Text style={styles.recipeFactText}>
+                                    {opt.durationTicks} ticks · {(opt.durationTicks / MINECRAFT_TICKS_PER_SECOND).toLocaleString()} sec
+                                  </Text>
+                                </View>
+                              ) : cycleSeconds ? (
+                                <View style={styles.recipeFactChip}>
+                                  <Text style={styles.recipeFactText}>
+                                    {(cycleSeconds * MINECRAFT_TICKS_PER_SECOND).toLocaleString()} ticks · {cycleSeconds.toLocaleString()} sec
+                                  </Text>
+                                </View>
+                              ) : null}
+                              {productionPlan && opt.outputPerCycle !== undefined ? (
+                                <View
+                                  style={[
+                                    styles.parallelChip,
+                                    machineCount !== null && styles.parallelChipReady,
+                                  ]}>
+                                  <Text
+                                    style={[
+                                      styles.parallelText,
+                                      machineCount !== null && styles.parallelTextReady,
+                                    ]}>
+                                    {machineCount
+                                      ? `${machineCount} parallel ${machineCount === 1 ? 'machine' : 'machines'}${cycleSeconds ? ` · ${cycleSeconds.toLocaleString()} sec batch` : ' · time unavailable'}`
+                                      : 'Timing unavailable in this export'}
+                                  </Text>
+                                </View>
+                              ) : null}
+                            </View>
+                          )}
                           {opt.imageUri && imageSize ? (
                             <RecipePreviewImage
                               uri={opt.imageUri}
@@ -374,6 +453,27 @@ export function PickerModal({
                                   />
                                 ))}
                               </View>
+                            </View>
+                          ) : null}
+                          {opt.machineKey && opt.machineLabel && onOpenMachine ? (
+                            <View style={styles.machineRow}>
+                              <View style={styles.machineCopy}>
+                                <Text style={styles.machineLabel}>CRAFTING MACHINE</Text>
+                                <Text style={styles.machineName} numberOfLines={1}>
+                                  {opt.machineLabel}
+                                </Text>
+                              </View>
+                              <TouchableOpacity
+                                {...signalTarget('graph.source-picker.machine.open')}
+                                accessibilityRole="button"
+                                accessibilityLabel={`View recipe for ${opt.machineLabel}`}
+                                style={styles.machineButton}
+                                onPress={event => {
+                                  event.stopPropagation();
+                                  onOpenMachine(opt.machineKey!);
+                                }}>
+                                <Text style={styles.machineButtonText}>View machine recipe</Text>
+                              </TouchableOpacity>
                             </View>
                           ) : null}
                         </TouchableOpacity>
@@ -463,6 +563,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 16,
   },
+  backdropNative: {
+    justifyContent: 'flex-end',
+    padding: 0,
+  },
   card: {
     backgroundColor: theme.panel,
     borderColor: theme.border,
@@ -474,6 +578,14 @@ const styles = StyleSheet.create({
     maxHeight: '92%' as never,
     minHeight: 0,
     padding: 14,
+  },
+  cardNative: {
+    maxWidth: '100%',
+    height: '94%',
+    maxHeight: '94%',
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    borderBottomWidth: 0,
   },
   title: {color: theme.text, fontSize: 15, fontWeight: '700', marginBottom: 10},
   directionTabs: {
@@ -638,6 +750,27 @@ const styles = StyleSheet.create({
   },
   optionLabel: {color: theme.text, fontSize: 13, fontWeight: '600'},
   optionSub: {color: theme.textDim, fontSize: 11, marginTop: 2},
+  recipeFacts: {flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 7},
+  recipeFactChip: {
+    borderRadius: 999,
+    backgroundColor: theme.panelAlt,
+    borderColor: theme.border,
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  recipeFactText: {color: theme.text, fontSize: 9, fontWeight: '700'},
+  parallelChip: {
+    borderRadius: 999,
+    backgroundColor: theme.panelAlt,
+    borderColor: theme.border,
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  parallelChipReady: {borderColor: theme.accent, backgroundColor: '#1c2b22'},
+  parallelText: {color: theme.textDim, fontSize: 9, fontWeight: '700'},
+  parallelTextReady: {color: theme.accent},
   optionImage: {marginTop: 8, borderRadius: 4},
   ingredientGroup: {marginTop: 9, gap: 5},
   ingredientLabel: {
@@ -647,6 +780,27 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   ingredientChips: {flexDirection: 'row', flexWrap: 'wrap', gap: 5},
+  machineRow: {
+    marginTop: 10,
+    paddingTop: 9,
+    borderTopColor: theme.border,
+    borderTopWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  machineCopy: {flex: 1, minWidth: 0},
+  machineLabel: {color: theme.textDim, fontSize: 8, fontWeight: '800'},
+  machineName: {color: theme.text, fontSize: 10, fontWeight: '700', marginTop: 2},
+  machineButton: {
+    borderColor: theme.accent,
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+    backgroundColor: '#1c2b22',
+  },
+  machineButtonText: {color: theme.accent, fontSize: 9, fontWeight: '800'},
   alternativeBackdrop: {
     position: 'absolute',
     top: 0,

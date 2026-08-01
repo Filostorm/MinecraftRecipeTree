@@ -4,6 +4,8 @@ import {
   COMPACT_LABEL_WIDTH,
   COMPACT_ITEM_SIZE,
   COMPACT_ROOT_LABEL_HEIGHT,
+  ROOT_ATTACHED_ACTIONS_HEIGHT,
+  ROOT_ATTACHED_ACTIONS_WIDTH,
   sourceNodeSize,
 } from './layout.ts';
 import type {ItemTreeNode} from './model.ts';
@@ -274,6 +276,7 @@ function flattenRadialTree(
   compact: boolean,
   isTerminal: (item: ItemTreeNode) => boolean,
   showLabels: boolean,
+  showRootActions: boolean,
 ): RadialUnit[] {
   const rootUnit = makeRadialUnit(root, 0, null, false);
   if (compact) {
@@ -285,6 +288,16 @@ function flattenRadialTree(
     rootUnit.collisionH = showLabels
       ? RADIAL_ROOT_SIZE + COMPACT_ROOT_LABEL_HEIGHT
       : RADIAL_ROOT_SIZE;
+    if (showRootActions) {
+      rootUnit.collisionW = Math.max(
+        rootUnit.collisionW,
+        ROOT_ATTACHED_ACTIONS_WIDTH,
+      );
+      rootUnit.collisionH = Math.max(
+        rootUnit.collisionH,
+        RADIAL_ROOT_SIZE + ROOT_ATTACHED_ACTIONS_HEIGHT,
+      );
+    }
     rootUnit.collisionDiameter = Math.max(rootUnit.collisionW, rootUnit.collisionH);
   } else if (!root.source) {
     rootUnit.visualW = RADIAL_ROOT_SIZE;
@@ -297,6 +310,9 @@ function flattenRadialTree(
       : RADIAL_ROOT_SIZE;
     rootUnit.collisionDiameter = Math.max(rootUnit.collisionW, rootUnit.collisionH);
   } else {
+    const rootSourceSize = sourceNodeSize(root.source, showRootActions);
+    rootUnit.visualW = rootSourceSize.w;
+    rootUnit.visualH = rootSourceSize.h;
     rootUnit.visualW += RADIAL_EXPANDED_ROOT_HORIZONTAL_GROWTH;
     rootUnit.visualH += RADIAL_EXPANDED_ROOT_VERTICAL_GROWTH;
     rootUnit.collisionW = rootUnit.visualW;
@@ -642,8 +658,15 @@ export function layoutRadialTree(
   compact = false,
   isTerminal: (item: ItemTreeNode) => boolean = () => false,
   showLabels = false,
+  showRootActions = false,
 ): GraphLayout {
-  const units = flattenRadialTree(root, compact, isTerminal, showLabels);
+  const units = flattenRadialTree(
+    root,
+    compact,
+    isTerminal,
+    showLabels,
+    showRootActions,
+  );
   calculateAngularSectors(units);
 
   const levels: number[][] = [];

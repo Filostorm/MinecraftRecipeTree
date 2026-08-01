@@ -1,20 +1,20 @@
 import {StatusBar} from 'expo-status-bar';
-import React, {Suspense, useEffect, useState} from 'react';
+import React, {Suspense, useEffect, useMemo, useRef, useState} from 'react';
 import {
   ActivityIndicator,
+  Animated,
   Platform,
-  SafeAreaView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
   useWindowDimensions,
 } from 'react-native';
+import {SafeAreaProvider, SafeAreaView, initialWindowMetrics} from './src/ui/safeArea';
 import {ItemDetailModal} from './src/components/ItemDetailModal';
 import {InterfaceZoomSlider} from './src/components/InterfaceZoomSlider';
 import {DatasetPicker} from './src/components/DatasetPicker';
 import {DatasetSwitcher} from './src/components/DatasetSwitcher';
-import {FeedbackModal, type FeedbackKind} from './src/components/FeedbackModal';
 import {GraphGuideModal} from './src/components/GraphGuideModal';
 import {ItemsScreen} from './src/components/ItemsScreen';
 import {MobsScreen} from './src/components/MobsScreen';
@@ -34,6 +34,8 @@ import {datasetMountKey} from './src/data/datasetCatalog';
 import {theme} from './src/theme';
 import type {Manifest} from './src/types';
 import {Tab, UiProvider, useUi} from './src/ui/UiContext';
+import {lightImpactFeedback, selectionFeedback} from './src/ui/haptics';
+import {disclosureChevron} from './src/ui/disclosureChevron';
 import {
   INTERFACE_ZOOM_STEP,
   MAXIMUM_INTERFACE_ZOOM,
@@ -51,12 +53,16 @@ const LazyGraphScreen = React.lazy(async () => {
 
 export default function App() {
   return (
-    <DatasetCatalogProvider>
-      <SafeAreaView style={styles.app}>
+    <SafeAreaProvider initialMetrics={initialWindowMetrics}>
+      <SafeAreaView
+        style={styles.app}
+        edges={Platform.OS === 'web' ? ['top', 'right', 'bottom', 'left'] : ['top', 'right', 'left']}>
         <StatusBar style="light" />
-        <DatasetRoot />
+        <DatasetCatalogProvider>
+          <DatasetRoot />
+        </DatasetCatalogProvider>
       </SafeAreaView>
-    </DatasetCatalogProvider>
+    </SafeAreaProvider>
   );
 }
 
@@ -71,6 +77,7 @@ function DatasetRoot() {
     details?: React.ReactNode,
     leadingAction?: React.ReactNode,
     fullWidthControls?: React.ReactNode,
+    trailingAction?: React.ReactNode,
   ) => (
     <>
       <DatasetSwitcher
@@ -80,6 +87,7 @@ function DatasetRoot() {
         loadedManifest={loadedManifest}
         onOpenPicker={() => setShowDatasetPicker(true)}
         leadingAction={leadingAction}
+        trailingAction={trailingAction}
         fullWidthControls={fullWidthControls}
         details={details}
       />
@@ -156,6 +164,7 @@ function LoadedDatasetLayout({
     details?: React.ReactNode,
     leadingAction?: React.ReactNode,
     fullWidthControls?: React.ReactNode,
+    trailingAction?: React.ReactNode,
   ): React.ReactNode;
 }) {
   return (
@@ -178,6 +187,7 @@ function Root({
     details?: React.ReactNode,
     leadingAction?: React.ReactNode,
     fullWidthControls?: React.ReactNode,
+    trailingAction?: React.ReactNode,
   ): React.ReactNode;
 }) {
   const state = useLoadState();
@@ -244,6 +254,7 @@ function Shell({
     details?: React.ReactNode,
     leadingAction?: React.ReactNode,
     fullWidthControls?: React.ReactNode,
+    trailingAction?: React.ReactNode,
   ): React.ReactNode;
 }) {
   const data = useData();
@@ -255,12 +266,10 @@ function Shell({
   const [showRecipeHistory, setShowRecipeHistory] = useState(false);
   const [showRecipeStages, setShowRecipeStages] = useState(false);
   const [showGraphGuide, setShowGraphGuide] = useState(false);
-  const [feedbackKind, setFeedbackKind] = useState<FeedbackKind | null>(null);
+  const [showGraphControls, setShowGraphControls] = useState(false);
   const [showDatasetDetails, setShowDatasetDetails] = useState(false);
   const [interfaceZoom, setInterfaceZoom] = useState(1);
-  const shellSurface = feedbackKind
-    ? `feedback/${feedbackKind}`
-    : showRecipeStages
+  const shellSurface = showRecipeStages
       ? 'recipe-stages'
       : showGraphGuide
         ? 'graph-guide'
@@ -269,7 +278,7 @@ function Shell({
           : tab;
   useSignalSurface(
     shellSurface,
-    feedbackKind || showRecipeStages || showGraphGuide || showRecipeHistory
+    showRecipeStages || showGraphGuide || showRecipeHistory
       ? 'modal'
       : 'screen',
   );
@@ -305,21 +314,25 @@ function Shell({
           zoom: interfaceZoom,
         } as unknown as object)
       : null;
-  const headerTabs = (
-    <View style={styles.headerActionRow}>
-      <TabBtn tab="items" label="Items" />
-      <TabBtn tab="graph" label="Graph" />
-      {data.capabilities.mobs && <TabBtn tab="mobs" label="Mobs" />}
-    </View>
-  );
+  const headerTabs = Platform.OS === 'web' ? (
+      <View style={styles.headerActionRow}>
+        <TabBtn tab="items" label="Items" />
+        <TabBtn tab="graph" label="Graph" />
+        {data.capabilities.mobs && <TabBtn tab="mobs" label="Mobs" />}
+      </View>
+    ) : null;
   const datasetDetailsButton = (
     <TouchableOpacity
       {...signalTarget('header.dataset-details')}
       style={[
         styles.headerDetailBtn,
+        Platform.OS !== 'web' && styles.nativeHeaderDetailBtn,
         showDatasetDetails && styles.headerDetailBtnActive,
       ]}
-      onPress={() => setShowDatasetDetails(value => !value)}
+      onPress={() => {
+        lightImpactFeedback();
+        setShowDatasetDetails(value => !value);
+      }}
       accessibilityRole="button"
       accessibilityState={{expanded: showDatasetDetails}}
       accessibilityLabel="Dataset details">
@@ -328,7 +341,7 @@ function Shell({
           styles.headerDetailBtnText,
           showDatasetDetails && styles.headerDetailBtnTextActive,
         ]}>
-        ⓘ Details
+        {Platform.OS === 'web' ? 'ⓘ Details' : 'ⓘ  Dataset details'}
       </Text>
     </TouchableOpacity>
   );
@@ -383,14 +396,30 @@ function Shell({
     </View>
   ) : null;
   const headerActions = (
-    <View style={styles.headerUtilityRow}>
+    <View
+      style={[
+        styles.headerUtilityRow,
+        Platform.OS !== 'web' && styles.nativeHeaderUtilityRow,
+      ]}>
       <TouchableOpacity
         {...signalTarget('header.recipe-history')}
-        style={styles.headerUtilityButton}
-        onPress={() => setShowRecipeHistory(true)}
+        style={[
+          styles.headerUtilityButton,
+          Platform.OS !== 'web' && styles.nativeHeaderUtilityButton,
+        ]}
+        onPress={() => {
+          lightImpactFeedback();
+          setShowRecipeHistory(true);
+        }}
         accessibilityRole="button"
         accessibilityLabel={`Open recipe history for ${data.descriptor.displayName}`}>
-        <Text style={styles.historyHeaderIcon}>◷</Text>
+        <Text
+          style={[
+            styles.historyHeaderIcon,
+            Platform.OS !== 'web' && styles.nativeHeaderMenuText,
+          ]}>
+          {Platform.OS === 'web' ? '◷' : '◷  Recipe history'}
+        </Text>
       </TouchableOpacity>
       {recipeStages.catalog.stages.length > 0 && (
         <TouchableOpacity
@@ -398,9 +427,13 @@ function Shell({
           style={[
             styles.headerUtilityButton,
             styles.recipeStagesHeaderButton,
+            Platform.OS !== 'web' && styles.nativeHeaderUtilityButton,
             showRecipeStages && styles.headerUtilityButtonActive,
           ]}
-          onPress={() => setShowRecipeStages(true)}
+          onPress={() => {
+            lightImpactFeedback();
+            setShowRecipeStages(true);
+          }}
           accessibilityRole="button"
           accessibilityLabel={`Open recipe stage controls, ${recipeStages.catalog.stages.length} stages`}>
           <Text
@@ -408,7 +441,7 @@ function Shell({
               styles.recipeStagesHeaderText,
               showRecipeStages && styles.recipeStagesHeaderTextActive,
             ]}>
-            ⚑ Stages
+            {Platform.OS === 'web' ? '⚑ Stages' : '⚑  Recipe stages'}
           </Text>
         </TouchableOpacity>
       )}
@@ -416,21 +449,52 @@ function Shell({
         {...signalTarget('header.graph-guide')}
         style={[
           styles.headerUtilityButton,
+          Platform.OS !== 'web' && styles.nativeHeaderUtilityButton,
           showGraphGuide && styles.headerUtilityButtonActive,
         ]}
-        onPress={() => setShowGraphGuide(true)}
+        onPress={() => {
+          lightImpactFeedback();
+          setShowGraphGuide(true);
+        }}
         accessibilityRole="button"
         accessibilityLabel="Open graph guide">
         <Text
           style={[
             styles.guideHeaderIcon,
+            Platform.OS !== 'web' && styles.nativeHeaderMenuText,
             showGraphGuide && styles.guideHeaderIconActive,
           ]}>
-          ?
+          {Platform.OS === 'web' ? '?' : '?  Graph guide'}
         </Text>
       </TouchableOpacity>
     </View>
   );
+  const graphControlsHeaderAction =
+    compactHeader && tab === 'graph' && data.indexStatus === 'ready' ? (
+      <TouchableOpacity
+        {...signalTarget('graph.control.menu')}
+        accessibilityRole="button"
+        accessibilityLabel={
+          showGraphControls ? 'Collapse graph controls' : 'Expand graph controls'
+        }
+        accessibilityState={{expanded: showGraphControls}}
+        style={[
+          styles.graphControlsHeaderButton,
+          showGraphControls && styles.headerUtilityButtonActive,
+        ]}
+        onPress={() => {
+          lightImpactFeedback();
+          setShowGraphControls(value => !value);
+        }}>
+        <Text
+          style={[
+            styles.graphControlsHeaderButtonText,
+            showGraphControls && styles.graphControlsHeaderButtonTextActive,
+          ]}>
+          {disclosureChevron(showGraphControls)}
+        </Text>
+      </TouchableOpacity>
+    ) : null;
   return (
     <View style={styles.shell}>
       {renderControls(
@@ -438,14 +502,40 @@ function Shell({
         headerDetails,
         headerActions,
         fullWidthHeaderControls,
+        graphControlsHeaderAction,
       )}
       <View style={styles.workspaceViewport}>
         <View style={styles.workspace}>
           {/* All tabs stay mounted so graph expansion state survives tab switches. */}
-          <View style={[styles.body, tab !== 'items' && styles.hidden]}>
+          <View
+            style={[
+              styles.body,
+              Platform.OS !== 'web' && styles.nativeWorkspacePane,
+              Platform.OS !== 'web' && tab === 'items' && styles.nativeWorkspacePaneActive,
+              Platform.OS !== 'web' && tab !== 'items' && styles.nativeWorkspacePaneInactive,
+              Platform.OS === 'web' && tab !== 'items' && styles.hidden,
+            ]}
+            pointerEvents={Platform.OS !== 'web' && tab !== 'items' ? 'none' : 'auto'}
+            accessibilityElementsHidden={Platform.OS !== 'web' && tab !== 'items'}
+            importantForAccessibility={
+              Platform.OS !== 'web' && tab !== 'items' ? 'no-hide-descendants' : 'auto'
+            }>
             <ItemsScreen interfaceZoom={interfaceZoom} />
           </View>
-          <View style={[styles.body, scaledWorkspaceStyle, tab !== 'graph' && styles.hidden]}>
+          <View
+            style={[
+              styles.body,
+              scaledWorkspaceStyle,
+              Platform.OS !== 'web' && styles.nativeWorkspacePane,
+              Platform.OS !== 'web' && tab === 'graph' && styles.nativeWorkspacePaneActive,
+              Platform.OS !== 'web' && tab !== 'graph' && styles.nativeWorkspacePaneInactive,
+              Platform.OS === 'web' && tab !== 'graph' && styles.hidden,
+            ]}
+            pointerEvents={Platform.OS !== 'web' && tab !== 'graph' ? 'none' : 'auto'}
+            accessibilityElementsHidden={Platform.OS !== 'web' && tab !== 'graph'}
+            importantForAccessibility={
+              Platform.OS !== 'web' && tab !== 'graph' ? 'no-hide-descendants' : 'auto'
+            }>
             {data.indexStatus === 'ready' ? (
               <Suspense
                 fallback={
@@ -454,7 +544,14 @@ function Shell({
                     <Text style={styles.loadingText}>loading graph workspace…</Text>
                   </View>
                 }>
-                <LazyGraphScreen interfaceZoom={interfaceZoom} />
+                <LazyGraphScreen
+                  interfaceZoom={interfaceZoom}
+                  showGraphControls={showGraphControls}
+                  onToggleGraphControls={() =>
+                    setShowGraphControls(value => !value)
+                  }
+                  controlsToggleInHeader={compactHeader}
+                />
               </Suspense>
             ) : (
               <View style={styles.center}>
@@ -480,12 +577,28 @@ function Shell({
             )}
           </View>
           {data.capabilities.mobs && (
-            <View style={[styles.body, scaledWorkspaceStyle, tab !== 'mobs' && styles.hidden]}>
+            <View
+              style={[
+                styles.body,
+                scaledWorkspaceStyle,
+                Platform.OS !== 'web' && styles.nativeWorkspacePane,
+                Platform.OS !== 'web' && tab === 'mobs' && styles.nativeWorkspacePaneActive,
+                Platform.OS !== 'web' && tab !== 'mobs' && styles.nativeWorkspacePaneInactive,
+                Platform.OS === 'web' && tab !== 'mobs' && styles.hidden,
+              ]}
+              pointerEvents={Platform.OS !== 'web' && tab !== 'mobs' ? 'none' : 'auto'}
+              accessibilityElementsHidden={Platform.OS !== 'web' && tab !== 'mobs'}
+              importantForAccessibility={
+                Platform.OS !== 'web' && tab !== 'mobs' ? 'no-hide-descendants' : 'auto'
+              }>
               <MobsScreen />
             </View>
           )}
         </View>
       </View>
+      {Platform.OS !== 'web' && (
+        <MobileBottomNavigation hasMobs={data.capabilities.mobs} />
+      )}
       <ItemDetailModal />
       {showRecipeStages && (
         <RecipeStageModal
@@ -503,16 +616,6 @@ function Shell({
         <GraphGuideModal
           visible
           onClose={() => setShowGraphGuide(false)}
-          onOpenFeedback={kind => {
-            setShowGraphGuide(false);
-            setFeedbackKind(kind);
-          }}
-        />
-      )}
-      {feedbackKind && (
-        <FeedbackModal
-          kind={feedbackKind}
-          onClose={() => setFeedbackKind(null)}
           packSlug={data.descriptor.slug}
           packName={data.descriptor.displayName}
         />
@@ -527,9 +630,88 @@ function TabBtn({tab, label}: {tab: Tab; label: string}) {
   return (
     <TouchableOpacity
       {...signalTarget(`tab.${tab}`)}
-      onPress={() => ui.setTab(tab)}
+      onPress={() => {
+        selectionFeedback();
+        ui.setTab(tab);
+      }}
       style={[styles.tabBtn, active && styles.tabBtnActive]}>
       <Text style={[styles.tabBtnText, active && styles.tabBtnTextActive]}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
+function MobileBottomNavigation({hasMobs}: {hasMobs: boolean}) {
+  const ui = useUi();
+  const tabs = useMemo(
+    () => [
+      {tab: 'items' as const, icon: '☷', label: 'Browse'},
+      {tab: 'graph' as const, icon: '⌘', label: 'Tree'},
+      ...(hasMobs ? [{tab: 'mobs' as const, icon: '♟', label: 'Mobs'}] : []),
+    ],
+    [hasMobs],
+  );
+  const selectedIndex = Math.max(0, tabs.findIndex(item => item.tab === ui.tab));
+  const animatedIndex = useRef(new Animated.Value(selectedIndex)).current;
+  const [navigationWidth, setNavigationWidth] = useState(0);
+  const segmentWidth = Math.max(0, (navigationWidth - 20) / tabs.length);
+
+  useEffect(() => {
+    Animated.spring(animatedIndex, {
+      toValue: selectedIndex,
+      damping: 22,
+      stiffness: 230,
+      mass: 0.8,
+      useNativeDriver: true,
+    }).start();
+  }, [animatedIndex, selectedIndex]);
+
+  return (
+    <SafeAreaView edges={['bottom']} style={styles.mobileNavigationSafeArea}>
+      <View
+        style={styles.mobileNavigation}
+        onLayout={event => setNavigationWidth(event.nativeEvent.layout.width)}
+        accessibilityRole="tablist"
+        accessibilityLabel="Main navigation">
+        {segmentWidth > 0 && (
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.mobileTabIndicator,
+              {
+                width: segmentWidth,
+                transform: [{translateX: Animated.multiply(animatedIndex, segmentWidth)}],
+              },
+            ]}
+          />
+        )}
+        {tabs.map(item => (
+          <MobileTabBtn key={item.tab} {...item} />
+        ))}
+      </View>
+    </SafeAreaView>
+  );
+}
+
+function MobileTabBtn({tab, icon, label}: {tab: Tab; icon: string; label: string}) {
+  const ui = useUi();
+  const active = ui.tab === tab;
+  return (
+    <TouchableOpacity
+      {...signalTarget(`tab.${tab}`)}
+      accessibilityRole="tab"
+      accessibilityLabel={label}
+      accessibilityState={{selected: active}}
+      onPress={() => {
+        selectionFeedback();
+        ui.setTab(tab);
+      }}
+      style={[styles.mobileTab, active && styles.mobileTabActive]}>
+      <Text style={[styles.mobileTabIcon, active && styles.mobileTabIconActive]}>
+        {icon}
+      </Text>
+      <Text style={[styles.mobileTabLabel, active && styles.mobileTabLabelActive]}>
+        {label}
+      </Text>
     </TouchableOpacity>
   );
 }
@@ -600,11 +782,24 @@ const styles = StyleSheet.create({
   headerDetailBtnActive: {borderColor: theme.accent, backgroundColor: theme.panelAlt},
   headerDetailBtnText: {color: theme.text, fontSize: 11, fontWeight: '700'},
   headerDetailBtnTextActive: {color: theme.accent},
+  nativeHeaderDetailBtn: {
+    width: '100%',
+    minHeight: 44,
+    alignItems: 'flex-start',
+    paddingHorizontal: 12,
+    backgroundColor: theme.panelAlt,
+  },
   headerUtilityRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     flexShrink: 0,
+  },
+  nativeHeaderUtilityRow: {
+    width: '100%',
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    gap: 8,
   },
   headerUtilityButton: {
     width: 34,
@@ -617,13 +812,39 @@ const styles = StyleSheet.create({
     borderColor: theme.borderLight,
     backgroundColor: theme.panelAlt,
   },
+  nativeHeaderUtilityButton: {
+    width: '100%',
+    minWidth: 0,
+    minHeight: 44,
+    alignItems: 'flex-start',
+    paddingHorizontal: 12,
+  },
   headerUtilityButtonActive: {borderColor: theme.accent},
+  graphControlsHeaderButton: {
+    width: 44,
+    minHeight: 44,
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: theme.borderLight,
+    backgroundColor: theme.panelAlt,
+  },
+  graphControlsHeaderButtonText: {
+    color: theme.textDim,
+    fontSize: 20,
+    lineHeight: 22,
+    fontWeight: '800',
+  },
+  graphControlsHeaderButtonTextActive: {color: theme.accent},
   historyHeaderIcon: {color: theme.text, fontSize: 17, fontWeight: '700'},
   recipeStagesHeaderButton: {width: 'auto', minWidth: 72, paddingHorizontal: 8},
   recipeStagesHeaderText: {color: theme.text, fontSize: 11, fontWeight: '800'},
   recipeStagesHeaderTextActive: {color: theme.accent},
   guideHeaderIcon: {color: theme.text, fontSize: 16, fontWeight: '800'},
   guideHeaderIconActive: {color: theme.accent},
+  nativeHeaderMenuText: {color: theme.text, fontSize: 12, fontWeight: '700'},
   interfaceZoomControls: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -643,7 +864,54 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   workspaceViewport: {flex: 1, minHeight: 0, overflow: 'hidden'},
-  workspace: {flex: 1, minHeight: 0},
+  workspace: {flex: 1, minHeight: 0, position: 'relative'},
   body: {flex: 1, minHeight: 0},
+  nativeWorkspacePane: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+  },
+  nativeWorkspacePaneActive: {opacity: 1, zIndex: 1},
+  nativeWorkspacePaneInactive: {opacity: 0, zIndex: 0},
+  mobileNavigationSafeArea: {
+    flexShrink: 0,
+    borderTopWidth: 1,
+    borderTopColor: theme.border,
+    backgroundColor: theme.panel,
+  },
+  mobileNavigation: {
+    minHeight: 62,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingTop: 6,
+    paddingBottom: 5,
+  },
+  mobileTabIndicator: {
+    position: 'absolute',
+    left: 10,
+    top: 6,
+    height: 50,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: theme.borderLight,
+    backgroundColor: theme.panelAlt,
+  },
+  mobileTab: {
+    flex: 1,
+    minHeight: 50,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    borderRadius: 12,
+    zIndex: 1,
+  },
+  mobileTabActive: {},
+  mobileTabIcon: {color: theme.textDim, fontSize: 20, lineHeight: 22},
+  mobileTabIconActive: {color: theme.accent},
+  mobileTabLabel: {color: theme.textDim, fontSize: 10, fontWeight: '700'},
+  mobileTabLabelActive: {color: theme.accent},
   hidden: {display: 'none'},
 });

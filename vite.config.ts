@@ -4,6 +4,8 @@ import hostingConfig from './.openai/hosting.json';
 import {sites} from './build/sites-vite-plugin';
 
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === 'seatbelt';
+const isCloudflareBeta = process.env.MRT_DEPLOY_TARGET === 'cloudflare-beta';
+const BETA_DATA_ORIGIN = 'https://minecraftrecipetree.craftsmannsoftware.com';
 const SITE_CREATOR_PLACEHOLDER_DATABASE_ID = '00000000-0000-4000-8000-000000000000';
 
 export default defineConfig(async () => {
@@ -32,6 +34,12 @@ export default defineConfig(async () => {
       cloudflare({
         viteEnvironment: {name: 'rsc', childEnvironments: ['ssr']},
         config: {
+          ...(isCloudflareBeta
+            ? {
+                name: 'minecraft-recipe-tree-beta',
+                vars: {BETA_DATA_ORIGIN},
+              }
+            : {}),
           main: './worker/index.ts',
           compatibility_flags: ['nodejs_compat'],
           cache: {enabled: true},
@@ -48,7 +56,7 @@ export default defineConfig(async () => {
               '/dataset/preview-sets/*',
             ],
           },
-          d1_databases: hostingConfig.d1
+          d1_databases: !isCloudflareBeta && hostingConfig.d1
             ? [
                 {
                   binding: hostingConfig.d1,
@@ -57,7 +65,7 @@ export default defineConfig(async () => {
                 },
               ]
             : [],
-          r2_buckets: hostingConfig.r2
+          r2_buckets: !isCloudflareBeta && hostingConfig.r2
             ? [
                 {
                   binding: hostingConfig.r2,

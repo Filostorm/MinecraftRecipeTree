@@ -217,6 +217,11 @@ final class RecipePhase implements ExportJob.PhaseRunner {
                 recipeJson.add("cat", serializedCatalysts);
             }
 
+            JsonObject structure = MultiblockedStructure.extract(display, catalog);
+            if (structure != null) {
+                recipeJson.add("structure", structure);
+            }
+
             RenderedRecipe rendered = renderDisplay(
                     currentCategory.configuration(), display, planned.sourceIndex(), localIndex);
             String imageName = "r" + localIndex + ".png";

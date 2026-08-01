@@ -1,4 +1,5 @@
 import handler from 'vinext/server/app-router-entry';
+import {proxyBetaDatasetRequest} from './betaDataProxy.ts';
 import {CORE_DATASET_UPLOAD_BASE_PATH, handleCoreDatasetUpload} from './coreDatasetUpload.ts';
 import {
   CORE_PUBLIC_ROUTE,
@@ -123,6 +124,8 @@ async function dispatchRequest(
 ): Promise<Response> {
   const runtime = (env ?? {}) as DatasetRuntime;
   const url = new URL(request.url);
+  const betaDataResponse = await proxyBetaDatasetRequest(request, runtime, url);
+  if (betaDataResponse) return betaDataResponse;
 
   if (url.pathname.startsWith(PREVIEW_UPLOAD_BASE_PATH)) {
     return handlePreviewAssetUpload(request, runtime, url);

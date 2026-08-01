@@ -12,9 +12,11 @@ import {
   View,
   type ImageErrorEvent,
 } from 'react-native';
+import {useSafeAreaInsets} from '../ui/safeArea';
 import type {DatasetDescriptor} from '../data/datasetCatalog';
 import {datasetPackIconPath} from '../data/datasetPresentation';
 import {isLocalPackDescriptor} from '../data/localPackStorage';
+import {fuzzySearchScore, normalizeSearchText} from '../data/fuzzySearch';
 import {theme} from '../theme';
 
 const PRODUCTION_ORIGIN = 'https://minecraftrecipetree.craftsmannsoftware.com';
@@ -81,43 +83,57 @@ export function DatasetPicker({
   onClose(): void;
 }) {
   const [query, setQuery] = useState('');
+  const safeAreaInsets = useSafeAreaInsets();
 
   useEffect(() => {
     if (!visible) setQuery('');
   }, [visible]);
 
   const filteredDatasets = useMemo(() => {
-    const normalizedQuery = query.trim().toLocaleLowerCase();
-    const matches = normalizedQuery.length === 0
-      ? [...datasets]
-      : datasets.filter(dataset =>
-          [
-            dataset.displayName,
-            dataset.slug,
-            dataset.minecraftVersion,
-            dataset.packVersion,
-          ].some(value => value.toLocaleLowerCase().includes(normalizedQuery)),
-        );
+    const normalizedQuery = normalizeSearchText(query);
+    const matches = datasets
+      .map(dataset => ({
+        dataset,
+        score: normalizedQuery
+          ? fuzzySearchScore(
+              normalizedQuery,
+              [
+                dataset.displayName,
+                dataset.slug,
+                dataset.minecraftVersion,
+                dataset.packVersion,
+              ].map(normalizeSearchText),
+            )
+          : 0,
+      }))
+      .filter(match => match.score != null);
     return matches.sort((left, right) => {
-      if (left.slug === selectedSlug) return -1;
-      if (right.slug === selectedSlug) return 1;
-      return left.displayName.localeCompare(right.displayName, undefined, {sensitivity: 'base'});
-    });
+      if (left.dataset.slug === selectedSlug) return -1;
+      if (right.dataset.slug === selectedSlug) return 1;
+      if (left.score !== right.score) return left.score! - right.score!;
+      return left.dataset.displayName.localeCompare(right.dataset.displayName, undefined, {
+        sensitivity: 'base',
+      });
+    }).map(match => match.dataset);
   }, [datasets, query, selectedSlug]);
 
   return (
     <Modal
       visible={visible}
       transparent
-      animationType="fade"
+      animationType={Platform.OS === 'web' ? 'fade' : 'slide'}
       onRequestClose={onClose}
       accessibilityViewIsModal>
       <Pressable
-        style={styles.backdrop}
+        style={[styles.backdrop, Platform.OS !== 'web' && styles.backdropNative]}
         onPress={onClose}
         accessible={false}>
         <Pressable
-          style={styles.card}
+          style={[
+            styles.card,
+            Platform.OS !== 'web' && styles.cardNative,
+            Platform.OS !== 'web' && {paddingBottom: safeAreaInsets.bottom},
+          ]}
           onPress={() => {}}
           accessible={false}>
           <View style={styles.header}>
@@ -222,6 +238,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 18,
   },
+  backdropNative: {
+    justifyContent: 'flex-end',
+    padding: 0,
+  },
   card: {
     width: '100%',
     maxWidth: 620,
@@ -232,6 +252,13 @@ const styles = StyleSheet.create({
     borderColor: theme.border,
     backgroundColor: theme.panel,
     overflow: 'hidden',
+  },
+  cardNative: {
+    maxWidth: '100%',
+    maxHeight: '92%',
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    borderBottomWidth: 0,
   },
   header: {
     flexDirection: 'row',

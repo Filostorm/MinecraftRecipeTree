@@ -2,6 +2,60 @@
 
 Client-side mod that exports everything JEI knows about to `<gameDir>/jei-exports/`:
 
+## In-game recipe planner
+
+Press **G** while holding an item or hovering an item in JEI or any inventory/container slot to
+open its Recipe Tree planner.
+The key is configurable under Minecraft's **Controls → Recipe Tree** category. The planner:
+
+- draws recipes with JEI's own renderer, so modded layouts and ingredient alternatives remain familiar;
+- exports exact vanilla cooking durations and common modded JEI recipe timing accessors for
+  production planning in the site viewer; recipes that expose total energy and energy per tick are
+  converted to an exact cycle length when the ratio is integral;
+- lets you left-click an item to choose its input recipe and right-click it to choose a recipe
+  output that consumes it;
+- attaches chosen input recipes to persistent branches instead of replacing the current recipe;
+- uses JEI's native recipe box as every expanded Details-mode node, while Compact mode keeps the
+  tree item-only and reveals the hovered node in a responsive, fitted top-right translucent square
+  layered over the full-width tree canvas;
+- shows the configured attack-button recipe hint on unexpanded items and cycles a hovered
+  ingredient through its JEI tag alternatives before the mouse wheel falls back to tree zoom;
+- preserves every JEI typed input in the tree, including Forge fluids and Mekanism chemicals,
+  using each type's native JEI renderer, tooltip, identity, and amount;
+- supports background-drag panning and cursor-centered wheel zoom, with the arrow buttons reserved
+  for moving backward and forward through recent output targets;
+- shares the current plan with the web/mobile viewers using portable `.mrtree.json` JSON, copied to
+  the clipboard and backed up at `config/recipe-tree-shares/last-tree.mrtree.json`, and imports the
+  newest tree placed in that folder (falling back to the clipboard when the folder is empty);
+- wraps the current tree when a new output is chosen from the root, preserving the existing plan as
+  the matching input branch; selected recipes are persisted as per-output favorites and promoted to
+  the front of future recipe choosers, and favorited recipes automatically expand whenever their
+  output appears as an ingredient; the input picker header can explicitly select **No recipe**,
+  clearing that favorite and leaving the ingredient collapsed;
+- keeps the requested amount editable in both display modes and multiplies every expanded input
+  branch by the required craft count, including recipes that produce more than one output;
+- packs differently sized recipe choices closely in one vertically scrolling list and only renders
+  or ticks the visible JEI boxes, grouped under collapsible JEI recipe-type headers whose state is
+  remembered locally;
+- renders tree recipes and items beneath the foreground controls so item depth cannot cover buttons
+  or status messages, without reserving a footer strip from the pannable tree;
+- wraps the planner toolbar into up to three rows on narrow GUI-scaled screens and moves the tree
+  viewport below those rows instead of allowing controls to overlap;
+- uses the same full-size planner canvas in Compact and Details modes, places calculated quantities
+  below their nodes, and gives recipe-picker cards more breathing room;
+- groups repeated ingredients into one tree node with a quantity such as `9x`, and excludes JEI's
+  informational tag pages from planner recipe choices; and
+- saves the most recent plan for each target locally in `config/recipe-tree-plans.json`.
+
+JEI recipe queries remain lazy and bounded, keeping the normal game loop independent from large JEI
+recipe catalogs. Account sync is not part of this first release; the local plan file is the migration
+boundary for a later opt-in sync service.
+
+The portable format and compatibility limits are documented in
+[`docs/portable-recipe-trees.md`](../docs/portable-recipe-trees.md).
+
+## Exporting a pack
+
 - **Recipes** — every recipe of every visible JEI category, rendered offscreen through JEI's own
   `IRecipeLayoutDrawable` into PNGs (it looks exactly like the in-game recipe screen), plus
   per-category `recipes.json` with inputs/outputs/catalysts.
@@ -20,7 +74,7 @@ Client-side mod that exports everything JEI knows about to `<gameDir>/jei-export
 
 ```bash
 JAVA_HOME=$(/usr/libexec/java_home -v 17) ./gradlew build
-# -> build/libs/jeiexport-1.1.0.jar
+# -> build/libs/jeiexport-1.2.0-beta.22.jar
 ```
 
 Gradle 8.1.1 / ForgeGradle 6 / Forge 1.20.1. The release accepts Forge 47.1–47.x and

@@ -45,6 +45,8 @@ export interface DatasetRuntime {
   DB?: D1Database;
   /** Existing Sites binding; core publications use the isolated `core/` prefix. */
   PREVIEW_ASSETS?: DatasetR2Bucket;
+  /** Beta-only read origin for the public, immutable production dataset corpus. */
+  BETA_DATA_ORIGIN?: string;
   DATASET_ADMIN_ENABLED?: string;
   CORE_DATASET_UPLOAD_TOKEN?: string;
   PREVIEW_UPLOAD_ASSET_SET_ID?: string;

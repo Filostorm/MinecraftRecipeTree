@@ -20,8 +20,10 @@ function openAttributionLink(url: string, profile: string, label: string) {
 
 export function DatasetDisclaimer({
   attribution,
+  variant = 'default',
 }: {
   attribution: LoadedDatasetAttribution;
+  variant?: 'default' | 'menu';
 }) {
   const [visible, setVisible] = useState(false);
   const close = () => setVisible(false);
@@ -29,13 +31,15 @@ export function DatasetDisclaimer({
   return (
     <>
       <TouchableOpacity
-        style={styles.button}
+        style={[styles.button, variant === 'menu' && styles.menuButton]}
         onPress={() => setVisible(true)}
         accessibilityRole="button"
         accessibilityLabel="Open GT New Horizons disclaimer"
         accessibilityHint="Shows dataset attribution, modification, license, artwork, and affiliation notices"
         focusable>
-        <Text style={styles.buttonText}>ⓘ GTNH disclaimer</Text>
+        <Text style={[styles.buttonText, variant === 'menu' && styles.menuButtonText]}>
+          ⓘ GTNH disclaimer
+        </Text>
       </TouchableOpacity>
 
       <Modal
@@ -138,6 +142,16 @@ const styles = StyleSheet.create({
     backgroundColor: theme.panelAlt,
   },
   buttonText: {color: theme.accent, fontSize: 10, fontWeight: '700'},
+  menuButton: {
+    width: '100%',
+    minHeight: 44,
+    marginTop: 0,
+    paddingHorizontal: 12,
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    borderColor: theme.borderLight,
+  },
+  menuButtonText: {color: theme.text, fontSize: 12},
   backdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.76)',
