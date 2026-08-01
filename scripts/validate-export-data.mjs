@@ -73,6 +73,12 @@ function countValue(value) {
   return Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
+function hasExactKeys(value, expected) {
+  const actual = Object.keys(value).sort();
+  const required = [...expected].sort();
+  return actual.length === required.length && actual.every((key, index) => key === required[index]);
+}
+
 export async function validateExportData(exportRoot = defaultExportRoot, options = {}) {
   const root = resolve(exportRoot);
   const forceRawAssets = options.assetMode === 'raw';
@@ -517,6 +523,100 @@ export async function validateExportData(exportRoot = defaultExportRoot, options
     }
   };
 
+  const validateStructure = (structure, location) => {
+    if (structure === undefined) return;
+    if (
+      !isRecord(structure) ||
+      !hasExactKeys(structure, ['size', 'total', 'controller', 'blocks', 'cells']) ||
+      !Array.isArray(structure.size) ||
+      structure.size.length !== 3 ||
+      !structure.size.every(size => Number.isSafeInteger(size) && size > 0) ||
+      !Number.isSafeInteger(structure.total) ||
+      structure.total <= 0 ||
+      typeof structure.controller !== 'string' ||
+      !itemKeys.has(structure.controller) ||
+      !Array.isArray(structure.blocks) ||
+      structure.blocks.length === 0 ||
+      structure.blocks.length > 10_000 ||
+      !Array.isArray(structure.cells) ||
+      structure.cells.length === 0 ||
+      structure.cells.length > 100_000 ||
+      structure.total !== structure.cells.length
+    ) {
+      fail(`${location} must be an exact bounded multiblock structure payload.`);
+      return;
+    }
+
+    const declared = new Map();
+    let declaredTotal = 0;
+    for (const [blockIndex, block] of structure.blocks.entries()) {
+      if (
+        !Array.isArray(block) ||
+        block.length !== 2 ||
+        typeof block[0] !== 'string' ||
+        !itemKeys.has(block[0]) ||
+        !Number.isSafeInteger(block[1]) ||
+        block[1] <= 0 ||
+        declared.has(block[0])
+      ) {
+        fail(`${location}.blocks[${blockIndex}] must be a unique [catalog key, positive count].`);
+        continue;
+      }
+      declared.set(block[0], block[1]);
+      declaredTotal += block[1];
+    }
+    if (declaredTotal !== structure.total || !declared.has(structure.controller)) {
+      fail(`${location}.blocks must account for every position and include the controller.`);
+    }
+
+    const actual = new Map();
+    const positions = new Set();
+    let minX = Infinity;
+    let minY = Infinity;
+    let minZ = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    let maxZ = -Infinity;
+    for (const [cellIndex, cell] of structure.cells.entries()) {
+      if (
+        !Array.isArray(cell) ||
+        cell.length !== 4 ||
+        !Number.isSafeInteger(cell[0]) ||
+        !Number.isSafeInteger(cell[1]) ||
+        !Number.isSafeInteger(cell[2]) ||
+        typeof cell[3] !== 'string' ||
+        !itemKeys.has(cell[3])
+      ) {
+        fail(`${location}.cells[${cellIndex}] must be [x, y, z, catalog key].`);
+        continue;
+      }
+      const [x, y, z, key] = cell;
+      const position = `${x}:${y}:${z}`;
+      if (positions.has(position)) fail(`${location}.cells repeats position ${position}.`);
+      positions.add(position);
+      actual.set(key, (actual.get(key) ?? 0) + 1);
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      minZ = Math.min(minZ, z);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+      maxZ = Math.max(maxZ, z);
+    }
+    if (
+      maxX - minX + 1 !== structure.size[0] ||
+      maxY - minY + 1 !== structure.size[1] ||
+      maxZ - minZ + 1 !== structure.size[2]
+    ) {
+      fail(`${location}.size must match the coordinate extents.`);
+    }
+    if (
+      actual.size !== declared.size ||
+      [...actual].some(([key, count]) => declared.get(key) !== count)
+    ) {
+      fail(`${location}.blocks must exactly match the counted positions.`);
+    }
+  };
+
   const readRecipes = async category => {
     const documentKey = `${category.dir}/recipes.json`;
     const physicalValue = await readJsonDocument(
@@ -672,6 +772,7 @@ export async function validateExportData(exportRoot = defaultExportRoot, options
       validateSlots(recipe.in, `${location}.in`, 'in');
       validateSlots(recipe.out, `${location}.out`, 'out');
       validateSlots(recipe.cat, `${location}.cat`, 'cat');
+      validateStructure(recipe.structure, `${location}.structure`);
     }
   }
 

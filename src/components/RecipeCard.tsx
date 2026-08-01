@@ -24,6 +24,7 @@ import {
   RECIPE_CARD_PADDING,
   responsiveRecipePreviewSize,
 } from './recipePreviewSizing';
+import {MultiblockPreview} from './MultiblockPreview';
 
 export function RecipeCard({
   recipe,
@@ -93,7 +94,7 @@ export function RecipeCard({
           <Text style={styles.recipeStageBadgeText}>Requires stage · {recipe.stage}</Text>
         </View>
       ) : null}
-      {presentation === 'image' && recipe.img ? (
+      {!recipe.structure && presentation === 'image' && recipe.img ? (
         <RecipePreviewImage
           uri={data.imageUrl(recipeImagePath(dir, recipe.img))!}
           context={recipe.id ?? `${catTitle ?? dir} recipe`}
@@ -104,11 +105,20 @@ export function RecipeCard({
           ]}
           resizeMode="contain"
         />
-      ) : (
+      ) : !recipe.structure ? (
         <Text style={styles.previewUnavailable}>
           Structured recipe · layout preview unavailable
         </Text>
-      )}
+      ) : null}
+      {recipe.structure ? (
+        <MultiblockPreview
+          structure={recipe.structure}
+          availableWidth={Math.max(
+            180,
+            availableCardWidth - (RECIPE_CARD_BORDER_WIDTH + RECIPE_CARD_PADDING) * 2,
+          )}
+        />
+      ) : null}
       {(inputs.length > 0 || outputs.length > 0) && (
         <View style={styles.recipeItems}>
           {inputs.map(item => (

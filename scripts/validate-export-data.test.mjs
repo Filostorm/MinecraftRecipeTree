@@ -318,6 +318,55 @@ test('recipe slots reject partial logical identities instead of silently merging
   });
 });
 
+test('recipe validation accepts exact bounded multiblock geometry and counts', async () => {
+  await withFixture(async root => {
+    await configureSingleStoneRecipe(root, {
+      in: [[['minecraft:stone', 1]]],
+      out: [[['minecraft:stone', 1]]],
+      structure: {
+        size: [2, 1, 1],
+        total: 2,
+        controller: 'minecraft:stone',
+        blocks: [['minecraft:stone', 2]],
+        cells: [
+          [0, 0, 0, 'minecraft:stone'],
+          [1, 0, 0, 'minecraft:stone'],
+        ],
+      },
+    });
+    const summary = await validateExportData(root, {assetMode: 'raw'});
+    assert.equal(summary.recipes, 1);
+  });
+});
+
+test('recipe validation rejects multiblock count and coordinate drift', async () => {
+  await withFixture(async root => {
+    await configureSingleStoneRecipe(root, {
+      in: [[['minecraft:stone', 1]]],
+      out: [[['minecraft:stone', 1]]],
+      structure: {
+        size: [3, 1, 1],
+        total: 2,
+        controller: 'minecraft:stone',
+        blocks: [['minecraft:stone', 1]],
+        cells: [
+          [0, 0, 0, 'minecraft:stone'],
+          [0, 0, 0, 'minecraft:stone'],
+        ],
+      },
+    });
+    await assert.rejects(
+      validateExportData(root, {assetMode: 'raw'}),
+      error => {
+        assert.match(error.message, /must account for every position/);
+        assert.match(error.message, /repeats position/);
+        assert.match(error.message, /size must match/);
+        return true;
+      },
+    );
+  });
+});
+
 test('format-v2 recipe inputs and outputs accept one strict probability shared by every alternative', async () => {
   await withFixture(async root => {
     await configureSingleStoneRecipe(

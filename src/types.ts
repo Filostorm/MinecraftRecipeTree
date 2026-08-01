@@ -164,6 +164,20 @@ export type SlotEntry =
       occurrenceProbability: number,
     ];
 
+/** Compact deterministic representative of one exported multiblock structure. */
+export interface RecipeStructure {
+  /** Width, height, and depth in blocks. */
+  size: [x: number, y: number, z: number];
+  /** Exact number of occupied positions, including the controller. */
+  total: number;
+  /** Catalog key for the controller block. */
+  controller: string;
+  /** Exact build-list counts using the same representative states as the in-game preview. */
+  blocks: [catalogKey: string, count: number][];
+  /** Relative x/y/z positions used for the lightweight rotatable preview. */
+  cells: [x: number, y: number, z: number, catalogKey: string][];
+}
+
 export interface Recipe {
   /** Present when the export of this recipe failed; image/slots missing. */
   err?: boolean;
@@ -175,6 +189,8 @@ export interface Recipe {
   img?: string;
   /** Processing duration in game ticks when the exporter can determine it exactly. */
   durationTicks?: number;
+  /** Optional multiblock geometry and exact material counts from a structure-preview recipe. */
+  structure?: RecipeStructure;
   /** Logical (GUI-pixel) size of the image; actual PNG is scaled up */
   w?: number;
   h?: number;

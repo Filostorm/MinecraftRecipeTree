@@ -152,6 +152,7 @@ final class RecipePhase implements ExportPhase {
         int semanticFailuresBefore = context.failureCount();
         try {
             collectSemantics(recipe, data, sourceIndex);
+            data.structure = ModularMachineryStructure.extract(recipe, catalog);
         } catch (IOException e) {
             throw e;
         } catch (Throwable throwable) {
@@ -692,11 +693,35 @@ final class RecipePhase implements ExportPhase {
             recipesWriter.name("w").value(data.width);
             recipesWriter.name("h").value(data.height);
         }
+        if (data.structure != null) {
+            writeStructure(data.structure);
+        }
         writeSlots("in", data.inputs);
         writeSlots("out", data.outputs);
         if (!data.catalysts.isEmpty()) {
             writeSlots("cat", data.catalysts);
         }
+        recipesWriter.endObject();
+    }
+
+    private void writeStructure(ModularMachineryStructure.Data structure) throws IOException {
+        recipesWriter.name("structure").beginObject();
+        recipesWriter.name("size").beginArray()
+                .value(structure.sizeX).value(structure.sizeY).value(structure.sizeZ).endArray();
+        recipesWriter.name("total").value(structure.cells.size());
+        recipesWriter.name("controller").value(structure.controllerKey);
+        recipesWriter.name("blocks").beginArray();
+        for (Map.Entry<String, BigDecimal> entry : structure.blockCounts.entrySet()) {
+            recipesWriter.beginArray().value(entry.getKey()).value(entry.getValue()).endArray();
+        }
+        recipesWriter.endArray();
+        recipesWriter.name("cells").beginArray();
+        for (ModularMachineryStructure.Cell cell : structure.cells) {
+            recipesWriter.beginArray()
+                    .value(cell.x).value(cell.y).value(cell.z).value(cell.key)
+                    .endArray();
+        }
+        recipesWriter.endArray();
         recipesWriter.endObject();
     }
 
@@ -764,6 +789,7 @@ final class RecipePhase implements ExportPhase {
         boolean error;
         boolean excluded;
         Long durationTicks;
+        ModularMachineryStructure.Data structure;
         final List<SlotData> inputs = new ArrayList<SlotData>();
         final List<SlotData> outputs = new ArrayList<SlotData>();
         final List<SlotData> catalysts = new ArrayList<SlotData>();

@@ -23,6 +23,8 @@ import {
   isExactGtnhDatasetAttribution,
   isExactGtnhVisualAssetsPolicy,
 } from './datasetAttribution';
+import {requireRecipeStructure} from './recipeStructure';
+import {applyLegacyRecipeStructures} from './legacyRecipeStructures';
 import {
   datasetIdentityFromManifest,
   isDatasetPublicationId,
@@ -524,7 +526,16 @@ function requireRecipeArray(value: unknown, count: number, url: string): Recipe[
       `Invalid recipe document ${url}: expected ${count} recipe objects.`,
     );
   }
-  return value as unknown as Recipe[];
+  return value.map((recipe, recipeIndex) => {
+    const typed = recipe as Recipe;
+    if (typed.structure !== undefined) {
+      typed.structure = requireRecipeStructure(
+        typed.structure,
+        `${url} recipe ${recipeIndex}.structure`,
+      );
+    }
+    return typed;
+  });
 }
 
 function isManifestCounts(value: unknown): boolean {
@@ -1271,7 +1282,7 @@ export function DataProvider({
               `${base}/${category.dir}/recipes.json`,
               datasetIdentity,
             );
-            promise = fetchBoundedJson(recipesUrl).then(({value, bytes}) => {
+            promise = fetchBoundedJson(recipesUrl).then(async ({value, bytes}) => {
               const descriptor = parseShardedDescriptor(value, 'array', recipesUrl);
               if (descriptor) {
                 if (descriptor.count !== category.count) {
@@ -1288,7 +1299,11 @@ export function DataProvider({
                     `a sharded-array descriptor.`,
                 );
               }
-              const recipes = requireRecipeArray(value, category.count, recipesUrl);
+              const recipes = await applyLegacyRecipeStructures(
+                requireRecipeArray(value, category.count, recipesUrl),
+                datasetIdentity,
+                category,
+              );
               if (structuredDataOnly) {
                 requireStructuredDataOnlyRecipes(recipes, recipesUrl);
               }
