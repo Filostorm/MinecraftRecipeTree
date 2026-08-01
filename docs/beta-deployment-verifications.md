@@ -62,3 +62,16 @@ Deployment status was `succeeded`. The application production build, TypeScript 
 A mobile-width, hydrated, end-to-end Worker session passed interactive acceptance for both packs. MeatballCraft loaded the lazy MMCE structure bundle and rendered a 7 × 3 × 7, 54-block blueprint as overlapping placed-block sprites with an exact eight-type block count and working rotation. Multiblock Madness 2 loaded the lazy Multiblocked structure bundle and rendered Galactic Trade Outpost as a 5 × 9 × 5, 80-block structure with the exact seven-type count, including 51 Space Age Casings. The corresponding block-count entries are interactive buttons. The same session loaded the hashed application/graph bundles and both lazy compatibility bundles. `/api/datasets` returned HTTP 200 with `X-MRT-Beta-Data-Origin: https://minecraftrecipetree.craftsmannsoftware.com`.
 
 A fresh tab to the deployed private URL reached the Sites sign-in flow, so the automated browser could not repeat the hydrated interaction against the deployed hostname without an owner session. The locally verified Worker used the exact production archive deployed as version 12 and the required beta data origin. Production was not changed.
+
+## 2026-08-01 — Starting-item blank-screen repair
+
+- Application commit: `a155021e89174e8a0d342e436de5ef55785cd293`
+- Sites version: `appgprj_6a6a505e7bc08191acada3d05fa5d18d~appgver_abd5952fa1f08191915394195a794c09` (version 13)
+- Deployment: `appgdep_6a6dd068a978819189bc87a5cf679389`
+- URL: `https://minecraft-recipe-tree-beta.gtjoe51.chatgpt.site`
+
+Deployment status was `succeeded`. The production build, TypeScript validation, and 11 focused item-icon, production-parallel, and picker-planning tests passed. The new regression test pins the starting-item quick-control icon to a valid 32-pixel size on the viewer's 16-pixel logical item grid.
+
+A mobile-width, hydrated, end-to-end Worker session reproduced the prior failure as an uncaught 24-pixel ItemIcon alignment error, then passed the repaired flow from the exact deployed archive. Tapping the expanded Iron Ingot starting node kept the graph visible, opened the compact controls, increased the requested amount from 1 to 2, opened the ingredient recipe picker from `Change recipe`, and opened the 1,192-entry usage picker from `Add used by`. The hashed application and GraphScreen assets loaded successfully, and no new render errors appeared after the repair. `/api/datasets` returned HTTP 200 with `X-MRT-Beta-Data-Origin: https://minecraftrecipetree.craftsmannsoftware.com`.
+
+The beta runtime environment remains exactly `BETA_DATA_ORIGIN=https://minecraftrecipetree.craftsmannsoftware.com`. A fresh tab to the deployed private URL reached the Sites sign-in flow, so live-hostname hydration remains blocked without an owner session. Production was not changed.
