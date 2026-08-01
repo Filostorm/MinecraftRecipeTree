@@ -14,6 +14,10 @@ import {signalTarget} from '../analytics/signal';
 import {theme} from '../theme';
 import {uniformPickerRecipePreviewSize} from '../ui/interfaceZoom';
 import type {GraphDirection} from '../graph/direction';
+import {
+  MINECRAFT_TICKS_PER_SECOND,
+  parallelMachinesForOneCycle,
+} from '../graph/machineParallels';
 import {pixelated} from './ItemIcon';
 import {ItemChip} from './RecipeCard';
 import {RecipePreviewImage} from './RecipePreviewImage';
@@ -74,7 +78,6 @@ export function PickerModal({
   onLoadGroup,
   onSelectAlternative,
   productionPlan,
-  onProductionPlanChange,
   onOpenMachine,
   onSelect,
   onClose,
@@ -104,7 +107,6 @@ export function PickerModal({
     selectedKey: string,
   ) => void;
   productionPlan?: PickerProductionPlan;
-  onProductionPlanChange?: (plan: PickerProductionPlan) => void;
   onOpenMachine?: (itemKey: string) => void;
   onSelect: (index: number) => void;
   onClose: () => void;
@@ -166,80 +168,6 @@ export function PickerModal({
                   </TouchableOpacity>
                 );
               })}
-            </View>
-          ) : null}
-          {productionPlan && onProductionPlanChange ? (
-            <View style={styles.productionTarget}>
-              <View style={styles.productionHeading}>
-                <View style={styles.productionCopy}>
-                  <Text style={styles.productionTitle}>Production target</Text>
-                  <Text style={styles.productionHint}>
-                    Recipe cards update their suggested parallel machines.
-                  </Text>
-                </View>
-                <View style={styles.amountStepper}>
-                  <TouchableOpacity
-                    {...signalTarget('graph.source-picker.production.decrease')}
-                    accessibilityRole="button"
-                    accessibilityLabel="Decrease requested amount"
-                    style={styles.amountButton}
-                    onPress={() =>
-                      onProductionPlanChange({
-                        ...productionPlan,
-                        amount: Math.max(1, productionPlan.amount - 1),
-                      })
-                    }>
-                    <Text style={styles.amountButtonText}>−</Text>
-                  </TouchableOpacity>
-                  <View style={styles.amountValue}>
-                    <Text style={styles.amountValueLabel}>AMOUNT</Text>
-                    <Text style={styles.amountValueText}>{productionPlan.amount}</Text>
-                  </View>
-                  <TouchableOpacity
-                    {...signalTarget('graph.source-picker.production.increase')}
-                    accessibilityRole="button"
-                    accessibilityLabel="Increase requested amount"
-                    style={styles.amountButton}
-                    onPress={() =>
-                      onProductionPlanChange({
-                        ...productionPlan,
-                        amount: productionPlan.amount + 1,
-                      })
-                    }>
-                    <Text style={styles.amountButtonText}>+</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-              <View style={styles.deadlineRow}>
-                <Text style={styles.deadlineLabel}>Finish within</Text>
-                {[60, 300, 900, 3600].map(seconds => {
-                  const selected = productionPlan.windowSeconds === seconds;
-                  const label = seconds < 3600 ? `${seconds / 60}m` : '1h';
-                  return (
-                    <TouchableOpacity
-                      {...signalTarget('graph.source-picker.production.deadline')}
-                      key={seconds}
-                      accessibilityRole="button"
-                      accessibilityState={{selected}}
-                      accessibilityLabel={`Finish within ${label}`}
-                      style={[styles.deadlineChip, selected && styles.deadlineChipSelected]}
-                      onPress={() =>
-                        onProductionPlanChange({
-                          ...productionPlan,
-                          windowSeconds: seconds,
-                        })
-                      }>
-                      <Text
-                        style={[
-                          styles.deadlineChipText,
-                          selected && styles.deadlineChipTextSelected,
-                        ]}>
-                        {label}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
             </View>
           ) : null}
           {onRememberSourceChange && (
@@ -396,17 +324,12 @@ export function PickerModal({
                           )
                         : null;
                       const cycleSeconds = opt.cycleSeconds;
-                      const cyclesPerMachine =
-                        productionPlan && cycleSeconds
-                          ? Math.floor(productionPlan.windowSeconds / cycleSeconds)
-                          : 0;
-                      const cyclesRequired =
-                        productionPlan && opt.outputPerCycle
-                          ? Math.ceil(productionPlan.amount / opt.outputPerCycle)
-                          : 0;
                       const machineCount =
-                        cyclesPerMachine > 0 && cyclesRequired > 0
-                          ? Math.max(1, Math.ceil(cyclesRequired / cyclesPerMachine))
+                        productionPlan && opt.outputPerCycle
+                          ? parallelMachinesForOneCycle(
+                              productionPlan.amount,
+                              opt.outputPerCycle,
+                            )
                           : null;
                       return (
                         <TouchableOpacity
@@ -423,13 +346,13 @@ export function PickerModal({
                               {opt.durationTicks ? (
                                 <View style={styles.recipeFactChip}>
                                   <Text style={styles.recipeFactText}>
-                                    {opt.durationTicks} ticks · {(opt.durationTicks / 20).toLocaleString()} sec
+                                    {opt.durationTicks} ticks · {(opt.durationTicks / MINECRAFT_TICKS_PER_SECOND).toLocaleString()} sec
                                   </Text>
                                 </View>
                               ) : cycleSeconds ? (
                                 <View style={styles.recipeFactChip}>
                                   <Text style={styles.recipeFactText}>
-                                    {(cycleSeconds * 20).toLocaleString()} ticks · {cycleSeconds.toLocaleString()} sec
+                                    {(cycleSeconds * MINECRAFT_TICKS_PER_SECOND).toLocaleString()} ticks · {cycleSeconds.toLocaleString()} sec
                                   </Text>
                                 </View>
                               ) : null}
@@ -445,7 +368,7 @@ export function PickerModal({
                                       machineCount !== null && styles.parallelTextReady,
                                     ]}>
                                     {machineCount
-                                      ? `${machineCount} parallel ${machineCount === 1 ? 'machine' : 'machines'}`
+                                      ? `${machineCount} parallel ${machineCount === 1 ? 'machine' : 'machines'}${cycleSeconds ? ` · ${cycleSeconds.toLocaleString()} sec batch` : ' · time unavailable'}`
                                       : 'Timing unavailable in this export'}
                                   </Text>
                                 </View>
@@ -676,55 +599,6 @@ const styles = StyleSheet.create({
     padding: 10,
     marginBottom: 10,
   },
-  productionTarget: {
-    backgroundColor: theme.panelAlt,
-    borderColor: theme.radialRoot,
-    borderWidth: 1,
-    borderRadius: 9,
-    padding: 10,
-    marginBottom: 10,
-    gap: 9,
-  },
-  productionHeading: {flexDirection: 'row', alignItems: 'center', gap: 10},
-  productionCopy: {flex: 1},
-  productionTitle: {color: theme.radialRoot, fontSize: 12, fontWeight: '800'},
-  productionHint: {color: theme.textDim, fontSize: 9, marginTop: 2},
-  amountStepper: {flexDirection: 'row', alignItems: 'stretch'},
-  amountButton: {
-    width: 34,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderColor: theme.borderLight,
-    borderWidth: 1,
-    backgroundColor: theme.panel,
-  },
-  amountButtonText: {color: theme.radialRoot, fontSize: 20, fontWeight: '700'},
-  amountValue: {
-    minWidth: 54,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderTopColor: theme.borderLight,
-    borderBottomColor: theme.borderLight,
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    backgroundColor: theme.panel,
-    paddingHorizontal: 8,
-  },
-  amountValueLabel: {color: theme.textDim, fontSize: 7, fontWeight: '800'},
-  amountValueText: {color: theme.text, fontSize: 14, fontWeight: '800'},
-  deadlineRow: {flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6},
-  deadlineLabel: {color: theme.textDim, fontSize: 10, fontWeight: '700', marginRight: 2},
-  deadlineChip: {
-    borderColor: theme.border,
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 9,
-    paddingVertical: 5,
-    backgroundColor: theme.panel,
-  },
-  deadlineChipSelected: {borderColor: theme.radialRoot, backgroundColor: theme.radialRootPanel},
-  deadlineChipText: {color: theme.textDim, fontSize: 9, fontWeight: '700'},
-  deadlineChipTextSelected: {color: theme.radialRoot},
   recipeStageFilters: {
     borderTopColor: theme.border,
     borderTopWidth: 1,

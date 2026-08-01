@@ -127,6 +127,7 @@ import {
 } from './treeTotalTargets';
 import {
   estimateParallelMachines,
+  MINECRAFT_TICKS_PER_SECOND,
   recipeCycleSeconds,
   selectedRecipeOutput,
   type ProductionPlan,
@@ -426,18 +427,14 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
   const [picker, setPicker] = useState<PickerState | null>(null);
   const pickerRef = useRef<PickerState | null>(null);
   pickerRef.current = picker;
-  const [productionTarget, setProductionTarget] = useState<{
-    node: ItemTreeNode;
-    source: SourceTreeNode;
-    requiredAmount: number | null;
-  } | null>(null);
+  const [showRootActions, setShowRootActions] = useState(false);
+  useEffect(() => setShowRootActions(false), [graphRequestId]);
+  useEffect(() => {
+    if (tab !== 'graph') setShowRootActions(false);
+  }, [tab]);
   useSignalSurface(
-    tab === 'graph' && (picker || productionTarget)
-      ? picker
-        ? 'graph/source-picker'
-        : 'graph/production-planner'
-      : tab,
-    tab === 'graph' && (picker || productionTarget) ? 'modal' : 'screen',
+    tab === 'graph' && picker ? 'graph/source-picker' : tab,
+    tab === 'graph' && picker ? 'modal' : 'screen',
   );
   const pickerGroupLoadsRef = useRef(new Set<string>());
   const pickerRequestIdRef = useRef(0);
@@ -1158,7 +1155,7 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
           target.id === 'root' && direction === 'inputs'
             ? target.productionPlan ?? {
                 amount: Math.max(1, target.amount ?? 1),
-                windowSeconds: 60,
+                windowSeconds: 1,
               }
             : undefined,
         collapsedGroupKeys: loadCollapsedRecipeCategories(),
@@ -1294,12 +1291,42 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
   );
 
   const openPickerWithErrorHandling = useCallback(
-    (node: ItemTreeNode, byproductCoverage?: NodeByproductCoverage) => {
-      void openPicker(node, byproductCoverage).catch(error => {
+    (
+      node: ItemTreeNode,
+      byproductCoverage?: NodeByproductCoverage,
+      direction: GraphDirection = graphDirection,
+    ) => {
+      void openPicker(node, byproductCoverage, direction).catch(error => {
         console.error('The recipe-source picker could not be opened.', error);
       });
     },
-    [openPicker],
+    [graphDirection, openPicker],
+  );
+
+  const updateRootRequestedAmount = useCallback(
+    (requestedAmount: number) => {
+      const currentRoot = rootRef.current;
+      if (!currentRoot || !Number.isFinite(requestedAmount)) return;
+      const amount = Math.min(1_000_000_000_000, Math.max(1, Math.floor(requestedAmount)));
+      currentRoot.productionPlan = {
+        ...currentRoot.productionPlan,
+        amount,
+        // Legacy saved graphs require this field. Parallel suggestions now target one cycle.
+        windowSeconds: currentRoot.productionPlan?.windowSeconds ?? 1,
+      };
+      bump();
+    },
+    [bump],
+  );
+
+  const openRootPicker = useCallback(
+    (direction: GraphDirection) => {
+      const currentRoot = rootRef.current;
+      if (!currentRoot) return;
+      setShowRootActions(false);
+      openPickerWithErrorHandling(currentRoot, undefined, direction);
+    },
+    [openPickerWithErrorHandling],
   );
 
   const applyOnlyChoice = useCallback(
@@ -2132,10 +2159,11 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
                 byproductCoverage={treeTotals.byproductCoverageByNode.get(n.item.id)}
                 isRoot={n.item.id === 'root'}
                 selectable={
-                  !isRecursiveItemNode(n.item) &&
-                  (!!n.item.deferredRecipeExpansion ||
-                    treeTotals.byproductCoverageByNode.has(n.item.id) ||
-                    choicesFor(n.item.key).length > 0)
+                  n.item.id === 'root' ||
+                  (!isRecursiveItemNode(n.item) &&
+                    (!!n.item.deferredRecipeExpansion ||
+                      treeTotals.byproductCoverageByNode.has(n.item.id) ||
+                      choicesFor(n.item.key).length > 0))
                 }
                 terminal={
                   isRecursiveItemNode(n.item) ||
@@ -2155,11 +2183,13 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
                 showLabel
                 deferredDuplicate={!!n.item.deferredRecipeExpansion}
                 onTap={() =>
-                  handleCollapsedIngredientTap(n.item, () =>
-                    n.item.deferredRecipeExpansion || n.radial
-                      ? onItemTap(n.item)
-                      : openPickerWithErrorHandling(n.item),
-                  )
+                  n.item.id === 'root'
+                    ? setShowRootActions(value => !value)
+                    : handleCollapsedIngredientTap(n.item, () =>
+                        n.item.deferredRecipeExpansion || n.radial
+                          ? onItemTap(n.item)
+                          : openPickerWithErrorHandling(n.item),
+                      )
                 }
               />
             ) : n.kind === 'item' ? (
@@ -2185,7 +2215,9 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
                       : 'no inputs'
                 }
                 onTap={() =>
-                  handleCollapsedIngredientTap(n.item, () => onItemTap(n.item))
+                  n.item.id === 'root'
+                    ? setShowRootActions(value => !value)
+                    : handleCollapsedIngredientTap(n.item, () => onItemTap(n.item))
                 }
                 onInfo={() => openItem(n.item.key)}
               />
@@ -2205,24 +2237,17 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
                 focused={n.source?.id === focusedSourceId}
                 animateMobs={animateMobs}
                 canSwap={
+                  n.item.id !== 'root' &&
                   !isRecursiveItemNode(n.item) &&
                   choicesFor(n.item.key).length > 1
                 }
-                onCollapse={() => onItemTap(n.item)}
+                onCollapse={() =>
+                  n.item.id === 'root'
+                    ? setShowRootActions(value => !value)
+                    : onItemTap(n.item)
+                }
                 onSwap={() => openPickerWithErrorHandling(n.item)}
                 onInfo={() => openItem(n.item.key)}
-                onPlanProduction={
-                  n.item.id === 'root' &&
-                  graphDirection === 'inputs' &&
-                  n.source?.kind === 'recipe'
-                    ? () =>
-                        setProductionTarget({
-                          node: n.item,
-                          source: n.source!,
-                          requiredAmount: displayedAmountFor(n.item),
-                        })
-                    : undefined
-                }
               />
             ),
           )}
@@ -2299,22 +2324,14 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
           onOpenItem={openItem}
         />
       )}
-      {productionTarget && productionTarget.source.recipe && (
-        <ProductionPlannerModal
-          node={productionTarget.node}
-          source={productionTarget.source}
-          requiredAmount={productionTarget.requiredAmount}
-          onClose={() => setProductionTarget(null)}
-          onApply={plan => {
-            productionTarget.node.productionPlan = plan;
-            setProductionTarget(null);
-            bump();
-          }}
-          onClear={() => {
-            productionTarget.node.productionPlan = undefined;
-            setProductionTarget(null);
-            bump();
-          }}
+      {showRootActions && root && (
+        <RootQuickActions
+          root={root}
+          amount={root.productionPlan?.amount ?? root.amount ?? 1}
+          onAmountChange={updateRootRequestedAmount}
+          onChangeRecipe={() => openRootPicker('inputs')}
+          onAddUsedBy={() => openRootPicker('outputs')}
+          onClose={() => setShowRootActions(false)}
         />
       )}
       {picker && (
@@ -2449,14 +2466,6 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
             });
           }}
           productionPlan={picker.productionPlan}
-          onProductionPlanChange={
-            picker.productionPlan
-              ? productionPlan =>
-                  setPicker(current =>
-                    current ? {...current, productionPlan} : current,
-                  )
-              : undefined
-          }
           onOpenMachine={machineKey => {
             setPicker(null);
             openItem(machineKey);
@@ -2544,217 +2553,132 @@ export function GraphScreen({interfaceZoom = 1}: {interfaceZoom?: number}) {
   );
 }
 
-function ProductionPlannerModal({
-  node,
-  source,
-  requiredAmount,
+function RootQuickActions({
+  root,
+  amount,
+  onAmountChange,
+  onChangeRecipe,
+  onAddUsedBy,
   onClose,
-  onApply,
-  onClear,
 }: {
-  node: ItemTreeNode;
-  source: SourceTreeNode;
-  requiredAmount: number | null;
+  root: ItemTreeNode;
+  amount: number;
+  onAmountChange: (amount: number) => void;
+  onChangeRecipe: () => void;
+  onAddUsedBy: () => void;
   onClose: () => void;
-  onApply: (plan: ProductionPlan) => void;
-  onClear: () => void;
 }) {
   const data = useData();
-  const recipe = source.recipe!;
-  const category = source.ref ? data.categories[source.ref[0]] : undefined;
-  const exportedCycleSeconds = recipeCycleSeconds(recipe, category?.id);
-  const outputPerCycle = selectedRecipeOutput(recipe, node.key);
-  const initialAmount = node.productionPlan?.amount ?? requiredAmount ?? outputPerCycle ?? 1;
-  const [amountText, setAmountText] = useState(String(initialAmount));
-  const [minutesText, setMinutesText] = useState(
-    String((node.productionPlan?.windowSeconds ?? 60) / 60),
-  );
-  const [cycleText, setCycleText] = useState(
-    String(node.productionPlan?.cycleSeconds ?? exportedCycleSeconds ?? ''),
-  );
-  const amount = Number(amountText);
-  const minutes = Number(minutesText);
-  const enteredCycle = cycleText.trim() === '' ? undefined : Number(cycleText);
-  const cycleSeconds = enteredCycle ?? exportedCycleSeconds;
-  const validAmount = Number.isFinite(amount) && amount > 0;
-  const validMinutes = Number.isFinite(minutes) && minutes > 0;
-  const validCycle =
-    enteredCycle === undefined || (Number.isFinite(enteredCycle) && enteredCycle > 0);
-  const plan: ProductionPlan | null =
-    validAmount && validMinutes && validCycle
-      ? {
-          amount,
-          windowSeconds: minutes * 60,
-          ...(enteredCycle !== undefined &&
-          (exportedCycleSeconds == null || Math.abs(enteredCycle - exportedCycleSeconds) > 1e-9)
-            ? {cycleSeconds: enteredCycle}
-            : {}),
-        }
-      : null;
-  const estimate = plan
-    ? estimateParallelMachines(recipe, node.key, category?.id, plan)
+  const [amountText, setAmountText] = useState(String(amount));
+  useEffect(() => setAmountText(String(amount)), [amount]);
+  const recipe = root.source?.kind === 'recipe' ? root.source.recipe : undefined;
+  const category = root.source?.ref ? data.categories[root.source.ref[0]] : undefined;
+  const cycleSeconds = recipe ? recipeCycleSeconds(recipe, category?.id) : null;
+  const durationTicks =
+    cycleSeconds == null
+      ? null
+      : recipe?.durationTicks ?? cycleSeconds * MINECRAFT_TICKS_PER_SECOND;
+  const estimate = recipe
+    ? estimateParallelMachines(recipe, root.key, category?.id, {
+        amount,
+        windowSeconds: 1,
+      })
     : null;
   const machineKey = category?.catalysts[0];
   const machineName = machineKey
     ? data.itemsByKey.get(machineKey)?.n ?? machineKey
     : 'machine';
-  const step = outputPerCycle ?? 1;
+  const outputPerCycle = recipe ? selectedRecipeOutput(recipe, root.key) : null;
   const adjustAmount = (direction: -1 | 1) => {
-    const current = validAmount ? amount : step;
-    setAmountText(String(Math.max(step, current + direction * step)));
+    onAmountChange(amount + direction);
   };
-  const estimateMessage = estimate
-    ? `${estimate.machines} × ${machineName}`
-    : cycleSeconds == null
-      ? 'Enter the recipe time to calculate machines.'
-      : outputPerCycle == null
-        ? 'This recipe has no guaranteed output amount.'
-        : validMinutes && minutes * 60 < cycleSeconds
-          ? 'The deadline is shorter than one complete recipe cycle.'
-          : 'Enter valid planning values.';
+  const updateAmountText = (value: string) => {
+    setAmountText(value);
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed >= 1) onAmountChange(parsed);
+  };
 
   return (
-    <Pressable
-      style={styles.plannerBackdrop}
-      onPress={onClose}
-      accessible={false}>
-      <Pressable
-        style={styles.plannerCard}
-        onPress={() => {}}
-        accessible={false}>
-        <ScrollView
-          style={styles.plannerScroll}
-          contentContainerStyle={styles.plannerContent}
-          keyboardShouldPersistTaps="handled">
-        <View style={styles.plannerHeader}>
-          <View style={styles.plannerTarget}>
-            <ItemIcon itemKey={node.key} size={28} />
-            <View style={{flex: 1}}>
-              <Text style={styles.plannerEyebrow}>PRODUCTION TARGET</Text>
-              <Text style={styles.plannerTitle} numberOfLines={1}>
-                {data.itemsByKey.get(node.key)?.n ?? node.key}
-              </Text>
-            </View>
-          </View>
-          <TouchableOpacity
-            {...signalTarget('graph.production.close')}
-            accessibilityRole="button"
-            accessibilityLabel="Close production planner"
-            style={styles.plannerClose}
-            onPress={onClose}>
-            <Text style={styles.plannerCloseText}>×</Text>
-          </TouchableOpacity>
-        </View>
-
-        <Text style={styles.plannerLabel}>Amount requested</Text>
-        <View style={styles.plannerStepper}>
-          <TouchableOpacity
-            {...signalTarget('graph.production.amount.decrease')}
-            accessibilityRole="button"
-            accessibilityLabel={`Decrease requested amount by ${String(step)}`}
-            style={styles.plannerStepBtn}
-            onPress={() => adjustAmount(-1)}>
-            <Text style={styles.plannerStepText}>−</Text>
-          </TouchableOpacity>
-          <TextInput
-            accessibilityLabel="Amount requested"
-            style={styles.plannerInput}
-            value={amountText}
-            onChangeText={setAmountText}
-            keyboardType="decimal-pad"
-            inputMode="decimal"
-            selectTextOnFocus
-          />
-          <TouchableOpacity
-            {...signalTarget('graph.production.amount.increase')}
-            accessibilityRole="button"
-            accessibilityLabel={`Increase requested amount by ${String(step)}`}
-            style={styles.plannerStepBtn}
-            onPress={() => adjustAmount(1)}>
-            <Text style={styles.plannerStepText}>+</Text>
-          </TouchableOpacity>
-        </View>
-        {outputPerCycle != null && (
-          <Text style={styles.plannerHint}>{outputPerCycle} output per recipe cycle</Text>
-        )}
-
-        <View style={styles.plannerFields}>
-          <View style={styles.plannerField}>
-            <Text style={styles.plannerLabel}>Finish within</Text>
-            <View style={styles.plannerInputWrap}>
-              <TextInput
-                accessibilityLabel="Production deadline in minutes"
-                style={[styles.plannerInput, styles.plannerFieldInput]}
-                value={minutesText}
-                onChangeText={setMinutesText}
-                keyboardType="decimal-pad"
-                inputMode="decimal"
-                selectTextOnFocus
-              />
-              <Text style={styles.plannerUnit}>min</Text>
-            </View>
-          </View>
-          <View style={styles.plannerField}>
-            <Text style={styles.plannerLabel}>Recipe time</Text>
-            <View style={styles.plannerInputWrap}>
-              <TextInput
-                accessibilityLabel="Recipe cycle time in seconds"
-                style={[styles.plannerInput, styles.plannerFieldInput]}
-                value={cycleText}
-                onChangeText={setCycleText}
-                keyboardType="decimal-pad"
-                inputMode="decimal"
-                selectTextOnFocus
-                placeholder="Unknown"
-                placeholderTextColor={theme.textDim}
-              />
-              <Text style={styles.plannerUnit}>sec</Text>
-            </View>
-          </View>
-        </View>
-        <Text style={styles.plannerHint}>
-          {recipe.durationTicks !== undefined
-            ? 'Recipe time supplied by the modpack export.'
-            : exportedCycleSeconds !== null
-              ? 'Using the built-in Minecraft cooking time.'
-              : 'This export has no timing data; enter the cycle time shown by the machine.'}
-        </Text>
-
-        <View style={[styles.plannerEstimate, estimate && styles.plannerEstimateReady]}>
-          <Text style={styles.plannerEstimateLabel}>SUGGESTED PARALLELS</Text>
-          <Text style={[styles.plannerEstimateValue, estimate && styles.plannerEstimateValueReady]}>
-            {estimateMessage}
-          </Text>
-          {estimate && (
-            <Text style={styles.plannerEstimateDetail}>
-              {estimate.cyclesRequired} cycles total · {estimate.cyclesPerMachine} per machine
+    <View style={styles.rootActions}>
+      <View style={styles.rootActionsHeader}>
+        <View style={styles.rootActionsIdentity}>
+          <ItemIcon itemKey={root.key} size={24} />
+          <View style={styles.rootActionsTitleWrap}>
+            <Text style={styles.rootActionsEyebrow}>STARTING ITEM</Text>
+            <Text style={styles.rootActionsTitle} numberOfLines={1}>
+              {data.itemsByKey.get(root.key)?.n ?? root.key}
             </Text>
-          )}
+          </View>
         </View>
+        <TouchableOpacity
+          {...signalTarget('graph.root-actions.close')}
+          accessibilityRole="button"
+          accessibilityLabel="Close starting item controls"
+          style={styles.rootActionsClose}
+          onPress={onClose}>
+          <Text style={styles.rootActionsCloseText}>×</Text>
+        </TouchableOpacity>
+      </View>
 
-        <View style={styles.plannerActions}>
-          {node.productionPlan && (
-            <TouchableOpacity
-              {...signalTarget('graph.production.clear')}
-              accessibilityRole="button"
-              style={styles.plannerSecondaryBtn}
-              onPress={onClear}>
-              <Text style={styles.plannerSecondaryText}>Reset</Text>
-            </TouchableOpacity>
-          )}
-          <TouchableOpacity
-            {...signalTarget('graph.production.apply')}
-            accessibilityRole="button"
-            accessibilityState={{disabled: plan == null}}
-            disabled={plan == null}
-            style={[styles.plannerApplyBtn, plan == null && styles.plannerApplyBtnDisabled]}
-            onPress={() => plan && onApply(plan)}>
-            <Text style={styles.plannerApplyText}>Apply target</Text>
-          </TouchableOpacity>
-        </View>
-        </ScrollView>
-      </Pressable>
-    </Pressable>
+      <Text style={styles.rootActionsLabel}>Amount requested</Text>
+      <View style={styles.rootActionsStepper}>
+        <TouchableOpacity
+          {...signalTarget('graph.root-actions.amount.decrease')}
+          accessibilityRole="button"
+          accessibilityLabel="Decrease requested amount"
+          style={styles.rootActionsStepButton}
+          onPress={() => adjustAmount(-1)}>
+          <Text style={styles.rootActionsStepText}>−</Text>
+        </TouchableOpacity>
+        <TextInput
+          accessibilityLabel="Amount requested"
+          style={styles.rootActionsInput}
+          value={amountText}
+          onChangeText={updateAmountText}
+          onBlur={() => setAmountText(String(amount))}
+          keyboardType="number-pad"
+          inputMode="numeric"
+          selectTextOnFocus
+        />
+        <TouchableOpacity
+          {...signalTarget('graph.root-actions.amount.increase')}
+          accessibilityRole="button"
+          accessibilityLabel="Increase requested amount"
+          style={styles.rootActionsStepButton}
+          onPress={() => adjustAmount(1)}>
+          <Text style={styles.rootActionsStepText}>+</Text>
+        </TouchableOpacity>
+      </View>
+
+      {estimate && cycleSeconds != null && durationTicks != null ? (
+        <Text style={styles.rootActionsEstimate}>
+          Suggested: {estimate.machines} × {machineName} · {durationTicks.toLocaleString()} ticks / {cycleSeconds.toLocaleString()} sec per batch
+        </Text>
+      ) : recipe && outputPerCycle == null ? (
+        <Text style={styles.rootActionsHint}>This recipe has no guaranteed output count.</Text>
+      ) : recipe ? (
+        <Text style={styles.rootActionsHint}>Recipe timing is unavailable in this export.</Text>
+      ) : (
+        <Text style={styles.rootActionsHint}>Choose a recipe to see its batch time and suggested parallels.</Text>
+      )}
+
+      <View style={styles.rootActionsButtons}>
+        <TouchableOpacity
+          {...signalTarget('graph.root-actions.change-recipe')}
+          accessibilityRole="button"
+          style={styles.rootActionsSecondary}
+          onPress={onChangeRecipe}>
+          <Text style={styles.rootActionsSecondaryText}>Change recipe</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          {...signalTarget('graph.root-actions.add-used-by')}
+          accessibilityRole="button"
+          style={styles.rootActionsPrimary}
+          onPress={onAddUsedBy}>
+          <Text style={styles.rootActionsPrimaryText}>Add used by</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
   );
 }
 
@@ -2930,7 +2854,7 @@ function CompactItemNodeView({
     <Pressable
       {...signalTarget(`graph.node.expand.${nodeDepthBucket(node)}`)}
       accessibilityRole={selectable ? 'button' : undefined}
-      accessibilityLabel={`${name}, quantity ${formatIngredientQuantity(node.key, requiredAmount)}${terminal ? `, ${terminalLabel}` : ''}${deferredDuplicate ? ', recipe expanded elsewhere, tap to move expansion here' : ''}${byproductLabel ? `, ${byproductLabel}` : ''}${node.nonConsumed ? ', not consumed' : ''}${node.consumptionProbability !== undefined ? `, ${node.consumptionProbability == null ? 'unknown' : `${String(Math.round(node.consumptionProbability * 10_000) / 100)} percent`} consume chance` : ''}${node.productionProbability !== undefined ? `, ${node.productionProbability == null ? 'unknown' : `${String(Math.round(node.productionProbability * 10_000) / 100)} percent`} produce chance` : ''}${selectable && !deferredDuplicate ? byproductCoverage?.remainingAmount === 0 ? ', navigate to producing recipe' : ', choose source' : ''}`}
+      accessibilityLabel={`${name}, quantity ${formatIngredientQuantity(node.key, requiredAmount)}${terminal ? `, ${terminalLabel}` : ''}${deferredDuplicate ? ', recipe expanded elsewhere, tap to move expansion here' : ''}${byproductLabel ? `, ${byproductLabel}` : ''}${node.nonConsumed ? ', not consumed' : ''}${node.consumptionProbability !== undefined ? `, ${node.consumptionProbability == null ? 'unknown' : `${String(Math.round(node.consumptionProbability * 10_000) / 100)} percent`} consume chance` : ''}${node.productionProbability !== undefined ? `, ${node.productionProbability == null ? 'unknown' : `${String(Math.round(node.productionProbability * 10_000) / 100)} percent`} produce chance` : ''}${isRoot ? ', open amount and recipe controls' : selectable && !deferredDuplicate ? byproductCoverage?.remainingAmount === 0 ? ', navigate to producing recipe' : ', choose source' : ''}`}
       disabled={!selectable || node.loading}
       onPress={onTap}
       style={[
@@ -3045,7 +2969,7 @@ function ItemNodeView({
       {...signalTarget(`graph.node.expand.${nodeDepthBucket(node)}`)}
       onPress={onTap}
       accessibilityRole="button"
-      accessibilityLabel={`${name}, quantity ${formatIngredientQuantity(node.key, requiredAmount)}${!expandable ? `, ${terminalLabel}` : ''}${deferredDuplicate ? ', recipe expanded elsewhere, tap to move expansion here' : ''}${node.productionProbability !== undefined ? `, ${node.productionProbability == null ? 'unknown' : `${String(Math.round(node.productionProbability * 10_000) / 100)} percent`} produce chance` : ''}${byproductCoverage ? byproductCoverage.remainingAmount === 0 ? ', completed by byproduct, navigate to producing recipe' : `, partially completed by byproduct, ${formatIngredientQuantity(node.key, byproductCoverage.remainingAmount)} still needed, choose source` : expandable && !deferredDuplicate ? ', choose source' : ''}`}
+      accessibilityLabel={`${name}, quantity ${formatIngredientQuantity(node.key, requiredAmount)}${!expandable ? `, ${terminalLabel}` : ''}${deferredDuplicate ? ', recipe expanded elsewhere, tap to move expansion here' : ''}${node.productionProbability !== undefined ? `, ${node.productionProbability == null ? 'unknown' : `${String(Math.round(node.productionProbability * 10_000) / 100)} percent`} produce chance` : ''}${isRoot ? ', open amount and recipe controls' : byproductCoverage ? byproductCoverage.remainingAmount === 0 ? ', completed by byproduct, navigate to producing recipe' : `, partially completed by byproduct, ${formatIngredientQuantity(node.key, byproductCoverage.remainingAmount)} still needed, choose source` : expandable && !deferredDuplicate ? ', choose source' : ''}`}
       style={[
         styles.itemNode,
         {left: x, top: y, width: ITEM_W, height: ITEM_H},
@@ -3116,7 +3040,6 @@ function SourceNodeView({
   onCollapse,
   onSwap,
   onInfo,
-  onPlanProduction,
 }: {
   x: number;
   y: number;
@@ -3134,7 +3057,6 @@ function SourceNodeView({
   onCollapse: () => void;
   onSwap: () => void;
   onInfo: () => void;
-  onPlanProduction?: () => void;
 }) {
   const data = useData();
   const catalogItem = data.itemsByKey.get(item.key);
@@ -3211,47 +3133,19 @@ function SourceNodeView({
       ]}>
       <Pressable
         {...signalTarget(`graph.node.collapse.${nodeDepthBucket(item)}`)}
+        accessibilityRole="button"
+        accessibilityLabel={isRoot ? `Open amount and recipe controls for ${name}` : undefined}
         onPress={onCollapse}
         style={styles.sourceHeader}>
         {isRoot ? (
-          onPlanProduction ? (
-            <TouchableOpacity
-              {...signalTarget('graph.node.production-plan')}
-              accessibilityRole="button"
-              accessibilityLabel={`Plan requested amount and parallel machines for ${name}`}
-              onPress={event => {
-                event.stopPropagation();
-                onPlanProduction();
-              }}
-              hitSlop={5}
-              style={styles.rootSourceIconFrame}>
-              <View pointerEvents="none" style={styles.rootSourceIconDiamond} />
-              <ItemIcon item={catalogItem} itemKey={item.key} size={16} />
-            </TouchableOpacity>
-          ) : (
-            <View style={styles.rootSourceIconFrame}>
-              <View pointerEvents="none" style={styles.rootSourceIconDiamond} />
-              <ItemIcon item={catalogItem} itemKey={item.key} size={16} />
-            </View>
-          )
+          <View style={styles.rootSourceIconFrame}>
+            <View pointerEvents="none" style={styles.rootSourceIconDiamond} />
+            <ItemIcon item={catalogItem} itemKey={item.key} size={16} />
+          </View>
         ) : (
           <ItemIcon item={catalogItem} itemKey={item.key} size={16} />
         )}
-        {isRoot && onPlanProduction ? (
-          <TouchableOpacity
-            {...signalTarget('graph.node.production-plan.label')}
-            accessibilityRole="button"
-            accessibilityLabel={`Plan requested amount and parallel machines for ${name}`}
-            style={styles.sourceHeaderLabelButton}
-            onPress={event => {
-              event.stopPropagation();
-              onPlanProduction();
-            }}>
-            {headerCopy}
-          </TouchableOpacity>
-        ) : (
-          headerCopy
-        )}
+        {headerCopy}
         {canSwap && (
           <TouchableOpacity
             {...signalTarget(`graph.node.swap.${nodeDepthBucket(item)}`)}
@@ -3555,7 +3449,6 @@ const styles = StyleSheet.create({
     marginBottom: 3,
   },
   sourceHeaderText: {color: theme.text, fontSize: 11, fontWeight: '600', flex: 1},
-  sourceHeaderLabelButton: {flex: 1, minWidth: 0},
   sourceHeaderAmount: {color: theme.accent, fontWeight: '700'},
   sourceHeaderContext: {color: theme.textDim, fontWeight: '400'},
   sourceHeaderByproduct: {color: theme.accentAlt, fontWeight: '600'},
@@ -3564,45 +3457,42 @@ const styles = StyleSheet.create({
   dropRow: {flexDirection: 'row', alignItems: 'center', flex: 1, paddingHorizontal: 4},
   dropName: {color: theme.text, fontSize: 12},
   dropStat: {color: theme.textDim, fontSize: 10, marginTop: 2},
-  plannerBackdrop: {
+  rootActions: {
     position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-    backgroundColor: 'rgba(3,5,8,0.76)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 18,
-  },
-  plannerCard: {
-    width: 430,
-    maxWidth: '100%',
-    backgroundColor: theme.panel,
-    borderColor: theme.borderLight,
+    zIndex: 20,
+    bottom: 72,
+    left: 12,
+    width: 360,
+    maxWidth: '92%',
+    alignSelf: 'center',
+    backgroundColor: 'rgba(23,29,38,0.98)',
+    borderColor: theme.radialRoot,
     borderWidth: 1,
     borderRadius: 12,
-    maxHeight: '94%',
-    overflow: 'hidden',
+    padding: 12,
+    gap: 8,
   },
-  plannerScroll: {flexShrink: 1},
-  plannerContent: {padding: 16},
-  plannerHeader: {
+  rootActionsHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 16,
   },
-  plannerTarget: {flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10},
-  plannerEyebrow: {color: theme.accent, fontSize: 9, fontWeight: '800', letterSpacing: 0.8},
-  plannerTitle: {color: theme.text, fontSize: 16, fontWeight: '700', marginTop: 2},
-  plannerClose: {width: 32, height: 32, alignItems: 'center', justifyContent: 'center'},
-  plannerCloseText: {color: theme.textDim, fontSize: 24, lineHeight: 26},
-  plannerLabel: {color: theme.textDim, fontSize: 10, fontWeight: '700', marginBottom: 6},
-  plannerStepper: {flexDirection: 'row', alignItems: 'stretch', gap: 6},
-  plannerStepBtn: {
-    width: 42,
-    minHeight: 42,
+  rootActionsIdentity: {flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8},
+  rootActionsTitleWrap: {flex: 1, minWidth: 0},
+  rootActionsEyebrow: {
+    color: theme.radialRoot,
+    fontSize: 8,
+    fontWeight: '800',
+    letterSpacing: 0.7,
+  },
+  rootActionsTitle: {color: theme.text, fontSize: 13, fontWeight: '700', marginTop: 1},
+  rootActionsClose: {width: 30, height: 30, alignItems: 'center', justifyContent: 'center'},
+  rootActionsCloseText: {color: theme.textDim, fontSize: 22, lineHeight: 24},
+  rootActionsLabel: {color: theme.textDim, fontSize: 9, fontWeight: '700'},
+  rootActionsStepper: {flexDirection: 'row', alignItems: 'stretch', gap: 6},
+  rootActionsStepButton: {
+    width: 40,
+    minHeight: 40,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: theme.panelAlt,
@@ -3610,11 +3500,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 7,
   },
-  plannerStepText: {color: theme.text, fontSize: 20, fontWeight: '700'},
-  plannerInput: {
+  rootActionsStepText: {color: theme.radialRoot, fontSize: 20, fontWeight: '700'},
+  rootActionsInput: {
     flex: 1,
     minWidth: 0,
-    minHeight: 42,
+    minHeight: 40,
     backgroundColor: '#0f141b',
     borderColor: theme.border,
     borderWidth: 1,
@@ -3625,46 +3515,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     textAlign: 'center',
   },
-  plannerHint: {color: theme.textDim, fontSize: 10, lineHeight: 14, marginTop: 6},
-  plannerFields: {flexDirection: 'row', gap: 10, marginTop: 16},
-  plannerField: {flex: 1},
-  plannerInputWrap: {position: 'relative', flexDirection: 'row', alignItems: 'center'},
-  plannerFieldInput: {paddingRight: 42, textAlign: 'left'},
-  plannerUnit: {position: 'absolute', right: 10, color: theme.textDim, fontSize: 10},
-  plannerEstimate: {
-    backgroundColor: '#111720',
-    borderColor: theme.border,
-    borderWidth: 1,
-    borderRadius: 9,
-    padding: 12,
-    marginTop: 16,
-  },
-  plannerEstimateReady: {backgroundColor: '#202017', borderColor: '#6c642b'},
-  plannerEstimateLabel: {color: theme.textDim, fontSize: 9, fontWeight: '800', letterSpacing: 0.7},
-  plannerEstimateValue: {color: theme.textDim, fontSize: 14, fontWeight: '700', marginTop: 4},
-  plannerEstimateValueReady: {color: theme.warn, fontSize: 18},
-  plannerEstimateDetail: {color: theme.textDim, fontSize: 10, marginTop: 3},
-  plannerActions: {flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 16},
-  plannerSecondaryBtn: {
+  rootActionsEstimate: {color: theme.warn, fontSize: 10, lineHeight: 14, fontWeight: '700'},
+  rootActionsHint: {color: theme.textDim, fontSize: 10, lineHeight: 14},
+  rootActionsButtons: {flexDirection: 'row', gap: 8, marginTop: 2},
+  rootActionsSecondary: {
+    flex: 1,
     minHeight: 38,
-    paddingHorizontal: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    borderColor: theme.border,
+    borderColor: theme.borderLight,
     borderWidth: 1,
     borderRadius: 7,
   },
-  plannerSecondaryText: {color: theme.textDim, fontSize: 11, fontWeight: '700'},
-  plannerApplyBtn: {
+  rootActionsSecondaryText: {color: theme.text, fontSize: 10, fontWeight: '800'},
+  rootActionsPrimary: {
+    flex: 1,
     minHeight: 38,
-    paddingHorizontal: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: theme.accent,
+    backgroundColor: theme.radialRoot,
     borderRadius: 7,
   },
-  plannerApplyBtnDisabled: {opacity: 0.45},
-  plannerApplyText: {color: '#0b2613', fontSize: 11, fontWeight: '800'},
+  rootActionsPrimaryText: {color: '#0b1610', fontSize: 10, fontWeight: '800'},
   controls: {
     position: 'absolute',
     top: 10,
