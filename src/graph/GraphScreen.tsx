@@ -12,7 +12,10 @@ import {
 } from 'react-native';
 import {formatDropStat} from '../components/DropList';
 import {ItemIcon, pixelated} from '../components/ItemIcon';
-import {RADIAL_ROOT_ITEM_ICON_SIZE} from '../components/itemIconSizing';
+import {
+  RADIAL_ROOT_ITEM_ICON_SIZE,
+  ROOT_QUICK_ACTION_ITEM_ICON_SIZE,
+} from '../components/itemIconSizing';
 import {MobSprite} from '../components/MobSprite';
 import {
   PickerGroupProgress,
@@ -2602,7 +2605,7 @@ function RootQuickActions({
     <View style={styles.rootActions}>
       <View style={styles.rootActionsHeader}>
         <View style={styles.rootActionsIdentity}>
-          <ItemIcon itemKey={root.key} size={24} />
+          <ItemIcon itemKey={root.key} size={ROOT_QUICK_ACTION_ITEM_ICON_SIZE} />
           <View style={styles.rootActionsTitleWrap}>
             <Text style={styles.rootActionsEyebrow}>STARTING ITEM</Text>
             <Text style={styles.rootActionsTitle} numberOfLines={1}>
