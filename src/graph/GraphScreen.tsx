@@ -3036,7 +3036,10 @@ function CompactItemNodeView({
       {isRoot && (
         <View
           pointerEvents="none"
-          style={radialRoot ? styles.radialRootDiamond : styles.compactRootDiamond}
+          style={[
+            radialRoot ? styles.radialRootDiamond : styles.compactRootDiamond,
+            rootActions && styles.rootDiamondSelected,
+          ]}
         />
       )}
       <ItemIcon
@@ -3156,6 +3159,7 @@ function ItemNodeView({
           styles.nodeByproductPartial,
         deferredDuplicate && styles.nodeDeferredRecipe,
         isRoot && styles.nodeRoot,
+        isRoot && rootActions && styles.rootNodeSelected,
       ]}>
       {isRoot ? (
         <View style={styles.rootItemIconFrame}>
@@ -3318,6 +3322,8 @@ function SourceNodeView({
         focused && styles.nodeByproductTarget,
         isRoot && !radialRoot && styles.nodeRoot,
         radialRoot && styles.radialExpandedRootNode,
+        isRoot && rootActions &&
+          (radialRoot ? styles.radialRootSelected : styles.rootNodeSelected),
       ]}>
       <Pressable
         {...signalTarget(`graph.node.collapse.${nodeDepthBucket(item)}`)}
@@ -3488,7 +3494,7 @@ const styles = StyleSheet.create({
     height: RADIAL_ROOT_DIAMOND_SIZE,
     borderRadius: 17,
     borderColor: theme.radialRoot,
-    borderWidth: 3,
+    borderWidth: 1,
     backgroundColor: theme.radialRootPanel,
     transform: [{rotate: '45deg'}],
   },
@@ -3498,7 +3504,7 @@ const styles = StyleSheet.create({
     height: COMPACT_ROOT_DIAMOND_SIZE,
     borderRadius: 12,
     borderColor: theme.radialRoot,
-    borderWidth: 3,
+    borderWidth: 1,
     backgroundColor: theme.radialRootPanel,
     transform: [{rotate: '45deg'}],
   },
@@ -3565,15 +3571,18 @@ const styles = StyleSheet.create({
   nodeLoading: {opacity: 0.55},
   nodeRoot: {
     borderColor: theme.radialRoot,
-    borderWidth: 2,
+    borderWidth: 1,
     backgroundColor: theme.radialRootPanel,
   },
+  rootNodeSelected: {borderWidth: 2},
   radialExpandedRootNode: {
     backgroundColor: theme.radialRootPanel,
     borderColor: theme.radialRoot,
-    borderWidth: 3,
+    borderWidth: 1,
     borderRadius: 22,
   },
+  radialRootSelected: {borderWidth: 3},
+  rootDiamondSelected: {borderWidth: 3},
   nodePrerequisite: {borderColor: theme.borderLight, borderStyle: 'dashed'},
   nodeCyclic: {borderColor: theme.warn},
   nodeTerminal: {borderColor: theme.textDim, borderWidth: 2},
