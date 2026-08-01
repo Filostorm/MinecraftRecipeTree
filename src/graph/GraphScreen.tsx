@@ -3319,7 +3319,15 @@ function SourceNodeView({
   );
 
   return (
-    <View
+    <Pressable
+      {...(isRoot ? signalTarget('graph.root-actions.toggle-expanded') : {})}
+      accessibilityRole={isRoot ? 'button' : undefined}
+      accessibilityLabel={
+        isRoot
+          ? `${rootActions ? 'Close' : 'Open'} amount and recipe controls for ${name}`
+          : undefined
+      }
+      onPress={isRoot ? onCollapse : undefined}
       style={[
         styles.sourceNode,
         {left: x, top: y, width: sourceCardWidth, height: h},
@@ -3338,9 +3346,9 @@ function SourceNodeView({
       ]}>
       <Pressable
         {...signalTarget(`graph.node.collapse.${nodeDepthBucket(item)}`)}
-        accessibilityRole="button"
-        accessibilityLabel={isRoot ? `Open amount and recipe controls for ${name}` : undefined}
-        onPress={onCollapse}
+        pointerEvents={isRoot ? 'box-none' : 'auto'}
+        accessibilityRole={isRoot ? undefined : 'button'}
+        onPress={isRoot ? undefined : onCollapse}
         style={styles.sourceHeader}>
         {isRoot ? (
           <View style={styles.rootSourceIconFrame}>
@@ -3423,7 +3431,7 @@ function SourceNodeView({
           </View>
         </>
       )}
-    </View>
+    </Pressable>
   );
 }
 
