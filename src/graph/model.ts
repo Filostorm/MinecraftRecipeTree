@@ -2,7 +2,6 @@ import type {DropStat, Mob, Recipe, RecipeRef} from '../types';
 import type {IngredientSelections} from '../data/ingredientAlternativeSelection';
 import type {GraphDirection} from './direction';
 import type {ProductionPlan} from './machineParallels';
-import {createDefaultRootProductionPlan} from './rootAmount';
 
 /**
  * The flowchart is a tree rooted at the item being crafted, growing downward.
@@ -87,12 +86,7 @@ export interface ItemTreeNode {
 }
 
 export function makeRoot(key: string): ItemTreeNode {
-  return {
-    id: 'root',
-    key,
-    ancestors: [],
-    productionPlan: createDefaultRootProductionPlan(),
-  };
+  return {id: 'root', key, ancestors: []};
 }
 
 /** A node is a recursion boundary when its item already exists in its own path. */
