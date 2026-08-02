@@ -466,21 +466,6 @@ async function writeReportFile(
   return {htmlUrl, downloadUrl};
 }
 
-function dedupeDescription(identity: ReportDedupeIdentity): string {
-  if (identity.kind === 'pack-version') {
-    return `pack version ${inlineCode(`${identity.packName} ${identity.packVersion}`)}`;
-  }
-  if (identity.kind === 'mod-versions') {
-    const mods = Object.entries(identity.mods);
-    const shown = mods.slice(0, 40)
-      .map(([modId, version]) => inlineCode(`${modId} ${version}`))
-      .join(', ');
-    return `affected mod versions ${shown}` +
-      (mods.length > 40 ? ` and ${mods.length - 40} more in errors.json` : '');
-  }
-  return `exporter build ${inlineCode(`${identity.exporterId} ${identity.exporterVersion}`)}`;
-}
-
 function issueTitle(report: ExportFailureReport, identity: ReportDedupeIdentity): string {
   if (identity.kind === 'pack-version') {
     return singleLine(`[Exporter] ${report.packName} ${report.packVersion} export failures`).slice(0, 240);
@@ -494,7 +479,6 @@ function issueTitle(report: ExportFailureReport, identity: ReportDedupeIdentity)
 
 function issueBody(
   report: ExportFailureReport,
-  identity: ReportDedupeIdentity,
   fingerprint: string,
   file: GitHubFile,
 ): string {
@@ -516,10 +500,9 @@ function issueBody(
     (affectedMods.length > 0
       ? `- Affected mods: ${affectedModSummary}\n`
       : '') +
-    `- Deduplicated by: ${dedupeDescription(identity)}\n\n` +
+    `\n` +
     `## Errors file\n\n` +
-    `[Download errors.json](${file.downloadUrl}) · [View file history](${file.htmlUrl})\n\n` +
-    `Repeating this report for the same dedupe identity updates the file and this issue instead of adding comments.`;
+    `[Download errors.json](${file.downloadUrl}) · [View file history](${file.htmlUrl})`;
 }
 
 async function findExistingIssue(
@@ -548,7 +531,7 @@ async function publishFailureIssue(
   let issue = issueHint ?? await findExistingIssue(githubFetch, token, fingerprint);
   const duplicate = issue !== null;
   const title = issueTitle(report, identity);
-  const body = issueBody(report, identity, fingerprint, file);
+  const body = issueBody(report, fingerprint, file);
   if (!issue) {
     issue = await githubJson<GitHubIssue>(githubFetch, token, `${GITHUB_API}/issues`, {
       method: 'POST',

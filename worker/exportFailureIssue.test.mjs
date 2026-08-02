@@ -121,6 +121,8 @@ test('stores all exporter failures in errors.json and links one issue without co
   assert.match(issuePayload.title, /Broken Machines 4\.2\.0 export failures/);
   assert.match(issuePayload.body, /Download errors\.json/);
   assert.match(issuePayload.body, /brokenmod 7\.3\.1/);
+  assert.doesNotMatch(issuePayload.body, /Deduplicated by:/);
+  assert.doesNotMatch(issuePayload.body, /Repeating this report/);
   assert.equal(github.calls.some(call => call.url.includes('/comments')), false);
   assert.equal(github.calls.every(call => call.init.headers.Authorization === `Bearer ${TOKEN}`), true);
 });
