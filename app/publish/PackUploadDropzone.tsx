@@ -42,7 +42,9 @@ type UploadState =
       status: 'checking';
       filename: string;
       progress: number;
-      phase: 'checking' | 'adding' | 'reporting';
+      phase: 'checking' | 'adding' | 'saving' | 'finalizing' | 'reporting';
+      completedFiles?: number;
+      totalFiles?: number;
     }
   | {
       status: 'ready';
@@ -363,12 +365,32 @@ export function PackUploadDropzone() {
             result.manifestBytes,
             result.manifest,
             result.summary,
-            fraction => {
+            progress => {
               if (operationRef.current !== operation) return;
+              if (progress.phase === 'saving') {
+                setState({
+                  status: 'checking',
+                  filename: file.name,
+                  progress: progress.fraction,
+                  phase: 'saving',
+                  completedFiles: progress.completedFiles,
+                  totalFiles: progress.totalFiles,
+                });
+                return;
+              }
+              if (progress.phase === 'finalizing') {
+                setState({
+                  status: 'checking',
+                  filename: file.name,
+                  progress: 1,
+                  phase: 'finalizing',
+                });
+                return;
+              }
               setState({
                 status: 'checking',
                 filename: file.name,
-                progress: fraction,
+                progress: progress.fraction,
                 phase: 'adding',
               });
             },
@@ -478,10 +500,14 @@ export function PackUploadDropzone() {
         <strong>
           {state.status === 'checking'
             ? state.phase === 'reporting'
-              ? `Finishing ${state.filename}`
-              : state.phase === 'adding'
-                ? `Adding ${state.filename} to your viewer`
-                : `Checking ${state.filename}`
+              ? `Reporting errors for ${state.filename}`
+              : state.phase === 'finalizing'
+                ? `Preparing ${state.filename}`
+                : state.phase === 'saving'
+                  ? `Saving ${state.filename}`
+                  : state.phase === 'adding'
+                    ? `Adding ${state.filename} to your viewer`
+                    : `Checking ${state.filename}`
             : dragging
               ? 'Drop the exporter ZIP here'
               : 'Drag and drop your exporter ZIP'}
@@ -490,30 +516,46 @@ export function PackUploadDropzone() {
           {state.status === 'checking'
             ? state.phase === 'reporting'
               ? 'Sending its errors report…'
-              : `${Math.round(state.progress * 100)}% ${
-                  state.phase === 'adding' ? 'saved' : 'checked'
-                }`
+              : state.phase === 'finalizing'
+                ? 'Preparing it for the viewer…'
+                : state.phase === 'saving'
+                  ? `${state.completedFiles?.toLocaleString() ?? 0} of ${
+                      state.totalFiles?.toLocaleString() ?? 0
+                    } files saved`
+                  : `${Math.round(state.progress * 100)}% ${
+                      state.phase === 'adding' ? 'read' : 'checked'
+                    }`
             : 'or tap to add a file'}
         </span>
         {state.status === 'checking' && (
           <span
             className={[
               styles.uploadProgress,
-              state.phase === 'reporting' ? styles.uploadProgressWaiting : '',
+              state.phase === 'reporting' || state.phase === 'finalizing'
+                ? styles.uploadProgressWaiting
+                : '',
             ].filter(Boolean).join(' ')}
             style={{'--upload-progress': `${state.progress * 100}%`} as CSSProperties}
             role="progressbar"
             aria-label={
               state.phase === 'reporting'
                 ? 'Waiting for the errors report to finish'
-                : state.phase === 'adding'
-                  ? 'Adding pack to the viewer'
-                  : 'Checking pack'
+                : state.phase === 'finalizing'
+                  ? 'Preparing pack for the viewer'
+                  : state.phase === 'saving'
+                    ? 'Saving pack files'
+                    : state.phase === 'adding'
+                      ? 'Reading pack files'
+                      : 'Checking pack'
             }
-            aria-valuemin={state.phase === 'reporting' ? undefined : 0}
-            aria-valuemax={state.phase === 'reporting' ? undefined : 100}
+            aria-valuemin={
+              state.phase === 'reporting' || state.phase === 'finalizing' ? undefined : 0
+            }
+            aria-valuemax={
+              state.phase === 'reporting' || state.phase === 'finalizing' ? undefined : 100
+            }
             aria-valuenow={
-              state.phase === 'reporting'
+              state.phase === 'reporting' || state.phase === 'finalizing'
                 ? undefined
                 : Math.round(state.progress * 100)
             }
