@@ -1,0 +1,36 @@
+{
+  "format": "mrt-export-failure-file-v1",
+  "dedupeFingerprint": "b7dae77f8519bc8bf238865886e8ff57014659bc41ed82babc6028e0ef02accd",
+  "dedupeIdentity": {
+    "kind": "pack-version",
+    "packName": "Recipe Tree file report verification",
+    "packVersion": "aea1d10-smoke",
+    "minecraftVersion": "1.20.1"
+  },
+  "report": {
+    "format": "mrt-export-failure-report-v1",
+    "packName": "Recipe Tree file report verification",
+    "packVersion": "aea1d10-smoke",
+    "minecraftVersion": "1.20.1",
+    "exporterId": "jeiexport",
+    "exporterVersion": "1.2.0-beta.24",
+    "exporterBuild": "beta-file-report-smoke",
+    "generatedAt": "2026-08-02T15:00:00Z",
+    "modVersions": {
+      "mrt_verification": "1.0.0"
+    },
+    "failures": [
+      {
+        "scope": "recipe",
+        "modId": "mrt_verification",
+        "categoryId": "mrt_verification:smoke_test",
+        "recipeId": "mrt_verification:synthetic_file_failure",
+        "recipeIndex": 0,
+        "recipeClass": "dev.mrt.VerificationRecipe",
+        "errorType": "dev.mrt.ExpectedVerificationException",
+        "message": "Synthetic beta file-report verification; no real recipe failed.",
+        "details": "This record verifies errors.json storage, issue linking, and version deduplication."
+      }
+    ]
+  }
+}
