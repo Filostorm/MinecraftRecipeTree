@@ -275,6 +275,13 @@ final class ExportContext {
         errorExporter.addProperty("id", JeiExportMod.MOD_ID);
         errorExporter.addProperty("version", exporterVersion());
         exportErrors.add("exporter", errorExporter);
+        JsonObject errorModVersions = new JsonObject();
+        for (var mod : ModList.get().getMods().stream()
+                .sorted(Comparator.comparing(info -> info.getModId()))
+                .toList()) {
+            errorModVersions.addProperty(mod.getModId(), mod.getVersion().toString());
+        }
+        exportErrors.add("modVersions", errorModVersions);
         exportErrors.add("failures", new GsonBuilder()
                 .disableHtmlEscaping()
                 .serializeNulls()

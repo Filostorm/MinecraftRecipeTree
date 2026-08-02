@@ -9,15 +9,17 @@ import {GITHUB_REPOSITORY} from '../src/components/githubIssues.ts';
 export const EXPORT_FAILURE_ROUTE = '/api/export-failures';
 
 const REPORT_FORMAT = 'mrt-export-failure-report-v1';
+const REPORT_FILE_FORMAT = 'mrt-export-failure-file-v1';
+const REPORT_BRANCH = 'export-failure-reports';
 const GITHUB_API = `https://api.github.com/repos/${GITHUB_REPOSITORY}`;
 const GITHUB_API_VERSION = '2022-11-28';
 const MAX_REQUEST_BYTES = 8 * 1024 * 1024;
 const MAX_FAILURES = 20_000;
 const MAX_FAILURE_TEXT = 16_000;
-const COMMENT_TARGET_BYTES = 48_000;
 const RATE_LIMIT_WINDOW_MS = 24 * 60 * 60 * 1000;
 const RATE_LIMIT_REPORTS = 5;
 const PENDING_REPORT_TIMEOUT_MS = 10 * 60 * 1000;
+const UNKNOWN_VERSION = /^(?:unknown|missing|unspecified|n\/a|null)$/iu;
 const ACCEPTED_ORIGINS = new Set([
   'https://minecraftrecipetree.craftsmannsoftware.com',
   'https://minecraft-recipe-tree.gtjoe51.chatgpt.site',
@@ -81,8 +83,30 @@ interface ExportFailureReport {
   exporterVersion: string;
   exporterBuild: string | null;
   generatedAt: string | null;
+  modVersions: Record<string, string>;
   failures: ExportFailure[];
 }
+
+type ReportDedupeIdentity =
+  | {
+      kind: 'pack-version';
+      packName: string;
+      packVersion: string;
+      minecraftVersion: string;
+    }
+  | {
+      kind: 'mod-versions';
+      minecraftVersion: string;
+      mods: Record<string, string>;
+    }
+  | {
+      kind: 'exporter-build';
+      packName: string;
+      minecraftVersion: string;
+      exporterId: string;
+      exporterVersion: string;
+      exporterBuild: string | null;
+    };
 
 interface StoredReport {
   fingerprint: string;
@@ -96,6 +120,11 @@ interface GitHubIssue {
   number: number;
   html_url: string;
   body?: string | null;
+}
+
+interface GitHubFile {
+  htmlUrl: string;
+  downloadUrl: string;
 }
 
 type GitHubFetch = typeof fetch;
@@ -143,6 +172,29 @@ function parseFailure(value: unknown): ExportFailure | null {
   return {scope, modId, categoryId, recipeId, recipeIndex, recipeClass, errorType, message, details};
 }
 
+function parseModVersions(
+  value: unknown,
+  failures: readonly ExportFailure[],
+): Record<string, string> | null {
+  if (value !== undefined && !isRecord(value)) return null;
+  const source = isRecord(value) ? value : {};
+  const modIds = [...new Set(
+    failures.map(failure => failure.modId).filter((modId): modId is string => modId !== null),
+  )].sort();
+  const versions: Record<string, string> = {};
+  for (const modId of modIds) {
+    const candidate = source[modId];
+    if (candidate === undefined) {
+      versions[modId] = 'Unknown';
+      continue;
+    }
+    const version = requiredText(candidate, 120);
+    if (!version) return null;
+    versions[modId] = version;
+  }
+  return versions;
+}
+
 function parseReport(value: unknown): ExportFailureReport | null {
   if (!isRecord(value) || value.format !== REPORT_FORMAT || !Array.isArray(value.failures)) {
     return null;
@@ -165,6 +217,10 @@ function parseReport(value: unknown): ExportFailureReport | null {
     const canonical = JSON.stringify(failure);
     if (!unique.has(canonical)) unique.set(canonical, failure);
   }
+  const uniqueFailures = [...unique.values()].sort((left, right) =>
+    JSON.stringify(left).localeCompare(JSON.stringify(right)));
+  const modVersions = parseModVersions(value.modVersions, uniqueFailures);
+  if (!modVersions) return null;
   return {
     format: REPORT_FORMAT,
     packName,
@@ -174,8 +230,8 @@ function parseReport(value: unknown): ExportFailureReport | null {
     exporterVersion,
     exporterBuild,
     generatedAt,
-    failures: [...unique.values()].sort((left, right) =>
-      JSON.stringify(left).localeCompare(JSON.stringify(right))),
+    modVersions,
+    failures: uniqueFailures,
   };
 }
 
@@ -184,16 +240,35 @@ async function sha256(value: string): Promise<string> {
   return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
-async function reportFingerprint(report: ExportFailureReport): Promise<string> {
-  return sha256(JSON.stringify({
+export function reportDedupeIdentity(report: ExportFailureReport): ReportDedupeIdentity {
+  if (!UNKNOWN_VERSION.test(report.packVersion)) {
+    return {
+      kind: 'pack-version',
+      packName: report.packName,
+      packVersion: report.packVersion,
+      minecraftVersion: report.minecraftVersion,
+    };
+  }
+  if (Object.keys(report.modVersions).length > 0) {
+    return {
+      kind: 'mod-versions',
+      minecraftVersion: report.minecraftVersion,
+      mods: Object.fromEntries(Object.entries(report.modVersions).sort(([left], [right]) =>
+        left.localeCompare(right))),
+    };
+  }
+  return {
+    kind: 'exporter-build',
     packName: report.packName,
-    packVersion: report.packVersion,
     minecraftVersion: report.minecraftVersion,
     exporterId: report.exporterId,
     exporterVersion: report.exporterVersion,
     exporterBuild: report.exporterBuild,
-    failures: report.failures,
-  }));
+  };
+}
+
+async function reportFingerprint(report: ExportFailureReport): Promise<string> {
+  return sha256(JSON.stringify(reportDedupeIdentity(report)));
 }
 
 function clientAddress(request: Request, url: URL): string | null {
@@ -216,20 +291,31 @@ function githubHeaders(token: string): HeadersInit {
   };
 }
 
+async function githubRequest(
+  githubFetch: GitHubFetch,
+  token: string,
+  url: string,
+  init: RequestInit = {},
+): Promise<Response> {
+  return githubFetch(url, {
+    ...init,
+    headers: {...githubHeaders(token), ...init.headers},
+  });
+}
+
+async function githubError(response: Response): Promise<Error> {
+  const diagnostic = (await response.text()).slice(0, 1000);
+  return new Error(`GitHub returned HTTP ${response.status}: ${diagnostic}`);
+}
+
 async function githubJson<T>(
   githubFetch: GitHubFetch,
   token: string,
   url: string,
   init: RequestInit = {},
 ): Promise<T> {
-  const response = await githubFetch(url, {
-    ...init,
-    headers: {...githubHeaders(token), ...init.headers},
-  });
-  if (!response.ok) {
-    const diagnostic = (await response.text()).slice(0, 1000);
-    throw new Error(`GitHub returned HTTP ${response.status}: ${diagnostic}`);
-  }
+  const response = await githubRequest(githubFetch, token, url, init);
+  if (!response.ok) throw await githubError(response);
   return response.json() as Promise<T>;
 }
 
@@ -237,65 +323,203 @@ function issueMarker(fingerprint: string): string {
   return `<!-- mrt-export-failure:${fingerprint} -->`;
 }
 
-function escapeFence(value: string): string {
-  return value.replaceAll('```', '`\u200b``');
+function reportFilePath(fingerprint: string): string {
+  return `export-failure-reports/${fingerprint}/errors.json`;
 }
 
-function failureMarkdown(failure: ExportFailure, index: number): string {
-  const identity = failure.recipeId ??
-    (failure.recipeIndex === null ? null : `recipe index ${failure.recipeIndex}`) ??
-    `failure ${index + 1}`;
-  const context = [
-    failure.modId ? `- Mod: \`${failure.modId}\`` : null,
-    failure.categoryId ? `- Category: \`${failure.categoryId}\`` : null,
-    failure.recipeId ? `- Recipe: \`${failure.recipeId}\`` : null,
-    failure.recipeIndex === null ? null : `- Recipe index: \`${failure.recipeIndex}\``,
-    failure.recipeClass ? `- Recipe class: \`${failure.recipeClass}\`` : null,
-    failure.errorType ? `- Error type: \`${failure.errorType}\`` : null,
-    `- Scope: \`${failure.scope}\``,
-  ].filter(Boolean).join('\n');
-  const details = failure.details
-    ? `\n\n<details><summary>Error details</summary>\n\n\`\`\`text\n${escapeFence(failure.details)}\n\`\`\`\n</details>`
-    : '';
-  return `### ${index + 1}. ${identity}\n\n${context}\n\n${failure.message}${details}`;
+function encodePath(path: string): string {
+  return path.split('/').map(segment => encodeURIComponent(segment)).join('/');
 }
 
-export function buildFailureCommentBodies(
-  report: ExportFailureReport,
-  fingerprint: string,
-): string[] {
-  const entries = report.failures.map(failureMarkdown);
-  const groups: string[][] = [];
-  let current: string[] = [];
-  let currentBytes = 0;
-  for (const entry of entries) {
-    const entryBytes = new TextEncoder().encode(entry).byteLength;
-    if (current.length > 0 && currentBytes + entryBytes + 4 > COMMENT_TARGET_BYTES) {
-      groups.push(current);
-      current = [];
-      currentBytes = 0;
-    }
-    current.push(entry);
-    currentBytes += entryBytes + 4;
+function singleLine(value: string): string {
+  return value.replaceAll(/[\r\n\t]+/gu, ' ').replaceAll(/\s{2,}/gu, ' ').trim();
+}
+
+function inlineCode(value: string): string {
+  return `\`${singleLine(value).replaceAll('`', 'ˋ')}\``;
+}
+
+function toBase64(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  let binary = '';
+  const chunkBytes = 32 * 1024;
+  for (let offset = 0; offset < bytes.byteLength; offset += chunkBytes) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkBytes));
   }
-  if (current.length > 0) groups.push(current);
-  return groups.map((group, index) =>
-    `<!-- mrt-export-failure-part:${fingerprint}:${index + 1}/${groups.length} -->\n` +
-    `## Export failures (${index + 1}/${groups.length})\n\n${group.join('\n\n---\n\n')}`,
-  );
+  return btoa(binary);
 }
 
-function issueBody(report: ExportFailureReport, fingerprint: string, parts: number): string {
+async function gitBlobSha(value: string): Promise<string> {
+  const content = new TextEncoder().encode(value);
+  const header = new TextEncoder().encode(`blob ${content.byteLength}\0`);
+  const input = new Uint8Array(header.byteLength + content.byteLength);
+  input.set(header);
+  input.set(content, header.byteLength);
+  const digest = await crypto.subtle.digest('SHA-1', input);
+  return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function ensureReportBranch(
+  githubFetch: GitHubFetch,
+  token: string,
+): Promise<void> {
+  const reportRefUrl = `${GITHUB_API}/git/ref/heads/${REPORT_BRANCH}`;
+  const existing = await githubRequest(githubFetch, token, reportRefUrl);
+  if (existing.ok) return;
+  if (existing.status !== 404) throw await githubError(existing);
+
+  const repository = await githubJson<{default_branch: string}>(
+    githubFetch,
+    token,
+    GITHUB_API,
+  );
+  const baseRef = await githubJson<{object: {sha: string}}>(
+    githubFetch,
+    token,
+    `${GITHUB_API}/git/ref/heads/${encodeURIComponent(repository.default_branch)}`,
+  );
+  const created = await githubRequest(githubFetch, token, `${GITHUB_API}/git/refs`, {
+    method: 'POST',
+    body: JSON.stringify({
+      ref: `refs/heads/${REPORT_BRANCH}`,
+      sha: baseRef.object.sha,
+    }),
+  });
+  if (created.ok) return;
+  if (created.status === 422) {
+    const raced = await githubRequest(githubFetch, token, reportRefUrl);
+    if (raced.ok) return;
+  }
+  throw await githubError(created);
+}
+
+function reportFileBody(
+  report: ExportFailureReport,
+  identity: ReportDedupeIdentity,
+  fingerprint: string,
+): string {
+  return `${JSON.stringify({
+    format: REPORT_FILE_FORMAT,
+    dedupeFingerprint: fingerprint,
+    dedupeIdentity: identity,
+    report,
+  }, null, 2)}\n`;
+}
+
+async function writeReportFile(
+  report: ExportFailureReport,
+  identity: ReportDedupeIdentity,
+  fingerprint: string,
+  token: string,
+  githubFetch: GitHubFetch,
+): Promise<GitHubFile> {
+  await ensureReportBranch(githubFetch, token);
+  const path = reportFilePath(fingerprint);
+  const contentUrl = `${GITHUB_API}/contents/${encodePath(path)}`;
+  const body = reportFileBody(report, identity, fingerprint);
+  const bodySha = await gitBlobSha(body);
+  let existingSha: string | undefined;
+  const existing = await githubRequest(
+    githubFetch,
+    token,
+    `${contentUrl}?ref=${encodeURIComponent(REPORT_BRANCH)}`,
+  );
+  if (existing.ok) {
+    const payload = await existing.json() as {
+      sha?: unknown;
+      html_url?: unknown;
+      download_url?: unknown;
+    };
+    if (typeof payload.sha !== 'string') {
+      throw new Error('GitHub returned an exporter report file without a blob SHA.');
+    }
+    existingSha = payload.sha;
+    if (
+      existingSha === bodySha &&
+      typeof payload.html_url === 'string' &&
+      typeof payload.download_url === 'string'
+    ) {
+      return {htmlUrl: payload.html_url, downloadUrl: payload.download_url};
+    }
+  } else if (existing.status !== 404) {
+    throw await githubError(existing);
+  }
+
+  const write = await githubJson<{
+    content?: {html_url?: string | null; download_url?: string | null};
+  }>(githubFetch, token, contentUrl, {
+    method: 'PUT',
+    body: JSON.stringify({
+      message: singleLine(
+        `${existingSha ? 'Update' : 'Add'} exporter errors for ${report.packName} ${report.packVersion}`,
+      ).slice(0, 240),
+      content: toBase64(body),
+      branch: REPORT_BRANCH,
+      ...(existingSha ? {sha: existingSha} : {}),
+    }),
+  });
+  const htmlUrl = write.content?.html_url;
+  const downloadUrl = write.content?.download_url;
+  if (!htmlUrl || !downloadUrl) {
+    throw new Error('GitHub did not return links for the exporter errors file.');
+  }
+  return {htmlUrl, downloadUrl};
+}
+
+function dedupeDescription(identity: ReportDedupeIdentity): string {
+  if (identity.kind === 'pack-version') {
+    return `pack version ${inlineCode(`${identity.packName} ${identity.packVersion}`)}`;
+  }
+  if (identity.kind === 'mod-versions') {
+    const mods = Object.entries(identity.mods);
+    const shown = mods.slice(0, 40)
+      .map(([modId, version]) => inlineCode(`${modId} ${version}`))
+      .join(', ');
+    return `affected mod versions ${shown}` +
+      (mods.length > 40 ? ` and ${mods.length - 40} more in errors.json` : '');
+  }
+  return `exporter build ${inlineCode(`${identity.exporterId} ${identity.exporterVersion}`)}`;
+}
+
+function issueTitle(report: ExportFailureReport, identity: ReportDedupeIdentity): string {
+  if (identity.kind === 'pack-version') {
+    return singleLine(`[Exporter] ${report.packName} ${report.packVersion} export failures`).slice(0, 240);
+  }
+  const mods = Object.entries(report.modVersions)
+    .slice(0, 4)
+    .map(([modId, version]) => `${modId} ${version}`)
+    .join(', ');
+  return singleLine(`[Exporter] ${mods || report.packName} export failures`).slice(0, 240);
+}
+
+function issueBody(
+  report: ExportFailureReport,
+  identity: ReportDedupeIdentity,
+  fingerprint: string,
+  file: GitHubFile,
+): string {
+  const affectedMods = Object.entries(report.modVersions);
+  const affectedModSummary = affectedMods.slice(0, 40)
+    .map(([id, version]) => inlineCode(`${id} ${version}`))
+    .join(', ') + (affectedMods.length > 40
+      ? ` and ${affectedMods.length - 40} more in errors.json`
+      : '');
   return `${issueMarker(fingerprint)}\n` +
     `An uploaded pack completed with recipe failures. The usable recipes were still loaded into Recipe Tree.\n\n` +
-    `- Pack: **${report.packName}**\n` +
-    `- Pack version: \`${report.packVersion}\`\n` +
-    `- Minecraft: \`${report.minecraftVersion}\`\n` +
-    `- Exporter: \`${report.exporterId} ${report.exporterVersion}\`\n` +
-    (report.exporterBuild ? `- Exporter build: \`${report.exporterBuild}\`\n` : '') +
-    (report.generatedAt ? `- Exported at: \`${report.generatedAt}\`\n` : '') +
-    `- Unique failures: **${report.failures.length}**\n\n` +
-    `All deduplicated failures and their error details are included in ${parts} comment${parts === 1 ? '' : 's'} below.`;
+    `- Pack: ${inlineCode(report.packName)}\n` +
+    `- Pack version: ${inlineCode(report.packVersion)}\n` +
+    `- Minecraft: ${inlineCode(report.minecraftVersion)}\n` +
+    `- Exporter: ${inlineCode(`${report.exporterId} ${report.exporterVersion}`)}\n` +
+    (report.exporterBuild ? `- Exporter build: ${inlineCode(report.exporterBuild)}\n` : '') +
+    (report.generatedAt ? `- Exported at: ${inlineCode(report.generatedAt)}\n` : '') +
+    `- Unique failures in latest report: **${report.failures.length}**\n` +
+    (affectedMods.length > 0
+      ? `- Affected mods: ${affectedModSummary}\n`
+      : '') +
+    `- Deduplicated by: ${dedupeDescription(identity)}\n\n` +
+    `## Errors file\n\n` +
+    `[Download errors.json](${file.downloadUrl}) · [View file history](${file.htmlUrl})\n\n` +
+    `Repeating this report for the same dedupe identity updates the file and this issue instead of adding comments.`;
 }
 
 async function findExistingIssue(
@@ -314,41 +538,31 @@ async function findExistingIssue(
 
 async function publishFailureIssue(
   report: ExportFailureReport,
+  identity: ReportDedupeIdentity,
   fingerprint: string,
   token: string,
   githubFetch: GitHubFetch,
-): Promise<{issue: GitHubIssue; duplicate: boolean}> {
-  const comments = buildFailureCommentBodies(report, fingerprint);
-  let issue = await findExistingIssue(githubFetch, token, fingerprint);
+  issueHint: GitHubIssue | null,
+): Promise<{issue: GitHubIssue; file: GitHubFile; duplicate: boolean}> {
+  const file = await writeReportFile(report, identity, fingerprint, token, githubFetch);
+  let issue = issueHint ?? await findExistingIssue(githubFetch, token, fingerprint);
   const duplicate = issue !== null;
+  const title = issueTitle(report, identity);
+  const body = issueBody(report, identity, fingerprint, file);
   if (!issue) {
     issue = await githubJson<GitHubIssue>(githubFetch, token, `${GITHUB_API}/issues`, {
       method: 'POST',
-      body: JSON.stringify({
-        title: `[Exporter] ${report.packName} ${report.packVersion}: ${report.failures.length} unique failure${report.failures.length === 1 ? '' : 's'}`,
-        body: issueBody(report, fingerprint, comments.length),
-      }),
+      body: JSON.stringify({title, body}),
     });
-  }
-  const existingComments: Array<{body?: string | null}> = [];
-  for (let page = 1; page <= 10; page += 1) {
-    const pageComments = await githubJson<Array<{body?: string | null}>>(
+  } else {
+    issue = await githubJson<GitHubIssue>(
       githubFetch,
       token,
-      `${GITHUB_API}/issues/${issue.number}/comments?per_page=100&page=${page}`,
+      `${GITHUB_API}/issues/${issue.number}`,
+      {method: 'PATCH', body: JSON.stringify({title, body, state: 'open'})},
     );
-    existingComments.push(...pageComments);
-    if (pageComments.length < 100) break;
   }
-  for (let index = 0; index < comments.length; index += 1) {
-    const marker = `<!-- mrt-export-failure-part:${fingerprint}:${index + 1}/${comments.length} -->`;
-    if (existingComments.some(comment => comment.body?.includes(marker))) continue;
-    await githubJson(githubFetch, token, `${GITHUB_API}/issues/${issue.number}/comments`, {
-      method: 'POST',
-      body: JSON.stringify({body: comments[index]}),
-    });
-  }
-  return {issue, duplicate};
+  return {issue, file, duplicate};
 }
 
 function isSameOrigin(request: Request, requestUrl: URL): boolean {
@@ -392,54 +606,75 @@ export async function handleExportFailureIssue(
   }
   const address = clientAddress(request, requestUrl);
   if (!address) return noStoreJson({error: 'Automatic exporter issue reporting is unavailable.'}, 503);
+  const identity = reportDedupeIdentity(report);
   const fingerprint = await reportFingerprint(report);
   const clientHash = await sha256(`${address}\n${(request.headers.get('user-agent') ?? '').slice(0, 512)}`);
   const now = Date.now();
   const db = runtime.DB;
+  let stored: StoredReport | null = null;
+  let restoreReportedReservation = false;
 
   if (db) {
     await ensureExportFailureSchema(db);
-    const stored = await db.prepare(
+    stored = await db.prepare(
       `SELECT fingerprint, issue_number, issue_url, status, updated_at
        FROM export_failure_reports WHERE fingerprint = ?`,
     ).bind(fingerprint).first<StoredReport>();
-    if (stored?.status === 'reported' && stored.issue_url) {
-      return noStoreJson({issueUrl: stored.issue_url, duplicate: true});
+    if (stored?.status === 'pending' && stored.updated_at > now - PENDING_REPORT_TIMEOUT_MS) {
+      return noStoreJson({error: 'This failure report is already being processed.'}, 409);
     }
-    if (stored) {
-      if (stored.updated_at > now - PENDING_REPORT_TIMEOUT_MS) {
+    if (stored?.status === 'reported') {
+      restoreReportedReservation = true;
+      const reserved = await db.prepare(
+        `UPDATE export_failure_reports SET status = 'pending', updated_at = ?
+         WHERE fingerprint = ? AND status = 'reported'`,
+      ).bind(now, fingerprint).run();
+      if ((reserved.meta?.changes ?? 0) !== 1) {
         return noStoreJson({error: 'This failure report is already being processed.'}, 409);
       }
-      await db.prepare(
-        `DELETE FROM export_failure_reports WHERE fingerprint = ? AND status = 'pending' AND updated_at = ?`,
-      ).bind(fingerprint, stored.updated_at).run();
-    }
-    const recent = await db.prepare(
-      `SELECT COUNT(*) AS count FROM export_failure_reports
-       WHERE client_hash = ? AND created_at >= ?`,
-    ).bind(clientHash, now - RATE_LIMIT_WINDOW_MS).first<{count: number}>();
-    if ((recent?.count ?? 0) >= RATE_LIMIT_REPORTS) {
-      return new Response(`${JSON.stringify({error: 'Please wait before reporting another export.'})}\n`, {
-        status: 429,
-        headers: {
-          'Cache-Control': 'no-store',
-          'Content-Type': 'application/json; charset=utf-8',
-          'Retry-After': String(Math.ceil(RATE_LIMIT_WINDOW_MS / 1000)),
-        },
-      });
-    }
-    const inserted = await db.prepare(
-      `INSERT OR IGNORE INTO export_failure_reports
-        (fingerprint, issue_number, issue_url, status, client_hash, created_at, updated_at)
-       VALUES (?, NULL, NULL, 'pending', ?, ?, ?)`,
-    ).bind(fingerprint, clientHash, now, now).run();
-    if ((inserted.meta?.changes ?? 0) !== 1) {
-      return noStoreJson({error: 'This failure report is already being processed.'}, 409);
+    } else {
+      if (stored) {
+        await db.prepare(
+          `DELETE FROM export_failure_reports WHERE fingerprint = ? AND status = 'pending'`,
+        ).bind(fingerprint).run();
+      }
+      const recent = await db.prepare(
+        `SELECT COUNT(*) AS count FROM export_failure_reports
+         WHERE client_hash = ? AND created_at >= ?`,
+      ).bind(clientHash, now - RATE_LIMIT_WINDOW_MS).first<{count: number}>();
+      if ((recent?.count ?? 0) >= RATE_LIMIT_REPORTS) {
+        return new Response(`${JSON.stringify({error: 'Please wait before reporting another export.'})}\n`, {
+          status: 429,
+          headers: {
+            'Cache-Control': 'no-store',
+            'Content-Type': 'application/json; charset=utf-8',
+            'Retry-After': String(Math.ceil(RATE_LIMIT_WINDOW_MS / 1000)),
+          },
+        });
+      }
+      const inserted = await db.prepare(
+        `INSERT OR IGNORE INTO export_failure_reports
+          (fingerprint, issue_number, issue_url, status, client_hash, created_at, updated_at)
+         VALUES (?, NULL, NULL, 'pending', ?, ?, ?)`,
+      ).bind(fingerprint, clientHash, now, now).run();
+      if ((inserted.meta?.changes ?? 0) !== 1) {
+        return noStoreJson({error: 'This failure report is already being processed.'}, 409);
+      }
     }
   }
 
+  const issueHint = stored?.issue_number && stored.issue_url
+    ? {number: stored.issue_number, html_url: stored.issue_url}
+    : null;
   try {
-    const {issue, duplicate} = await publishFailureIssue(report, fingerprint, token, githubFetch);
+    const {issue, file, duplicate} = await publishFailureIssue(
+      report,
+      identity,
+      fingerprint,
+      token,
+      githubFetch,
+      issueHint,
+    );
     if (db) {
       await db.prepare(
         `UPDATE export_failure_reports
@@ -447,13 +682,22 @@ export async function handleExportFailureIssue(
          WHERE fingerprint = ?`,
       ).bind(issue.number, issue.html_url, Date.now(), fingerprint).run();
     }
-    return noStoreJson({issueUrl: issue.html_url, duplicate}, duplicate ? 200 : 201);
+    return noStoreJson(
+      {issueUrl: issue.html_url, fileUrl: file.downloadUrl, duplicate},
+      duplicate ? 200 : 201,
+    );
   } catch (error) {
     console.error('Automatic exporter GitHub issue reporting failed.', {fingerprint, error});
     if (db) {
-      await db.prepare(
-        `DELETE FROM export_failure_reports WHERE fingerprint = ? AND status = 'pending'`,
-      ).bind(fingerprint).run().catch(cleanupError =>
+      const cleanup = restoreReportedReservation
+        ? db.prepare(
+            `UPDATE export_failure_reports SET status = 'reported', updated_at = ?
+             WHERE fingerprint = ? AND status = 'pending'`,
+          ).bind(Date.now(), fingerprint).run()
+        : db.prepare(
+            `DELETE FROM export_failure_reports WHERE fingerprint = ? AND status = 'pending'`,
+          ).bind(fingerprint).run();
+      await cleanup.catch(cleanupError =>
         console.error('Could not clear a failed exporter report reservation.', cleanupError));
     }
     return noStoreJson({error: 'Automatic exporter issue reporting failed; the pack was still installed.'}, 502);

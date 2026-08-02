@@ -33,6 +33,7 @@ test('builds a deduplicated structured report with pack and exporter context', (
     exportErrors: {
       format: EXPORT_ERRORS_FILE_FORMAT,
       exporter: {id: 'jeiexport', version: '1.2.0-beta.23'},
+      modVersions: {create: '6.0.8', unrelated: '1.0.0'},
       failures: [detail, detail],
     },
     exporterBuild: {exporterId: 'forge-jei-1.20.1', payloadSha256: 'a'.repeat(64)},
@@ -44,6 +45,7 @@ test('builds a deduplicated structured report with pack and exporter context', (
   assert.equal(report.failures[0].modId, 'create');
   assert.equal(report.failures[0].recipeId, 'create:mixing/brass');
   assert.equal(report.exporterBuild, 'a'.repeat(64));
+  assert.deepEqual(report.modVersions, {create: '6.0.8'});
 });
 
 test('derives useful recipe and mod context from legacy string failures', () => {
@@ -58,6 +60,7 @@ test('derives useful recipe and mod context from legacy string failures', () => 
   assert.equal(report.failures[0].categoryId, 'mekanism:crushing');
   assert.equal(report.failures[0].recipeIndex, 17);
   assert.match(report.failures[0].message, /bad input/);
+  assert.deepEqual(report.modVersions, {mekanism: 'Unknown'});
 });
 
 test('rejects an empty failure report', () => {

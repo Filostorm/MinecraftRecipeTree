@@ -24,6 +24,7 @@ export interface ExportFailureReport {
   readonly exporterVersion: string;
   readonly exporterBuild: string | null;
   readonly generatedAt: string | null;
+  readonly modVersions: Readonly<Record<string, string>>;
   readonly failures: readonly ExportFailureDetail[];
 }
 
@@ -107,6 +108,21 @@ function dedupeFailures(failures: readonly ExportFailureDetail[]): readonly Expo
   return Object.freeze([...unique.values()]);
 }
 
+function affectedModVersions(
+  exportErrors: unknown,
+  failures: readonly ExportFailureDetail[],
+): Readonly<Record<string, string>> {
+  const source = isRecord(exportErrors) && isRecord(exportErrors.modVersions)
+    ? exportErrors.modVersions
+    : {};
+  const affected = [...new Set(
+    failures.map(failure => failure.modId).filter((modId): modId is string => modId !== null),
+  )].sort();
+  return Object.freeze(Object.fromEntries(
+    affected.map(modId => [modId, text(source[modId], 'Unknown', 120)]),
+  ));
+}
+
 export function buildExportFailureReport({
   manifest,
   failures,
@@ -148,25 +164,34 @@ export function buildExportFailureReport({
     exporterVersion: text(richExporter.version ?? manifestExporter.version, 'Unknown', 80),
     exporterBuild: optionalText(build.payloadSha256, 64),
     generatedAt: optionalText(manifest.generatedAt, 80),
+    modVersions: affectedModVersions(exportErrors, uniqueFailures),
     failures: uniqueFailures,
   });
 }
 
 export async function sendExportFailureReport(
   report: ExportFailureReport,
-): Promise<{issueUrl: string; duplicate: boolean}> {
+): Promise<{issueUrl: string; fileUrl: string; duplicate: boolean}> {
   const response = await fetch('/api/export-failures', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(report),
   });
   const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
-  if (!response.ok || typeof payload.issueUrl !== 'string') {
+  if (
+    !response.ok ||
+    typeof payload.issueUrl !== 'string' ||
+    typeof payload.fileUrl !== 'string'
+  ) {
     throw new Error(
       typeof payload.error === 'string'
         ? payload.error
         : `Failure report request returned HTTP ${response.status}.`,
     );
   }
-  return {issueUrl: payload.issueUrl, duplicate: payload.duplicate === true};
+  return {
+    issueUrl: payload.issueUrl,
+    fileUrl: payload.fileUrl,
+    duplicate: payload.duplicate === true,
+  };
 }

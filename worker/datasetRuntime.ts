@@ -53,7 +53,7 @@ export interface DatasetRuntime {
   PREVIEW_UPLOAD_ENABLED?: string;
   PREVIEW_UPLOAD_TOKEN?: string;
   FEEDBACK_ADMIN_TOKEN?: string;
-  /** Server-only fine-grained token with Issues: write access to Filostorm/MinecraftRecipeTree. */
+  /** Server-only token with Issues: write and Contents: write access to the application repo. */
   GITHUB_ISSUES_TOKEN?: string;
 }
 

@@ -53,6 +53,7 @@ type UploadState =
       saved: boolean;
       findings: readonly string[];
       issueUrl: string | null;
+      fileUrl: string | null;
       reportStatus: 'sent' | 'duplicate' | 'failed' | null;
     }
   | {status: 'error'; filename: string | null; message: string};
@@ -351,6 +352,7 @@ export function PackUploadDropzone() {
       let saved = false;
       let findings = result.summary.findings;
       let issueUrl: string | null = null;
+      let fileUrl: string | null = null;
       let reportStatus: 'sent' | 'duplicate' | 'failed' | null = null;
       if (result.summary.readyForHandoff) {
         setState({status: 'checking', filename: file.name, progress: 0, phase: 'adding'});
@@ -386,6 +388,7 @@ export function PackUploadDropzone() {
               });
               const submitted = await sendExportFailureReport(report);
               issueUrl = submitted.issueUrl;
+              fileUrl = submitted.fileUrl;
               reportStatus = submitted.duplicate ? 'duplicate' : 'sent';
             } catch (error) {
               console.error('The pack loaded, but its exporter failure report could not be sent.', error);
@@ -411,6 +414,7 @@ export function PackUploadDropzone() {
         saved,
         findings,
         issueUrl,
+        fileUrl,
         reportStatus,
       });
     } catch (error) {
@@ -548,10 +552,13 @@ export function PackUploadDropzone() {
                 {state.reportStatus === 'failed'
                   ? 'You can use the pack now; failure reporting can be retried by adding the ZIP again.'
                   : state.reportStatus === 'duplicate'
-                    ? 'These failures were already reported.'
-                    : 'The deduplicated exporter failures were reported automatically.'}
+                    ? 'This pack or mod version already had a report, so its errors file was updated.'
+                    : 'The exporter failures were saved to errors.json and reported automatically.'}
                 {state.issueUrl && (
                   <> <a href={state.issueUrl} target="_blank" rel="noreferrer">View GitHub issue</a></>
+                )}
+                {state.fileUrl && (
+                  <> <a href={state.fileUrl} target="_blank" rel="noreferrer">Download errors.json</a></>
                 )}
               </p>
             )}

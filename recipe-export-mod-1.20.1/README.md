@@ -74,7 +74,7 @@ The portable format and compatibility limits are documented in
 
 ```bash
 JAVA_HOME=$(/usr/libexec/java_home -v 17) ./gradlew build
-# -> build/libs/jeiexport-1.2.0-beta.23.jar
+# -> build/libs/jeiexport-1.2.0-beta.24.jar
 ```
 
 Gradle 8.1.1 / ForgeGradle 6 / Forge 1.20.1. The release accepts Forge 47.1–47.x and
