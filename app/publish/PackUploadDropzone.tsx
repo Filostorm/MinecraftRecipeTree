@@ -42,7 +42,7 @@ type UploadState =
       status: 'checking';
       filename: string;
       progress: number;
-      phase: 'checking' | 'adding';
+      phase: 'checking' | 'adding' | 'reporting';
     }
   | {
       status: 'ready';
@@ -377,6 +377,12 @@ export function PackUploadDropzone() {
           saved = true;
           if (result.summary.counts.failures > 0) {
             try {
+              setState({
+                status: 'checking',
+                filename: file.name,
+                progress: 1,
+                phase: 'reporting',
+              });
               if (result.failures === null) {
                 throw new Error('failures.json is missing from an export that reports failures.');
               }
@@ -471,25 +477,46 @@ export function PackUploadDropzone() {
         <span className={styles.uploadIcon} aria-hidden="true">↑</span>
         <strong>
           {state.status === 'checking'
-            ? state.phase === 'adding'
-              ? `Adding ${state.filename} to your viewer`
-              : `Checking ${state.filename}`
+            ? state.phase === 'reporting'
+              ? `Finishing ${state.filename}`
+              : state.phase === 'adding'
+                ? `Adding ${state.filename} to your viewer`
+                : `Checking ${state.filename}`
             : dragging
               ? 'Drop the exporter ZIP here'
               : 'Drag and drop your exporter ZIP'}
         </strong>
         <span>
           {state.status === 'checking'
-            ? `${Math.round(state.progress * 100)}% ${
-                state.phase === 'adding' ? 'saved' : 'checked'
-              }`
+            ? state.phase === 'reporting'
+              ? 'Sending its errors report…'
+              : `${Math.round(state.progress * 100)}% ${
+                  state.phase === 'adding' ? 'saved' : 'checked'
+                }`
             : 'or tap to add a file'}
         </span>
         {state.status === 'checking' && (
           <span
-            className={styles.uploadProgress}
+            className={[
+              styles.uploadProgress,
+              state.phase === 'reporting' ? styles.uploadProgressWaiting : '',
+            ].filter(Boolean).join(' ')}
             style={{'--upload-progress': `${state.progress * 100}%`} as CSSProperties}
-            aria-hidden="true"
+            role="progressbar"
+            aria-label={
+              state.phase === 'reporting'
+                ? 'Waiting for the errors report to finish'
+                : state.phase === 'adding'
+                  ? 'Adding pack to the viewer'
+                  : 'Checking pack'
+            }
+            aria-valuemin={state.phase === 'reporting' ? undefined : 0}
+            aria-valuemax={state.phase === 'reporting' ? undefined : 100}
+            aria-valuenow={
+              state.phase === 'reporting'
+                ? undefined
+                : Math.round(state.progress * 100)
+            }
           />
         )}
       </label>
