@@ -131,13 +131,13 @@ final class TradeExporter implements ExportJob.PhaseRunner {
         try {
             offers = server.submit(() -> sampleUnit(unit)).join();
         } catch (Throwable t) {
-            ctx.failure("trades " + unit.idPrefix() + ": " + t);
+            ctx.failure("trades " + unit.idPrefix(), t);
         }
         for (MerchantOffer offer : offers) {
             try {
                 exportOffer(unit, offer);
             } catch (Throwable t) {
-                ctx.failure("trade render " + unit.idPrefix() + ": " + t);
+                ctx.failure("trade render " + unit.idPrefix(), t);
             }
         }
         return queue.isEmpty();

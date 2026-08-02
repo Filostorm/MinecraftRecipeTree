@@ -127,7 +127,7 @@ final class ItemCatalog {
         try {
             icon = renderIcon(type, ingredient, prefix, rl, uid, key);
         } catch (Throwable t) {
-            ctx.failure("icon " + key + ": " + t);
+            ctx.failure("icon " + key, t);
         }
 
         try {

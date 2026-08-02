@@ -74,7 +74,7 @@ The portable format and compatibility limits are documented in
 
 ```bash
 JAVA_HOME=$(/usr/libexec/java_home -v 17) ./gradlew build
-# -> build/libs/jeiexport-1.2.0-beta.22.jar
+# -> build/libs/jeiexport-1.2.0-beta.23.jar
 ```
 
 Gradle 8.1.1 / ForgeGradle 6 / Forge 1.20.1. The release accepts Forge 47.1–47.x and
@@ -144,6 +144,12 @@ events. Unknown custom ingredient amounts remain explicit as `-1` in the raw sna
 logged as publication-blocking diagnostics; they are never silently converted to quantity `1`.
 Custom ingredient classes with no quantity API are explicitly logged and treated as categorical
 unit values; item, fluid, and quantified custom stacks retain their runtime counts.
+
+The exporter also writes `export-errors.json`. It retains every failure as a structured record with
+the responsible mod, JEI category, recipe ID and source index when available, recipe class,
+exception type, bounded stack trace, pack/version, Minecraft version, and exporter version. The web
+viewer can load the successful part of an export even when this report is non-empty, then submit the
+deduplicated diagnostics to the project's GitHub issue reporter.
 
 Recipe slot alternatives and category catalysts are exported in full. Sets above 512 entries emit
 a warning because large tags can materially increase JSON size and export time, but they are not

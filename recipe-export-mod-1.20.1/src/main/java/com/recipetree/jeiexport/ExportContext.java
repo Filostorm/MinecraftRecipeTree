@@ -49,6 +49,7 @@ final class ExportContext {
     final AtomicInteger pendingWrites = new AtomicInteger();
     private final Semaphore imageWritePermits = new Semaphore(MAX_PENDING_IMAGE_WRITES);
     final List<String> failures = Collections.synchronizedList(new ArrayList<>());
+    final List<ExportFailure> failureDetails = Collections.synchronizedList(new ArrayList<>());
     /** All relative paths handed out so far, to keep file/dir names collision-free. */
     final Set<String> usedPaths = new HashSet<>();
 
@@ -123,7 +124,7 @@ final class ExportContext {
                         PngIntegrity.verify(file);
                     }
                 } catch (Throwable t) {
-                    failure("write " + root.relativize(file) + ": " + t);
+                    failure("write " + root.relativize(file), t);
                 } finally {
                     image.close();
                     pendingWrites.decrementAndGet();
@@ -134,7 +135,7 @@ final class ExportContext {
             image.close();
             pendingWrites.decrementAndGet();
             imageWritePermits.release();
-            failure("write scheduling " + root.relativize(file) + ": " + e);
+            failure("write scheduling " + root.relativize(file), e);
         }
     }
 
@@ -160,7 +161,33 @@ final class ExportContext {
 
     void failure(String message) {
         failures.add(message);
+        failureDetails.add(ExportFailure.generic(message));
         JeiExportMod.LOGGER.warn("[jeiexport] {}", message);
+    }
+
+    void failure(String message, Throwable error) {
+        ExportFailure failure = ExportFailure.generic(message, error);
+        failures.add(failure.message);
+        failureDetails.add(failure);
+        JeiExportMod.LOGGER.warn("[jeiexport] {}", failure.message, error);
+    }
+
+    void recipeFailure(
+            net.minecraft.resources.ResourceLocation categoryId,
+            @Nullable net.minecraft.resources.ResourceLocation recipeId,
+            int recipeIndex,
+            @Nullable Class<?> recipeClass,
+            String message,
+            @Nullable Throwable error) {
+        ExportFailure failure = ExportFailure.recipe(
+                categoryId, recipeId, recipeIndex, recipeClass, message, error);
+        failures.add(failure.message);
+        failureDetails.add(failure);
+        if (error == null) {
+            JeiExportMod.LOGGER.warn("[jeiexport] {}", failure.message);
+        } else {
+            JeiExportMod.LOGGER.warn("[jeiexport] {}", failure.message, error);
+        }
     }
 
     /** Reserve a unique sanitized relative file path like "icons/item/minecraft/stone.png". */
@@ -233,6 +260,30 @@ final class ExportContext {
             w.endArray();
         }
 
+        List<ExportFailure> failureDetailsCopy;
+        synchronized (failureDetails) {
+            failureDetailsCopy = new ArrayList<>(failureDetails);
+        }
+        JsonObject exportErrors = new JsonObject();
+        exportErrors.addProperty("format", "mrt-export-errors-v1");
+        JsonObject errorPack = new JsonObject();
+        errorPack.addProperty("name", packIdentity.name());
+        if (packIdentity.version() != null) errorPack.addProperty("version", packIdentity.version());
+        exportErrors.add("pack", errorPack);
+        exportErrors.addProperty("minecraft", SharedConstants.getCurrentVersion().getName());
+        JsonObject errorExporter = new JsonObject();
+        errorExporter.addProperty("id", JeiExportMod.MOD_ID);
+        errorExporter.addProperty("version", exporterVersion());
+        exportErrors.add("exporter", errorExporter);
+        exportErrors.add("failures", new GsonBuilder()
+                .disableHtmlEscaping()
+                .serializeNulls()
+                .create()
+                .toJsonTree(failureDetailsCopy));
+        try (var writer = Files.newBufferedWriter(root.resolve("export-errors.json"))) {
+            GSON.toJson(exportErrors, writer);
+        }
+
         try (JsonWriter w = new JsonWriter(Files.newBufferedWriter(root.resolve("manifest.json")))) {
             w.setIndent("  ");
             w.beginObject();
@@ -248,6 +299,10 @@ final class ExportContext {
             w.name("identitySource").value(packIdentity.identitySource())
                     .endObject();
             w.name("minecraft").value(SharedConstants.getCurrentVersion().getName());
+            w.name("exporter").beginObject()
+                    .name("id").value(JeiExportMod.MOD_ID)
+                    .name("version").value(exporterVersion())
+                    .endObject();
             w.name("settings").beginObject()
                     .name("iconScale").value(iconScale)
                     .name("recipeScale").value(recipeScale)
@@ -271,6 +326,12 @@ final class ExportContext {
             w.endObject();
             w.endObject();
         }
+    }
+
+    private static String exporterVersion() {
+        return ModList.get().getModContainerById(JeiExportMod.MOD_ID)
+                .map(container -> container.getModInfo().getVersion().toString())
+                .orElse("unknown");
     }
 
     /**

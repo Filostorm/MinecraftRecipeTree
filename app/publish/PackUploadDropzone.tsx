@@ -17,12 +17,24 @@ import {
   type LocalPackManifestSummary,
 } from '../../src/data/localPackArchive';
 import {installLocalPackArchive} from '../../src/data/localPackStorage';
+import {
+  buildExportFailureReport,
+  sendExportFailureReport,
+} from '../../src/data/exportFailureReport';
 import styles from './publish.module.css';
 
 // Keep each synchronous fflate push small enough for archives containing long
 // runs of tiny entries. Larger batches can recurse through thousands of local
 // file headers before returning and overflow the browser call stack.
 const ARCHIVE_READ_CHUNK_BYTES = 1024 * 1024;
+const MAX_FAILURE_DOCUMENT_BYTES = 16 * 1024 * 1024;
+const MAX_EXPORTER_BUILD_BYTES = 16 * 1024;
+
+const OPTIONAL_REPORT_DOCUMENT_LIMITS = new Map([
+  ['failures.json', MAX_FAILURE_DOCUMENT_BYTES],
+  ['export-errors.json', MAX_FAILURE_DOCUMENT_BYTES],
+  ['exporter-build.json', MAX_EXPORTER_BUILD_BYTES],
+]);
 
 type UploadState =
   | {status: 'idle'}
@@ -40,6 +52,8 @@ type UploadState =
       viewerHref: string;
       saved: boolean;
       findings: readonly string[];
+      issueUrl: string | null;
+      reportStatus: 'sent' | 'duplicate' | 'failed' | null;
     }
   | {status: 'error'; filename: string | null; message: string};
 
@@ -86,6 +100,25 @@ function joinChunks(chunks: readonly Uint8Array[], totalBytes: number): Uint8Arr
   return combined;
 }
 
+function reportDocumentName(path: string): string | null {
+  const match = /^(?:[^/]+\/)?(failures\.json|export-errors\.json|exporter-build\.json)$/u.exec(path);
+  return match?.[1] ?? null;
+}
+
+function parseJsonDocument(bytes: Uint8Array, path: string): unknown {
+  let source: string;
+  try {
+    source = new TextDecoder('utf-8', {fatal: true}).decode(bytes);
+  } catch (error) {
+    throw new Error(`${path} is not valid UTF-8: ${errorMessage(error)}`);
+  }
+  try {
+    return JSON.parse(source);
+  } catch (error) {
+    throw new Error(`${path} is not valid JSON: ${errorMessage(error)}`);
+  }
+}
+
 async function inspectPackArchive(
   file: File,
   onProgress: (fraction: number) => void,
@@ -95,6 +128,9 @@ async function inspectPackArchive(
   manifestBytes: Uint8Array;
   manifest: unknown;
   summary: LocalPackManifestSummary;
+  failures: unknown | null;
+  exportErrors: unknown | null;
+  exporterBuild: unknown | null;
 }> {
   if (file.size === 0) throw new Error('The selected ZIP file is empty.');
   if (!Number.isSafeInteger(file.size)) throw new Error('The selected file size is invalid.');
@@ -104,6 +140,12 @@ async function inspectPackArchive(
   let manifestPath: string | null = null;
   let manifestBytes = 0;
   let manifestChunks: Uint8Array[] = [];
+  const reportDocuments = new Map<string, {
+    path: string;
+    bytes: number;
+    chunks: Uint8Array[];
+    skipped: boolean;
+  }>();
   let lastReportedPercent = 0;
 
   const unzip = new Unzip(entry => {
@@ -126,7 +168,42 @@ async function inspectPackArchive(
       return;
     }
 
-    if (!isExportManifestPath(safePath)) return;
+    const optionalDocumentName = reportDocumentName(safePath);
+    if (!isExportManifestPath(safePath) && optionalDocumentName === null) return;
+    if (optionalDocumentName !== null) {
+      if (reportDocuments.has(optionalDocumentName)) {
+        archiveError = new Error(`The ZIP contains more than one ${optionalDocumentName}.`);
+        return;
+      }
+      const maximum = OPTIONAL_REPORT_DOCUMENT_LIMITS.get(optionalDocumentName) ?? 0;
+      const document = {
+        path: safePath,
+        bytes: 0,
+        chunks: [] as Uint8Array[],
+        skipped: entry.originalSize !== undefined && entry.originalSize > maximum,
+      };
+      reportDocuments.set(optionalDocumentName, document);
+      entry.ondata = (error, data) => {
+        if (error) {
+          archiveError = error instanceof Error ? error : new Error(String(error));
+          return;
+        }
+        if (document.skipped) return;
+        document.bytes += data.byteLength;
+        if (document.bytes > maximum) {
+          document.skipped = true;
+          document.chunks = [];
+          return;
+        }
+        document.chunks.push(data);
+      };
+      try {
+        entry.start();
+      } catch (error) {
+        archiveError = error instanceof Error ? error : new Error(String(error));
+      }
+      return;
+    }
     if (manifestPath !== null) {
       archiveError = new Error(
         `The ZIP contains more than one exporter manifest (${manifestPath} and ${safePath}).`,
@@ -195,26 +272,30 @@ async function inspectPackArchive(
   if (manifestBytes === 0) throw new Error('manifest.json is empty.');
 
   const manifestData = joinChunks(manifestChunks, manifestBytes);
-  let manifestText: string;
-  try {
-    manifestText = new TextDecoder('utf-8', {fatal: true}).decode(manifestData);
-  } catch (error) {
-    throw new Error(`manifest.json is not valid UTF-8: ${errorMessage(error)}`);
-  } finally {
-    manifestChunks = [];
-  }
-
-  let manifest: unknown;
-  try {
-    manifest = JSON.parse(manifestText);
-  } catch (error) {
-    throw new Error(`manifest.json is not valid JSON: ${errorMessage(error)}`);
-  }
+  const manifest = parseJsonDocument(manifestData, 'manifest.json');
+  manifestChunks = [];
+  const resolvedManifestPath = manifestPath as string;
+  const manifestPrefix = resolvedManifestPath.includes('/')
+    ? resolvedManifestPath.slice(0, resolvedManifestPath.indexOf('/') + 1)
+    : '';
+  const optionalDocument = (name: string): unknown | null => {
+    const document = reportDocuments.get(name);
+    if (!document || document.path !== `${manifestPrefix}${name}` || document.skipped) return null;
+    try {
+      return parseJsonDocument(joinChunks(document.chunks, document.bytes), name);
+    } catch (error) {
+      console.warn(`The optional ${name} report could not be read; pack loading will continue.`, error);
+      return null;
+    }
+  };
   return {
-    manifestPath,
+    manifestPath: resolvedManifestPath,
     manifestBytes: manifestData,
     manifest,
     summary: requireLocalPackManifest(manifest),
+    failures: optionalDocument('failures.json'),
+    exportErrors: optionalDocument('export-errors.json'),
+    exporterBuild: optionalDocument('exporter-build.json'),
   };
 }
 
@@ -269,6 +350,8 @@ export function PackUploadDropzone() {
       let viewerHref = '/';
       let saved = false;
       let findings = result.summary.findings;
+      let issueUrl: string | null = null;
+      let reportStatus: 'sent' | 'duplicate' | 'failed' | null = null;
       if (result.summary.readyForHandoff) {
         setState({status: 'checking', filename: file.name, progress: 0, phase: 'adding'});
         try {
@@ -290,6 +373,29 @@ export function PackUploadDropzone() {
           );
           viewerHref = installed.viewerHref;
           saved = true;
+          if (result.summary.counts.failures > 0) {
+            try {
+              if (result.failures === null) {
+                throw new Error('failures.json is missing from an export that reports failures.');
+              }
+              const report = buildExportFailureReport({
+                manifest: result.manifest,
+                failures: result.failures,
+                exportErrors: result.exportErrors ?? undefined,
+                exporterBuild: result.exporterBuild ?? undefined,
+              });
+              const submitted = await sendExportFailureReport(report);
+              issueUrl = submitted.issueUrl;
+              reportStatus = submitted.duplicate ? 'duplicate' : 'sent';
+            } catch (error) {
+              console.error('The pack loaded, but its exporter failure report could not be sent.', error);
+              reportStatus = 'failed';
+              findings = Object.freeze([
+                ...findings,
+                'The pack was added, but its automatic GitHub failure report could not be sent.',
+              ]);
+            }
+          }
         } catch (error) {
           console.error('The checked pack could not be added to the viewer.', error);
           findings = Object.freeze([...findings, plainUploadError(error)]);
@@ -304,6 +410,8 @@ export function PackUploadDropzone() {
         viewerHref,
         saved,
         findings,
+        issueUrl,
+        reportStatus,
       });
     } catch (error) {
       if (operationRef.current !== operation) return;
@@ -433,6 +541,18 @@ export function PackUploadDropzone() {
             ) : (
               <p className={styles.uploadSuccessCopy}>
                 No errors found. This pack is now in your modpack list.
+              </p>
+            )}
+            {state.reportStatus && (
+              <p className={styles.uploadSuccessCopy}>
+                {state.reportStatus === 'failed'
+                  ? 'You can use the pack now; failure reporting can be retried by adding the ZIP again.'
+                  : state.reportStatus === 'duplicate'
+                    ? 'These failures were already reported.'
+                    : 'The deduplicated exporter failures were reported automatically.'}
+                {state.issueUrl && (
+                  <> <a href={state.issueUrl} target="_blank" rel="noreferrer">View GitHub issue</a></>
+                )}
               </p>
             )}
           </article>

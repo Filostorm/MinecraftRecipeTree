@@ -50,6 +50,7 @@ export default defineConfig(async () => {
               '/api/admin/core-datasets/*',
               '/api/admin/dataset-channels/*',
               '/api/datasets',
+              '/api/export-failures',
               '/api/feedback',
               '/api/modpacks*',
               '/dataset/publications/*',

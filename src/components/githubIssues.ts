@@ -1,7 +1,7 @@
 export type GitHubIssueKind = 'bug' | 'feature';
 
-const GITHUB_ISSUES_URL =
-  'https://github.com/Filostorm/MinecraftRecipeTree/issues/new';
+export const GITHUB_REPOSITORY = 'Filostorm/MinecraftRecipeTree';
+export const GITHUB_ISSUES_URL = `https://github.com/${GITHUB_REPOSITORY}/issues/new`;
 
 interface GitHubIssueContext {
   kind: GitHubIssueKind;
@@ -46,4 +46,3 @@ export function buildGitHubIssueUrl({
   );
   return url.toString();
 }
-
