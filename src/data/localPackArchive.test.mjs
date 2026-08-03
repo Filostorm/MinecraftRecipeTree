@@ -69,10 +69,10 @@ test('keeps structurally valid incomplete exports visible with actionable findin
   assert.equal(summary.findings.length, 6);
   assert.match(summary.findings.join('\n'), /stopped before it finished/);
   assert.match(summary.findings.join('\n'), /small test/);
-  assert.match(summary.findings.join('\n'), /4 recipes could not be exported/);
+  assert.match(summary.findings.join('\n'), /exporter recorded 4 issues/);
 });
 
-test('allows a completed export with recipe failures to load with a warning', () => {
+test('allows a completed export with reported failures to load with a warning', () => {
   const summary = requireLocalPackManifest(manifest({
     counts: {
       items: 10,
