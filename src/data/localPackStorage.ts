@@ -9,10 +9,13 @@ import {
 const LOCAL_PACK_CACHE = 'minecraft-recipe-tree-local-packs-v1';
 const LOCAL_PACK_CATALOG_PATH = '/__local-packs/catalog.json';
 const LOCAL_PACK_ROUTE_PREFIX = '/__local-packs/';
+const LOCAL_PACK_INVENTORY_NAME = 'inventory.json';
 const ARCHIVE_READ_CHUNK_BYTES = 1024 * 1024;
+const CACHE_DELETE_BATCH_SIZE = 32;
 const MAX_LOCAL_PACKS = 24;
 const MAX_LOCAL_FILE_BYTES = 128 * 1024 * 1024;
 const LOCAL_CATALOG_FORMAT = 1;
+const LOCAL_INVENTORY_FORMAT = 1;
 
 interface LocalPackRecord extends DatasetDescriptor {
   storedAt: number;
@@ -21,6 +24,11 @@ interface LocalPackRecord extends DatasetDescriptor {
 interface LocalPackCatalog {
   format: typeof LOCAL_CATALOG_FORMAT;
   packs: LocalPackRecord[];
+}
+
+interface LocalPackInventory {
+  format: typeof LOCAL_INVENTORY_FORMAT;
+  paths: string[];
 }
 
 export interface InstalledLocalPack {
@@ -134,6 +142,12 @@ function localPackRequest(publicationId: string, relativePath: string): Request 
   return new Request(`${browserOrigin()}${localPackPath(publicationId, relativePath)}`);
 }
 
+function inventoryRequest(publicationId: string): Request {
+  return new Request(
+    `${browserOrigin()}${LOCAL_PACK_ROUTE_PREFIX}${publicationId}/${LOCAL_PACK_INVENTORY_NAME}`,
+  );
+}
+
 function contentType(path: string): string {
   const normalized = path.toLowerCase();
   if (normalized.endsWith('.json')) return 'application/json; charset=utf-8';
@@ -167,14 +181,88 @@ async function publicationIdForManifest(manifestBytes: Uint8Array): Promise<stri
   return hex(new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', digestInput.buffer)));
 }
 
-async function deletePublication(cache: Cache, publicationId: string): Promise<void> {
-  const prefix = `${browserOrigin()}${LOCAL_PACK_ROUTE_PREFIX}${publicationId}/`;
-  const requests = await cache.keys();
-  await Promise.all(
-    requests
-      .filter(request => request.url.startsWith(prefix))
-      .map(request => cache.delete(request)),
+function requireLocalPackInventory(value: unknown): LocalPackInventory {
+  if (
+    !isRecord(value) ||
+    value.format !== LOCAL_INVENTORY_FORMAT ||
+    !Array.isArray(value.paths) ||
+    value.paths.length > MAX_EXPORT_ARCHIVE_ENTRIES ||
+    !value.paths.every(
+      path => typeof path === 'string' && requireSafeArchivePath(path) === path,
+    )
+  ) {
+    throw new Error('The saved pack file list is unreadable.');
+  }
+  return {
+    format: LOCAL_INVENTORY_FORMAT,
+    paths: [...new Set(value.paths)],
+  };
+}
+
+async function readPublicationInventory(
+  cache: Cache,
+  publicationId: string,
+): Promise<readonly string[] | null> {
+  const response = await cache.match(inventoryRequest(publicationId), {ignoreSearch: true});
+  if (!response) return null;
+  try {
+    return requireLocalPackInventory(await response.json()).paths;
+  } catch (error) {
+    console.error('A local pack file list could not be read.', error);
+    return null;
+  }
+}
+
+async function writePublicationInventory(
+  cache: Cache,
+  publicationId: string,
+  paths: Iterable<string>,
+): Promise<void> {
+  const inventory: LocalPackInventory = {
+    format: LOCAL_INVENTORY_FORMAT,
+    paths: [...new Set(paths)].sort(),
+  };
+  await cache.put(
+    inventoryRequest(publicationId),
+    new Response(JSON.stringify(inventory), {
+      headers: {
+        'Cache-Control': 'no-store',
+        'Content-Type': 'application/json; charset=utf-8',
+      },
+    }),
   );
+}
+
+async function deletePublicationPaths(
+  cache: Cache,
+  publicationId: string,
+  paths: readonly string[],
+): Promise<void> {
+  for (let offset = 0; offset < paths.length; offset += CACHE_DELETE_BATCH_SIZE) {
+    await Promise.all(
+      paths
+        .slice(offset, offset + CACHE_DELETE_BATCH_SIZE)
+        .map(path => cache.delete(localPackRequest(publicationId, path))),
+    );
+  }
+}
+
+async function deletePublication(
+  cache: Cache,
+  publicationId: string,
+  knownPaths?: Iterable<string>,
+): Promise<void> {
+  const paths = knownPaths
+    ? [...new Set(knownPaths)]
+    : await readPublicationInventory(cache, publicationId);
+  if (paths === null) {
+    console.warn(
+      `The legacy local pack ${publicationId} has no file inventory; its unreferenced cache files were left in place.`,
+    );
+    return;
+  }
+  await deletePublicationPaths(cache, publicationId, paths);
+  await cache.delete(inventoryRequest(publicationId));
 }
 
 export async function registerLocalPackServiceWorker(): Promise<void> {
@@ -237,6 +325,7 @@ export async function installLocalPackArchive(
   };
   const prefix = rootPrefix(manifestPath);
   const cache = await cacheApi().open(LOCAL_PACK_CACHE);
+  const previousStoredPaths = await readPublicationInventory(cache, publicationId);
   const storedPaths = new Set<string>();
   let entryCount = 0;
   let archiveError: Error | null = null;
@@ -385,6 +474,12 @@ export async function installLocalPackArchive(
         },
       }),
     );
+    await writePublicationInventory(cache, publicationId, storedPaths);
+
+    if (previousStoredPaths !== null) {
+      const stalePaths = previousStoredPaths.filter(path => !storedPaths.has(path));
+      await deletePublicationPaths(cache, publicationId, stalePaths);
+    }
 
     const current = await readCatalog(cache);
     const superseded = current.packs.filter(
@@ -405,18 +500,23 @@ export async function installLocalPackArchive(
     await writeCatalog(cache, {format: LOCAL_CATALOG_FORMAT, packs: nextPacks});
 
     const retainedIds = new Set(nextPacks.map(pack => pack.publicationId));
-    await Promise.all(
-      [...superseded, ...retained.slice(MAX_LOCAL_PACKS - 1)]
-        .filter(pack => !retainedIds.has(pack.publicationId))
-        .map(pack => deletePublication(cache, pack.publicationId)),
-    );
+    const publicationsToDelete = [
+      ...new Set(
+        [...superseded, ...retained.slice(MAX_LOCAL_PACKS - 1)]
+          .filter(pack => !retainedIds.has(pack.publicationId))
+          .map(pack => pack.publicationId),
+      ),
+    ];
+    for (const oldPublicationId of publicationsToDelete) {
+      await deletePublication(cache, oldPublicationId);
+    }
 
     return {
       descriptor,
       viewerHref: `/?pack=${encodeURIComponent(descriptor.slug)}`,
     };
   } catch (error) {
-    await deletePublication(cache, publicationId).catch(cleanupError => {
+    await deletePublication(cache, publicationId, storedPaths).catch(cleanupError => {
       console.error('An incomplete local pack could not be removed.', cleanupError);
     });
     throw error;

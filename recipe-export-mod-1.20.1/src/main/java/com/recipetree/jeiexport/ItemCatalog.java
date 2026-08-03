@@ -61,6 +61,35 @@ final class ItemCatalog {
         return ensureTyped(typed);
     }
 
+    /**
+     * Restores an ingredient referenced by a reused synthetic recipe. Synthetic trade outputs are
+     * not guaranteed to occur in JEI's ordinary ingredient list, so copying the recipe alone can
+     * otherwise leave its keys absent from items.json.
+     */
+    boolean restorePrevious(String key) throws IOException {
+        if (known.contains(key)) {
+            return true;
+        }
+        if (ctx.previous == null) {
+            return false;
+        }
+        JsonObject previousEntry = ctx.previous.item(key);
+        if (previousEntry == null) {
+            return false;
+        }
+        if (previousEntry.has("icon")) {
+            String previousIcon = previousEntry.get("icon").getAsString();
+            if (!ctx.reserveAndReusePreviousFile(previousIcon, previousIcon)) {
+                return false;
+            }
+        }
+        known.add(key);
+        GSON.toJson(previousEntry, writer);
+        count++;
+        ctx.reusedItems++;
+        return true;
+    }
+
     static boolean isEmptyIngredient(ITypedIngredient<?> typed) {
         Object ingredient = typed.getIngredient();
         return (typed.getType() == VanillaTypes.ITEM_STACK

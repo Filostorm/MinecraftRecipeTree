@@ -19,7 +19,7 @@ test('reports file-saving and finalization after archive reading reaches 100%', 
       responses.set(request.url, response.clone());
     },
     async keys() {
-      return [...responses.keys()].map(url => new Request(url));
+      throw new DOMException('Operation too large.', 'QuotaExceededError');
     },
     async delete(request) {
       return responses.delete(request.url);
@@ -92,6 +92,48 @@ test('reports file-saving and finalization after archive reading reaches 100%', 
       totalFiles: 3,
     });
     assert.deepEqual(updates.at(-1), {phase: 'finalizing'});
+
+    const firstInventoryUrl = [...responses.keys()].find(url => url.endsWith('/inventory.json'));
+    assert.ok(firstInventoryUrl);
+    responses.delete(firstInventoryUrl);
+
+    const updatedManifest = {
+      ...manifest,
+      pack: {name: 'Progress Pack', version: '1.0.1'},
+    };
+    const updatedManifestBytes = strToU8(JSON.stringify(updatedManifest));
+    const updatedArchive = zipSync({
+      'manifest.json': updatedManifestBytes,
+      'items.json': strToU8('[]'),
+      'categories.json': strToU8('[]'),
+      'index.json': strToU8('{}'),
+    });
+    const updatedFile = new File([updatedArchive], 'progress-pack-updated.zip', {
+      type: 'application/zip',
+    });
+
+    const installed = await installLocalPackArchive(
+      updatedFile,
+      'manifest.json',
+      updatedManifestBytes,
+      updatedManifest,
+      {
+        packName: 'Progress Pack',
+        packVersion: '1.0.1',
+        minecraftVersion: '1.20.1',
+        readyForHandoff: true,
+        findings: [],
+        counts: {items: 0, recipes: 0, categories: 0, failures: 0},
+      },
+      () => {},
+    );
+
+    assert.equal(installed.descriptor.packVersion, '1.0.1');
+    const catalog = await responses
+      .get('https://viewer.example/__local-packs/catalog.json')
+      ?.clone()
+      .json();
+    assert.deepEqual(catalog.packs.map(pack => pack.packVersion), ['1.0.1']);
   } finally {
     if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
     else delete globalThis.window;

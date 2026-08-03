@@ -161,14 +161,20 @@ final class IncrementalExportCache {
 
     @Nullable
     JsonObject matchingItem(String key, JsonObject currentWithoutIcon) throws IOException {
-        if (items == null) {
-            items = readKeyedArray(root.resolve("items.json"), "items", "k");
-        }
-        JsonObject previous = items.get(key);
+        JsonObject previous = item(key);
         if (previous == null || !sameStructure(previous, currentWithoutIcon, "icon")) {
             return null;
         }
         return previous;
+    }
+
+    /** Returns an exact prior catalog record for a cached synthetic recipe ingredient. */
+    @Nullable
+    JsonObject item(String key) throws IOException {
+        if (items == null) {
+            items = readKeyedArray(root.resolve("items.json"), "items", "k");
+        }
+        return items.get(key);
     }
 
     RecipeCategoryCache recipeCategory(ResourceLocation categoryId) throws IOException {

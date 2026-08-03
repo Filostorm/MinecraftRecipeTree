@@ -118,6 +118,15 @@ final class TradeExporter implements ExportJob.PhaseRunner {
             return false;
         }
 
+        for (String key : cachedIngredientKeys(cachedRecipes)) {
+            if (!catalog.restorePrevious(key)) {
+                JeiExportMod.LOGGER.info(
+                        "[jeiexport] Prior trade ingredient {} could not be restored; resampling all trades",
+                        key);
+                return false;
+            }
+        }
+
         List<String> linkedImages = new ArrayList<>();
         for (int index = 0; index < cachedRecipes.size(); index++) {
             IncrementalExportCache.CachedRecipe cached = cachedRecipes.get(index);
@@ -145,6 +154,34 @@ final class TradeExporter implements ExportJob.PhaseRunner {
                 "[jeiexport] Reused {} complete trade records; skipped randomized trade sampling",
                 cachedRecipes.size());
         return true;
+    }
+
+    static Set<String> cachedIngredientKeys(
+            List<IncrementalExportCache.CachedRecipe> cachedRecipes) {
+        Set<String> keys = new HashSet<>();
+        for (IncrementalExportCache.CachedRecipe cached : cachedRecipes) {
+            collectCachedSlotKeys(cached.json().getAsJsonArray("in"), keys);
+            collectCachedSlotKeys(cached.json().getAsJsonArray("out"), keys);
+        }
+        return keys;
+    }
+
+    private static void collectCachedSlotKeys(@Nullable JsonArray slots, Set<String> keys) {
+        if (slots == null) {
+            return;
+        }
+        for (var slotElement : slots) {
+            if (!slotElement.isJsonArray()) {
+                continue;
+            }
+            for (var pairElement : slotElement.getAsJsonArray()) {
+                if (pairElement.isJsonArray()
+                        && !pairElement.getAsJsonArray().isEmpty()
+                        && pairElement.getAsJsonArray().get(0).isJsonPrimitive()) {
+                    keys.add(pairElement.getAsJsonArray().get(0).getAsString());
+                }
+            }
+        }
     }
 
     private void indexCachedRecipe(JsonObject recipe, int index) {
