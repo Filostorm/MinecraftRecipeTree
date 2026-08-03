@@ -30,6 +30,7 @@ import {
   requireMatchingExportedBuildIdentity,
 } from './exporter-artifact-provenance.mjs';
 import {digestExportTree, sameExportTreeDigest} from './export-tree-digest.mjs';
+import {requireRecipeImageInventory} from './recipe-image-inventory.mjs';
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 
@@ -231,7 +232,23 @@ export async function acceptExporterRelease({
     profile: qualityProfile,
     requirePackIdentity: true,
     assetMode: 'raw',
+    computeRecipeImageInventory: true,
   });
+  const recipeImageInventory = requireRecipeImageInventory(
+    summary?.recipeImageInventory,
+    'Acceptance raw recipe-image inventory',
+    manifest.counts?.recipes,
+  );
+  if (
+    recipeImageInventory.previews !== manifest.counts.recipes ||
+    recipeImageInventory.missing !== 0
+  ) {
+    throw new Error(
+      `Acceptance export requires one decoded recipe preview per recipe; ` +
+        `recipes/previews/missing=${String(manifest.counts?.recipes)}/` +
+        `${recipeImageInventory.previews}/${recipeImageInventory.missing}.`,
+    );
+  }
 
   const manifestAfter = await readVerifiedRegularFile(
     manifestPath,

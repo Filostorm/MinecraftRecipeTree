@@ -32,6 +32,20 @@ import {digestExportTree} from './export-tree-digest.mjs';
 
 const quietLogger = Object.freeze({info() {}, warn() {}, error() {}});
 
+function completeValidationSummary(root, recipes = 20) {
+  return {
+    root,
+    recipes,
+    recipeImageInventory: {
+      format: 'mrt-recipe-image-inventory-v1',
+      sha256: 'a'.repeat(64),
+      entries: recipes,
+      previews: recipes,
+      missing: 0,
+    },
+  };
+}
+
 async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), 'mrt-exporter-acceptance-test-'));
   t.after(() => rm(root, {recursive: true, force: true}));
@@ -279,14 +293,56 @@ test('acceptance action validates a full export once and writes the bound receip
         profile: value.definition.qualityProfiles[0],
         requirePackIdentity: true,
         assetMode: 'raw',
+        computeRecipeImageInventory: true,
       });
-      return {root, recipes: 20};
+      return completeValidationSummary(root);
     },
   });
   assert.equal(validationCalls, 1);
   assert.equal(result.receipt.release.sha256, sha256Hex(value.sourceBytes));
   assert.equal(result.receipt.exportManifest.sha256, sha256Hex(value.manifestBytes));
-  assert.deepEqual(result.summary, {root: value.exportRoot, recipes: 20});
+  assert.deepEqual(result.summary, completeValidationSummary(value.exportRoot));
+});
+
+test('acceptance action rejects an incomplete decoded recipe-preview inventory', async t => {
+  const value = await fixture(t);
+  await assert.rejects(
+    acceptExporterRelease({
+      releaseId: value.definition.id,
+      profile: value.definition.qualityProfiles[0],
+      exportRoot: value.exportRoot,
+      workspaceRoot: value.workspaceRoot,
+      acceptanceRoot: value.acceptanceRoot,
+      publicRoot: value.publicRoot,
+      definitions: [value.definition],
+      logger: quietLogger,
+      async testOnlyValidateExport(root, options) {
+        assert.equal(root, value.exportRoot);
+        assert.equal(options.computeRecipeImageInventory, true);
+        return {
+          ...completeValidationSummary(root),
+          recipeImageInventory: {
+            format: 'mrt-recipe-image-inventory-v1',
+            sha256: 'b'.repeat(64),
+            entries: value.manifest.counts.recipes,
+            previews: value.manifest.counts.recipes - 1,
+            missing: 1,
+          },
+        };
+      },
+    }),
+    /requires one decoded recipe preview per recipe; recipes\/previews\/missing=20\/19\/1/,
+  );
+  await assert.rejects(
+    readFile(
+      exporterAcceptanceReceiptPath(
+        value.definition.id,
+        value.definition.qualityProfiles[0],
+        value.acceptanceRoot,
+      ),
+    ),
+    error => error?.code === 'ENOENT',
+  );
 });
 
 test('acceptance cannot pair a rebuilt source JAR with an export from the prior build', async t => {
@@ -445,7 +501,7 @@ test('rejects diagnostic mini exports and manifests that mutate during validatio
       logger: quietLogger,
       async testOnlyValidateExport() {
         await writeFile(manifestPath, `${JSON.stringify({...value.manifest, durationMs: 101})}\n`);
-        return {};
+        return completeValidationSummary(value.exportRoot);
       },
     }),
     /changed during validation/,
@@ -466,7 +522,7 @@ test('rejects diagnostic mini exports and manifests that mutate during validatio
       logger: quietLogger,
       async testOnlyValidateExport() {
         await writeFile(nonManifestPath, '{"items":[{"changed":true}]}\n');
-        return {};
+        return completeValidationSummary(value.exportRoot);
       },
     }),
     /export tree changed during exhaustive validation/,

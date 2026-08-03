@@ -14,6 +14,7 @@ import {fileURLToPath} from 'node:url';
 import {isDeepStrictEqual} from 'node:util';
 import sharp from 'sharp';
 import {
+  collectIconlessItemIds,
   EXPORT_QUALITY_PROFILE_IDS,
   exportQualityIssues,
   GENERIC_JEI_120_PROFILE,
@@ -224,11 +225,15 @@ function validateMm1QualitySample(value, manifest, label) {
 }
 
 function validateMm2QualitySample(value, manifest, label) {
-  if (!hasExactKeys(value, ['selectorCounts', 'requested'])) {
-    throw new Error(`${label} must contain exactly selectorCounts and requested.`);
+  if (!hasExactKeys(value, ['selectorCounts', 'requested', 'requestedItems'])) {
+    throw new Error(
+      `${label} must contain exactly selectorCounts, requested, and requestedItems.`,
+    );
   }
-  if (!hasExactKeys(value.selectorCounts, ['recipeId', 'sourceIndex'])) {
-    throw new Error(`${label}.selectorCounts must contain exactly recipeId and sourceIndex.`);
+  if (!hasExactKeys(value.selectorCounts, ['item', 'recipeId', 'sourceIndex'])) {
+    throw new Error(
+      `${label}.selectorCounts must contain exactly item, recipeId, and sourceIndex.`,
+    );
   }
   const recipeId = requireNonNegativeSafeInteger(
     value.selectorCounts.recipeId,
@@ -238,14 +243,27 @@ function validateMm2QualitySample(value, manifest, label) {
     value.selectorCounts.sourceIndex,
     `${label}.selectorCounts.sourceIndex`,
   );
+  const item = requireNonNegativeSafeInteger(
+    value.selectorCounts.item,
+    `${label}.selectorCounts.item`,
+  );
   if (recipeId !== 0) {
     throw new Error(`${label}.selectorCounts.recipeId must be 0 for the REI exporter.`);
   }
-  if (!Array.isArray(value.requested) || value.requested.length === 0 || value.requested.length > 32) {
-    throw new Error(`${label}.requested must contain 1..32 selectors.`);
+  if (!Array.isArray(value.requested) || value.requested.length > 32) {
+    throw new Error(`${label}.requested must contain 0..32 selectors.`);
+  }
+  if (!Array.isArray(value.requestedItems) || value.requestedItems.length > 32) {
+    throw new Error(`${label}.requestedItems must contain 0..32 selectors.`);
+  }
+  if (value.requested.length === 0 && value.requestedItems.length === 0) {
+    throw new Error(`${label} must contain at least one recipe or item selector.`);
   }
   if (sourceIndex !== value.requested.length) {
     throw new Error(`${label}.selectorCounts.sourceIndex must equal requested.length.`);
+  }
+  if (item !== value.requestedItems.length) {
+    throw new Error(`${label}.selectorCounts.item must equal requestedItems.length.`);
   }
   if (value.requested.length !== manifest.counts.recipes) {
     throw new Error(
@@ -276,9 +294,30 @@ function validateMm2QualitySample(value, manifest, label) {
       sourceIndex: selectorSourceIndex,
     });
   });
+  const seenItems = new Set();
+  const requestedItems = value.requestedItems.map((selector, index) => {
+    const selectorLabel = `${label}.requestedItems[${index}]`;
+    if (!hasExactKeys(selector, ['identifier', 'typeId'])) {
+      throw new Error(`${selectorLabel} must contain exactly typeId and identifier.`);
+    }
+    if (typeof selector.typeId !== 'string' || !RESOURCE_LOCATION_PATTERN.test(selector.typeId)) {
+      throw new Error(`${selectorLabel}.typeId must be a canonical resource location.`);
+    }
+    if (
+      typeof selector.identifier !== 'string' ||
+      !RESOURCE_LOCATION_PATTERN.test(selector.identifier)
+    ) {
+      throw new Error(`${selectorLabel}.identifier must be a canonical resource location.`);
+    }
+    const identity = `${selector.typeId}\u0000${selector.identifier}`;
+    if (seenItems.has(identity)) throw new Error(`${selectorLabel} duplicates an earlier selector.`);
+    seenItems.add(identity);
+    return Object.freeze({typeId: selector.typeId, identifier: selector.identifier});
+  });
   return Object.freeze({
-    selectorCounts: Object.freeze({recipeId, sourceIndex}),
+    selectorCounts: Object.freeze({recipeId, sourceIndex, item}),
     requested: Object.freeze(requested),
+    requestedItems: Object.freeze(requestedItems),
   });
 }
 
@@ -392,7 +431,12 @@ function assertProfileQuality(input, profile, label) {
  * derive counts from the validated raw manifest, but require every declared
  * recipe to have a preview and retain exact hosted/raw identity checks.
  */
-export function recipePreviewContractForProfile(profile, rawManifest, warnings) {
+export function recipePreviewContractForProfile(
+  profile,
+  rawManifest,
+  warnings,
+  iconlessItemIds,
+) {
   const resolvedProfile = resolveQualityProfile(profile);
   if (resolvedProfile === null) {
     throw new Error(
@@ -410,7 +454,13 @@ export function recipePreviewContractForProfile(profile, rawManifest, warnings) 
 
   const requirements = qualityProfileRequirementsFor(resolvedProfile);
   assertProfileQuality(
-    {manifest: rawManifest, failures: [], warnings, semanticErrorRecipes: 0},
+    {
+      manifest: rawManifest,
+      failures: [],
+      warnings,
+      iconlessItemIds,
+      semanticErrorRecipes: 0,
+    },
     resolvedProfile,
     'Raw export manifest',
   );
@@ -2033,7 +2083,14 @@ export async function buildRecipePreviewSidecar({
   logger.info(`Writing transaction staging directory ${stagingRoot}.`);
 
   try {
-    const [rawManifest, hostedPublication, categoriesDocument, failures, warnings] =
+    const [
+      rawManifest,
+      hostedPublication,
+      categoriesDocument,
+      failures,
+      warnings,
+      rawItemsDocument,
+    ] =
       await Promise.all([
         readJsonFile(join(rawRoot, 'manifest.json'), 'Raw export manifest'),
         readHostedPublication(datasetManifest),
@@ -2041,12 +2098,26 @@ export async function buildRecipePreviewSidecar({
         resolvedProfile === null
           ? Promise.resolve(null)
           : readJsonFile(join(rawRoot, 'failures.json'), 'Raw export failures'),
-        resolvedProfile === MULTIBLOCK_MADNESS_112_PROFILE
+        resolvedProfile === MULTIBLOCK_MADNESS_112_PROFILE ||
+        resolvedProfile === MULTIBLOCK_MADNESS_2_118_PROFILE
           ? readJsonFile(join(rawRoot, 'warnings.json'), 'Raw export warnings')
           : Promise.resolve(undefined),
+        resolvedProfile === MULTIBLOCK_MADNESS_2_118_PROFILE
+          ? readJsonFile(join(rawRoot, 'items.json'), 'Raw export items')
+          : Promise.resolve(undefined),
       ]);
+    const iconlessItemIds =
+      resolvedProfile === MULTIBLOCK_MADNESS_2_118_PROFILE
+        ? collectIconlessItemIds(rawItemsDocument, 'Raw export items.json')
+        : undefined;
     const datasetContract =
-      contract ?? recipePreviewContractForProfile(resolvedProfile, rawManifest, warnings);
+      contract ??
+      recipePreviewContractForProfile(
+        resolvedProfile,
+        rawManifest,
+        warnings,
+        iconlessItemIds,
+      );
     validateContract(datasetContract, resolvedProfile);
     if (resolvedProfile !== null) {
       if (!Array.isArray(failures)) {
@@ -2067,7 +2138,7 @@ export async function buildRecipePreviewSidecar({
         );
       }
       assertProfileQuality(
-        {manifest: rawManifest, failures, warnings, semanticErrorRecipes: 0},
+        {manifest: rawManifest, failures, warnings, iconlessItemIds, semanticErrorRecipes: 0},
         resolvedProfile,
         'Raw export metadata',
       );
@@ -2097,7 +2168,10 @@ export async function buildRecipePreviewSidecar({
     });
     assertRawAndHostedIdentity(rawManifest, hostedManifest);
     await verifyHostedPublicationId(hostedPublication, logger);
-    if (resolvedProfile === MULTIBLOCK_MADNESS_112_PROFILE) {
+    if (
+      resolvedProfile === MULTIBLOCK_MADNESS_112_PROFILE ||
+      resolvedProfile === MULTIBLOCK_MADNESS_2_118_PROFILE
+    ) {
       const hostedWarnings = (
         await hostedPublication.readDocument('warnings.json', 'Hosted warnings.json')
       ).value;
@@ -2108,7 +2182,11 @@ export async function buildRecipePreviewSidecar({
         );
       }
       logger.info(
-        `Validated ${warnings.length} audited Multiblock Madness warning event(s) against ` +
+        `Validated ${warnings.length} audited ${
+          resolvedProfile === MULTIBLOCK_MADNESS_112_PROFILE
+            ? 'Multiblock Madness'
+            : 'Multiblock Madness 2'
+        } warning event(s) against ` +
           'the hosted warnings.json document.',
       );
     }
@@ -2322,7 +2400,7 @@ export async function buildRecipePreviewSidecar({
     }
     if (resolvedProfile !== null) {
       assertProfileQuality(
-        {manifest: rawManifest, failures, warnings, semanticErrorRecipes},
+        {manifest: rawManifest, failures, warnings, iconlessItemIds, semanticErrorRecipes},
         resolvedProfile,
         'Raw export corpus',
       );
