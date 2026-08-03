@@ -6,12 +6,16 @@ overwrite production.
 
 | Environment | Source branch | Sites project ID | URL | Access |
 | --- | --- | --- | --- | --- |
-| Beta | `beta` | Cloudflare Worker `minecraft-recipe-tree-beta` | Cloudflare Workers development URL | Private release candidate |
+| Beta | `beta` | Cloudflare Worker `minecraft-recipe-tree-beta` | [minecraft-recipe-tree-beta.gtjoe51.workers.dev](https://minecraft-recipe-tree-beta.gtjoe51.workers.dev/) | Private release candidate |
 | Production | `main` | `appgprj_6a5a5da437248191a0f8accf3fb92d5d` | [minecraftrecipetree.craftsmannsoftware.com](https://minecraftrecipetree.craftsmannsoftware.com/) | Public |
 
 The production Sites origin is
 `https://minecraft-recipe-tree.gtjoe51.chatgpt.site`. The canonical hostname is routed to that
 origin by the `craftsmann-app-subdomain-router` Cloudflare Worker.
+
+The canonical beta endpoint is `https://minecraft-recipe-tree-beta.gtjoe51.workers.dev`. Use it for
+all beta acceptance testing and links. The previous `chatgpt.site` beta endpoint and the obsolete
+`https://minecraftrecipetree.pages.dev` export are not the active beta application.
 
 ## Branch-specific configuration
 

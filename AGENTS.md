@@ -2,11 +2,19 @@
 
 Read the exact versioned docs at https://docs.expo.dev/versions/v56.0.0/ before writing any code.
 
+# GitHub authentication checks
+
+- The stored `Filostorm` GitHub CLI credential is expected to authenticate with `repo` and
+  `workflow` scopes. If `gh auth status` reports an invalid token inside the restricted Codex
+  sandbox, treat it as a possible network false negative and rerun the same check with network
+  permission before asking the user to reauthenticate. Never infer stale credentials solely from a
+  sandboxed authentication check.
+
 # Release environments
 
 - Use `beta` as the integration branch for application changes and `main` as the production branch.
 - Validate and deploy application changes to the private beta Site before asking for explicit production promotion.
-- The beta Sites project is `appgprj_6a6a505e7bc08191acada3d05fa5d18d` at `https://minecraft-recipe-tree-beta.gtjoe51.chatgpt.site`. The `beta` branch's `.openai/hosting.json` must point to this project.
+- The active beta endpoint is `https://minecraft-recipe-tree-beta.gtjoe51.workers.dev`. Use this URL whenever opening or sharing the beta application; the older `chatgpt.site` beta and `minecraftrecipetree.pages.dev` URLs are obsolete. The beta Worker is `minecraft-recipe-tree-beta`. The historical beta Sites project is `appgprj_6a6a505e7bc08191acada3d05fa5d18d`, and the `beta` branch's `.openai/hosting.json` must continue to point to it for compatibility with historical Sites builds.
 - The production Sites project is `appgprj_6a5a5da437248191a0f8accf3fb92d5d`. The `main` branch's `.openai/hosting.json` must point to this project. Never deploy with the other environment's project ID.
 - The beta Site must remain private and set `BETA_DATA_ORIGIN=https://minecraftrecipetree.craftsmannsoftware.com`. Its Worker may proxy only public read requests for the dataset catalog, immutable publications, immutable preview sets, and legacy modpack verification. Never proxy cookies, authorization, feedback, administration, or mutation methods.
 - After every beta deployment, verify that the beta URL hydrates in a fresh browser tab, the changed feature works, a hashed application asset loads, and `/api/datasets` returns `X-MRT-Beta-Data-Origin: https://minecraftrecipetree.craftsmannsoftware.com`.

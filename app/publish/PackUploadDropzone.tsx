@@ -21,6 +21,7 @@ import {
   buildExportFailureReport,
   sendExportFailureReport,
 } from '../../src/data/exportFailureReport';
+import {localPackUploadErrorMessage} from '../../src/data/localPackUploadError';
 import styles from './publish.module.css';
 
 // Keep each synchronous fflate push small enough for archives containing long
@@ -62,35 +63,6 @@ type UploadState =
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function plainUploadError(error: unknown): string {
-  const message = errorMessage(error);
-  if (message.includes('empty')) {
-    return 'This ZIP is empty. Run the exporter again and choose the new ZIP.';
-  }
-  if (message.includes('manifest.json') || message.includes('exporter information')) {
-    return 'We could not find the pack information in this ZIP. Run the exporter again and choose the new ZIP.';
-  }
-  if (
-    message.includes('too many files') ||
-    message.includes('too large') ||
-    message.includes('browser storage')
-  ) {
-    return message;
-  }
-  if (
-    message.includes('unsafe file path') ||
-    message.includes('file path that cannot be opened safely')
-  ) {
-    return 'This ZIP contains a file we cannot open safely. Make a fresh export and try again.';
-  }
-  if (message.includes('not a readable ZIP') || message.includes('could not be opened')) {
-    return 'This file is not a readable ZIP. Choose the ZIP made by the exporter.';
-  }
-  if (message.startsWith('The ZIP is missing ')) return message;
-  console.error('The exporter ZIP could not be prepared for the viewer.', error);
-  return 'We could not read this export. Run the exporter again and try the new ZIP.';
 }
 
 function joinChunks(chunks: readonly Uint8Array[], totalBytes: number): Uint8Array {
@@ -429,7 +401,7 @@ export function PackUploadDropzone() {
           }
         } catch (error) {
           console.error('The checked pack could not be added to the viewer.', error);
-          findings = Object.freeze([...findings, plainUploadError(error)]);
+          findings = Object.freeze([...findings, localPackUploadErrorMessage(error)]);
         }
       }
       if (operationRef.current !== operation) return;
@@ -448,7 +420,7 @@ export function PackUploadDropzone() {
     } catch (error) {
       if (operationRef.current !== operation) return;
       console.error('The exporter ZIP check failed.', error);
-      setState({status: 'error', filename: file.name, message: plainUploadError(error)});
+      setState({status: 'error', filename: file.name, message: localPackUploadErrorMessage(error)});
     } finally {
       if (inputRef.current) inputRef.current.value = '';
     }

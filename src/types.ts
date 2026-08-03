@@ -187,6 +187,8 @@ export interface Recipe {
   stage?: string;
   /** Optional legacy screenshot filename or packed coordinate; absent in structured publications. */
   img?: string;
+  /** Optional shared base layer rendered beneath img for exact composited JEI previews. */
+  bg?: string;
   /** Processing duration in game ticks when the exporter can determine it exactly. */
   durationTicks?: number;
   /** Optional multiblock geometry and exact material counts from a structure-preview recipe. */

@@ -992,6 +992,10 @@ export function GraphScreen({
               presentedRecipe?.img && category
                 ? data.imageUrl(recipeImagePath(category.dir, presentedRecipe.img))
                 : undefined,
+            imageBackgroundUri:
+              presentedRecipe?.bg && category
+                ? data.imageUrl(recipeImagePath(category.dir, presentedRecipe.bg))
+                : undefined,
             imageW: presentedRecipe?.w,
             imageH: presentedRecipe?.h,
             inputs:
@@ -3437,6 +3441,11 @@ function SourceNodeView({
       {source.kind === 'recipe' && source.recipe?.img && source.dir && (
         <RecipePreviewImage
           uri={data.imageUrl(recipeImagePath(source.dir, source.recipe.img))!}
+          backgroundUri={
+            source.recipe.bg
+              ? data.imageUrl(recipeImagePath(source.dir, source.recipe.bg))
+              : undefined
+          }
           context={source.recipe.id ?? `${source.dir} graph recipe`}
           style={[
             {

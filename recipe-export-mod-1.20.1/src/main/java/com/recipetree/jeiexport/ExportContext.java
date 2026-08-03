@@ -42,6 +42,8 @@ final class ExportContext {
     final Path finalRoot;
     final int iconScale;
     final PackIdentity packIdentity;
+    @Nullable
+    final IncrementalExportCache previous;
     final int recipeScale = ExportManifestContract.RECIPE_SCALE;
     final int mobCanvas = ExportManifestContract.MOB_CANVAS;
 
@@ -64,6 +66,12 @@ final class ExportContext {
     int categoryCount;
     int mobCount;
     int blockDropsCount;
+    int reusedItems;
+    int reusedCategoryIcons;
+    int reusedRecipes;
+    int reusedMobs;
+    int reusedBlockDrops;
+    int reusedTrades;
 
     @Nullable
     private ItemCatalog catalog;
@@ -74,6 +82,10 @@ final class ExportContext {
     }
 
     ExportContext(Path finalRoot, int iconScale, PackIdentity packIdentity) throws IOException {
+        this(finalRoot, iconScale, packIdentity, false);
+    }
+
+    ExportContext(Path finalRoot, int iconScale, PackIdentity packIdentity, boolean forceRebuild) throws IOException {
         this.finalRoot = finalRoot.toAbsolutePath().normalize();
         Path parent = this.finalRoot.getParent();
         if (parent == null) {
@@ -83,11 +95,80 @@ final class ExportContext {
                 + ".staging-" + UUID.randomUUID()).normalize();
         this.iconScale = iconScale;
         this.packIdentity = packIdentity;
+        this.previous = IncrementalExportCache.load(
+                this.finalRoot, iconScale, packIdentity, forceRebuild);
         if (!root.getParent().equals(parent)) {
             throw new IOException("Staging output escaped the export directory: " + root);
         }
         Files.createDirectories(root);
         JeiExportMod.LOGGER.info("[jeiexport] Writing transactional snapshot to {}", root);
+    }
+
+    boolean reusePreviousFile(String previousRelativePath, String newRelativePath) {
+        if (previous == null) {
+            return false;
+        }
+        final Path source;
+        final Path destination;
+        try {
+            source = previous.reusableFile(previousRelativePath);
+            destination = stagingFile(newRelativePath);
+            if (!Files.isRegularFile(source)) {
+                JeiExportMod.LOGGER.warn(
+                        "[jeiexport] Incremental cache record references missing file {}; regenerating it",
+                        source);
+                return false;
+            }
+            Files.createDirectories(destination.getParent());
+            try {
+                Files.createLink(destination, source);
+            } catch (UnsupportedOperationException | IOException linkFailure) {
+                JeiExportMod.LOGGER.warn(
+                        "[jeiexport] Hard-link reuse failed for {}; copying the validated prior file instead",
+                        previousRelativePath,
+                        linkFailure);
+                Files.copy(source, destination, StandardCopyOption.COPY_ATTRIBUTES);
+            }
+            return true;
+        } catch (IOException reuseFailure) {
+            JeiExportMod.LOGGER.warn(
+                    "[jeiexport] Could not reuse cached file {}; regenerating it",
+                    previousRelativePath,
+                    reuseFailure);
+            return false;
+        }
+    }
+
+    boolean reserveAndReusePreviousFile(String previousRelativePath, String newRelativePath) {
+        if (!usedPaths.add(newRelativePath)) {
+            JeiExportMod.LOGGER.warn(
+                    "[jeiexport] Cached path {} collides with another export path; regenerating with a unique name",
+                    newRelativePath);
+            return false;
+        }
+        if (reusePreviousFile(previousRelativePath, newRelativePath)) {
+            return true;
+        }
+        usedPaths.remove(newRelativePath);
+        return false;
+    }
+
+    private Path stagingFile(String relativePath) throws IOException {
+        Path destination = root.resolve(relativePath).normalize();
+        if (!destination.startsWith(root) || destination.equals(root)) {
+            throw new IOException("Incremental destination escapes staging snapshot: " + relativePath);
+        }
+        return destination;
+    }
+
+    int reusedTotal() {
+        return reusedItems + reusedCategoryIcons + reusedRecipes + reusedMobs + reusedBlockDrops + reusedTrades;
+    }
+
+    String incrementalStatus() {
+        return previous == null
+                ? "starting fresh"
+                : String.format(java.util.Locale.ROOT, "%,d already saved", reusedTotal());
     }
 
     ItemCatalog catalog(IIngredientManager manager) throws IOException {
@@ -314,6 +395,16 @@ final class ExportContext {
                     .name("iconScale").value(iconScale)
                     .name("recipeScale").value(recipeScale)
                     .name("mobCanvas").value(mobCanvas)
+                    .name("cacheRevision").value(IncrementalExportCache.CACHE_REVISION)
+                    .endObject();
+            w.name("incremental").beginObject()
+                    .name("cacheUsed").value(previous != null)
+                    .name("itemsReused").value(reusedItems)
+                    .name("categoryIconsReused").value(reusedCategoryIcons)
+                    .name("recipesReused").value(reusedRecipes)
+                    .name("mobsReused").value(reusedMobs)
+                    .name("blockDropsReused").value(reusedBlockDrops)
+                    .name("tradesReused").value(reusedTrades)
                     .endObject();
             w.name("counts").beginObject()
                     .name("items").value(itemCount)

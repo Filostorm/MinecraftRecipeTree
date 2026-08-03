@@ -272,8 +272,8 @@ export async function installLocalPackArchive(
     let safePath: string;
     try {
       safePath = requireSafeArchivePath(entry.name);
-    } catch {
-      archiveError = new Error('This ZIP contains a file path that cannot be opened safely.');
+    } catch (error) {
+      archiveError = error instanceof Error ? error : new Error(String(error));
       return;
     }
     if (entry.name.endsWith('/')) return;

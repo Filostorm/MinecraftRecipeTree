@@ -66,22 +66,38 @@ export function isExportManifestPath(path: string): boolean {
   return path === 'manifest.json' || /^[^/]+\/manifest\.json$/u.test(path);
 }
 
+function unsafeArchivePath(path: string, reason: string): never {
+  throw new Error(
+    `The ZIP entry ${JSON.stringify(path)} cannot be opened safely: ${reason}.`,
+  );
+}
+
 export function requireSafeArchivePath(path: string): string {
-  const pathWithoutDirectoryMarker = path.endsWith('/') ? path.slice(0, -1) : path;
-  if (
-    pathWithoutDirectoryMarker.length === 0 ||
-    path.length > 1024 ||
-    path.startsWith('/') ||
-    path.includes('\\') ||
-    path.includes('\u0000')
-  ) {
-    throw new Error(`The archive contains an unsafe file path: ${JSON.stringify(path)}.`);
-  }
+  if (path.length === 0) unsafeArchivePath(path, 'its name is empty');
+  if (path.length > 1024) unsafeArchivePath(path, 'its name exceeds 1,024 characters');
+  if (path.startsWith('/')) unsafeArchivePath(path, 'it uses an absolute path');
+  if (path.includes('\\')) unsafeArchivePath(path, 'it uses a Windows path separator');
+  if (path.includes('\u0000')) unsafeArchivePath(path, 'it contains a null character');
+
+  const directory = path.endsWith('/');
+  const pathWithoutDirectoryMarker = directory ? path.slice(0, -1) : path;
   const segments = pathWithoutDirectoryMarker.split('/');
-  if (segments.some(segment => segment === '.' || segment === '..' || segment.length === 0)) {
-    throw new Error(`The archive contains an unsafe file path: ${JSON.stringify(path)}.`);
+  if (segments.some(segment => segment === '..')) {
+    unsafeArchivePath(path, 'it tries to leave the export folder');
   }
-  return path;
+  if (segments.some(segment => segment.length === 0)) {
+    unsafeArchivePath(path, 'it contains an empty folder name');
+  }
+
+  // Finder, Explorer, and command-line ZIP tools can add harmless `.` segments even when the
+  // selected export folder is valid. Canonicalize those segments while retaining the traversal,
+  // absolute-path, and duplicate-entry protections applied to the normalized path.
+  const normalized = segments.filter(segment => segment !== '.').join('/');
+  if (normalized.length === 0) {
+    if (directory) return '';
+    unsafeArchivePath(path, 'it does not name a file or folder');
+  }
+  return directory ? `${normalized}/` : normalized;
 }
 
 export function requireLocalPackManifest(value: unknown): LocalPackManifestSummary {

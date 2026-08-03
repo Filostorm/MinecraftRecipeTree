@@ -58,7 +58,9 @@ The portable format and compatibility limits are documented in
 
 - **Recipes** — every recipe of every visible JEI category, rendered offscreen through JEI's own
   `IRecipeLayoutDrawable` into PNGs (it looks exactly like the in-game recipe screen), plus
-  per-category `recipes.json` with inputs/outputs/catalysts.
+  per-category `recipes.json` with inputs/outputs/catalysts. Repeated pixels can be stored once as
+  a shared `bg` layer; the recipe's `img` is then its exact transparent overlay. Readers draw `bg`
+  first and `img` second at the same dimensions. Recipes without `bg` remain complete images.
 - **Ingredients** — every registered JEI ingredient (items, fluids, custom types like gases) rendered
   through its `IIngredientRenderer` into icons. 3D blocks keep their GUI pose, special renderers
   (chests, banners, tridents, glint) are correct because it's the real render path.
@@ -74,7 +76,7 @@ The portable format and compatibility limits are documented in
 
 ```bash
 JAVA_HOME=$(/usr/libexec/java_home -v 17) ./gradlew build
-# -> build/libs/jeiexport-1.2.0-beta.24.jar
+# -> build/libs/jeiexport-1.2.0-beta.28.jar
 ```
 
 Gradle 8.1.1 / ForgeGradle 6 / Forge 1.20.1. The release accepts Forge 47.1–47.x and
@@ -85,6 +87,25 @@ exercise JEI 15.20.0.130, preventing accidental linkage to newer-only JEI method
 
 Install the jar + JEI 15.x in the pack, join a world, then `/jeiexport all`.
 See the [repo root README](../README.md) for the full command reference, output format, and the viewer.
+
+Completed compatible snapshots are incremental by default. The exporter validates the Minecraft
+version, modpack identity, exact loaded mod versions, render settings, and cache revision, then reuses
+unchanged ingredient/category icons, structurally identical recipe previews, mobs, block drops, and
+complete trade records. Missing files, previous failures, new records, and recipes whose JEI slots,
+amounts, dimensions, duration, or identifiers changed are generated again. Reused files are linked
+into the transactional staging snapshot when supported, with a logged copy fallback. Run
+`/jeiexport rebuild` to explicitly ignore the prior snapshot and regenerate everything. Cache usage
+and per-phase reuse counts are written to `manifest.json` and displayed in progress/completion text.
+Existing complete recipe images remain reusable after upgrading; run `/jeiexport rebuild` once when
+you want those older screenshots converted to shared layers for maximum disk savings.
+
+JEI layouts must be rendered on Minecraft's render thread, so the exporter uses cooperative pacing.
+Run `/jeiexport speed` to inspect the active preset or `/jeiexport speed <1-3>` to change it while an
+export is running. Speed 1 uses 2 ms slices for playable background exports, speed 2 is the default
+and matches the legacy 45 ms pacing, and speed 3 uses bounded 250 ms turbo slices. Turbo nearly
+monopolizes the render thread but yields between slices so the progress overlay can redraw. Automated
+launches can select a preset with `-Djeiexport.speed=1|2|3`. Invalid property values are logged and
+use the explicit speed 2 default rather than being silently clamped.
 
 The default command renders 64×64 ingredient canvases (`iconScale: 4`) and 2× JEI recipe
 layouts. Those settings, complete failure telemetry in `manifest.diagnostics`, and one preview

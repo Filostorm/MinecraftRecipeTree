@@ -275,6 +275,21 @@ For the current JEI build, join the world and run:
 /jeiexport all
 ```
 
+Repeat exports are incremental when the existing completed snapshot is compatible. The exporter
+reuses unchanged records while regenerating missing files, previous failures, newly discovered
+content, and structurally changed recipes. Compatibility requires the same Minecraft version,
+modpack identity, loaded mod versions, render settings, and exporter cache revision. Use
+`/jeiexport rebuild` when you intentionally need a full clean regeneration. The transactional staging
+directory remains in use, so the last completed export is preserved if an incremental run fails.
+
+The exporter exposes three render-thread pacing presets. `/jeiexport speed 1` uses 2 ms slices for
+playable background exports, speed 2 is the default and matches the legacy 45 ms pacing, and speed 3
+uses bounded 250 ms turbo slices. Turbo nearly monopolizes the render thread but yields between slices
+so the progress overlay can redraw. The command takes effect on an active export, and automated
+launches can use `-Djeiexport.speed=1|2|3`. Pacing changes scheduling only; dataset contents and image
+fidelity are unchanged. A single JEI recipe renderer is not preemptible and can still exceed its
+preset's slice boundary.
+
 Publish a Forge 1.20.1 + JEI 15 export with the strict `generic-jei-1.20.1` profile. The default
 command already emits that profile's required `iconScale: 4`, `recipeScale: 2`, exact failure
 diagnostics, and modpack identity. Do not pass a different icon scale for a hosted snapshot.

@@ -114,15 +114,30 @@ test('rejects malformed manifest metadata instead of inventing fallback values',
   );
 });
 
-test('accepts only a root or one-folder exporter manifest and rejects unsafe ZIP paths', () => {
+test('accepts only a root or one-folder exporter manifest and canonicalizes safe ZIP paths', () => {
   assert.equal(isExportManifestPath('manifest.json'), true);
   assert.equal(isExportManifestPath('jei-export/manifest.json'), true);
   assert.equal(isExportManifestPath('outer/jei-export/manifest.json'), false);
   assert.equal(isExportManifestPath('MANIFEST.JSON'), false);
   assert.equal(requireSafeArchivePath('jei-export/'), 'jei-export/');
-  assert.throws(() => requireSafeArchivePath('../manifest.json'), /unsafe file path/);
-  assert.throws(() => requireSafeArchivePath('folder\\manifest.json'), /unsafe file path/);
-  assert.throws(() => requireSafeArchivePath('/manifest.json'), /unsafe file path/);
+  assert.equal(requireSafeArchivePath('./'), '');
+  assert.equal(requireSafeArchivePath('./jei-export/manifest.json'), 'jei-export/manifest.json');
+  assert.equal(requireSafeArchivePath('jei-export/./items.json'), 'jei-export/items.json');
+});
+
+test('names the ZIP entry and reason when an archive path is unsafe', () => {
+  assert.throws(
+    () => requireSafeArchivePath('../manifest.json'),
+    /ZIP entry "\.\.\/manifest\.json".*tries to leave the export folder/,
+  );
+  assert.throws(
+    () => requireSafeArchivePath('folder\\manifest.json'),
+    /ZIP entry "folder\\\\manifest\.json".*Windows path separator/,
+  );
+  assert.throws(
+    () => requireSafeArchivePath('/manifest.json'),
+    /ZIP entry "\/manifest\.json".*absolute path/,
+  );
 });
 
 test('maps an installed device-local pack to its isolated viewer route', () => {
