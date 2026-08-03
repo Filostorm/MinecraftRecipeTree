@@ -112,7 +112,7 @@ function catalogRequest(): Request {
 }
 
 async function readCatalog(cache: Cache): Promise<LocalPackCatalog> {
-  const response = await cache.match(catalogRequest(), {ignoreSearch: true});
+  const response = await cache.match(catalogRequest());
   if (!response) return emptyCatalog();
   try {
     return requireLocalPackCatalog(await response.json());
@@ -203,7 +203,7 @@ async function readPublicationInventory(
   cache: Cache,
   publicationId: string,
 ): Promise<readonly string[] | null> {
-  const response = await cache.match(inventoryRequest(publicationId), {ignoreSearch: true});
+  const response = await cache.match(inventoryRequest(publicationId));
   if (!response) return null;
   try {
     return requireLocalPackInventory(await response.json()).paths;

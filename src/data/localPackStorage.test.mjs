@@ -1,9 +1,17 @@
 import assert from 'node:assert/strict';
 import {File} from 'node:buffer';
+import {readFile} from 'node:fs/promises';
 import test from 'node:test';
 import {strToU8, zipSync} from 'fflate';
 
 const {installLocalPackArchive} = await import('./localPackStorage.ts');
+
+test('local pack requests use exact cache keys instead of full-cache scans', async () => {
+  const source = await readFile(new URL('../../public/local-pack-sw.js', import.meta.url), 'utf8');
+  assert.match(source, /url\.search = '';/u);
+  assert.match(source, /cache\.match\(url\.href\)/u);
+  assert.doesNotMatch(source, /ignoreSearch\s*:/u);
+});
 
 test('reports file-saving and finalization after archive reading reaches 100%', async () => {
   const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
