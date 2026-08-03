@@ -81,13 +81,13 @@ final class MobExporter implements ExportJob.PhaseRunner {
                 }
             }
         } catch (Throwable t) {
-            ctx.failure("mob " + id + ": " + t);
+            ctx.failure("mob " + id, t);
         } finally {
             if (entity != null) {
                 try {
                     entity.discard();
                 } catch (Throwable t) {
-                    ctx.failure("mob cleanup " + id + ": " + t);
+                    ctx.failure("mob cleanup " + id, t);
                 }
             }
         }
@@ -133,7 +133,7 @@ final class MobExporter implements ExportJob.PhaseRunner {
         try {
             mj.addProperty("hp", entity.getMaxHealth());
         } catch (Throwable t) {
-            ctx.failure("mob max health " + id + ": " + t);
+            ctx.failure("mob max health " + id, t);
         }
         mj.addProperty("cat", type.getCategory().getName());
 
@@ -144,13 +144,13 @@ final class MobExporter implements ExportJob.PhaseRunner {
             try {
                 drops = LootSampler.sampleEntityDrops(server, type, DROP_ROLLS);
             } catch (Throwable t) {
-                ctx.failure("mob drops " + id + ": " + t);
+                ctx.failure("mob drops " + id, t);
             }
             try {
                 JsonArray customDrops = LootSampler.sampleCustomDeathDrops(server, type, CUSTOM_DROP_ROLLS);
                 drops = mergeMissingCustomDrops(id, drops, customDrops);
             } catch (Throwable t) {
-                ctx.failure("mob custom death drops " + id + ": " + t);
+                ctx.failure("mob custom death drops " + id, t);
             }
         }
         drops = addKnownCustomDeathDrops(id, drops);

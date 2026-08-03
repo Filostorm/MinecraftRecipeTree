@@ -61,9 +61,14 @@ import {
 } from './recipeCategories';
 import {applyRecipeStageMetadata} from './recipeStages';
 import {reconstructLegacyReplaceableInputs} from './legacyReplaceableInputs';
+import {
+  MAX_NETWORK_DOCUMENT_BYTES,
+  isLocalPackExportUrl,
+  runtimeDocumentByteLimit,
+} from './runtimeDocumentLimits';
 
 const SHARDED_JSON_FORMAT = 'mrt-sharded-json-v1';
-const MAX_SHARD_BYTES = 8 * 1024 * 1024;
+const MAX_SHARD_BYTES = MAX_NETWORK_DOCUMENT_BYTES;
 const MAX_RECIPE_PART_CACHE_BYTES = 32 * 1024 * 1024;
 const MAX_RECIPE_PART_CACHE_ENTRIES = 8;
 const MAX_PREVIEW_METADATA_CACHE_BYTES = 8 * 1024 * 1024;
@@ -246,10 +251,14 @@ async function fetchBoundedJson(
   if (!res.ok) throw new ExportHttpError(res.status, url);
   const source = await res.text();
   const bytes = UTF8_ENCODER.encode(source).byteLength;
-  if (bytes > MAX_SHARD_BYTES) {
+  const maximumBytes = runtimeDocumentByteLimit(url);
+  if (bytes > maximumBytes) {
+    const compatibilityHint = isLocalPackExportUrl(url)
+      ? ' Re-export with the latest exporter to split this legacy document into smaller shards.'
+      : '';
     throw new Error(
       `Export document ${url} is ${bytes} UTF-8 bytes, above the ` +
-        `${MAX_SHARD_BYTES}-byte runtime limit.`,
+        `${maximumBytes}-byte runtime limit.${compatibilityHint}`,
     );
   }
   if (expectedBytes !== undefined && bytes !== expectedBytes) {

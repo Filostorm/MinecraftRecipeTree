@@ -19,6 +19,7 @@ const d1Migrations = await Promise.all([
   readFile(new URL('../drizzle/0001_wide_the_hand.sql', import.meta.url), 'utf8'),
   readFile(new URL('../drizzle/0002_shiny_sunfire.sql', import.meta.url), 'utf8'),
   readFile(new URL('../drizzle/0003_tidy_ogun.sql', import.meta.url), 'utf8'),
+  readFile(new URL('../drizzle/0004_rainy_maverick.sql', import.meta.url), 'utf8'),
 ]);
 
 test('Cloudflare routes catalog, immutable datasets, and administration through the Worker', () => {
@@ -72,6 +73,7 @@ test('Cloudflare routes catalog, immutable datasets, and administration through 
     '/api/admin/core-datasets/*',
     '/api/admin/dataset-channels/*',
     '/api/datasets',
+    '/api/export-failures',
     '/api/feedback',
     '/api/modpacks*',
     '/dataset/publications/*',
@@ -160,6 +162,7 @@ test('the environment template exposes only the current server-side operator con
     'PREVIEW_UPLOAD_ASSET_SET_ID',
     'PREVIEW_UPLOAD_TOKEN',
     'FEEDBACK_ADMIN_TOKEN',
+    'GITHUB_ISSUES_TOKEN',
   ]);
   assert.equal(values.BETA_DATA_ORIGIN, 'https://minecraftrecipetree.craftsmannsoftware.com');
   assert.equal(values.DATASET_ADMIN_ENABLED, 'false');
@@ -169,6 +172,8 @@ test('the environment template exposes only the current server-side operator con
   assert.ok(values.PREVIEW_UPLOAD_TOKEN.length >= 32);
   assert.ok(values.FEEDBACK_ADMIN_TOKEN.length >= 32);
   assert.doesNotMatch(values.FEEDBACK_ADMIN_TOKEN, /[\s\u0000-\u001f\u007f]/);
+  assert.ok(values.GITHUB_ISSUES_TOKEN.length >= 32);
+  assert.doesNotMatch(values.GITHUB_ISSUES_TOKEN, /[\s\u0000-\u001f\u007f]/);
   assert.doesNotMatch(environmentExample, /^PREVIEW_ASSET_SET_ID=/m);
   assert.doesNotMatch(environmentExample, /^EXPO_PUBLIC_.*TOKEN=/m);
 });

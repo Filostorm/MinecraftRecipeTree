@@ -28,6 +28,11 @@ export interface InstalledLocalPack {
   viewerHref: string;
 }
 
+export type LocalPackInstallProgress =
+  | {phase: 'reading'; fraction: number}
+  | {phase: 'saving'; fraction: number; completedFiles: number; totalFiles: number}
+  | {phase: 'finalizing'};
+
 export function isLocalPackDescriptor(descriptor: DatasetDescriptor): boolean {
   return (
     /^local-[a-f0-9]{16}$/u.test(descriptor.slug) &&
@@ -217,7 +222,7 @@ export async function installLocalPackArchive(
   manifestBytes: Uint8Array,
   manifest: unknown,
   summary: LocalPackManifestSummary,
-  onProgress: (fraction: number) => void,
+  onProgress: (progress: LocalPackInstallProgress) => void,
 ): Promise<InstalledLocalPack> {
   await registerLocalPackServiceWorker();
   const publicationId = await publicationIdForManifest(manifestBytes);
@@ -238,6 +243,24 @@ export async function installLocalPackArchive(
   let writeError: Error | null = null;
   let writeQueue = Promise.resolve();
   let lastReportedPercent = 0;
+  let queuedWrites = 0;
+  let completedWrites = 0;
+  let archiveReadComplete = false;
+  let lastReportedSavePercent = -1;
+
+  const reportSaveProgress = () => {
+    if (!archiveReadComplete) return;
+    const fraction = queuedWrites === 0 ? 1 : completedWrites / queuedWrites;
+    const percent = Math.floor(fraction * 100);
+    if (percent === lastReportedSavePercent && completedWrites !== queuedWrites) return;
+    lastReportedSavePercent = percent;
+    onProgress({
+      phase: 'saving',
+      fraction,
+      completedFiles: completedWrites,
+      totalFiles: queuedWrites,
+    });
+  };
 
   const unzip = new Unzip(entry => {
     entryCount += 1;
@@ -290,9 +313,10 @@ export async function installLocalPackArchive(
       }
       const body = new Blob(chunks, {type: contentType(relativePath)});
       chunks = [];
+      queuedWrites += 1;
       writeQueue = writeQueue
-        .then(() =>
-          cache.put(
+        .then(async () => {
+          await cache.put(
             localPackRequest(publicationId, relativePath),
             new Response(body, {
               headers: {
@@ -300,8 +324,10 @@ export async function installLocalPackArchive(
                 'Content-Type': contentType(relativePath),
               },
             }),
-          ),
-        )
+          );
+          completedWrites += 1;
+          reportSaveProgress();
+        })
         .catch(error => {
           writeError = error instanceof Error ? error : new Error(String(error));
         });
@@ -327,14 +353,18 @@ export async function installLocalPackArchive(
       const percent = Math.floor((end / file.size) * 100);
       if (percent > lastReportedPercent || end === file.size) {
         lastReportedPercent = percent;
-        onProgress(end / file.size);
+        onProgress({phase: 'reading', fraction: end / file.size});
       }
     }
+    archiveReadComplete = true;
+    reportSaveProgress();
     await writeQueue;
     if (writeError !== null) {
       console.error('A local pack file could not be saved.', writeError);
       throw new Error('There is not enough browser storage to keep this pack.');
     }
+
+    onProgress({phase: 'finalizing'});
 
     for (const requiredPath of ['manifest.json', 'items.json', 'categories.json', 'index.json']) {
       if (!storedPaths.has(requiredPath)) {
