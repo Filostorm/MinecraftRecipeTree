@@ -5,9 +5,11 @@ import {fileURLToPath} from 'node:url';
 import sharp from 'sharp';
 import {collectFiles, isRecord, pathKind, readJsonDocument} from './export-data-utils.mjs';
 import {
+  collectIconlessItemIds,
   EXPORT_QUALITY_PROFILE_IDS,
   exportQualityIssues,
   MULTIBLOCK_MADNESS_112_PROFILE,
+  MULTIBLOCK_MADNESS_2_118_PROFILE,
   qualityProfileRequirementsFor,
   resolveQualityProfile,
 } from './export-quality-policy.mjs';
@@ -47,6 +49,10 @@ import {
 const defaultExportRoot = join(process.cwd(), 'public', 'exports');
 const MAX_REPORTED_ERRORS = 100;
 const SHARP_CONCURRENCY = Math.max(1, Math.min(2, availableParallelism()));
+const MM2_MISSINGNO_RGBA_SHA256 = Object.freeze([
+  '386c06ecfb9a401bf0abe1d92a04a23a06a424dd39e33df2c7dcae19bc6ec31a',
+  '1e76e32423f2e15298af791e370c640b8e62dd7e36efc1cee260ba1430432b44',
+]);
 
 // Validation touches every image exactly once. Disabling libvips' operation
 // cache prevents decoded pixels from accumulating across a six-figure export.
@@ -387,6 +393,7 @@ export async function validateExportData(exportRoot = defaultExportRoot, options
   const itemKeysById = [];
   const assetReferences = new Set();
   const expectedAssetDimensions = new Map();
+  const itemIconIdentitiesByAssetPath = new Map();
   const iconScale = countValue(manifest?.settings?.iconScale);
   const recipeScale = countValue(manifest?.settings?.recipeScale);
   const mobCanvas = countValue(manifest?.settings?.mobCanvas);
@@ -433,6 +440,11 @@ export async function validateExportData(exportRoot = defaultExportRoot, options
           item.icon,
           iconScale && iconScale > 0 ? {width: 16 * iconScale, height: 16 * iconScale} : null,
           `items[${itemIndex}]`,
+        );
+        itemIconIdentitiesByAssetPath.set(
+          item.icon,
+          `${typeof item.id === 'string' ? item.id : '(invalid id)'} ` +
+            `(${typeof item.k === 'string' ? item.k : `items[${itemIndex}]`})`,
         );
       }
       else fail(`Unsafe or invalid item icon path at items[${itemIndex}]: ${String(item.icon)}`);
@@ -901,7 +913,10 @@ export async function validateExportData(exportRoot = defaultExportRoot, options
   }
 
   let warnings;
-  if (qualityProfile === MULTIBLOCK_MADNESS_112_PROFILE) {
+  if (
+    qualityProfile === MULTIBLOCK_MADNESS_112_PROFILE ||
+    qualityProfile === MULTIBLOCK_MADNESS_2_118_PROFILE
+  ) {
     if (fileKeys.has('warnings.json')) {
       warnings = await readJsonDocument(join(root, 'warnings.json'), 'warnings.json');
     } else {
@@ -910,7 +925,16 @@ export async function validateExportData(exportRoot = defaultExportRoot, options
   }
 
   for (const issue of exportQualityIssues(
-    {manifest, failures, warnings, semanticErrorRecipes},
+    {
+      manifest,
+      failures,
+      warnings,
+      iconlessItemIds:
+        qualityProfile === MULTIBLOCK_MADNESS_2_118_PROFILE
+          ? collectIconlessItemIds({items}, 'items.json')
+          : undefined,
+      semanticErrorRecipes,
+    },
     qualityProfile,
   )) {
     fail(issue);
@@ -1352,13 +1376,78 @@ export async function validateExportData(exportRoot = defaultExportRoot, options
           const channels = info.channels;
           const alphaChannel = channels - 1;
           let hasVisiblePixel = false;
+          const itemIconIdentity = itemIconIdentitiesByAssetPath.get(assetKey);
+          const inspectMissingTexture =
+            qualityProfile === MULTIBLOCK_MADNESS_2_118_PROFILE &&
+            itemIconIdentity !== undefined;
+          const missingCheckerHalfWidth = info.width / 2;
+          const missingCheckerHalfHeight = info.height / 2;
+          let exactMissingCheckerPhaseA =
+            inspectMissingTexture &&
+            expected !== undefined &&
+            info.width === expected.width &&
+            info.height === expected.height &&
+            Number.isInteger(missingCheckerHalfWidth) &&
+            Number.isInteger(missingCheckerHalfHeight);
+          let exactMissingCheckerPhaseB = exactMissingCheckerPhaseA;
           for (let offset = 0; offset < data.length; offset += channels) {
-            if (data[offset + alphaChannel] !== 0) {
-              hasVisiblePixel = true;
+            const alpha = data[offset + alphaChannel];
+            if (alpha !== 0) hasVisiblePixel = true;
+            if (!inspectMissingTexture) {
+              if (hasVisiblePixel) break;
+              continue;
+            }
+            const red = data[offset];
+            const green = data[offset + 1];
+            const blue = data[offset + 2];
+            const black = red === 0 && green === 0 && blue === 0 && alpha === 255;
+            const missingMagenta =
+              red === 248 && green === 0 && blue === 248 && alpha === 255;
+            if (exactMissingCheckerPhaseA || exactMissingCheckerPhaseB) {
+              const pixelIndex = offset / channels;
+              const x = pixelIndex % info.width;
+              const y = Math.floor(pixelIndex / info.width);
+              const phaseAMagenta =
+                (x < missingCheckerHalfWidth) !== (y < missingCheckerHalfHeight);
+              exactMissingCheckerPhaseA &&=
+                phaseAMagenta ? missingMagenta : black;
+              exactMissingCheckerPhaseB &&=
+                phaseAMagenta ? black : missingMagenta;
+            }
+            if (
+              hasVisiblePixel &&
+              !exactMissingCheckerPhaseA &&
+              !exactMissingCheckerPhaseB
+            ) {
               break;
             }
           }
           if (!hasVisiblePixel) fail(`Raw image ${assetKey} is fully transparent.`);
+          const exactMissingChecker =
+            exactMissingCheckerPhaseA || exactMissingCheckerPhaseB;
+          // Both audited digests are the two checker phases. Hash only a full
+          // checker candidate so normal MM2 icons incur no extra buffer pass.
+          const itemIconRgbaSha256 = exactMissingChecker
+            ? decodedRgbaSha256(info.width, info.height, data)
+            : null;
+          const auditedMissingnoDigest =
+            itemIconRgbaSha256 !== null &&
+            MM2_MISSINGNO_RGBA_SHA256.includes(itemIconRgbaSha256);
+          if (inspectMissingTexture && (auditedMissingnoDigest || exactMissingChecker)) {
+            const matchedSignatures = [
+              ...(auditedMissingnoDigest
+                ? [`decoded RGBA SHA-256 ${itemIconRgbaSha256}`]
+                : []),
+              ...(exactMissingChecker
+                ? ['exact black/magenta checker scaled from 8×8 source quadrants']
+                : []),
+            ];
+            fail(
+              `Raw item icon ${assetKey} for ${itemIconIdentity} matches the canonical ` +
+                `Minecraft missing-texture signature (${matchedSignatures.join(' and ')}); ` +
+                'the Multiblock Madness 2 profile has no missing-texture allowlist entry.',
+            );
+          }
           const inventoryEntryIndexes = recipeImageEntryIndexesByAssetKey?.get(assetKey);
           if (inventoryEntryIndexes !== undefined) {
             const decodedInventory = {
@@ -1485,7 +1574,9 @@ export async function validateExportData(exportRoot = defaultExportRoot, options
     mobs: mobs.length,
     blockDrops: blockDropCount,
     failures: failureCount,
-    ...(qualityProfile === MULTIBLOCK_MADNESS_112_PROFILE && Array.isArray(warnings)
+    ...((qualityProfile === MULTIBLOCK_MADNESS_112_PROFILE ||
+      qualityProfile === MULTIBLOCK_MADNESS_2_118_PROFILE) &&
+    Array.isArray(warnings)
       ? {warnings: warnings.length}
       : {}),
     semanticErrorRecipes,

@@ -42,4 +42,3 @@ test('feature requests open a prefilled enhancement issue', () => {
   assert.match(url.searchParams.get('body'), /Page: Unavailable/);
   assert.match(url.searchParams.get('body'), /Browser: Unavailable/);
 });
-

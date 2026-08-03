@@ -12,20 +12,45 @@ import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /** Small client-local state. Cloud sync can replace this store without changing the planner UI. */
 public final class RecipeTreeProgress {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final Path FILE = FMLPaths.CONFIGDIR.get().resolve("recipe-tree-plans.json");
+    private static final Path DISCOVERIES_FILE = FMLPaths.CONFIGDIR.get()
+            .resolve("recipe-tree-discoveries.json");
     private static RecipeTreeProgress instance;
 
     private Map<String, SavedPlan> plans = new HashMap<>();
     private Map<String, String> favoriteRecipes = new HashMap<>();
     private Map<String, Boolean> collapsedRecipeTypes = new HashMap<>();
+    private List<RecipeHistoryEntry> recipeHistory = new ArrayList<>();
+    private Set<String> discoveredItems = new HashSet<>();
+    private boolean recipeBookMode;
 
     public record SavedPlan(long amount, String recipeKey) {
+    }
+
+    public record RecipeHistoryEntry(
+            String itemKey,
+            String recipeKey,
+            long amount,
+            boolean compactMode) {
+    }
+
+    private record StateFile(
+            Map<String, SavedPlan> plans,
+            Map<String, String> favoriteRecipes,
+            Map<String, Boolean> collapsedRecipeTypes,
+            List<RecipeHistoryEntry> recipeHistory,
+            boolean recipeBookMode) {
     }
 
     private RecipeTreeProgress() {
@@ -42,7 +67,7 @@ public final class RecipeTreeProgress {
 
     public void savePlan(ItemStack target, SavedPlan plan) {
         if (target.isEmpty()) return;
-        plans.put(itemKey(target), plan);
+        if (plan.equals(plans.put(itemKey(target), plan))) return;
         save();
     }
 
@@ -52,7 +77,7 @@ public final class RecipeTreeProgress {
 
     public void saveFavoriteRecipe(ItemStack output, String recipeKey) {
         if (output.isEmpty() || recipeKey == null || recipeKey.isBlank()) return;
-        favoriteRecipes.put(itemKey(output), recipeKey);
+        if (recipeKey.equals(favoriteRecipes.put(itemKey(output), recipeKey))) return;
         save();
     }
 
@@ -68,11 +93,70 @@ public final class RecipeTreeProgress {
     public void setRecipeTypeCollapsed(String recipeType, boolean collapsed) {
         if (recipeType == null || recipeType.isBlank()) return;
         if (collapsed) {
-            collapsedRecipeTypes.put(recipeType, true);
+            if (Boolean.TRUE.equals(collapsedRecipeTypes.put(recipeType, true))) return;
         } else {
-            collapsedRecipeTypes.remove(recipeType);
+            if (collapsedRecipeTypes.remove(recipeType) == null) return;
         }
         save();
+    }
+
+    public List<RecipeHistoryEntry> recipeHistory() {
+        return List.copyOf(recipeHistory);
+    }
+
+    public void replaceRecipeHistory(List<RecipeHistoryEntry> history) {
+        int first = Math.max(0, history.size() - 32);
+        List<RecipeHistoryEntry> replacement = new ArrayList<>(history.subList(first, history.size()));
+        if (recipeHistory.equals(replacement)) return;
+        recipeHistory = replacement;
+        save();
+    }
+
+    public boolean recipeBookMode() {
+        return recipeBookMode;
+    }
+
+    public void setRecipeBookMode(boolean enabled) {
+        if (recipeBookMode == enabled) return;
+        recipeBookMode = enabled;
+        save();
+    }
+
+    public boolean hasDiscovered(ItemStack stack) {
+        return !stack.isEmpty() && discoveredItems.contains(itemKey(stack));
+    }
+
+    public int discoverItems(Collection<ItemStack> stacks) {
+        int discovered = 0;
+        for (ItemStack stack : stacks) {
+            if (stack == null || stack.isEmpty()) continue;
+            if (discoveredItems.add(itemKey(stack))) discovered++;
+        }
+        if (discovered > 0) saveDiscoveries();
+        return discovered;
+    }
+
+    public int discoverItemKeys(Collection<String> itemKeys) {
+        int discovered = 0;
+        for (String itemKey : itemKeys) {
+            if (itemKey == null || itemKey.isBlank()) continue;
+            if (discoveredItems.add(itemKey)) discovered++;
+        }
+        if (discovered > 0) saveDiscoveries();
+        return discovered;
+    }
+
+    public static RecipeHistoryEntry historyEntry(
+            ItemStack target,
+            String recipeKey,
+            long amount,
+            boolean compactMode) {
+        if (target.isEmpty()) throw new IllegalArgumentException("History target cannot be empty");
+        return new RecipeHistoryEntry(
+                itemKey(target),
+                recipeKey,
+                Math.min(RecipeQuantityMath.MAX_REQUESTED_AMOUNT, Math.max(1, amount)),
+                compactMode);
     }
 
     private static String itemKey(ItemStack stack) {
@@ -80,34 +164,78 @@ public final class RecipeTreeProgress {
     }
 
     private static RecipeTreeProgress load() {
-        if (!Files.isRegularFile(FILE)) return new RecipeTreeProgress();
-        try (Reader reader = Files.newBufferedReader(FILE)) {
-            RecipeTreeProgress loaded = GSON.fromJson(reader, RecipeTreeProgress.class);
-            if (loaded == null) return new RecipeTreeProgress();
-            if (loaded.plans == null) loaded.plans = new HashMap<>();
-            if (loaded.favoriteRecipes == null) loaded.favoriteRecipes = new HashMap<>();
-            if (loaded.collapsedRecipeTypes == null) loaded.collapsedRecipeTypes = new HashMap<>();
-            return loaded;
-        } catch (Exception error) {
-            JeiExportMod.LOGGER.warn("Could not load local recipe-tree plans from {}", FILE, error);
-            return new RecipeTreeProgress();
+        RecipeTreeProgress loaded = new RecipeTreeProgress();
+        if (Files.isRegularFile(FILE)) {
+            try (Reader reader = Files.newBufferedReader(FILE)) {
+                RecipeTreeProgress stored = GSON.fromJson(reader, RecipeTreeProgress.class);
+                if (stored != null) loaded = stored;
+            } catch (Exception error) {
+                JeiExportMod.LOGGER.warn("Could not load local recipe-tree plans from {}", FILE, error);
+            }
         }
+        if (loaded.plans == null) loaded.plans = new HashMap<>();
+        if (loaded.favoriteRecipes == null) loaded.favoriteRecipes = new HashMap<>();
+        if (loaded.collapsedRecipeTypes == null) loaded.collapsedRecipeTypes = new HashMap<>();
+        if (loaded.recipeHistory == null) loaded.recipeHistory = new ArrayList<>();
+        if (loaded.discoveredItems == null) loaded.discoveredItems = new HashSet<>();
+        if (loaded.recipeHistory.size() > 32) {
+            loaded.recipeHistory = new ArrayList<>(loaded.recipeHistory.subList(
+                    loaded.recipeHistory.size() - 32,
+                    loaded.recipeHistory.size()));
+        }
+
+        boolean legacyDiscoveries = !loaded.discoveredItems.isEmpty();
+        if (Files.isRegularFile(DISCOVERIES_FILE)) {
+            try (Reader reader = Files.newBufferedReader(DISCOVERIES_FILE)) {
+                String[] stored = GSON.fromJson(reader, String[].class);
+                if (stored == null) {
+                    throw new IllegalStateException("Discovery file did not contain an item ID array");
+                }
+                for (String itemKey : stored) {
+                    if (itemKey != null && !itemKey.isBlank()) loaded.discoveredItems.add(itemKey);
+                }
+            } catch (Exception error) {
+                JeiExportMod.LOGGER.warn(
+                        "Could not load recipe-tree item discoveries from {}",
+                        DISCOVERIES_FILE,
+                        error);
+            }
+        } else if (legacyDiscoveries) {
+            loaded.saveDiscoveries();
+        }
+        return loaded;
     }
 
     private synchronized void save() {
-        Path temporary = FILE.resolveSibling(FILE.getFileName() + ".tmp");
+        writeAtomically(FILE, new StateFile(
+                plans,
+                favoriteRecipes,
+                collapsedRecipeTypes,
+                recipeHistory,
+                recipeBookMode), "local recipe-tree plans");
+    }
+
+    private synchronized void saveDiscoveries() {
+        List<String> ordered = discoveredItems.stream().sorted().toList();
+        writeAtomically(DISCOVERIES_FILE, ordered, "recipe-tree item discoveries");
+    }
+
+    private static void writeAtomically(Path destination, Object value, String description) {
+        Path temporary = destination.resolveSibling(destination.getFileName() + ".tmp");
         try {
-            Files.createDirectories(FILE.getParent());
+            Files.createDirectories(destination.getParent());
             try (Writer writer = Files.newBufferedWriter(temporary)) {
-                GSON.toJson(this, writer);
+                GSON.toJson(value, writer);
             }
             try {
-                Files.move(temporary, FILE, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+                Files.move(temporary, destination,
+                        StandardCopyOption.ATOMIC_MOVE,
+                        StandardCopyOption.REPLACE_EXISTING);
             } catch (IOException unsupportedAtomicMove) {
-                Files.move(temporary, FILE, StandardCopyOption.REPLACE_EXISTING);
+                Files.move(temporary, destination, StandardCopyOption.REPLACE_EXISTING);
             }
         } catch (IOException error) {
-            JeiExportMod.LOGGER.warn("Could not save local recipe-tree plans to {}", FILE, error);
+            JeiExportMod.LOGGER.warn("Could not save {} to {}", description, destination, error);
         }
     }
 }

@@ -1,0 +1,264 @@
+import java.io.ByteArrayOutputStream
+import java.nio.charset.StandardCharsets
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
+import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
+import java.util.zip.ZipOutputStream
+
+def mrtIdentityPath = 'META-INF/mrt-exporter-build.json'
+def mrtPayloadFormat = 'mrt-exporter-jar-payload-v1'
+def mrtIdentityFormat = 'mrt-exporter-build-v1'
+def mrtPayloadPrefix = (mrtPayloadFormat + '\u0000').getBytes(StandardCharsets.UTF_8)
+def mrtMaximumEntries = 4096
+def mrtMaximumPayloadBytes = 16L * 1024L * 1024L
+def mrtMaximumIdentityBytes = 512
+
+def mrtReadBounded = { InputStream input, int maximumBytes ->
+    def output = new ByteArrayOutputStream(Math.min(maximumBytes, 512))
+    byte[] buffer = new byte[512]
+    int read
+    while ((read = input.read(buffer)) != -1) {
+        if (read == 0) {
+            continue
+        }
+        if (output.size() + read > maximumBytes) {
+            throw new GradleException('Exporter build identity exceeds its byte bound')
+        }
+        output.write(buffer, 0, read)
+    }
+    output.toByteArray()
+}
+
+def mrtUpdateUInt32 = { MessageDigest digest, int value ->
+    digest.update((byte) (value >>> 24))
+    digest.update((byte) (value >>> 16))
+    digest.update((byte) (value >>> 8))
+    digest.update((byte) value)
+}
+
+def mrtUpdateUInt64 = { MessageDigest digest, long value ->
+    for (int shift = 56; shift >= 0; shift -= 8) {
+        digest.update((byte) (value >>> shift))
+    }
+}
+
+def mrtCompareUtf8 = { String left, String right ->
+    byte[] leftBytes = left.getBytes(StandardCharsets.UTF_8)
+    byte[] rightBytes = right.getBytes(StandardCharsets.UTF_8)
+    int shared = Math.min(leftBytes.length, rightBytes.length)
+    for (int index = 0; index < shared; index++) {
+        int comparison = Integer.compare(leftBytes[index] & 0xff, rightBytes[index] & 0xff)
+        if (comparison != 0) {
+            return comparison
+        }
+    }
+    Integer.compare(leftBytes.length, rightBytes.length)
+}
+
+def mrtRequireCanonicalZipPath = { String name ->
+    if (name == null || name.isEmpty() || name.indexOf('\\') >= 0 ||
+            name.indexOf('\u0000') >= 0 || name.charAt(0) == '/') {
+        throw new GradleException("Exporter JAR contains an unsafe ZIP entry path: ${name}")
+    }
+    def segments = name.split('/', -1)
+    int contentSegments = name.endsWith('/') ? segments.length - 1 : segments.length
+    if (contentSegments <= 0) {
+        throw new GradleException("Exporter JAR contains an unsafe ZIP entry path: ${name}")
+    }
+    for (int index = 0; index < contentSegments; index++) {
+        def segment = segments[index]
+        if (segment.isEmpty() || segment == '.' || segment == '..') {
+            throw new GradleException("Exporter JAR contains an unsafe ZIP entry path: ${name}")
+        }
+    }
+}
+
+def mrtPayloadEntries = { ZipFile jar ->
+    def seen = new HashSet<String>()
+    def payload = new ArrayList<ZipEntry>()
+    def allEntries = new ArrayList<ZipEntry>()
+    def entries = jar.entries()
+    while (entries.hasMoreElements()) {
+        def entry = entries.nextElement()
+        if (allEntries.size() >= mrtMaximumEntries) {
+            throw new GradleException("Exporter JAR exceeds the ${mrtMaximumEntries} entry provenance bound")
+        }
+        mrtRequireCanonicalZipPath(entry.name)
+        if (!seen.add(entry.name)) {
+            throw new GradleException("Exporter JAR contains duplicate entry ${entry.name}")
+        }
+        allEntries.add(entry)
+        if (!entry.directory && entry.name != mrtIdentityPath) {
+            payload.add(entry)
+        }
+    }
+    payload.sort { left, right -> mrtCompareUtf8(left.name, right.name) }
+    [all: allEntries, payload: payload]
+}
+
+def mrtDigestPayload = { ZipFile jar, List<ZipEntry> payload ->
+    def digest = MessageDigest.getInstance('SHA-256')
+    digest.update(mrtPayloadPrefix)
+    long totalBytes = 0L
+    byte[] buffer = new byte[8192]
+    payload.each { entry ->
+        byte[] pathBytes = entry.name.getBytes(StandardCharsets.UTF_8)
+        long size = entry.size
+        if (size < 0L) {
+            throw new GradleException("Exporter JAR entry has no uncompressed size: ${entry.name}")
+        }
+        try {
+            totalBytes = Math.addExact(totalBytes, size)
+        } catch (ArithmeticException overflow) {
+            throw new GradleException('Exporter JAR payload size overflowed', overflow)
+        }
+        if (totalBytes > mrtMaximumPayloadBytes) {
+            throw new GradleException('Exporter JAR exceeds the provenance payload byte bound')
+        }
+        mrtUpdateUInt32(digest, pathBytes.length)
+        digest.update(pathBytes)
+        mrtUpdateUInt64(digest, size)
+        long readBytes = 0L
+        jar.getInputStream(entry).withCloseable { input ->
+            int read
+            while ((read = input.read(buffer)) != -1) {
+                if (read == 0) {
+                    continue
+                }
+                digest.update(buffer, 0, read)
+                readBytes += read
+            }
+        }
+        if (readBytes != size) {
+            throw new GradleException("Exporter JAR entry size changed while hashing: ${entry.name}")
+        }
+    }
+    digest.digest().collect { String.format('%02x', it & 0xff) }.join()
+}
+
+def mrtIdentityBytes = { String exporterId, String minecraftVersion, String payloadSha256 ->
+    ("{\"format\":\"${mrtIdentityFormat}\",\"exporterId\":\"${exporterId}\"," +
+            "\"minecraftVersion\":\"${minecraftVersion}\",\"algorithm\":\"sha256\"," +
+            "\"payloadSha256\":\"${payloadSha256}\"}\n").getBytes(StandardCharsets.UTF_8)
+}
+
+def mrtVerifyIdentity = { File candidate, String expectedPayloadSha256, byte[] expectedIdentity ->
+    ZipFile verifiedJar = new ZipFile(candidate)
+    try {
+        def indexed = mrtPayloadEntries(verifiedJar)
+        def verifiedSha256 = mrtDigestPayload(verifiedJar, indexed.payload)
+        def identityEntry = verifiedJar.getEntry(mrtIdentityPath)
+        if (verifiedSha256 != expectedPayloadSha256 ||
+                identityEntry == null || identityEntry.directory) {
+            throw new GradleException('Exporter JAR provenance verification failed')
+        }
+        byte[] actualIdentity = verifiedJar.getInputStream(identityEntry).withCloseable {
+            mrtReadBounded(it, mrtMaximumIdentityBytes)
+        }
+        if (!Arrays.equals(actualIdentity, expectedIdentity)) {
+            throw new GradleException('Exporter JAR contains non-canonical provenance bytes')
+        }
+    } finally {
+        verifiedJar.close()
+    }
+}
+
+ext.embedMrtExporterBuildIdentity = { File archive, String exporterId, String minecraftVersion ->
+    if (!(exporterId ==~ /[a-z0-9]+(?:[.-][a-z0-9]+)*/) ||
+            !(minecraftVersion ==~ /[0-9]+(?:\.[0-9]+){1,2}/)) {
+        throw new GradleException('Exporter provenance ID or Minecraft version is noncanonical')
+    }
+    def archivePath = archive.toPath().toAbsolutePath().normalize()
+    if (Files.isSymbolicLink(archivePath) ||
+            !Files.isRegularFile(archivePath, LinkOption.NOFOLLOW_LINKS)) {
+        throw new GradleException("Reobfuscated exporter JAR is not a plain regular file: ${archivePath}")
+    }
+
+    String payloadSha256
+    byte[] identityBytes
+    boolean alreadyCanonical = false
+    ZipFile sourceJar = new ZipFile(archive)
+    try {
+        def indexed = mrtPayloadEntries(sourceJar)
+        payloadSha256 = mrtDigestPayload(sourceJar, indexed.payload)
+        identityBytes = mrtIdentityBytes(exporterId, minecraftVersion, payloadSha256)
+        def existingIdentity = sourceJar.getEntry(mrtIdentityPath)
+        if (existingIdentity != null && !existingIdentity.directory) {
+            byte[] existingBytes = sourceJar.getInputStream(existingIdentity).withCloseable {
+                mrtReadBounded(it, mrtMaximumIdentityBytes)
+            }
+            alreadyCanonical = Arrays.equals(existingBytes, identityBytes)
+        }
+    } finally {
+        sourceJar.close()
+    }
+
+    if (alreadyCanonical) {
+        logger.lifecycle("[exporter-provenance] Verified ${archive.name} payload sha256=${payloadSha256}")
+        return
+    }
+
+    def temporary = Files.createTempFile(
+            archivePath.parent, ".${archivePath.fileName}.", '.provenance.tmp')
+    try {
+        sourceJar = new ZipFile(archive)
+        try {
+            def indexed = mrtPayloadEntries(sourceJar)
+            Files.newOutputStream(temporary).withCloseable { rawOutput ->
+                new ZipOutputStream(rawOutput, StandardCharsets.UTF_8).withCloseable { output ->
+                    byte[] buffer = new byte[8192]
+                    indexed.all.each { sourceEntry ->
+                        if (sourceEntry.name == mrtIdentityPath) {
+                            return
+                        }
+                        def targetEntry = new ZipEntry(sourceEntry.name)
+                        targetEntry.time = 0L
+                        output.putNextEntry(targetEntry)
+                        if (!sourceEntry.directory) {
+                            sourceJar.getInputStream(sourceEntry).withCloseable { input ->
+                                int read
+                                while ((read = input.read(buffer)) != -1) {
+                                    if (read > 0) {
+                                        output.write(buffer, 0, read)
+                                    }
+                                }
+                            }
+                        }
+                        output.closeEntry()
+                    }
+                    def identityEntry = new ZipEntry(mrtIdentityPath)
+                    identityEntry.time = 0L
+                    output.putNextEntry(identityEntry)
+                    output.write(identityBytes)
+                    output.closeEntry()
+                }
+            }
+        } finally {
+            sourceJar.close()
+        }
+        // Validate the completed replacement before it can modify build/libs. If the source JAR
+        // changed between the initial digest and this rewrite, the payload mismatch fails here.
+        mrtVerifyIdentity(temporary.toFile(), payloadSha256, identityBytes)
+        try {
+            Files.move(
+                    temporary,
+                    archivePath,
+                    StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING)
+        } catch (AtomicMoveNotSupportedException unsupported) {
+            throw new GradleException(
+                    "Atomic provenance publication is unavailable for ${archivePath}; no fallback was attempted",
+                    unsupported)
+        }
+
+        // Re-open the published archive as an additional filesystem/post-move invariant.
+        mrtVerifyIdentity(archive, payloadSha256, identityBytes)
+    } finally {
+        Files.deleteIfExists(temporary)
+    }
+    logger.lifecycle("[exporter-provenance] Embedded ${archive.name} payload sha256=${payloadSha256}")
+}

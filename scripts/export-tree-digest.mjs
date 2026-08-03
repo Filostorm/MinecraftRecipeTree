@@ -11,8 +11,11 @@ const DIGEST_DOMAIN = `${EXPORT_TREE_DIGEST_FORMAT}\0`;
 const MAX_TREE_FILES = 2_000_000;
 const MAX_TREE_BYTES = 256 * 1024 * 1024 * 1024;
 const MAX_SINGLE_FILE_BYTES = 8 * 1024 * 1024 * 1024;
+const MAX_ROOT_MANIFEST_BYTES = 16 * 1024 * 1024;
 const HASH_CONCURRENCY = Math.max(1, Math.min(8, availableParallelism()));
 const READ_CHUNK_BYTES = 256 * 1024;
+const preparedSnapshotState = new WeakMap();
+const finalizedSnapshots = new WeakSet();
 
 function canonicalRelativePath(root, path) {
   const value = relative(root, path).split(sep).join('/');
@@ -40,12 +43,13 @@ function sameEntry(left, right) {
   );
 }
 
-async function collectPlainFiles(root) {
+async function collectPlainTree(root) {
   const rootBefore = await lstat(root, {bigint: true});
   if (rootBefore.isSymbolicLink() || !rootBefore.isDirectory()) {
     throw new Error(`Acceptance export root must be a real directory: ${root}.`);
   }
   const files = [];
+  const directories = [];
   const pending = [root];
   while (pending.length > 0) {
     const directory = pending.pop();
@@ -53,6 +57,13 @@ async function collectPlainFiles(root) {
     if (before.isSymbolicLink() || !before.isDirectory()) {
       throw new Error(`Export tree directory changed or is unsupported: ${directory}.`);
     }
+    directories.push(
+      Object.freeze({
+        path: directory,
+        relativePath: directory === root ? '' : canonicalRelativePath(root, directory),
+        info: before,
+      }),
+    );
     const entries = await readdir(directory, {withFileTypes: true});
     entries.sort((left, right) => left.name.localeCompare(right.name));
     for (const entry of entries) {
@@ -60,7 +71,20 @@ async function collectPlainFiles(root) {
       if (entry.isDirectory()) {
         pending.push(path);
       } else if (entry.isFile()) {
-        files.push(Object.freeze({path, relativePath: canonicalRelativePath(root, path)}));
+        const info = await lstat(path, {bigint: true});
+        if (info.isSymbolicLink() || !info.isFile() || info.nlink !== 1n) {
+          throw new Error(
+            `Export tree file must be a plain, non-hard-linked regular file: ` +
+              `${canonicalRelativePath(root, path)}.`,
+          );
+        }
+        files.push(
+          Object.freeze({
+            path,
+            relativePath: canonicalRelativePath(root, path),
+            info,
+          }),
+        );
         if (files.length > MAX_TREE_FILES) {
           throw new Error(`Export tree exceeds the ${MAX_TREE_FILES}-file acceptance bound.`);
         }
@@ -85,14 +109,31 @@ async function collectPlainFiles(root) {
       Buffer.from(right.relativePath, 'utf8'),
     ),
   );
-  return files;
+  directories.sort((left, right) =>
+    Buffer.compare(
+      Buffer.from(left.relativePath, 'utf8'),
+      Buffer.from(right.relativePath, 'utf8'),
+    ),
+  );
+  return Object.freeze({
+    root,
+    rootInfo: rootBefore,
+    files: Object.freeze(files),
+    directories: Object.freeze(directories),
+  });
 }
 
-async function hashPlainFile(file) {
+async function hashPlainFile(file, {captureRootManifest = false} = {}) {
   const before = await lstat(file.path, {bigint: true});
-  if (before.isSymbolicLink() || !before.isFile() || before.nlink !== 1n) {
+  if (
+    before.isSymbolicLink() ||
+    !before.isFile() ||
+    before.nlink !== 1n ||
+    !sameEntry(file.info, before)
+  ) {
     throw new Error(
-      `Export tree file must be a plain, non-hard-linked regular file: ${file.relativePath}.`,
+      `Export tree file changed or is not a plain, non-hard-linked regular file: ` +
+        `${file.relativePath}.`,
     );
   }
   if (before.size < 0n || before.size > BigInt(MAX_SINGLE_FILE_BYTES)) {
@@ -108,6 +149,13 @@ async function hashPlainFile(file) {
       throw new Error(`Export tree file changed before secure open: ${file.relativePath}.`);
     }
     const hash = createHash('sha256');
+    const captureManifest = captureRootManifest && file.relativePath === 'manifest.json';
+    if (captureManifest && opened.size > BigInt(MAX_ROOT_MANIFEST_BYTES)) {
+      throw new Error(
+        `Root manifest exceeds the ${MAX_ROOT_MANIFEST_BYTES}-byte deterministic-comparison bound.`,
+      );
+    }
+    const manifestChunks = captureManifest ? [] : null;
     const buffer = Buffer.allocUnsafe(READ_CHUNK_BYTES);
     let offset = 0;
     while (offset < Number(opened.size)) {
@@ -116,7 +164,9 @@ async function hashPlainFile(file) {
       if (bytesRead === 0) {
         throw new Error(`Export tree file ended early while hashing: ${file.relativePath}.`);
       }
-      hash.update(buffer.subarray(0, bytesRead));
+      const chunk = buffer.subarray(0, bytesRead);
+      hash.update(chunk);
+      if (manifestChunks !== null) manifestChunks.push(Buffer.from(chunk));
       offset += bytesRead;
     }
     const after = await handle.stat({bigint: true});
@@ -127,9 +177,34 @@ async function hashPlainFile(file) {
       relativePath: file.relativePath,
       bytes: Number(opened.size),
       sha256: hash.digest(),
+      ...(manifestChunks === null ? {} : {content: Buffer.concat(manifestChunks)}),
     });
   } finally {
     await handle.close();
+  }
+}
+
+function assertSamePlainTreeInventory(before, after) {
+  for (const [kind, leftEntries, rightEntries] of [
+    ['directory', before.directories, after.directories],
+    ['file', before.files, after.files],
+  ]) {
+    if (leftEntries.length !== rightEntries.length) {
+      throw new Error(
+        `Export tree ${kind} inventory changed during validation or hashing: ` +
+          `${leftEntries.length} became ${rightEntries.length}.`,
+      );
+    }
+    for (let index = 0; index < leftEntries.length; index += 1) {
+      const left = leftEntries[index];
+      const right = rightEntries[index];
+      if (left.relativePath !== right.relativePath || !sameEntry(left.info, right.info)) {
+        throw new Error(
+          `Export tree ${kind} inventory changed during validation or hashing at ` +
+            `${JSON.stringify(left.relativePath || right.relativePath || '.')}.`,
+        );
+      }
+    }
   }
 }
 
@@ -139,10 +214,39 @@ function uint64be(value) {
   return result;
 }
 
-export async function digestExportTree(exportRoot, {logger = console} = {}) {
+/**
+ * Capture the filesystem identity that a subsequent validation must cover.
+ * finalizeExportTreeSnapshot verifies this exact inventory before and after its
+ * secure reads, binding validation and byte comparison without a redundant
+ * second content-hash pass on very large exports.
+ */
+export async function prepareExportTreeSnapshot(
+  exportRoot,
+  {logger = console, captureRootManifest = false} = {},
+) {
   const root = resolve(exportRoot);
   logger.info(`[export-tree] Inventorying plain files under ${root}.`);
-  const files = await collectPlainFiles(root);
+  const inventory = await collectPlainTree(root);
+  const prepared = Object.freeze({root});
+  preparedSnapshotState.set(prepared, {root, inventory, captureRootManifest});
+  return prepared;
+}
+
+export async function finalizeExportTreeSnapshot(prepared, {logger = console} = {}) {
+  if (finalizedSnapshots.has(prepared)) {
+    throw new Error('An export-tree snapshot cannot be finalized more than once.');
+  }
+  const state = preparedSnapshotState.get(prepared);
+  if (state === undefined) {
+    throw new Error('A snapshot must be created by prepareExportTreeSnapshot before finalization.');
+  }
+  finalizedSnapshots.add(prepared);
+  preparedSnapshotState.delete(prepared);
+  const {root, inventory, captureRootManifest} = state;
+  const {files} = inventory;
+  logger.info(
+    `[export-tree] Securely hashing ${files.length} inventoried files under ${root}.`,
+  );
   const hashed = new Array(files.length);
   let nextIndex = 0;
   let completed = 0;
@@ -153,7 +257,7 @@ export async function digestExportTree(exportRoot, {logger = console} = {}) {
       nextIndex += 1;
       if (index >= files.length) return;
       try {
-        hashed[index] = await hashPlainFile(files[index]);
+        hashed[index] = await hashPlainFile(files[index], {captureRootManifest});
         completed += 1;
         if (completed % 50_000 === 0) {
           logger.info(`[export-tree] Hashed ${completed}/${files.length} files.`);
@@ -167,6 +271,9 @@ export async function digestExportTree(exportRoot, {logger = console} = {}) {
     Array.from({length: Math.min(HASH_CONCURRENCY, Math.max(1, files.length))}, () => worker()),
   );
   if (firstError !== null) throw firstError;
+
+  const after = await collectPlainTree(root);
+  assertSamePlainTreeInventory(inventory, after);
 
   const hash = createHash('sha256');
   hash.update(DIGEST_DOMAIN, 'utf8');
@@ -194,7 +301,27 @@ export async function digestExportTree(exportRoot, {logger = console} = {}) {
   logger.info(
     `[export-tree] Hashed ${result.files} files and ${result.bytes} bytes: sha256=${result.sha256}.`,
   );
-  return result;
+  const manifestEntry = hashed.find(file => file.relativePath === 'manifest.json');
+  return Object.freeze({
+    root,
+    treeDigest: result,
+    files: Object.freeze(
+      hashed.map(file =>
+        Object.freeze({
+          relativePath: file.relativePath,
+          bytes: file.bytes,
+          sha256: file.sha256.toString('hex'),
+        }),
+      ),
+    ),
+    manifestBytes: manifestEntry?.content,
+  });
+}
+
+export async function digestExportTree(exportRoot, {logger = console} = {}) {
+  const prepared = await prepareExportTreeSnapshot(exportRoot, {logger});
+  const snapshot = await finalizeExportTreeSnapshot(prepared, {logger});
+  return snapshot.treeDigest;
 }
 
 export function sameExportTreeDigest(left, right) {
