@@ -355,7 +355,9 @@ recipe documents/images, and optional mob/block-drop data. Before continuing:
 
 - `manifest.aborted` must be `false`;
 - `manifest.pack.name` and `.version` must be correct;
-- `failures.json` must be reviewed rather than ignored;
+- `failures.json` must be reviewed rather than ignored. Site uploads store the complete report as
+  `errors.json` on the isolated `export-failure-reports` GitHub branch and link it from one issue
+  deduplicated by pack version, or by affected mod versions when pack version is unavailable;
 - free disk space should exceed roughly twice the raw export when full-copy staging is used.
 
 Custom ingredient types, item/fluid/gas quantities, tag/OreDictionary alternatives,

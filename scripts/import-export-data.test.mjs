@@ -34,6 +34,7 @@ import {PUBLICATION_ID_PATTERN} from './publication-id.mjs';
 import {
   configureMultiblockExportFixture,
   createRawExportFixture,
+  multiblockMadness2Warnings,
   readJson,
   writeSyntheticExporterBuildIdentity,
   writeJson,
@@ -119,6 +120,67 @@ test('imports both Multiblock Madness versions with dynamic counts and productio
     } finally {
       await rm(root, {recursive: true, force: true});
     }
+  }
+});
+
+test('MM2 import rejects warning and iconless-item contract drift before staging', async t => {
+  const baseWarningCount = multiblockMadness2Warnings(0).length;
+  const cases = [
+    {
+      name: 'unknown warning class',
+      pattern: new RegExp(
+        `warnings\\.json\\[${baseWarningCount}\\] has an unrecognized warning class`,
+      ),
+      async mutate(source) {
+        const warningsPath = join(source, 'warnings.json');
+        const warnings = multiblockMadness2Warnings(0);
+        warnings.push('UNAUDITED_ICON_RECOVERY fixture:unexpected');
+        await writeJson(warningsPath, warnings);
+      },
+    },
+    {
+      name: 'additional iconless item',
+      pattern: /iconless items must be exactly/,
+      async mutate(source) {
+        const itemsPath = join(source, 'items.json');
+        const itemsDocument = await readJson(itemsPath);
+        itemsDocument.items.push({
+          k: 'item|fixture:unexpected_iconless',
+          id: 'fixture:unexpected_iconless',
+          n: 'Unexpected iconless item',
+          m: 'fixture',
+        });
+        await writeJson(itemsPath, itemsDocument);
+      },
+    },
+  ];
+
+  for (const testCase of cases) {
+    await t.test(testCase.name, async () => {
+      const root = await mkdtemp(join(tmpdir(), 'recipe-tree-import-mm2-contract-test-'));
+      try {
+        const source = join(root, 'raw-source');
+        const destination = join(root, 'public', 'exports');
+        await createRawExportFixture(source, {iconScale: 1, recipeScale: 2});
+        await configureMultiblockExportFixture(source, MULTIBLOCK_MADNESS_2_118_PROFILE);
+        await testCase.mutate(source);
+        await mkdir(dirname(destination), {recursive: true});
+
+        await assert.rejects(
+          importExportDataImplementation({
+            source,
+            destination,
+            profile: MULTIBLOCK_MADNESS_2_118_PROFILE,
+            dryRun: true,
+          }),
+          testCase.pattern,
+        );
+        assert.equal(await pathIsMissing(destination), true);
+        assert.equal(await pathIsMissing(importWorkspaceRootForDestination(destination)), true);
+      } finally {
+        await rm(root, {recursive: true, force: true});
+      }
+    });
   }
 });
 

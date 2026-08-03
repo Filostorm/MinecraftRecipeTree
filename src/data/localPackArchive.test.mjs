@@ -72,6 +72,22 @@ test('keeps structurally valid incomplete exports visible with actionable findin
   assert.match(summary.findings.join('\n'), /4 recipes could not be exported/);
 });
 
+test('allows a completed export with recipe failures to load with a warning', () => {
+  const summary = requireLocalPackManifest(manifest({
+    counts: {
+      items: 10,
+      recipes: 8,
+      categories: 2,
+      mobs: 0,
+      blockDrops: 0,
+      failures: 3,
+    },
+  }));
+  assert.equal(summary.readyForHandoff, true);
+  assert.match(summary.findings.join('\n'), /rest of the pack can still be opened/);
+  assert.match(summary.findings.join('\n'), /failure report will be sent automatically/);
+});
+
 test('rejects malformed manifest metadata instead of inventing fallback values', () => {
   assert.throws(
     () => requireLocalPackManifest(manifest({minecraft: '../1.21.1'})),

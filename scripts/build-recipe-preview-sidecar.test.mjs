@@ -38,6 +38,9 @@ import {
   MEATBALLCRAFT_112_PROFILE,
   MULTIBLOCK_MADNESS_112_PROFILE,
   MULTIBLOCK_MADNESS_2_118_PROFILE,
+  MULTIBLOCK_MADNESS_2_118_CATEGORICAL_WARNINGS,
+  MULTIBLOCK_MADNESS_2_118_ICON_OMISSION_IDS,
+  MULTIBLOCK_MADNESS_2_118_ICON_OMISSIONS,
 } from './export-quality-policy.mjs';
 import {
   requireRecipePreviewCategory,
@@ -68,6 +71,26 @@ const GTNH_PACK_IDENTITY = Object.freeze({
   version: '2.8.4',
   identitySource: 'explicit-request',
 });
+
+function validMm2Warnings(nativeIconCorrections = 2) {
+  return [
+    ...MULTIBLOCK_MADNESS_2_118_ICON_OMISSIONS.map(
+      ({id, type, valueClass, itemClass, blockClass}) =>
+        `UPSTREAM_NATIVE_ICON_UNAVAILABLE id=${id} type=${type} ` +
+        `valueClass=${valueClass} itemClass=${itemClass ?? '<none>'} ` +
+        `blockClass=${blockClass ?? '<none>'} visiblePixels=0 ` +
+        'contract=audited fixture omission; exact native 16x16 render has zero visible ' +
+        'pixels; omitted PNG/icon field; named UI fallback used',
+    ),
+    ...Array.from(
+      {length: nativeIconCorrections},
+      (_, index) =>
+        'Corrected transparent or quantity-clipped native REI catalog icon: ' +
+        `entry=fixture:corrected_${index}`,
+    ),
+    ...MULTIBLOCK_MADNESS_2_118_CATEGORICAL_WARNINGS,
+  ];
+}
 const FIXTURE_CONTRACT = Object.freeze({
   format: 1,
   minecraft: '1.12.2',
@@ -109,12 +132,21 @@ function qualitySampleForProfile(profile, recipeCount = FIXTURE_RECIPE_COUNT) {
     };
   }
   if (profile === MULTIBLOCK_MADNESS_2_118_PROFILE) {
+    const requestedItems = [
+      {typeId: 'minecraft:item', identifier: 'mekanism:bounding_block'},
+      {typeId: 'minecraft:item', identifier: 'integrateddynamics:invisible_light'},
+    ];
     return {
-      selectorCounts: {recipeId: 0, sourceIndex: recipeCount},
+      selectorCounts: {
+        recipeId: 0,
+        sourceIndex: recipeCount,
+        item: requestedItems.length,
+      },
       requested: Array.from({length: recipeCount}, (_, sourceIndex) => ({
         categoryId: 'fixture:category',
         sourceIndex,
       })),
+      requestedItems,
     };
   }
   return undefined;
@@ -124,7 +156,7 @@ function completeProfileFixtureContract(
   profile,
   minecraft,
   failures = 0,
-  {qualitySample, nativeIconCorrections = 2, transparentIcons = 0, warnings = []} = {},
+  {qualitySample, nativeIconCorrections = 2, transparentIcons = 0, warnings} = {},
 ) {
   const mm1 = profile === MULTIBLOCK_MADNESS_112_PROFILE;
   const mm2 = profile === MULTIBLOCK_MADNESS_2_118_PROFILE;
@@ -136,6 +168,8 @@ function completeProfileFixtureContract(
       : profile === MULTIBLOCK_MADNESS_112_PROFILE
         ? MULTIBLOCK_MADNESS_PACK_IDENTITY
         : undefined;
+  const effectiveWarnings =
+    warnings ?? (mm2 ? validMm2Warnings(nativeIconCorrections) : []);
   return recipePreviewContractForProfile(
     profile,
     {
@@ -155,7 +189,7 @@ function completeProfileFixtureContract(
       aborted: false,
       settings: {iconScale: 3, recipeScale: 2, mobCanvas: 256},
       counts: {
-        items: 2,
+        items: mm2 ? 6 : 2,
         recipes: FIXTURE_RECIPE_COUNT,
         categories: 1,
         mobs: 0,
@@ -167,7 +201,7 @@ function completeProfileFixtureContract(
         failureEvents: failures,
         failureEventsOmitted: 0,
         ...(mm1
-          ? {warningEvents: warnings.length, warningEventsOmitted: 0}
+          ? {warningEvents: effectiveWarnings.length, warningEventsOmitted: 0}
           : {}),
         ...(mm2 ? {nativeIconCorrections, transparentIcons} : {}),
         ...(gtnh
@@ -281,7 +315,8 @@ function completeProfileFixtureContract(
       },
       ...(qualitySample === undefined ? {} : {qualitySample}),
     },
-    mm1 ? warnings : undefined,
+    mm1 || mm2 ? effectiveWarnings : undefined,
+    mm2 ? [...MULTIBLOCK_MADNESS_2_118_ICON_OMISSION_IDS] : undefined,
   );
 }
 
@@ -630,15 +665,45 @@ test('profile contracts accept only their exact sampled-export telemetry', () =>
       recipePreviewContractForProfile(MULTIBLOCK_MADNESS_2_118_PROFILE, {
         ...rawManifestFor(mm2),
         diagnostics: {...mm2.diagnostics, nativeIconCorrections: 1},
-      }),
-    /native-icon correction counts disagree/,
+      }, validMm2Warnings(2), [...MULTIBLOCK_MADNESS_2_118_ICON_OMISSION_IDS]),
+    /diagnostics\.nativeIconCorrections \(1\) must equal the number of native-icon correction warnings \(2\)/,
+  );
+  assert.throws(
+    () =>
+      completeProfileFixtureContract(
+        MULTIBLOCK_MADNESS_2_118_PROFILE,
+        '1.18.2',
+        0,
+        {
+          qualitySample: {
+            ...mm2Sample,
+            requestedItems: [mm2Sample.requestedItems[0], mm2Sample.requestedItems[0]],
+          },
+        },
+      ),
+    /requestedItems\[1\] duplicates an earlier selector/,
+  );
+  assert.throws(
+    () =>
+      completeProfileFixtureContract(
+        MULTIBLOCK_MADNESS_2_118_PROFILE,
+        '1.18.2',
+        0,
+        {
+          qualitySample: {
+            ...mm2Sample,
+            selectorCounts: {...mm2Sample.selectorCounts, item: 1},
+          },
+        },
+      ),
+    /selectorCounts\.item must equal requestedItems\.length/,
   );
   assert.throws(
     () =>
       recipePreviewContractForProfile(MULTIBLOCK_MADNESS_2_118_PROFILE, {
         ...rawManifestFor(mm2),
         diagnostics: {...mm2.diagnostics, unexpected: 0},
-      }),
+      }, validMm2Warnings(2), [...MULTIBLOCK_MADNESS_2_118_ICON_OMISSION_IDS]),
     /manifest\.diagnostics.*contain exactly/,
   );
 });
@@ -734,6 +799,25 @@ async function createFixture(
     mkdir(categoryRoot, {recursive: true}),
     mkdir(hostedPartsRoot, {recursive: true}),
   ]);
+
+  const mm2 = Object.hasOwn(contract.diagnostics, 'nativeIconCorrections');
+  if (mm2) {
+    await writeFile(
+      join(rawRoot, 'items.json'),
+      json({
+        items: [
+          {k: 'item|fixture:visible_0', id: 'fixture:visible_0', n: 'Visible 0', m: 'fixture', icon: 'icons/visible_0.png'},
+          {k: 'item|fixture:visible_1', id: 'fixture:visible_1', n: 'Visible 1', m: 'fixture', icon: 'icons/visible_1.png'},
+          ...MULTIBLOCK_MADNESS_2_118_ICON_OMISSION_IDS.map(id => ({
+            k: `item|${id}`,
+            id,
+            n: `Audited iconless ${id}`,
+            m: id.split(':', 1)[0],
+          })),
+        ],
+      }),
+    );
+  }
 
   const logicalWidth = 8;
   const logicalHeight = 8;
@@ -880,9 +964,11 @@ async function createFixture(
   if (failures !== null) {
     await writeFile(join(rawRoot, 'failures.json'), json(failures));
   }
-  if (Object.hasOwn(contract.diagnostics, 'warningEvents')) {
-    const rawWarnings = warnings ?? [];
-    const publishedWarnings = hostedWarnings ?? [];
+  if (Object.hasOwn(contract.diagnostics, 'warningEvents') || mm2) {
+    const rawWarnings = warnings ?? (mm2
+      ? validMm2Warnings(contract.diagnostics.nativeIconCorrections)
+      : []);
+    const publishedWarnings = hostedWarnings ?? rawWarnings;
     await writeFile(join(rawRoot, 'warnings.json'), json(rawWarnings));
     await writeFile(join(hostedRoot, 'warnings.json'), json(publishedWarnings));
   }
@@ -1405,6 +1491,71 @@ test('MM1 sidecar requires warnings.json to survive core publication byte-for-by
     );
   } finally {
     await rm(driftRoot, {recursive: true, force: true});
+  }
+});
+
+test('MM2 sidecar rejects warning-publication and iconless-inventory drift', async () => {
+  const warnings = validMm2Warnings(2);
+  const contract = completeProfileFixtureContract(
+    MULTIBLOCK_MADNESS_2_118_PROFILE,
+    '1.18.2',
+    0,
+    {qualitySample: qualitySampleForProfile(MULTIBLOCK_MADNESS_2_118_PROFILE), warnings},
+  );
+
+  const warningRoot = await mkdtemp(join(tmpdir(), 'recipe-preview-mm2-warning-drift-test-'));
+  try {
+    const hostedWarnings = [...warnings];
+    hostedWarnings[hostedWarnings.length - 1] =
+      'Corrected transparent or quantity-clipped native REI catalog icon: entry=fixture:changed';
+    const fixture = await createFixture(warningRoot, contract, {
+      missingRecipeIndex: null,
+      failures: [],
+      warnings,
+      hostedWarnings,
+    });
+    await assert.rejects(
+      buildRecipePreviewSidecar({
+        source: fixture.rawRoot,
+        datasetManifest: fixture.hostedManifestPath,
+        output: join(warningRoot, 'sidecar'),
+        profile: MULTIBLOCK_MADNESS_2_118_PROFILE,
+        logger: quietLogger,
+      }),
+      /warnings\.json does not exactly match the hosted dataset publication/,
+    );
+  } finally {
+    await rm(warningRoot, {recursive: true, force: true});
+  }
+
+  const iconlessRoot = await mkdtemp(join(tmpdir(), 'recipe-preview-mm2-iconless-drift-test-'));
+  try {
+    const fixture = await createFixture(iconlessRoot, contract, {
+      missingRecipeIndex: null,
+      failures: [],
+      warnings,
+    });
+    const itemsPath = join(fixture.rawRoot, 'items.json');
+    const itemsDocument = JSON.parse(await readFile(itemsPath, 'utf8'));
+    itemsDocument.items.push({
+      k: 'item|fixture:unexpected_iconless',
+      id: 'fixture:unexpected_iconless',
+      n: 'Unexpected iconless item',
+      m: 'fixture',
+    });
+    await writeFile(itemsPath, json(itemsDocument));
+    await assert.rejects(
+      buildRecipePreviewSidecar({
+        source: fixture.rawRoot,
+        datasetManifest: fixture.hostedManifestPath,
+        output: join(iconlessRoot, 'sidecar'),
+        profile: MULTIBLOCK_MADNESS_2_118_PROFILE,
+        logger: quietLogger,
+      }),
+      /iconless items must be exactly/,
+    );
+  } finally {
+    await rm(iconlessRoot, {recursive: true, force: true});
   }
 });
 

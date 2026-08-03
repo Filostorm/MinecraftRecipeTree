@@ -117,13 +117,13 @@ final class RecipeExporter implements ExportJob.PhaseRunner {
         try {
             catTitle = category.getTitle().getString();
         } catch (Throwable t) {
-            ctx.failure("category title " + uid + ": " + t + "; using category id");
+            ctx.failure("category title " + uid + " failed; using category id", t);
             catTitle = uid.toString();
         }
         try {
             this.recipes = recipeManager.createRecipeLookup(category.getRecipeType()).get().toList();
         } catch (Throwable t) {
-            ctx.failure("category recipes " + uid + ": " + t);
+            ctx.failure("category recipes " + uid, t);
             this.recipes = List.of();
         }
         this.recipeIndex = 0;
@@ -140,7 +140,7 @@ final class RecipeExporter implements ExportJob.PhaseRunner {
                 cj.addProperty("icon", iconRel);
             }
         } catch (Throwable t) {
-            ctx.failure("category icon " + uid + ": " + t);
+            ctx.failure("category icon " + uid, t);
         }
         JsonArray catalysts = new JsonArray();
         try {
@@ -160,7 +160,7 @@ final class RecipeExporter implements ExportJob.PhaseRunner {
             }
             catalystKeys.forEach(catalysts::add);
         } catch (Throwable t) {
-            ctx.failure("category catalysts " + uid + ": " + t);
+            ctx.failure("category catalysts " + uid, t);
         }
         cj.add("catalysts", catalysts);
         categoryJson = cj;
@@ -172,14 +172,23 @@ final class RecipeExporter implements ExportJob.PhaseRunner {
         JsonObject rj = new JsonObject();
         Set<String> inputKeys = new LinkedHashSet<>();
         Set<String> outputKeys = new LinkedHashSet<>();
+        ResourceLocation categoryUid = category.getRecipeType().getUid();
+        ResourceLocation recipeId = registryName(category, recipe);
+        Class<?> recipeClass = recipe == null ? null : recipe.getClass();
         try {
             Optional<IRecipeLayoutDrawable<?>> drawableOpt = createDrawable(category, recipe);
             if (drawableOpt.isEmpty()) {
-                ctx.failure(String.format(
+                ctx.recipeFailure(
+                        categoryUid,
+                        recipeId,
+                        idx,
+                        recipeClass,
+                        String.format(
                         Locale.ROOT,
                         "recipe %s #%d: JEI returned no layout drawable; omitting the non-renderable placeholder",
                         catDir,
-                        idx));
+                        idx),
+                        null);
                 return;
             }
             IRecipeLayoutDrawable<?> drawable = drawableOpt.get();
@@ -202,9 +211,8 @@ final class RecipeExporter implements ExportJob.PhaseRunner {
             String imageName = "r" + exportedIndex + ".png";
             ctx.saveImage(image, ctx.root.resolve(catDir).resolve(imageName));
 
-            ResourceLocation registryName = registryName(category, recipe);
-            if (registryName != null) {
-                rj.addProperty("id", registryName.toString());
+            if (recipeId != null) {
+                rj.addProperty("id", recipeId.toString());
             }
             var durationTicks = RecipeDuration.ticks(recipe);
             if (durationTicks.isPresent()) {
@@ -222,7 +230,6 @@ final class RecipeExporter implements ExportJob.PhaseRunner {
                 if (ingredients.isEmpty()) {
                     continue;
                 }
-                ResourceLocation categoryUid = category.getRecipeType().getUid();
                 if (ingredients.size() > LARGE_VARIANT_SET
                         && warnedLargeVariantCategories.add(categoryUid)) {
                     JeiExportMod.LOGGER.warn(
@@ -271,7 +278,13 @@ final class RecipeExporter implements ExportJob.PhaseRunner {
                 rj.add("cat", cata);
             }
         } catch (Throwable t) {
-            ctx.failure(String.format(Locale.ROOT, "recipe %s #%d: %s", catDir, idx, t));
+            ctx.recipeFailure(
+                    categoryUid,
+                    recipeId,
+                    idx,
+                    recipeClass,
+                    String.format(Locale.ROOT, "recipe %s #%d failed", catDir, idx),
+                    t);
             rj = new JsonObject();
             rj.addProperty("err", true);
             inputKeys.clear();
@@ -345,8 +358,8 @@ final class RecipeExporter implements ExportJob.PhaseRunner {
         } catch (Throwable t) {
             ResourceLocation uid = category.getRecipeType().getUid();
             if (warnedRegistryNameCategories.add(uid)) {
-                ctx.failure("recipe registry id " + uid + ": " + t
-                        + "; recipe ids for this category may be omitted");
+                ctx.failure("recipe registry id " + uid
+                        + " failed; recipe ids for this category may be omitted", t);
             }
             return null;
         }

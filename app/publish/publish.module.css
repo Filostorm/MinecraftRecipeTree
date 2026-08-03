@@ -350,6 +350,38 @@
     );
 }
 
+.uploadProgressWaiting {
+  background: #2a3342;
+}
+
+.uploadProgressWaiting::after {
+  position: absolute;
+  inset: 0;
+  width: 38%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, #70d18f 30%, #58c47b 70%, transparent);
+  content: '';
+  animation: uploadProgressWaiting 1.15s ease-in-out infinite;
+}
+
+@keyframes uploadProgressWaiting {
+  from {
+    transform: translateX(-100%);
+  }
+
+  to {
+    transform: translateX(265%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .uploadProgressWaiting::after {
+    width: 100%;
+    animation: none;
+    background: #58c47b;
+  }
+}
+
 .uploadResult:empty {
   display: none;
 }

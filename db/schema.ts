@@ -63,3 +63,20 @@ export const feedbackReports = sqliteTable(
     index('feedback_reports_created_at_idx').on(table.createdAt),
   ],
 );
+
+export const exportFailureReports = sqliteTable(
+  'export_failure_reports',
+  {
+    fingerprint: text('fingerprint').primaryKey(),
+    issueNumber: integer('issue_number'),
+    issueUrl: text('issue_url'),
+    status: text('status', {enum: ['pending', 'reported']}).notNull(),
+    clientHash: text('client_hash').notNull(),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  table => [
+    index('export_failure_reports_rate_limit_idx').on(table.clientHash, table.createdAt),
+    index('export_failure_reports_created_at_idx').on(table.createdAt),
+  ],
+);

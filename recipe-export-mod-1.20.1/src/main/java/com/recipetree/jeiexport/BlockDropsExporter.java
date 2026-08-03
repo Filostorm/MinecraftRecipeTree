@@ -88,12 +88,12 @@ final class BlockDropsExporter implements ExportJob.PhaseRunner {
                     try {
                         sampleOne(item);
                     } catch (Throwable t) {
-                        ctx.failure("blockdrops " + ForgeRegistries.ITEMS.getKey(item) + ": " + t);
+                        ctx.failure("blockdrops " + ForgeRegistries.ITEMS.getKey(item), t);
                     }
                 }
             }).join();
         } catch (Throwable t) {
-            ctx.failure("blockdrops batch: " + t);
+            ctx.failure("blockdrops batch", t);
         }
         done += batch.size();
         return queue.isEmpty();
