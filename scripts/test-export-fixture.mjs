@@ -6,6 +6,10 @@ import {
   MEATBALLCRAFT_112_PROFILE,
   MULTIBLOCK_MADNESS_112_PROFILE,
   MULTIBLOCK_MADNESS_2_118_PROFILE,
+  MULTIBLOCK_MADNESS_2_118_CATEGORICAL_WARNINGS,
+  MULTIBLOCK_MADNESS_2_118_ICON_CORRECTION_WARNING_PREFIXES,
+  MULTIBLOCK_MADNESS_2_118_ICON_OMISSION_IDS,
+  MULTIBLOCK_MADNESS_2_118_ICON_OMISSIONS,
   qualityProfileRequirementsFor,
 } from './export-quality-policy.mjs';
 import {
@@ -48,6 +52,28 @@ export async function writeUniformVisibleImage(path) {
 export async function writeTransparentImage(path) {
   const pixels = Buffer.alloc(16 * 16 * 4);
   await sharp(pixels, {raw: {width: 16, height: 16, channels: 4}}).png().toFile(path);
+}
+
+export function multiblockMadness2Warnings(nativeIconCorrections = 0) {
+  return [
+    ...MULTIBLOCK_MADNESS_2_118_ICON_OMISSIONS.map(
+      ({id, type, valueClass, itemClass, blockClass}) =>
+        `UPSTREAM_NATIVE_ICON_UNAVAILABLE id=${id} type=${type} ` +
+        `valueClass=${valueClass} itemClass=${itemClass ?? '<none>'} ` +
+        `blockClass=${blockClass ?? '<none>'} visiblePixels=0 ` +
+        'contract=audited fixture omission; exact native 16x16 render has zero visible ' +
+        'pixels; omitted PNG/icon field; named UI fallback used',
+    ),
+    ...Array.from(
+      {length: nativeIconCorrections},
+      (_, index) =>
+        `${MULTIBLOCK_MADNESS_2_118_ICON_CORRECTION_WARNING_PREFIXES[
+          index % MULTIBLOCK_MADNESS_2_118_ICON_CORRECTION_WARNING_PREFIXES.length
+        ]} ` +
+        `entry=fixture:corrected_${index}`,
+    ),
+    ...MULTIBLOCK_MADNESS_2_118_CATEGORICAL_WARNINGS,
+  ];
 }
 
 export async function createRawExportFixture(
@@ -145,6 +171,19 @@ export async function configureMultiblockExportFixture(root, profile) {
     manifest.counts.nativeIconCorrections = 0;
     manifest.diagnostics.nativeIconCorrections = 0;
     manifest.diagnostics.transparentIcons = 0;
+    const itemsPath = join(root, 'items.json');
+    const itemsDocument = await readJson(itemsPath);
+    for (const id of MULTIBLOCK_MADNESS_2_118_ICON_OMISSION_IDS) {
+      itemsDocument.items.push({
+        k: `item|${id}`,
+        id,
+        n: `Audited iconless ${id}`,
+        m: id.split(':', 1)[0],
+      });
+    }
+    manifest.counts.items = itemsDocument.items.length;
+    await writeJson(itemsPath, itemsDocument);
+    await writeJson(join(root, 'warnings.json'), multiblockMadness2Warnings(0));
   }
   await writeJson(manifestPath, manifest);
   await writeSyntheticExporterBuildIdentity(root, profile);
