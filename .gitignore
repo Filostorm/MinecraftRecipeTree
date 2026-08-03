@@ -37,6 +37,10 @@ yarn-error.*
 # local env files
 .env*.local
 
+# local AI tooling
+/.claude/
+/.openai/
+
 # typescript
 *.tsbuildinfo
 

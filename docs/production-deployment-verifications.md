@@ -1,5 +1,32 @@
 # Production deployment verifications
 
+## 2026-07-31 — hide upload action on mobile
+
+- Application commit: `dc27c6bd38a42c8610a4ae4c6c793de45616b236`
+- Sites version: `appgprj_6a5a5da437248191a0f8accf3fb92d5d~appgver_a8a656d2ed6c8191b12161c6e7358db4`
+- Sites deployment: `appgdep_6a6ca5ec13c88191b3e07eb3fb8adddc`
+- Canonical URL: `https://minecraftrecipetree.craftsmannsoftware.com/`
+- Sites origin: `https://minecraft-recipe-tree.gtjoe51.chatgpt.site`
+
+Passed:
+
+- The canonical homepage returned `200`, and a fresh browser tab hydrated the viewer with the
+  published MeatballCraft dataset and 196,160 searchable items.
+- Vinext's canonical bootstrap import, `/assets/index-Ps-NnNTM.js`, returned `200` as
+  `text/javascript`.
+- The serialized RSC stylesheet path, `/assets/index-CKJ5bCQJ.css`, returned `200` from the
+  canonical hostname as `text/css`.
+- The hashed bootstrap asset returned `200` with 81,340 bytes.
+- `/api/modpacks` returned `200` with valid JSON containing two published modpacks.
+
+Open infrastructure warning:
+
+- The canonical response did not include the required
+  `X-Craftsmann-App-Origin: https://minecraft-recipe-tree.gtjoe51.chatgpt.site` header.
+- It did include `X-Craftsmann-Signal-Edge: v1`.
+- Production version 145 remains live; the verification failure was reported without falling back
+  to an older deployment.
+
 ## 2026-07-31 — five-step exporter guide
 
 - Application commit: `63430abcb621bbcef2461108e3c86c2d28e499fb`
