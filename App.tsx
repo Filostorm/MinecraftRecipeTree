@@ -204,6 +204,7 @@ function Root({
   }
   if (state.status === 'error') {
     const stale = state.kind === 'stale';
+    const localPack = state.base.startsWith('/__local-packs/');
     return (
       <View style={styles.datasetRoot}>
         {renderControls(null)}
@@ -211,13 +212,20 @@ function Root({
           <Text style={styles.errorTitle}>{stale ? 'Recipe dataset updated' : 'Export unavailable'}</Text>
           <Text style={styles.errorText}>
             {state.message}
-            {!stale && (
+            {!stale && !localPack && (
               <>
                 {'\n\n'}Expected data at “{state.base}/manifest.json”.
                 {'\n\n'}Development recovery:
                 {'\n'}1. Run the version-appropriate Minecraft exporter.
                 {'\n'}2. Run npm run import-data -- --source /absolute/path/to/export.
                 {'\n'}3. Reload this page after validation and publication complete.
+              </>
+            )}
+            {!stale && localPack && (
+              <>
+                {'\n\n'}This pack is already stored on this device. If the message above says a
+                legacy document exceeds the compatibility limit, make a new export with the
+                latest exporter; otherwise, add the same ZIP again to repair its saved copy.
               </>
             )}
           </Text>

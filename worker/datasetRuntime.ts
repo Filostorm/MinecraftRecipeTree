@@ -53,6 +53,8 @@ export interface DatasetRuntime {
   PREVIEW_UPLOAD_ENABLED?: string;
   PREVIEW_UPLOAD_TOKEN?: string;
   FEEDBACK_ADMIN_TOKEN?: string;
+  /** Server-only token with Issues: write and Contents: write access to the application repo. */
+  GITHUB_ISSUES_TOKEN?: string;
 }
 
 export function noStoreJson(value: unknown, status = 200): Response {

@@ -1,0 +1,17 @@
+{
+  "pack": {
+    "name": "GT New Horizons",
+    "version": "2.8.4"
+  },
+  "output": "recipe-tree-gtnh-2.8.4",
+  "iconScale": 3,
+  "recipeScale": 2,
+  "mobCanvas": 256,
+  "maxMillisPerTick": 30,
+  "pngThreads": 2,
+  "pngQueueCapacity": 128,
+  "readinessTimeoutTicks": 12000,
+  "handlerStableTicks": 100,
+  "bootstrapIntegratedWorld": true,
+  "exitOnComplete": true
+}

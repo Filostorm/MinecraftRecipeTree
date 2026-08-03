@@ -160,7 +160,7 @@ export function requireLocalPackManifest(value: unknown): LocalPackManifestSumma
     findings.push(
       `${counts.failures.toLocaleString()} recipe${
         counts.failures === 1 ? '' : 's'
-      } could not be exported. Run the export again before sharing this pack.`,
+      } could not be exported. The rest of the pack can still be opened, and the failure report will be sent automatically.`,
     );
   }
   if (warningEvents > 0) {
@@ -183,8 +183,7 @@ export function requireLocalPackManifest(value: unknown): LocalPackManifestSumma
       !value.aborted &&
       value.qualitySample === undefined &&
       packVersion !== null &&
-      identitySource !== 'game-directory' &&
-      counts.failures === 0,
+      identitySource !== 'game-directory',
     findings: Object.freeze(findings),
   });
 }

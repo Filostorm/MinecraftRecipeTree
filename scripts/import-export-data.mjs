@@ -18,9 +18,11 @@ import {
   readJsonDocument,
 } from './export-data-utils.mjs';
 import {
+  collectIconlessItemIds,
   EXPORT_QUALITY_PROFILE_IDS,
   exportQualityIssues,
   MULTIBLOCK_MADNESS_112_PROFILE,
+  MULTIBLOCK_MADNESS_2_118_PROFILE,
   qualityProfileRequirementsFor,
   resolveQualityProfile,
 } from './export-quality-policy.mjs';
@@ -159,14 +161,22 @@ async function assertQualityMetadata(exportRoot, label, profile) {
     `${label}/failures.json`,
   );
   const warnings =
-    profile === MULTIBLOCK_MADNESS_112_PROFILE
+    profile === MULTIBLOCK_MADNESS_112_PROFILE ||
+    profile === MULTIBLOCK_MADNESS_2_118_PROFILE
       ? await readJsonDocument(
           join(exportRoot, 'warnings.json'),
           `${label}/warnings.json`,
         )
       : undefined;
+  const iconlessItemIds =
+    profile === MULTIBLOCK_MADNESS_2_118_PROFILE
+      ? collectIconlessItemIds(
+          await readJsonDocument(join(exportRoot, 'items.json'), `${label}/items.json`),
+          `${label}/items.json`,
+        )
+      : undefined;
   const issues = exportQualityIssues(
-    {manifest, failures, warnings, semanticErrorRecipes: 0},
+    {manifest, failures, warnings, iconlessItemIds, semanticErrorRecipes: 0},
     profile,
   );
   if (issues.length > 0) {
