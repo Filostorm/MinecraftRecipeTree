@@ -117,7 +117,9 @@ async function exportDatabase({source, sourceTokenFile, output}) {
   const stream = createWriteStream(tempPath, {flags: 'wx', mode: 0o600});
   const exportedCounts = {};
   try {
-    await writeChunk(stream, '-- Minecraft Recipe Tree standalone Cloudflare migration\nPRAGMA foreign_keys=OFF;\nBEGIN TRANSACTION;\n');
+    // Wrangler's remote D1 file importer supplies the atomic rollback boundary and rejects
+    // explicit BEGIN/COMMIT statements.
+    await writeChunk(stream, '-- Minecraft Recipe Tree standalone Cloudflare migration\n');
     for (const [table, columns] of [...TABLES].reverse()) await writeChunk(stream, `DELETE FROM ${table};\n`);
     for (const [table, columns] of TABLES) {
       let after = '';
@@ -138,7 +140,6 @@ async function exportDatabase({source, sourceTokenFile, output}) {
       if (summary.counts[table] !== count) throw new Error(`${table} changed during export (${summary.counts[table]} expected, ${count} read). Retry during the cutover write freeze.`);
       console.log(`Exported ${table}: ${count} rows`);
     }
-    await writeChunk(stream, 'COMMIT;\nPRAGMA foreign_keys=ON;\n');
     await new Promise((resolveEnd, rejectEnd) => stream.end(error => error ? rejectEnd(error) : resolveEnd()));
     await fs.rename(tempPath, outputPath);
     console.log(`Database export complete: ${outputPath}`);
