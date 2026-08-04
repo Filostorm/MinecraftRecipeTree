@@ -1,8 +1,9 @@
 # Hosting environments
 
 Minecraft Recipe Tree uses a beta Cloudflare Worker for live testing before an explicitly approved
-production release. Production is migrating from OpenAI Sites-managed storage to normal Cloudflare
-D1 and R2 bindings without changing the canonical public hostname.
+production release. Production runs on normal Cloudflare Worker, D1, and R2 resources without
+changing the canonical public hostname. The former OpenAI Sites deployment is temporarily retained
+only as the rollback snapshot for the migration soak.
 
 | Environment | Source branch | Runtime | URL | Access |
 | --- | --- | --- | --- | --- |

@@ -1,0 +1,16 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "craftsmann-app-subdomain-router",
+  "account_id": "34d6dbf021db02dd0be6458527379b8c",
+  "main": "app-subdomain-router.worker.mjs",
+  "compatibility_date": "2026-07-17",
+  "services": [
+    {
+      "binding": "MINECRAFT_RECIPE_TREE",
+      "service": "minecraft-recipe-tree-production"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}
