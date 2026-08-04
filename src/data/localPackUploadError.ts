@@ -10,6 +10,15 @@ export function localPackUploadErrorMessage(error: unknown): string {
   if (message.startsWith('The ZIP entry ') && message.includes('cannot be opened safely:')) {
     return message;
   }
+  if (
+    message.startsWith('Install the full ') ||
+    message.startsWith('Re-add the full ') ||
+    message.startsWith('The update ZIP') ||
+    message.startsWith('The installed full export') ||
+    message.startsWith('delta.json')
+  ) {
+    return message;
+  }
   if (message.includes('manifest.json') || message.includes('exporter information')) {
     return 'We could not find the pack information in this ZIP. Run the exporter again and choose the new ZIP.';
   }

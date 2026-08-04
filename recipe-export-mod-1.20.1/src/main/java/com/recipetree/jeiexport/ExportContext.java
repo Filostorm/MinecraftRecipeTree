@@ -72,6 +72,9 @@ final class ExportContext {
     int reusedMobs;
     int reusedBlockDrops;
     int reusedTrades;
+    int deduplicatedRecipeImages;
+    @Nullable
+    ExportDeltaArchive.Result deltaArchive;
 
     @Nullable
     private ItemCatalog catalog;
@@ -406,6 +409,10 @@ final class ExportContext {
                     .name("blockDropsReused").value(reusedBlockDrops)
                     .name("tradesReused").value(reusedTrades)
                     .endObject();
+            w.name("optimizations").beginObject()
+                    .name("deduplicatedRecipeImages").value(deduplicatedRecipeImages)
+                    .name("deltaFormat").value(ExportDeltaArchive.FORMAT)
+                    .endObject();
             w.name("counts").beginObject()
                     .name("items").value(itemCount)
                     .name("recipes").value(recipeCount)
@@ -444,6 +451,20 @@ final class ExportContext {
         Path parent = finalRoot.getParent();
         Path backup = parent.resolve("." + finalRoot.getFileName()
                 + ".previous-" + UUID.randomUUID()).normalize();
+        Path deltaPath = parent.resolve(finalRoot.getFileName() + "-update.zip").normalize();
+        Path stagedDeltaPath = parent.resolve("." + finalRoot.getFileName()
+                + "-update.staging-" + UUID.randomUUID() + ".zip").normalize();
+        ExportDeltaArchive.Result preparedDelta = null;
+        if (Files.isDirectory(finalRoot)) {
+            try {
+                preparedDelta = ExportDeltaArchive.create(finalRoot, root, stagedDeltaPath);
+            } catch (Exception deltaFailure) {
+                deleteIfExistsQuietly(stagedDeltaPath, "discard incomplete update ZIP");
+                JeiExportMod.LOGGER.warn(
+                        "[jeiexport] Full export is complete, but its smaller update ZIP could not be prepared",
+                        deltaFailure);
+            }
+        }
         boolean previousMoved = false;
         try {
             if (Files.exists(finalRoot)) {
@@ -463,6 +484,7 @@ final class ExportContext {
                             backup, restoreFailure);
                 }
             }
+            deleteIfExistsQuietly(stagedDeltaPath, "discard update ZIP after snapshot promotion failure");
             throw promotionFailure;
         }
         if (previousMoved) {
@@ -473,6 +495,38 @@ final class ExportContext {
                         "[jeiexport] Published the new snapshot but could not remove previous snapshot backup {}",
                         backup, cleanupFailure);
             }
+        }
+        if (preparedDelta != null) {
+            try {
+                replaceWithLoggedAtomicFallback(
+                        stagedDeltaPath,
+                        deltaPath,
+                        "publish delta archive");
+                deltaArchive = new ExportDeltaArchive.Result(
+                        deltaPath,
+                        preparedDelta.basePublicationId(),
+                        preparedDelta.resultPublicationId(),
+                        preparedDelta.changedFiles(),
+                        preparedDelta.deletedFiles(),
+                        preparedDelta.unchangedFiles(),
+                        preparedDelta.changedBytes(),
+                        preparedDelta.resultBytes());
+                JeiExportMod.LOGGER.info(
+                        "[jeiexport] Published update ZIP {} ({} changed, {} deleted, {} unchanged files)",
+                        deltaPath,
+                        preparedDelta.changedFiles(),
+                        preparedDelta.deletedFiles(),
+                        preparedDelta.unchangedFiles());
+            } catch (IOException deltaPublishFailure) {
+                deleteIfExistsQuietly(stagedDeltaPath, "discard unpublished update ZIP");
+                deleteIfExistsQuietly(deltaPath, "remove stale update ZIP");
+                JeiExportMod.LOGGER.warn(
+                        "[jeiexport] Full export was published, but its update ZIP could not be published",
+                        deltaPublishFailure);
+            }
+        } else {
+            deleteIfExistsQuietly(stagedDeltaPath, "discard unused update ZIP");
+            deleteIfExistsQuietly(deltaPath, "remove stale update ZIP");
         }
         JeiExportMod.LOGGER.info("[jeiexport] Published completed snapshot to {}", finalRoot);
     }
@@ -486,6 +540,31 @@ final class ExportContext {
                     "[jeiexport] Atomic move unavailable while {}; using a same-filesystem non-atomic move: {}",
                     operation, unsupported.toString());
             Files.move(source, destination);
+        }
+    }
+
+    private static void replaceWithLoggedAtomicFallback(Path source, Path destination, String operation)
+            throws IOException {
+        try {
+            Files.move(
+                    source,
+                    destination,
+                    StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING);
+        } catch (AtomicMoveNotSupportedException unsupported) {
+            JeiExportMod.LOGGER.warn(
+                    "[jeiexport] Atomic move unavailable while {}; replacing with a same-filesystem move: {}",
+                    operation,
+                    unsupported.toString());
+            Files.move(source, destination, StandardCopyOption.REPLACE_EXISTING);
+        }
+    }
+
+    private static void deleteIfExistsQuietly(Path path, String operation) {
+        try {
+            Files.deleteIfExists(path);
+        } catch (IOException cleanupFailure) {
+            JeiExportMod.LOGGER.warn("[jeiexport] Could not {} {}", operation, path, cleanupFailure);
         }
     }
 

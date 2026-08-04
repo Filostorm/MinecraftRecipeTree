@@ -100,6 +100,16 @@ export function requireSafeArchivePath(path: string): string {
   return directory ? `${normalized}/` : normalized;
 }
 
+/** Finder/Archive Utility metadata is never part of an exporter dataset. */
+export function isIgnoredArchiveMetadataPath(path: string): boolean {
+  return path.split('/').some(
+    segment =>
+      segment === '__MACOSX' ||
+      segment === '.DS_Store' ||
+      segment.startsWith('._'),
+  );
+}
+
 export function requireLocalPackManifest(value: unknown): LocalPackManifestSummary {
   if (!isRecord(value)) throw new Error('manifest.json must contain a JSON object.');
   if (value.format !== 1) throw new Error('manifest.json format must be 1.');

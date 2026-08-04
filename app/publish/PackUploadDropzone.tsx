@@ -10,12 +10,18 @@ import {
 import {Unzip, UnzipInflate} from 'fflate';
 import {
   isExportManifestPath,
+  isIgnoredArchiveMetadataPath,
   MAX_EXPORT_ARCHIVE_ENTRIES,
   MAX_EXPORT_MANIFEST_BYTES,
   requireLocalPackManifest,
   requireSafeArchivePath,
   type LocalPackManifestSummary,
 } from '../../src/data/localPackArchive';
+import {
+  MAX_EXPORT_DELTA_BYTES,
+  requireLocalPackDelta,
+  type LocalPackDelta,
+} from '../../src/data/localPackDelta';
 import {installLocalPackArchive} from '../../src/data/localPackStorage';
 import {
   buildExportFailureReport,
@@ -35,6 +41,7 @@ const OPTIONAL_REPORT_DOCUMENT_LIMITS = new Map([
   ['failures.json', MAX_FAILURE_DOCUMENT_BYTES],
   ['export-errors.json', MAX_FAILURE_DOCUMENT_BYTES],
   ['exporter-build.json', MAX_EXPORTER_BUILD_BYTES],
+  ['delta.json', MAX_EXPORT_DELTA_BYTES],
 ]);
 
 type UploadState =
@@ -57,7 +64,8 @@ type UploadState =
       findings: readonly string[];
       issueUrl: string | null;
       fileUrl: string | null;
-      reportStatus: 'sent' | 'duplicate' | 'failed' | null;
+      reportStatus: 'pending' | 'sent' | 'duplicate' | 'failed' | null;
+      isDelta: boolean;
     }
   | {status: 'error'; filename: string | null; message: string};
 
@@ -76,7 +84,7 @@ function joinChunks(chunks: readonly Uint8Array[], totalBytes: number): Uint8Arr
 }
 
 function reportDocumentName(path: string): string | null {
-  const match = /^(?:[^/]+\/)?(failures\.json|export-errors\.json|exporter-build\.json)$/u.exec(path);
+  const match = /^(?:[^/]+\/)?(failures\.json|export-errors\.json|exporter-build\.json|delta\.json)$/u.exec(path);
   return match?.[1] ?? null;
 }
 
@@ -106,6 +114,7 @@ async function inspectPackArchive(
   failures: unknown | null;
   exportErrors: unknown | null;
   exporterBuild: unknown | null;
+  delta: LocalPackDelta | null;
 }> {
   if (file.size === 0) throw new Error('The selected ZIP file is empty.');
   if (!Number.isSafeInteger(file.size)) throw new Error('The selected file size is invalid.');
@@ -142,6 +151,7 @@ async function inspectPackArchive(
       archiveError = error instanceof Error ? error : new Error(String(error));
       return;
     }
+    if (isIgnoredArchiveMetadataPath(safePath)) return;
 
     const optionalDocumentName = reportDocumentName(safePath);
     if (!isExportManifestPath(safePath) && optionalDocumentName === null) return;
@@ -263,6 +273,17 @@ async function inspectPackArchive(
       return null;
     }
   };
+  let delta: LocalPackDelta | null = null;
+  const deltaDocument = reportDocuments.get('delta.json');
+  if (deltaDocument) {
+    if (deltaDocument.path !== `${manifestPrefix}delta.json` || deltaDocument.skipped) {
+      throw new Error('delta.json is too large or is outside the exporter folder.');
+    }
+    delta = requireLocalPackDelta(parseJsonDocument(
+      joinChunks(deltaDocument.chunks, deltaDocument.bytes),
+      'delta.json',
+    ));
+  }
   return {
     manifestPath: resolvedManifestPath,
     manifestBytes: manifestData,
@@ -271,6 +292,7 @@ async function inspectPackArchive(
     failures: optionalDocument('failures.json'),
     exportErrors: optionalDocument('export-errors.json'),
     exporterBuild: optionalDocument('exporter-build.json'),
+    delta,
   };
 }
 
@@ -327,7 +349,23 @@ export function PackUploadDropzone() {
       let findings = result.summary.findings;
       let issueUrl: string | null = null;
       let fileUrl: string | null = null;
-      let reportStatus: 'sent' | 'duplicate' | 'failed' | null = null;
+      let reportStatus: 'pending' | 'sent' | 'duplicate' | 'failed' | null = null;
+      const publishReadyState = () => {
+        if (operationRef.current !== operation) return;
+        setState({
+          status: 'ready',
+          filename: file.name,
+          bytes: file.size,
+          summary: result.summary,
+          viewerHref,
+          saved,
+          findings,
+          issueUrl,
+          fileUrl,
+          reportStatus,
+          isDelta: result.delta !== null,
+        });
+      };
       if (result.summary.readyForHandoff) {
         setState({status: 'checking', filename: file.name, progress: 0, phase: 'adding'});
         try {
@@ -366,17 +404,12 @@ export function PackUploadDropzone() {
                 phase: 'adding',
               });
             },
+            result.delta,
           );
           viewerHref = installed.viewerHref;
           saved = true;
           if (result.summary.counts.failures > 0) {
             try {
-              setState({
-                status: 'checking',
-                filename: file.name,
-                progress: 1,
-                phase: 'reporting',
-              });
               if (result.failures === null) {
                 throw new Error('failures.json is missing from an export that reports failures.');
               }
@@ -386,6 +419,9 @@ export function PackUploadDropzone() {
                 exportErrors: result.exportErrors ?? undefined,
                 exporterBuild: result.exporterBuild ?? undefined,
               });
+              reportStatus = 'pending';
+              publishReadyState();
+              if (inputRef.current) inputRef.current.value = '';
               const submitted = await sendExportFailureReport(report);
               issueUrl = submitted.issueUrl;
               fileUrl = submitted.fileUrl;
@@ -405,18 +441,7 @@ export function PackUploadDropzone() {
         }
       }
       if (operationRef.current !== operation) return;
-      setState({
-        status: 'ready',
-        filename: file.name,
-        bytes: file.size,
-        summary: result.summary,
-        viewerHref,
-        saved,
-        findings,
-        issueUrl,
-        fileUrl,
-        reportStatus,
-      });
+      publishReadyState();
     } catch (error) {
       if (operationRef.current !== operation) return;
       console.error('The exporter ZIP check failed.', error);
@@ -545,7 +570,11 @@ export function PackUploadDropzone() {
             }>
             <div className={styles.uploadResultTopline}>
               <span>
-                {state.saved ? 'READY IN VIEWER' : 'WE FOUND A PROBLEM'}
+                {state.saved
+                  ? state.isDelta
+                    ? 'UPDATE READY IN VIEWER'
+                    : 'READY IN VIEWER'
+                  : 'WE FOUND A PROBLEM'}
               </span>
               <a href={state.viewerHref}>Return to viewer</a>
             </div>
@@ -592,6 +621,8 @@ export function PackUploadDropzone() {
               <p className={styles.uploadSuccessCopy}>
                 {state.reportStatus === 'failed'
                   ? 'You can use the pack now; failure reporting can be retried by adding the ZIP again.'
+                  : state.reportStatus === 'pending'
+                    ? 'The pack is ready. Sending its errors.json report in the background…'
                   : state.reportStatus === 'duplicate'
                     ? 'This pack or mod version already had a report, so its errors file was updated.'
                     : 'The exporter failures were saved to errors.json and reported automatically.'}

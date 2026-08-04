@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   isExportManifestPath,
+  isIgnoredArchiveMetadataPath,
   requireLocalPackManifest,
   requireSafeArchivePath,
 } from './localPackArchive.ts';
@@ -138,6 +139,14 @@ test('names the ZIP entry and reason when an archive path is unsafe', () => {
     () => requireSafeArchivePath('/manifest.json'),
     /ZIP entry "\/manifest\.json".*absolute path/,
   );
+});
+
+test('recognizes Finder metadata without hiding legitimate exporter files', () => {
+  assert.equal(isIgnoredArchiveMetadataPath('jei-exports/._items.json'), true);
+  assert.equal(isIgnoredArchiveMetadataPath('__MACOSX/jei-exports/items.json'), true);
+  assert.equal(isIgnoredArchiveMetadataPath('jei-exports/.DS_Store'), true);
+  assert.equal(isIgnoredArchiveMetadataPath('jei-exports/items.json'), false);
+  assert.equal(isIgnoredArchiveMetadataPath('jei-exports/images/item.png'), false);
 });
 
 test('maps an installed device-local pack to its isolated viewer route', () => {

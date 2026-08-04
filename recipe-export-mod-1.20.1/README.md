@@ -99,6 +99,15 @@ and per-phase reuse counts are written to `manifest.json` and displayed in progr
 Existing complete recipe images remain reusable after upgrading; run `/jeiexport rebuild` once when
 you want those older screenshots converted to shared layers for maximum disk savings.
 
+After a repeat export, the exporter also writes a sibling `jei-exports-update.zip` when the changed
+payload is less than 80% of the new full snapshot. The update is compared with exactly the previous
+completed snapshot, includes SHA-256 metadata for every changed file, and never replaces the full
+`jei-exports/` fallback. Add the full ZIP to a browser once, then later update ZIPs reconstruct a new
+standalone local snapshot transactionally and remove the superseded copy; update archives do not
+form a dependency chain. If the pack identity, Minecraft version, render settings, or size threshold
+does not permit a safe useful delta, the exporter removes any stale update ZIP and keeps only the
+full export.
+
 JEI layouts must be rendered on Minecraft's render thread, so the exporter uses cooperative pacing.
 Run `/jeiexport speed` to inspect the active preset or `/jeiexport speed <1-3>` to change it while an
 export is running. Speed 1 uses 2 ms slices for playable background exports, speed 2 is the default

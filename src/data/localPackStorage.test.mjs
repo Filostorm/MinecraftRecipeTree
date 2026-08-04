@@ -18,13 +18,24 @@ test('reports file-saving and finalization after archive reading reaches 100%', 
   const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
   const originalCaches = Object.getOwnPropertyDescriptor(globalThis, 'caches');
   const responses = new Map();
+  let activeFileWrites = 0;
+  let maximumActiveFileWrites = 0;
   const cache = {
     async match(request) {
       return responses.get(request.url)?.clone();
     },
     async put(request, response) {
-      await Promise.resolve();
-      responses.set(request.url, response.clone());
+      const isPackFile = request.url.includes('/__local-packs/') && request.url.includes('/exports/');
+      if (isPackFile) {
+        activeFileWrites += 1;
+        maximumActiveFileWrites = Math.max(maximumActiveFileWrites, activeFileWrites);
+      }
+      try {
+        await new Promise(resolve => setTimeout(resolve, isPackFile ? 2 : 0));
+        responses.set(request.url, response.clone());
+      } finally {
+        if (isPackFile) activeFileWrites -= 1;
+      }
     },
     async keys() {
       throw new DOMException('Operation too large.', 'QuotaExceededError');
@@ -65,6 +76,9 @@ test('reports file-saving and finalization after archive reading reaches 100%', 
       'items.json': strToU8('[]'),
       'categories.json': strToU8('[]'),
       'index.json': strToU8('{}'),
+      '._items.json': strToU8('Finder metadata'),
+      '.DS_Store': strToU8('Finder metadata'),
+      '__MACOSX/._items.json': strToU8('Finder metadata'),
     });
     const file = new File([archive], 'progress-pack.zip', {type: 'application/zip'});
     const updates = [];
@@ -100,6 +114,12 @@ test('reports file-saving and finalization after archive reading reaches 100%', 
       totalFiles: 3,
     });
     assert.deepEqual(updates.at(-1), {phase: 'finalizing'});
+    assert.ok(maximumActiveFileWrites > 1);
+    assert.ok(maximumActiveFileWrites <= 4);
+    assert.equal(
+      [...responses.keys()].some(url => /(?:__MACOSX|\.DS_Store|\/\._)/u.test(url)),
+      false,
+    );
 
     const firstInventoryUrl = [...responses.keys()].find(url => url.endsWith('/inventory.json'));
     assert.ok(firstInventoryUrl);

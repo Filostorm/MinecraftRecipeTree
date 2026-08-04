@@ -282,6 +282,13 @@ modpack identity, loaded mod versions, render settings, and exporter cache revis
 `/jeiexport rebuild` when you intentionally need a full clean regeneration. The transactional staging
 directory remains in use, so the last completed export is preserved if an incremental run fails.
 
+Repeat runs also create `jei-exports-update.zip` beside the full export when the changed payload is
+meaningfully smaller. Import the full ZIP into the web viewer once, then drag in the update ZIP after
+later runs. Each update is bound to the exact prior manifest, verifies every changed file, rebuilds a
+standalone browser copy, and removes the superseded local snapshot after the replacement commits.
+Keep the full `jei-exports/` directory as the fallback; if an update ZIP is not produced, make and
+import a new full ZIP instead.
+
 The exporter exposes three render-thread pacing presets. `/jeiexport speed 1` uses 2 ms slices for
 playable background exports, speed 2 is the default and matches the legacy 45 ms pacing, and speed 3
 uses bounded 250 ms turbo slices. Turbo nearly monopolizes the render thread but yields between slices

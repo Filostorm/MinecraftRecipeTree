@@ -9,3 +9,8 @@ test('shows the exact unsafe ZIP entry and rejection reason', () => {
 
   assert.equal(localPackUploadErrorMessage(new Error(message)), message);
 });
+
+test('keeps actionable update ZIP recovery instructions', () => {
+  const message = 'Install the full Update Pack export before adding this update ZIP.';
+  assert.equal(localPackUploadErrorMessage(new Error(message)), message);
+});

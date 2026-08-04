@@ -275,7 +275,7 @@ public final class ExportJob {
                         ? String.format(Locale.ROOT, " %,d notes were added to the error report.", failures)
                         : "");
         JeiExportMod.LOGGER.info(
-                "[jeiexport] Export totals: aborted={} durationMs={} items={} recipes={} categories={} mobs={} failures={} reused={}",
+                "[jeiexport] Export totals: aborted={} durationMs={} items={} recipes={} categories={} mobs={} failures={} reused={} deduplicatedRecipeImages={}",
                 aborted,
                 elapsedMillis,
                 items,
@@ -283,11 +283,21 @@ public final class ExportJob {
                 categories,
                 mobs,
                 failures,
-                ctx.reusedTotal());
+                ctx.reusedTotal(),
+                ctx.deduplicatedRecipeImages);
         chatWithOutputPath(
                 summary,
                 aborted ? ctx.root : ctx.finalRoot,
                 aborted ? ChatFormatting.YELLOW : ChatFormatting.GREEN);
+        if (!aborted && ctx.deltaArchive != null) {
+            chatWithOutputPath(
+                    String.format(
+                            Locale.ROOT,
+                            "Smaller update ZIP ready (%,d changed files; the full export remains your fallback): ",
+                            ctx.deltaArchive.changedFiles()),
+                    ctx.deltaArchive.path(),
+                    ChatFormatting.AQUA);
+        }
         if (!aborted) {
             try {
                 if (AutomationOptions.exitOnCompleteEnabled()) {
