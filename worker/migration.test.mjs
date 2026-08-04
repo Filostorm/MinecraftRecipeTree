@@ -44,12 +44,14 @@ class MemoryStatement {
   async first() {
     const match = /^SELECT COUNT\(\*\) AS count FROM ([a-z_]+)$/u.exec(this.sql);
     if (!match) throw new Error(`Unexpected first SQL: ${this.sql}`);
+    if (!Object.hasOwn(this.database.tables, match[1])) throw new Error(`D1_ERROR: no such table: ${match[1]}`);
     return {count: this.database.tables[match[1]].length};
   }
 
   async all() {
     const match = /^SELECT .+ FROM ([a-z_]+) WHERE ([a-z_]+) > \? ORDER BY \2 LIMIT \?$/u.exec(this.sql);
     if (!match) throw new Error(`Unexpected all SQL: ${this.sql}`);
+    if (!Object.hasOwn(this.database.tables, match[1])) throw new Error(`D1_ERROR: no such table: ${match[1]}`);
     const [after, limit] = this.values;
     const rows = this.database.tables[match[1]]
       .filter(row => row[match[2]] > after)
@@ -176,6 +178,23 @@ test('database summary and allowlisted keyset pages export deterministic rows', 
     headers: authorized(EXPORT_TOKEN),
   });
   assert.equal(rejected.status, 400);
+});
+
+test('an older source may omit only the lazily created failure-report table', async () => {
+  const env = runtime();
+  delete env.DB.tables.export_failure_reports;
+  const summary = await request('database-summary', env, {headers: authorized(EXPORT_TOKEN)});
+  assert.equal(summary.status, 200);
+  assert.equal((await summary.json()).counts.export_failure_reports, 0);
+  const page = await request('database?table=export_failure_reports', env, {
+    headers: authorized(EXPORT_TOKEN),
+  });
+  assert.equal(page.status, 200);
+  assert.deepEqual((await page.json()).rows, []);
+
+  delete env.DB.tables.feedback_reports;
+  const required = await request('database-summary', env, {headers: authorized(EXPORT_TOKEN)});
+  assert.equal(required.status, 500);
 });
 
 test('object inventory and downloads preserve R2 migration metadata', async () => {

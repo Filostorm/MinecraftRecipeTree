@@ -93,6 +93,14 @@ const TABLES = Object.freeze({
 
 type MigrationTable = keyof typeof TABLES;
 
+function missingOptionalTable(error: unknown, table: MigrationTable): boolean {
+  return (
+    table === 'export_failure_reports' &&
+    error instanceof Error &&
+    /no such table:\s*export_failure_reports/iu.test(error.message)
+  );
+}
+
 interface MigrationHttpMetadata {
   contentType?: string;
   contentLanguage?: string;
@@ -212,9 +220,15 @@ async function exportDatabaseSummary(
   try {
     const counts: Partial<Record<MigrationTable, number>> = {};
     for (const table of Object.keys(TABLES) as MigrationTable[]) {
-      const row = await runtime.DB
-        .prepare(`SELECT COUNT(*) AS count FROM ${table}`)
-        .first<{count: number}>();
+      let row: {count: number} | null;
+      try {
+        row = await runtime.DB
+          .prepare(`SELECT COUNT(*) AS count FROM ${table}`)
+          .first<{count: number}>();
+      } catch (error) {
+        if (!missingOptionalTable(error, table)) throw error;
+        row = {count: 0};
+      }
       if (!row || !Number.isSafeInteger(row.count) || row.count < 0) {
         throw new Error(`D1 returned an invalid row count for ${table}.`);
       }
@@ -268,6 +282,15 @@ async function exportDatabasePage(
       nextAfter: rows.length === PAGE_LIMIT ? last : null,
     });
   } catch (error) {
+    if (missingOptionalTable(error, table)) {
+      return noStoreJson({
+        format: 'mrt-storage-migration-database-v1',
+        table,
+        columns: spec.columns,
+        rows: [],
+        nextAfter: null,
+      });
+    }
     console.error('Storage migration could not export a D1 page.', {table, error});
     return noStoreJson({error: 'Database export failed.'}, 500);
   }
