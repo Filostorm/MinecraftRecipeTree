@@ -88,6 +88,25 @@ test('beta data proxy refuses mutations without contacting production', async ()
   assert.equal(response.headers.get('allow'), 'GET, HEAD');
 });
 
+test('beta catalog responses are locally reframed after an upstream Worker', async () => {
+  const request = new Request('https://beta.example/api/datasets');
+  const response = await proxyBetaDatasetRequest(
+    request,
+    {BETA_DATA_ORIGIN: PRODUCTION_ORIGIN},
+    new URL(request.url),
+    async () => new Response('{"datasets":[]}', {
+      headers: {
+        'content-encoding': 'gzip',
+        'content-length': '999',
+        'content-type': 'application/json',
+      },
+    }),
+  );
+  assert.equal(await response.text(), '{"datasets":[]}');
+  assert.equal(response.headers.get('content-encoding'), null);
+  assert.equal(response.headers.get('content-length'), '15');
+});
+
 test('beta data proxy rejects an unsafe or path-bearing origin', async () => {
   for (const configuredOrigin of [
     'http://minecraftrecipetree.craftsmannsoftware.com',

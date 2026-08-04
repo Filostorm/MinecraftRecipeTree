@@ -163,6 +163,25 @@ export function DatasetCatalogProvider({children}: {children: React.ReactNode}) 
           throw new Error(`Dataset catalog returned invalid JSON: ${errorMessage(cause)}`);
         }
         const publishedDatasets = requireDatasetCatalog(value);
+        const defaultDataset = selectDataset(publishedDatasets, null);
+        sourceFor(defaultDataset, configuration.assetOrigin);
+        const requestedSlug = currentWebRequestSlug();
+        let publishedSelection = defaultDataset;
+        try {
+          publishedSelection = selectDataset(publishedDatasets, requestedSlug);
+        } catch (selectionError) {
+          // A saved local pack is discovered asynchronously below. Show the published catalog
+          // immediately while its service worker and browser cache finish initializing.
+          if (!requestedSlug?.startsWith('local-')) throw selectionError;
+        }
+        if (!alive) return;
+        setDatasets(publishedDatasets);
+        setAssetOrigin(configuration.assetOrigin);
+        selectedSlugRef.current = publishedSelection.slug;
+        setSelected(publishedSelection);
+        setError(null);
+        setLoading(false);
+
         let localDatasets: readonly DatasetDescriptor[] = [];
         if (Platform.OS === 'web') {
           try {
@@ -178,11 +197,7 @@ export function DatasetCatalogProvider({children}: {children: React.ReactNode}) 
           localDatasets.map(dataset => dataset.publicationId),
         );
         const nextDatasets = [...localDatasets, ...publishedDatasets];
-        const defaultDataset = selectDataset(nextDatasets, null);
-        sourceFor(defaultDataset, configuration.assetOrigin);
         if (!alive) return;
-        // Retain the validated catalog when only the requested ?pack value is invalid. The error
-        // boundary can then offer explicit, user-selected recovery instead of choosing a fallback.
         setDatasets(nextDatasets);
         setAssetOrigin(configuration.assetOrigin);
         const nextSelected = selectDataset(nextDatasets, currentWebRequestSlug());

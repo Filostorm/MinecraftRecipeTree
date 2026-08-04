@@ -22,6 +22,7 @@ import {
 } from './previewAssetUpload.ts';
 import {FEEDBACK_ROUTE, handleFeedback} from './feedback.ts';
 import {EXPORT_FAILURE_ROUTE, handleExportFailureIssue} from './exportFailureIssue.ts';
+import {MIGRATION_BASE_PATH, handleStorageMigration} from './migration.ts';
 
 const CONTENT_SECURITY_POLICY =
   "default-src 'self'; base-uri 'self'; connect-src 'self' https://metrics.craftsmannsoftware.com; " +
@@ -154,6 +155,9 @@ async function dispatchRequest(
   }
   if (url.pathname === EXPORT_FAILURE_ROUTE) {
     return handleExportFailureIssue(request, runtime, url);
+  }
+  if (url.pathname.startsWith(MIGRATION_BASE_PATH)) {
+    return handleStorageMigration(request, runtime, url);
   }
   if (url.pathname === '/api/modpacks' || url.pathname.startsWith('/api/modpacks/')) {
     return handleLegacyModpackApi(request, runtime, url.pathname);

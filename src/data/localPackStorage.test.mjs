@@ -3,7 +3,47 @@ import {File} from 'node:buffer';
 import test from 'node:test';
 import {strToU8, zipSync} from 'fflate';
 
-const {installLocalPackArchive} = await import('./localPackStorage.ts');
+const {installLocalPackArchive, registerLocalPackServiceWorker} = await import('./localPackStorage.ts');
+
+test('service worker preparation has a bounded failure instead of blocking catalog loading', async () => {
+  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  const listeners = new Set();
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      clearTimeout() {},
+      setTimeout(callback) {
+        queueMicrotask(callback);
+        return 1;
+      },
+    },
+  });
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: {
+      serviceWorker: {
+        controller: null,
+        ready: new Promise(() => {}),
+        async register() {},
+        addEventListener(_name, listener) { listeners.add(listener); },
+        removeEventListener(_name, listener) { listeners.delete(listener); },
+      },
+    },
+  });
+  try {
+    await assert.rejects(
+      registerLocalPackServiceWorker(),
+      /could not finish preparing local pack support/u,
+    );
+    assert.equal(listeners.size, 0);
+  } finally {
+    if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
+    else delete globalThis.window;
+    if (originalNavigator) Object.defineProperty(globalThis, 'navigator', originalNavigator);
+    else delete globalThis.navigator;
+  }
+});
 
 test('reports file-saving and finalization after archive reading reaches 100%', async () => {
   const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');

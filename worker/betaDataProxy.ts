@@ -105,6 +105,18 @@ export async function proxyBetaDatasetRequest(
   responseHeaders.delete('set-cookie');
   responseHeaders.delete('www-authenticate');
   responseHeaders.set('X-MRT-Beta-Data-Origin', origin.origin);
+  if (request.method === 'GET' && BETA_DATA_PROXY_PATHS.some(path => url.pathname === path)) {
+    // Catalog responses are small. Reframe them at the beta edge so an upstream Worker's
+    // compression/framing headers cannot leave a browser fetch waiting on a transformed stream.
+    const body = await upstreamResponse.arrayBuffer();
+    responseHeaders.delete('content-encoding');
+    responseHeaders.set('content-length', String(body.byteLength));
+    return new Response(body, {
+      status: upstreamResponse.status,
+      statusText: upstreamResponse.statusText,
+      headers: responseHeaders,
+    });
+  }
   return new Response(request.method === 'HEAD' ? null : upstreamResponse.body, {
     status: upstreamResponse.status,
     statusText: upstreamResponse.statusText,

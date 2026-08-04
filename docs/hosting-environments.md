@@ -1,37 +1,32 @@
 # Hosting environments
 
-Minecraft Recipe Tree uses a private beta Site for live testing before an explicitly approved
-production release. Keep the Sites project configuration tied to its branch so a beta build cannot
-overwrite production.
+Minecraft Recipe Tree uses a beta Cloudflare Worker for live testing before an explicitly approved
+production release. Production is migrating from OpenAI Sites-managed storage to normal Cloudflare
+D1 and R2 bindings without changing the canonical public hostname.
 
-| Environment | Source branch | Sites project ID | URL | Access |
+| Environment | Source branch | Runtime | URL | Access |
 | --- | --- | --- | --- | --- |
-| Beta | `beta` | Cloudflare Worker `minecraft-recipe-tree-beta` | Cloudflare Workers development URL | Private release candidate |
-| Production | `main` | `appgprj_6a5a5da437248191a0f8accf3fb92d5d` | [minecraftrecipetree.craftsmannsoftware.com](https://minecraftrecipetree.craftsmannsoftware.com/) | Public |
+| Beta | `beta` | Worker `minecraft-recipe-tree-beta` | [minecraft-recipe-tree-beta.gtjoe51.workers.dev](https://minecraft-recipe-tree-beta.gtjoe51.workers.dev/) | Private release candidate |
+| Production | `main` | Worker `minecraft-recipe-tree-production` | [minecraftrecipetree.craftsmannsoftware.com](https://minecraftrecipetree.craftsmannsoftware.com/) | Public |
+| Rollback source | `main` migration snapshot | Sites `appgprj_6a5a5da437248191a0f8accf3fb92d5d` | `minecraft-recipe-tree.gtjoe51.chatgpt.site` | Temporary |
 
-The production Sites origin is
-`https://minecraft-recipe-tree.gtjoe51.chatgpt.site`. The canonical hostname is routed to that
-origin by the `craftsmann-app-subdomain-router` Cloudflare Worker.
+The canonical hostname remains in the existing `craftsmann-subdomain-signal` and
+`craftsmann-app-subdomain-router` chain. At cutover, the app router uses a service binding to the
+standalone production Worker. DNS does not change.
 
 ## Branch-specific configuration
 
-The `beta` branch retains its `.openai/hosting.json` only for compatibility with historical Sites
-builds. Active beta releases use `npm run deploy:cloudflare-beta`, which builds an isolated
-Cloudflare Worker without the Sites-managed D1 or R2 bindings. Production continues to use the
-production Sites project and is not changed by this beta deployment path.
+The `beta` branch retains `.openai/hosting.json` only so the temporary Sites migration bridge can be
+built from the same application. Active beta releases always use `npm run deploy:cloudflare-beta`.
+Standalone production releases use `npm run deploy:cloudflare-production` and bind native
+Cloudflare resources directly.
 
-Each branch stores its own `.openai/hosting.json`:
-
-- `beta` must use project `appgprj_6a6a505e7bc08191acada3d05fa5d18d`.
-- `main` must use project `appgprj_6a5a5da437248191a0f8accf3fb92d5d`.
-
-Check the project ID before saving or deploying a version. Do not copy the beta hosting file onto
-`main`, copy the production hosting file onto `beta`, attach the canonical production hostname
-directly to Sites, or change its DNS record.
+Do not use `.openai/hosting.json` for beta or standalone production releases. Do not attach the
+canonical hostname directly to Sites or the application Worker, and do not change its DNS record.
 
 ## Beta data access
 
-The beta Site has this environment variable:
+The beta Worker has this environment variable:
 
 ```text
 BETA_DATA_ORIGIN=https://minecraftrecipetree.craftsmannsoftware.com
@@ -54,10 +49,31 @@ exercise production-shaped data without sharing production bindings or accepting
    `X-MRT-Beta-Data-Origin: https://minecraftrecipetree.craftsmannsoftware.com`.
 5. Share the Cloudflare beta URL for acceptance testing. A successful beta deployment does not
    authorize a production release.
-6. After explicit production approval, transfer the exact validated application changes to `main`
-   while retaining the production `.openai/hosting.json`.
-7. Save and deploy the production commit, then perform every production check listed in
-   `AGENTS.md`.
+6. After explicit production approval, transfer the exact validated application changes to `main`.
+7. Build and deploy with `npm run deploy:cloudflare-production`, then perform every production
+   check listed in `AGENTS.md`.
+
+## Sites-to-Cloudflare storage migration
+
+The temporary authenticated bridge at `/api/admin/migration/*` exports only the allowlisted D1
+tables and R2 objects. Export and import credentials are independent, server-only, and must be
+removed after the rollback soak.
+
+1. Apply `drizzle/` migrations to D1 `minecraft-recipe-tree-production`.
+2. Enable R2 and create `minecraft-recipe-tree-production-assets`.
+3. Deploy the bridge once to the Sites rollback source with `MIGRATION_EXPORT_TOKEN`.
+4. Deploy the standalone Worker with `MIGRATION_IMPORT_TOKEN`, `FEEDBACK_ADMIN_TOKEN`, and
+   `GITHUB_ISSUES_TOKEN` secrets.
+5. Use `npm run migrate:sites-storage -- export-db ...` and import the resulting SQL into D1.
+6. Use `npm run migrate:sites-storage -- copy-r2 ...`. The copy is checksum-enforced,
+   metadata-preserving, bounded-concurrency, and resumable.
+7. Briefly freeze source writes, repeat the database export/import and object copy, and compare row
+   counts plus the complete R2 key/size/metadata inventory.
+8. Verify reads, a staged upload, feedback, and deduplicated failure reporting against the direct
+   production Worker.
+9. Update the app router service binding, verify the canonical hostname, then leave Sites intact
+   during the rollback soak. Remove migration secrets immediately after the soak; retire Sites only
+   after the acceptance record is complete.
 
 If beta validation fails, fix and redeploy beta. Do not silently fall back to an older beta or
 promote an unverified commit.

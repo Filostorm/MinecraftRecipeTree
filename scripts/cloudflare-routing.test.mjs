@@ -35,13 +35,23 @@ test('Cloudflare routes catalog, immutable datasets, and administration through 
   );
   assert.match(
     viteConfig,
-    /d1_databases:\s*!isCloudflareBeta\s*&&\s*hostingConfig\.d1/,
+    /d1_databases:\s*isCloudflareProduction[\s\S]*?:\s*!isCloudflareBeta\s*&&\s*hostingConfig\.d1/,
     'the standalone beta Worker must not inherit the Sites-managed D1 binding',
   );
   assert.match(
     viteConfig,
-    /r2_buckets:\s*!isCloudflareBeta\s*&&\s*hostingConfig\.r2/,
+    /r2_buckets:\s*isCloudflareProduction[\s\S]*?:\s*!isCloudflareBeta\s*&&\s*hostingConfig\.r2/,
     'the standalone beta Worker must not inherit the Sites-managed R2 binding',
+  );
+  assert.match(
+    viteConfig,
+    /binding:\s*['"]DB['"][\s\S]*?database_name:\s*CLOUDFLARE_PRODUCTION_DATABASE_NAME[\s\S]*?database_id:\s*CLOUDFLARE_PRODUCTION_DATABASE_ID/,
+    'standalone production must bind the native production D1 database',
+  );
+  assert.match(
+    viteConfig,
+    /binding:\s*['"]PREVIEW_ASSETS['"][\s\S]*?bucket_name:\s*CLOUDFLARE_PRODUCTION_BUCKET_NAME/,
+    'standalone production must bind the native production R2 bucket',
   );
   assert.match(
     viteConfig,
@@ -67,6 +77,7 @@ test('Cloudflare routes catalog, immutable datasets, and administration through 
     '/api/admin/preview-assets/*',
     '/api/admin/core-datasets/*',
     '/api/admin/dataset-channels/*',
+    '/api/admin/migration/*',
     '/api/datasets',
     '/api/export-failures',
     '/api/feedback',
@@ -86,8 +97,8 @@ test('Cloudflare routes catalog, immutable datasets, and administration through 
   );
   assert.match(
     viteConfig,
-    /r2_buckets:\s*!isCloudflareBeta\s*&&\s*hostingConfig\.r2[\s\S]*?binding:\s*hostingConfig\.r2[\s\S]*?bucket_name:\s*['"]site-creator-r2['"]/,
-    'preview assets must use the Sites-managed native R2 binding',
+    /r2_buckets:\s*isCloudflareProduction[\s\S]*?:\s*!isCloudflareBeta\s*&&\s*hostingConfig\.r2[\s\S]*?binding:\s*hostingConfig\.r2[\s\S]*?bucket_name:\s*['"]site-creator-r2['"]/,
+    'the temporary migration build must retain the Sites-managed source R2 binding',
   );
   for (const header of [
     'Content-Security-Policy',

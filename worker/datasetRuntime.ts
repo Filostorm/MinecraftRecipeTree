@@ -55,6 +55,9 @@ export interface DatasetRuntime {
   FEEDBACK_ADMIN_TOKEN?: string;
   /** Server-only token with Issues: write and Contents: write access to the application repo. */
   GITHUB_ISSUES_TOKEN?: string;
+  /** Short-lived, server-only credentials used only while migrating away from Sites storage. */
+  MIGRATION_EXPORT_TOKEN?: string;
+  MIGRATION_IMPORT_TOKEN?: string;
 }
 
 export function noStoreJson(value: unknown, status = 200): Response {

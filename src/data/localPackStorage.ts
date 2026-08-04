@@ -181,22 +181,34 @@ export async function registerLocalPackServiceWorker(): Promise<void> {
   if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) {
     throw new Error('This browser cannot open saved packs in the viewer.');
   }
-  await navigator.serviceWorker.register('/local-pack-sw.js', {scope: '/'});
-  await navigator.serviceWorker.ready;
-  if (navigator.serviceWorker.controller) return;
-  await new Promise<void>((resolve, reject) => {
-    let timeout = 0;
-    const onControllerChange = () => {
-      window.clearTimeout(timeout);
+  let timeout = 0;
+  let onControllerChange: (() => void) | null = null;
+  try {
+    await Promise.race([
+      (async () => {
+        await navigator.serviceWorker.register('/local-pack-sw.js', {scope: '/'});
+        await navigator.serviceWorker.ready;
+        if (navigator.serviceWorker.controller) return;
+        await new Promise<void>(resolve => {
+          onControllerChange = () => {
+            resolve();
+          };
+          navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
+        });
+      })(),
+      new Promise<never>((_resolve, reject) => {
+        timeout = window.setTimeout(
+          () => reject(new Error('The viewer could not finish preparing local pack support.')),
+          5_000,
+        );
+      }),
+    ]);
+  } finally {
+    window.clearTimeout(timeout);
+    if (onControllerChange) {
       navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
-      resolve();
-    };
-    navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
-    timeout = window.setTimeout(() => {
-      navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
-      reject(new Error('The viewer could not finish preparing local pack support.'));
-    }, 5_000);
-  });
+    }
+  }
 }
 
 export async function listLocalPackDescriptors(): Promise<readonly DatasetDescriptor[]> {
