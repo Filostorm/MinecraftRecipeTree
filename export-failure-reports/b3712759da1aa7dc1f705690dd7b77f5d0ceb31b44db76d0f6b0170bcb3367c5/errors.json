@@ -1,0 +1,36 @@
+{
+  "format": "mrt-export-failure-file-v1",
+  "dedupeFingerprint": "b3712759da1aa7dc1f705690dd7b77f5d0ceb31b44db76d0f6b0170bcb3367c5",
+  "dedupeIdentity": {
+    "kind": "pack-version",
+    "packName": "Cloudflare Cutover Acceptance",
+    "packVersion": "cutover-20260804T131456Z",
+    "minecraftVersion": "1.20.1"
+  },
+  "report": {
+    "format": "mrt-export-failure-report-v1",
+    "packName": "Cloudflare Cutover Acceptance",
+    "packVersion": "cutover-20260804T131456Z",
+    "minecraftVersion": "1.20.1",
+    "exporterId": "mrt-acceptance",
+    "exporterVersion": "1.0.0",
+    "exporterBuild": "canonical-cutover",
+    "generatedAt": "2026-08-04T13:15:00Z",
+    "modVersions": {
+      "mrt_acceptance": "1.0.0"
+    },
+    "failures": [
+      {
+        "scope": "recipe",
+        "modId": "mrt_acceptance",
+        "categoryId": "acceptance",
+        "recipeId": "mrt_acceptance:synthetic",
+        "recipeIndex": 0,
+        "recipeClass": "SyntheticAcceptanceRecipe",
+        "errorType": "AcceptanceProbe",
+        "message": "Temporary synthetic failure used to verify canonical deduplicated reporting.",
+        "details": "This report is deleted after acceptance."
+      }
+    ]
+  }
+}
