@@ -5,6 +5,7 @@ import {
   EXPORT_ERRORS_FILE_FORMAT,
   EXPORT_FAILURE_REPORT_FORMAT,
   buildExportFailureReport,
+  shouldSendExportFailureReport,
 } from './exportFailureReport.ts';
 
 const manifest = {
@@ -14,6 +15,12 @@ const manifest = {
   pack: {name: 'Broken Pack', version: '4.2.0'},
   exporter: {id: 'jeiexport', version: '1.2.0-beta.23'},
 };
+
+test('failure reporting requires an explicit opt-in and at least one failure', () => {
+  assert.equal(shouldSendExportFailureReport(4, false), false);
+  assert.equal(shouldSendExportFailureReport(0, true), false);
+  assert.equal(shouldSendExportFailureReport(4, true), true);
+});
 
 test('builds a deduplicated structured report with pack and exporter context', () => {
   const detail = {

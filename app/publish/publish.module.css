@@ -267,6 +267,66 @@
   gap: 12px;
 }
 
+.localOnlyNotice {
+  display: grid;
+  gap: 14px;
+  padding: 17px;
+  border: 1px solid #406d4e;
+  border-radius: 12px;
+  background: #111a16;
+}
+
+.localOnlyNotice > div > strong,
+.localOnlyNotice > div > span {
+  display: block;
+}
+
+.localOnlyNotice > div > strong {
+  color: #70d18f;
+  font-size: 14px;
+}
+
+.localOnlyNotice > div > span {
+  margin-top: 3px;
+  color: #aab4c3;
+  font-size: 13px;
+}
+
+.reportChoice {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding-top: 13px;
+  border-top: 1px solid #2a3342;
+  cursor: pointer;
+}
+
+.reportChoice input {
+  width: 17px;
+  height: 17px;
+  margin: 2px 0 0;
+  accent-color: #58c47b;
+}
+
+.reportChoice span,
+.reportChoice strong,
+.reportChoice small {
+  display: block;
+}
+
+.reportChoice strong {
+  color: #e6ebf2;
+  font-size: 13px;
+}
+
+.reportChoice small {
+  margin-top: 3px;
+  color: #8b97a8;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .dropzone {
   position: relative;
   min-height: 238px;

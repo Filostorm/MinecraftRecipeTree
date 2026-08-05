@@ -31,7 +31,7 @@ export function MobileUploadGuide({
 
   const openDesktopUpload = () => {
     void Linking.openURL(DESKTOP_UPLOAD_HREF).catch(error => {
-      console.error('Could not open the desktop upload page.', error);
+      console.error('Could not open the desktop import page.', error);
     });
   };
 
@@ -40,7 +40,7 @@ export function MobileUploadGuide({
       await copyText(DESKTOP_UPLOAD_HREF);
       setCopied(true);
     } catch (error) {
-      console.error('Could not copy the desktop upload address.', error);
+      console.error('Could not copy the desktop import address.', error);
     }
   };
 
@@ -58,11 +58,11 @@ export function MobileUploadGuide({
               style={styles.backButton}
               onPress={onClose}
               accessibilityRole="button"
-              accessibilityLabel="Close desktop upload instructions">
+              accessibilityLabel="Close desktop import instructions">
               <Text style={styles.backIcon}>‹</Text>
             </TouchableOpacity>
             <Text style={styles.headerTitle} accessibilityRole="header">
-              Upload
+              Import
             </Text>
             <View style={styles.headerSpacer} />
           </View>
@@ -76,8 +76,8 @@ export function MobileUploadGuide({
             </View>
             <Text style={styles.title}>Continue on your computer</Text>
             <Text style={styles.body}>
-              Creating the exporter ZIP and publishing a pack still requires desktop Minecraft.
-              Exporter downloads are not available from the mobile app yet.
+              Creating the exporter ZIP and importing it still requires desktop Minecraft.
+              Exporter downloads and iOS file import are not available from the mobile app yet.
             </Text>
 
             <View style={styles.urlCard}>
@@ -102,7 +102,7 @@ export function MobileUploadGuide({
                   style={[styles.copyButton, copied && styles.copyButtonCopied]}
                   onPress={() => void copyDesktopUpload()}
                   accessibilityRole="button"
-                  accessibilityLabel={copied ? 'Desktop upload link copied' : 'Copy desktop upload link'}>
+                  accessibilityLabel={copied ? 'Desktop import link copied' : 'Copy desktop import link'}>
                   <Text
                     style={[styles.copyButtonText, copied && styles.copyButtonTextCopied]}
                     accessibilityLiveRegion="polite">
@@ -125,13 +125,13 @@ export function MobileUploadGuide({
               />
               <UploadStep
                 number="3"
-                title="Upload from your desktop"
-                body={`Open ${DESKTOP_UPLOAD_URL}, drag in the completed exporter ZIP, and follow the validation prompts.`}
+                title="Import on your desktop"
+                body={`Open ${DESKTOP_UPLOAD_URL} and drag in the completed exporter ZIP. It stays in that browser by default and is not published.`}
               />
               <UploadStep
                 number="4"
-                title="Return to mobile"
-                body="Open the modpack picker again. The published pack will be available after the catalog refreshes."
+                title="Use the pack in that browser"
+                body="The local pack appears in the desktop modpack picker. It does not sync to the mobile app yet."
                 last
               />
             </View>

@@ -35,6 +35,13 @@ interface ReportInputs {
   exporterBuild?: unknown;
 }
 
+export function shouldSendExportFailureReport(
+  failureCount: number,
+  sharingEnabled: boolean,
+): boolean {
+  return sharingEnabled && Number.isSafeInteger(failureCount) && failureCount > 0;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
