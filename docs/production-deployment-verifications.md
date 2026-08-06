@@ -1,5 +1,30 @@
 # Production deployment verifications
 
+## 2026-08-05 — local-only imports and large-tree stabilization
+
+- Application commit: `fa766d6dc7e2eab40e6645d95578b3267da07cde`
+- Standalone Worker: `minecraft-recipe-tree-production`
+- Standalone Worker version: `a85ed172-824d-4a2f-be47-19eedf1e7a11`
+- Canonical URL: `https://minecraftrecipetree.craftsmannsoftware.com/`
+
+Passed:
+
+- The complete release suite passed 478/478 tests; the focused local-pack, exporter-failure, and
+  large-tree viewport suite passed 16/16 tests; and the production Worker bundle built cleanly.
+- A fresh browser tab hydrated MeatballCraft, opened Stone's recipe picker, added a recipe to the
+  graph, exposed the fit control, and recorded no browser errors or graph recovery state.
+- The homepage, current hashed JavaScript bundle, `/api/datasets`, `/api/modpacks`, the default
+  core manifest, and its paired preview manifest all returned `200` through the canonical router.
+- The catalog retained four channels. Remote D1 readback retained two legacy modpacks, three
+  feedback reports, and zero exporter-failure reports without writing any rows.
+- The default MeatballCraft manifest remained available with 196,161 items, 359,215 recipes, and
+  its 130 logged recipe failures; its paired preview manifest retained 443 packs and 698 category
+  documents.
+- Feedback inbox reads, exporter-failure method handling, and dataset upload administration all
+  remained fail-closed. No synthetic feedback, upload, failure report, or GitHub issue was created.
+- Canonical responses retained the signal-edge compatibility header and identified the standalone
+  Worker as the actual application origin.
+
 ## 2026-08-04 — native Cloudflare production cutover
 
 - Application branch: `main`
