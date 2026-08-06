@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
 import test from 'node:test';
 import {
   capturePanGestureOrigin,
@@ -8,6 +9,8 @@ import {
   graphWheelZoomFactor,
   transformForPanGesture,
 } from './panGesture.ts';
+
+const graphScreenSource = await readFile(new URL('./GraphScreen.tsx', import.meta.url), 'utf8');
 
 test('native graph scale avoids composited scaling and snaps to physical pixels', () => {
   assert.deepEqual(graphDisplayTransform({x: 10.24, y: 20.26, scale: 1}, 2), {
@@ -26,6 +29,16 @@ test('native graph scale avoids composited scaling and snaps to physical pixels'
     () => graphDisplayTransform({x: 0, y: 0, scale: 1}, 0),
     /positive finite values/,
   );
+});
+
+test('web graph zoom uses layout scaling instead of a composited scale transform', () => {
+  assert.match(graphScreenSource, /zoom:\s*displayTransform\.scale/u);
+  const anchorMarkup = graphScreenSource.slice(
+    graphScreenSource.indexOf('Keep translation outside the web scale layer'),
+    graphScreenSource.indexOf('{renderedGraph?.edges.map'),
+  );
+  assert.match(anchorMarkup, /Platform\.OS === 'web'[\s\S]*?left:\s*displayTransform\.x/u);
+  assert.match(anchorMarkup, /Platform\.OS !== 'web'[\s\S]*?translateX:\s*displayTransform\.x/u);
 });
 
 test('wheel coordinates map displayed bounds into the logical graph viewport', () => {

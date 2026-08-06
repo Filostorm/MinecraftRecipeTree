@@ -2345,14 +2345,16 @@ export function GraphScreen({
           }
         }}
         {...responder.panHandlers}>
-        {/* 0x0 anchor so translate/scale apply around the top-left origin */}
+        {/*
+          Keep translation outside the web scale layer. CSS zoom makes Safari
+          lay out text and pixel art at the requested graph scale instead of
+          resampling one transformed bitmap of the entire recipe subtree.
+        */}
         <View
-          ref={anchorRef}
-          collapsable={false}
           style={[
             styles.anchor,
             Platform.OS !== 'web' && styles.nativeAnchor,
-            Platform.OS === 'web' && displayTransform.nativeScale
+            Platform.OS === 'web'
               ? {
                   left: displayTransform.x,
                   top: displayTransform.y,
@@ -2365,6 +2367,16 @@ export function GraphScreen({
                   ],
                 },
           ]}>
+          <View
+            ref={anchorRef}
+            collapsable={false}
+            style={[
+              styles.anchor,
+              Platform.OS !== 'web' && styles.nativeAnchor,
+              Platform.OS === 'web' && !displayTransform.nativeScale
+                ? ({zoom: displayTransform.scale} as unknown as object)
+                : null,
+            ]}>
           {renderedGraph?.edges.map((e, i) => (
             <View
               key={`e${i}`}
@@ -2498,6 +2510,7 @@ export function GraphScreen({
               />
             ),
           )}
+          </View>
         </View>
       </View>
 
