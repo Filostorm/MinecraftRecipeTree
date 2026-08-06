@@ -18,6 +18,7 @@ import {
   selectDataset,
 } from './datasetCatalog';
 import {
+  LOCAL_PACK_CATALOG_CHANGED_EVENT,
   listLocalPackDescriptors,
   localDatasetSource,
   registerLocalPackServiceWorker,
@@ -130,6 +131,7 @@ export function DatasetCatalogProvider({children}: {children: React.ReactNode}) 
   const [assetOrigin, setAssetOrigin] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [localCatalogRevision, setLocalCatalogRevision] = useState(0);
   const selectedSlugRef = useRef<string | null>(null);
   const localPublicationIdsRef = useRef(new Set<string>());
 
@@ -186,9 +188,13 @@ export function DatasetCatalogProvider({children}: {children: React.ReactNode}) 
         if (Platform.OS === 'web') {
           try {
             await registerLocalPackServiceWorker();
+          } catch (localError) {
+            console.warn('Saved pack file loading is unavailable in this browser.', localError);
+          }
+          try {
             localDatasets = await listLocalPackDescriptors();
           } catch (localError) {
-            console.warn('Saved packs are unavailable in this browser.', localError);
+            console.warn('The saved pack list is unavailable in this browser.', localError);
           }
         }
         const publishedSlugs = new Set(publishedDatasets.map(dataset => dataset.slug));
@@ -219,7 +225,22 @@ export function DatasetCatalogProvider({children}: {children: React.ReactNode}) 
       alive = false;
       controller.abort();
     };
-  }, [sourceFor]);
+  }, [localCatalogRevision, sourceFor]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const refreshLocalCatalog = () => {
+      setLocalCatalogRevision(revision => revision + 1);
+    };
+    window.addEventListener(LOCAL_PACK_CATALOG_CHANGED_EVENT, refreshLocalCatalog);
+    window.addEventListener('pageshow', refreshLocalCatalog);
+    window.addEventListener('focus', refreshLocalCatalog);
+    return () => {
+      window.removeEventListener(LOCAL_PACK_CATALOG_CHANGED_EVENT, refreshLocalCatalog);
+      window.removeEventListener('pageshow', refreshLocalCatalog);
+      window.removeEventListener('focus', refreshLocalCatalog);
+    };
+  }, []);
 
   const select = useCallback(
     (slug: string) => {

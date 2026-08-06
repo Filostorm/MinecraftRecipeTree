@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   isExportManifestPath,
   isIgnoredArchiveMetadataPath,
+  localPackVersionLabel,
   requireLocalPackManifest,
   requireSafeArchivePath,
 } from './localPackArchive.ts';
@@ -67,7 +68,7 @@ test('keeps structurally valid incomplete exports visible with actionable findin
     diagnostics: {warningEvents: 2},
   }));
   assert.equal(summary.readyForHandoff, false);
-  assert.equal(summary.findings.length, 6);
+  assert.equal(summary.findings.length, 5);
   assert.match(summary.findings.join('\n'), /stopped before it finished/);
   assert.match(summary.findings.join('\n'), /small test/);
   assert.match(summary.findings.join('\n'), /4 recipes could not be exported/);
@@ -85,8 +86,35 @@ test('allows a completed export with reported failures to load with a warning', 
     },
   }));
   assert.equal(summary.readyForHandoff, true);
-  assert.match(summary.findings.join('\n'), /rest of the pack can still be opened/);
-  assert.match(summary.findings.join('\n'), /Share exporter errors.*after import/);
+  assert.match(summary.findings.join('\n'), /not included in this ZIP/);
+  assert.match(summary.findings.join('\n'), /After a successful import.*Share exporter errors/);
+  assert.doesNotMatch(summary.findings.join('\n'), /rest of the pack can still be opened/);
+});
+
+test('allows a named custom pack without a version to install and report failures', () => {
+  const summary = requireLocalPackManifest(manifest({
+    pack: {
+      name: 'My Custom Tech Pack',
+      identitySource: 'game-directory',
+    },
+    counts: {
+      items: 1_200,
+      recipes: 8_000,
+      categories: 75,
+      mobs: 0,
+      blockDrops: 0,
+      failures: 74,
+    },
+  }));
+
+  assert.equal(summary.readyForHandoff, true);
+  assert.equal(summary.packName, 'My Custom Tech Pack');
+  assert.equal(summary.packVersion, null);
+  assert.equal(localPackVersionLabel(summary.packVersion), 'Unversioned');
+  assert.doesNotMatch(summary.findings.join('\n'), /pack version|Unversioned/i);
+  assert.match(summary.findings.join('\n'), /instance name “My Custom Tech Pack”/);
+  assert.match(summary.findings.join('\n'), /74 recipes could not be exported/);
+  assert.match(summary.findings.join('\n'), /Share exporter errors/);
 });
 
 test('rejects malformed manifest metadata instead of inventing fallback values', () => {

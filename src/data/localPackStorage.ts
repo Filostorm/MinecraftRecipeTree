@@ -1,8 +1,10 @@
 import {Unzip, UnzipInflate} from 'fflate';
+import {readLocalFileSlice} from './localFileReader.ts';
 import type {DatasetDescriptor, DatasetSource} from './datasetCatalog.ts';
 import {
   MAX_EXPORT_ARCHIVE_ENTRIES,
   isIgnoredArchiveMetadataPath,
+  localPackVersionLabel,
   requireSafeArchivePath,
   type LocalPackManifestSummary,
 } from './localPackArchive.ts';
@@ -20,6 +22,7 @@ const MAX_LOCAL_PACKS = 24;
 const MAX_LOCAL_FILE_BYTES = 128 * 1024 * 1024;
 const LOCAL_CATALOG_FORMAT = 1;
 const LOCAL_INVENTORY_FORMAT = 1;
+export const LOCAL_PACK_CATALOG_CHANGED_EVENT = 'mrt:local-pack-catalog-changed';
 
 interface LocalPackRecord extends DatasetDescriptor {
   storedAt: number;
@@ -41,7 +44,13 @@ export interface InstalledLocalPack {
 }
 
 export type LocalPackInstallProgress =
-  | {phase: 'reading'; fraction: number}
+  | {
+      phase: 'reading';
+      fraction: number;
+      completedBytes: number;
+      totalBytes: number;
+      discoveredFiles: number;
+    }
   | {phase: 'saving'; fraction: number; completedFiles: number; totalFiles: number}
   | {phase: 'finalizing'};
 
@@ -115,6 +124,16 @@ function catalogRequest(): Request {
   return new Request(`${browserOrigin()}${LOCAL_PACK_CATALOG_PATH}`);
 }
 
+function notifyLocalPackCatalogChanged(): void {
+  if (
+    typeof window !== 'undefined' &&
+    typeof window.dispatchEvent === 'function' &&
+    typeof Event === 'function'
+  ) {
+    window.dispatchEvent(new Event(LOCAL_PACK_CATALOG_CHANGED_EVENT));
+  }
+}
+
 async function readCatalog(cache: Cache): Promise<LocalPackCatalog> {
   const response = await cache.match(catalogRequest());
   if (!response) return emptyCatalog();
@@ -136,6 +155,7 @@ async function writeCatalog(cache: Cache, catalog: LocalPackCatalog): Promise<vo
       },
     }),
   );
+  notifyLocalPackCatalogChanged();
 }
 
 function localPackPath(publicationId: string, relativePath: string): string {
@@ -339,7 +359,7 @@ export async function installLocalPackArchive(
     slug: `local-${publicationId.slice(0, 16)}`,
     displayName: summary.packName,
     minecraftVersion: summary.minecraftVersion,
-    packVersion: summary.packVersion ?? 'Unknown',
+    packVersion: localPackVersionLabel(summary.packVersion),
     publicationId,
     previewAssetSetId: publicationId,
     isDefault: false,
@@ -351,6 +371,7 @@ export async function installLocalPackArchive(
     pack => pack.publicationId === publicationId,
   );
   if (alreadyInstalled) {
+    notifyLocalPackCatalogChanged();
     return {
       descriptor,
       viewerHref: `/?pack=${encodeURIComponent(descriptor.slug)}`,
@@ -413,7 +434,6 @@ export async function installLocalPackArchive(
   const writeLanes = Array.from({length: CACHE_WRITE_CONCURRENCY}, () => Promise.resolve());
   const pendingWriteJobs = new Set<Promise<void>>();
   let nextWriteLane = 0;
-  let lastReportedPercent = 0;
   let queuedWrites = 0;
   let completedWrites = 0;
   let archiveReadComplete = false;
@@ -597,19 +617,30 @@ export async function installLocalPackArchive(
   try {
     for (let offset = 0; offset < file.size; offset += ARCHIVE_READ_CHUNK_BYTES) {
       const end = Math.min(offset + ARCHIVE_READ_CHUNK_BYTES, file.size);
-      const chunk = new Uint8Array(await file.slice(offset, end).arrayBuffer());
+      const chunk = await readLocalFileSlice(file, offset, end, loadedBytes => {
+        if (loadedBytes >= end - offset) return;
+        onProgress({
+          phase: 'reading',
+          fraction: (offset + loadedBytes) / file.size,
+          completedBytes: offset + loadedBytes,
+          totalBytes: file.size,
+          discoveredFiles: storedPaths.size,
+        });
+      });
       try {
         unzip.push(chunk, end === file.size);
       } catch {
         throw new Error('The ZIP could not be opened.');
       }
       if (archiveError !== null) throw archiveError;
+      onProgress({
+        phase: 'reading',
+        fraction: end / file.size,
+        completedBytes: end,
+        totalBytes: file.size,
+        discoveredFiles: storedPaths.size,
+      });
       await applyWriteBackpressure();
-      const percent = Math.floor((end / file.size) * 100);
-      if (percent > lastReportedPercent || end === file.size) {
-        lastReportedPercent = percent;
-        onProgress({phase: 'reading', fraction: end / file.size});
-      }
     }
     if (delta !== null && deltaFiles !== null && deltaResultPaths !== null) {
       for (const expectedPath of deltaFiles.keys()) {

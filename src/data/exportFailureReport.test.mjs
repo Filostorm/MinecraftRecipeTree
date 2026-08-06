@@ -70,6 +70,20 @@ test('derives useful recipe and mod context from legacy string failures', () => 
   assert.deepEqual(report.modVersions, {mekanism: 'Unknown'});
 });
 
+test('prepares a shareable report for a named unversioned custom pack', () => {
+  const report = buildExportFailureReport({
+    manifest: {
+      ...manifest,
+      pack: {name: 'My Custom Tech Pack', identitySource: 'game-directory'},
+    },
+    failures: ['recipe recipes/mekanism_crushing #17: failed'],
+  });
+
+  assert.equal(report.packName, 'My Custom Tech Pack');
+  assert.equal(report.packVersion, 'Unknown');
+  assert.equal(report.failures.length, 1);
+});
+
 test('rejects an empty failure report', () => {
   assert.throws(
     () => buildExportFailureReport({manifest, failures: []}),

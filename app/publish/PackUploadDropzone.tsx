@@ -13,6 +13,7 @@ import {
   isIgnoredArchiveMetadataPath,
   MAX_EXPORT_ARCHIVE_ENTRIES,
   MAX_EXPORT_MANIFEST_BYTES,
+  localPackVersionLabel,
   requireLocalPackManifest,
   requireSafeArchivePath,
   type LocalPackManifestSummary,
@@ -28,6 +29,7 @@ import {
   sendExportFailureReport,
   type ExportFailureReport,
 } from '../../src/data/exportFailureReport';
+import {readLocalFileSlice} from '../../src/data/localFileReader';
 import {localPackUploadErrorMessage} from '../../src/data/localPackUploadError';
 import styles from './publish.module.css';
 
@@ -52,6 +54,9 @@ type UploadState =
       filename: string;
       progress: number;
       phase: 'checking' | 'adding' | 'saving' | 'finalizing';
+      completedBytes: number;
+      totalBytes: number;
+      discoveredFiles?: number;
       completedFiles?: number;
       totalFiles?: number;
     }
@@ -70,6 +75,16 @@ type UploadState =
       isDelta: boolean;
     }
   | {status: 'error'; filename: string | null; message: string};
+
+type CheckingUploadState = Extract<UploadState, {status: 'checking'}>;
+type UploadPhase = CheckingUploadState['phase'];
+
+const UPLOAD_PHASES: readonly {phase: UploadPhase; label: string}[] = [
+  {phase: 'checking', label: 'Check ZIP'},
+  {phase: 'adding', label: 'Read files'},
+  {phase: 'saving', label: 'Save locally'},
+  {phase: 'finalizing', label: 'Prepare viewer'},
+];
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -132,7 +147,6 @@ async function inspectPackArchive(
     chunks: Uint8Array[];
     skipped: boolean;
   }>();
-  let lastReportedPercent = 0;
 
   const unzip = new Unzip(entry => {
     entry.ondata = error => {
@@ -236,19 +250,18 @@ async function inspectPackArchive(
   for (let offset = 0; offset < file.size; offset += ARCHIVE_READ_CHUNK_BYTES) {
     if (!isCurrent()) throw new Error('Archive check was replaced by a newer file.');
     const end = Math.min(offset + ARCHIVE_READ_CHUNK_BYTES, file.size);
-    const chunk = new Uint8Array(await file.slice(offset, end).arrayBuffer());
+    const chunk = await readLocalFileSlice(file, offset, end, loadedBytes => {
+      if (loadedBytes < end - offset && isCurrent()) {
+        onProgress((offset + loadedBytes) / file.size);
+      }
+    });
     try {
       unzip.push(chunk, end === file.size);
     } catch (error) {
       throw new Error(`The selected file is not a readable ZIP archive: ${errorMessage(error)}`);
     }
     if (archiveError !== null) throw archiveError;
-    const progress = end / file.size;
-    const percent = Math.floor(progress * 100);
-    if (percent > lastReportedPercent || end === file.size) {
-      lastReportedPercent = percent;
-      onProgress(progress);
-    }
+    onProgress(end / file.size);
   }
 
   if (manifestPath === null) {
@@ -310,6 +323,68 @@ function formatBytes(bytes: number): string {
   return `${value.toFixed(value >= 10 ? 1 : 2)} ${unit}`;
 }
 
+function formatProgressPercent(progress: number): string {
+  if (progress <= 0) return 'Starting';
+  if (progress < 0.01) return '<1%';
+  return `${Math.round(progress * 100)}%`;
+}
+
+function UploadStageProgress({state}: {state: CheckingUploadState}) {
+  const activeIndex = UPLOAD_PHASES.findIndex(stage => stage.phase === state.phase);
+  return (
+    <span className={styles.uploadStages} aria-label="Import stages">
+      {UPLOAD_PHASES.map((stage, index) => {
+        const completed = index < activeIndex;
+        const active = index === activeIndex;
+        const indeterminate = active && (stage.phase === 'finalizing' || state.progress <= 0);
+        const fraction = completed ? 1 : active && !indeterminate ? state.progress : 0;
+        const detail = completed
+          ? 'Done'
+          : !active
+            ? 'Waiting'
+            : state.progress <= 0 && stage.phase !== 'finalizing'
+              ? 'Opening…'
+              : stage.phase === 'saving'
+              ? `${state.completedFiles?.toLocaleString() ?? 0} / ${
+                  state.totalFiles?.toLocaleString() ?? 0
+                } files`
+              : stage.phase === 'adding'
+                ? `${formatProgressPercent(state.progress)} · ${
+                    state.discoveredFiles?.toLocaleString() ?? 0
+                  } files`
+                : stage.phase === 'finalizing'
+                  ? 'Working…'
+                  : formatProgressPercent(state.progress);
+        return (
+          <span
+            key={stage.phase}
+            className={[
+              styles.uploadStage,
+              completed ? styles.uploadStageComplete : '',
+              active ? styles.uploadStageActive : '',
+            ].filter(Boolean).join(' ')}>
+            <span className={styles.uploadStageLabel}>{stage.label}</span>
+            <span
+              className={[
+                styles.uploadStageTrack,
+                indeterminate ? styles.uploadStageTrackWaiting : '',
+              ].filter(Boolean).join(' ')}
+              style={{'--upload-stage-progress': `${fraction * 100}%`} as CSSProperties}
+              role="progressbar"
+              aria-label={stage.label}
+              aria-valuemin={indeterminate ? undefined : 0}
+              aria-valuemax={indeterminate ? undefined : 100}
+              aria-valuenow={indeterminate ? undefined : Math.round(fraction * 100)}>
+              <span className={styles.uploadStageFill} />
+            </span>
+            <span className={styles.uploadStageDetail}>{detail}</span>
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
 export function PackUploadDropzone() {
   const inputRef = useRef<HTMLInputElement>(null);
   const operationRef = useRef(0);
@@ -334,7 +409,14 @@ export function PackUploadDropzone() {
     operationRef.current = operation;
     pendingFailureReportRef.current = null;
     reportSubmissionRef.current = false;
-    setState({status: 'checking', filename: file.name, progress: 0, phase: 'checking'});
+    setState({
+      status: 'checking',
+      filename: file.name,
+      progress: 0,
+      phase: 'checking',
+      completedBytes: 0,
+      totalBytes: file.size,
+    });
     try {
       const result = await inspectPackArchive(
         file,
@@ -345,6 +427,8 @@ export function PackUploadDropzone() {
             filename: file.name,
             progress: fraction,
             phase: 'checking',
+            completedBytes: Math.min(file.size, Math.round(file.size * fraction)),
+            totalBytes: file.size,
           });
         },
         () => operationRef.current === operation,
@@ -358,7 +442,15 @@ export function PackUploadDropzone() {
       let reportStatus: 'sending' | 'sent' | 'duplicate' | 'failed' | null = null;
       let reportAvailable = false;
       if (result.summary.readyForHandoff) {
-        setState({status: 'checking', filename: file.name, progress: 0, phase: 'adding'});
+        setState({
+          status: 'checking',
+          filename: file.name,
+          progress: 0,
+          phase: 'adding',
+          completedBytes: 0,
+          totalBytes: file.size,
+          discoveredFiles: 0,
+        });
         try {
           const installed = await installLocalPackArchive(
             file,
@@ -374,6 +466,8 @@ export function PackUploadDropzone() {
                   filename: file.name,
                   progress: progress.fraction,
                   phase: 'saving',
+                  completedBytes: file.size,
+                  totalBytes: file.size,
                   completedFiles: progress.completedFiles,
                   totalFiles: progress.totalFiles,
                 });
@@ -385,6 +479,8 @@ export function PackUploadDropzone() {
                   filename: file.name,
                   progress: 1,
                   phase: 'finalizing',
+                  completedBytes: file.size,
+                  totalBytes: file.size,
                 });
                 return;
               }
@@ -393,6 +489,9 @@ export function PackUploadDropzone() {
                 filename: file.name,
                 progress: progress.fraction,
                 phase: 'adding',
+                completedBytes: progress.completedBytes,
+                totalBytes: progress.totalBytes,
+                discoveredFiles: progress.discoveredFiles,
               });
             },
             result.delta,
@@ -418,7 +517,13 @@ export function PackUploadDropzone() {
           }
         } catch (error) {
           console.error('The checked pack could not be added to the viewer.', error);
-          findings = Object.freeze([...findings, localPackUploadErrorMessage(error)]);
+          if (operationRef.current !== operation) return;
+          setState({
+            status: 'error',
+            filename: file.name,
+            message: localPackUploadErrorMessage(error),
+          });
+          return;
         }
       }
       if (operationRef.current !== operation) return;
@@ -545,43 +650,20 @@ export function PackUploadDropzone() {
                   ? `${state.completedFiles?.toLocaleString() ?? 0} of ${
                       state.totalFiles?.toLocaleString() ?? 0
                     } files saved`
-                  : `${Math.round(state.progress * 100)}% ${
-                      state.phase === 'adding' ? 'read' : 'checked'
-                    }`
+                  : state.progress <= 0
+                    ? state.phase === 'adding'
+                      ? 'Starting file scan…'
+                      : 'Starting archive check…'
+                    : `${formatBytes(state.completedBytes)} of ${formatBytes(
+                        state.totalBytes,
+                      )} ${state.phase === 'adding' ? 'read' : 'checked'} · ${
+                        formatProgressPercent(state.progress)
+                      }${state.phase === 'adding'
+                        ? ` · ${state.discoveredFiles?.toLocaleString() ?? 0} files found`
+                        : ''}`
             : 'or tap to add a file'}
         </span>
-        {state.status === 'checking' && (
-          <span
-            className={[
-              styles.uploadProgress,
-              state.phase === 'finalizing'
-                ? styles.uploadProgressWaiting
-                : '',
-            ].filter(Boolean).join(' ')}
-            style={{'--upload-progress': `${state.progress * 100}%`} as CSSProperties}
-            role="progressbar"
-            aria-label={
-              state.phase === 'finalizing'
-                  ? 'Preparing pack for the viewer'
-                  : state.phase === 'saving'
-                    ? 'Saving pack files'
-                    : state.phase === 'adding'
-                      ? 'Reading pack files'
-                      : 'Checking pack'
-            }
-            aria-valuemin={
-              state.phase === 'finalizing' ? undefined : 0
-            }
-            aria-valuemax={
-              state.phase === 'finalizing' ? undefined : 100
-            }
-            aria-valuenow={
-              state.phase === 'finalizing'
-                ? undefined
-                : Math.round(state.progress * 100)
-            }
-          />
-        )}
+        {state.status === 'checking' && <UploadStageProgress state={state} />}
       </label>
 
       <div className={styles.uploadResult} aria-live="polite">
@@ -600,7 +682,7 @@ export function PackUploadDropzone() {
                     : 'READY IN VIEWER'
                   : 'WE FOUND A PROBLEM'}
               </span>
-              <a href={state.viewerHref}>Return to viewer</a>
+              {state.saved && <a href={state.viewerHref}>View pack</a>}
             </div>
             <h3>{state.summary.packName}</h3>
             <p className={styles.uploadFilename}>
@@ -609,7 +691,7 @@ export function PackUploadDropzone() {
             <dl className={styles.uploadFacts}>
               <div>
                 <dt>Pack version</dt>
-                <dd>{state.summary.packVersion ?? 'Missing'}</dd>
+                <dd>{localPackVersionLabel(state.summary.packVersion)}</dd>
               </div>
               <div>
                 <dt>Minecraft</dt>

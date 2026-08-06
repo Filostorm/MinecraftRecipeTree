@@ -296,6 +296,7 @@ export async function renderTiledPng({
     width: `${logicalWidth}px`,
     height: `${logicalHeight}px`,
     transform: 'none',
+    zoom: '1',
     overflow: 'visible',
   });
   staging.appendChild(clone);

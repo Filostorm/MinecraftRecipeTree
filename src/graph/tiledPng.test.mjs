@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
 import test from 'node:test';
 import {unzlibSync} from 'fflate';
 import {
@@ -6,6 +7,12 @@ import {
   planTiledPng,
   rgbaHasColorVariation,
 } from './tiledPng.ts';
+
+const tiledPngSource = await readFile(new URL('./tiledPng.ts', import.meta.url), 'utf8');
+
+test('tree export removes interactive graph zoom from its cloned render surface', () => {
+  assert.match(tiledPngSource, /transform:\s*'none',[\s\S]*?zoom:\s*'1'/u);
+});
 
 function uint32(data, offset) {
   return (

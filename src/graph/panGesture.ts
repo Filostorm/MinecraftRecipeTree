@@ -17,6 +17,42 @@ export interface GraphViewportPoint {
   y: number;
 }
 
+export interface GraphDisplayTransform extends GraphTransform {
+  /** True when graph contents can be laid out without a composited scale layer. */
+  nativeScale: boolean;
+}
+
+const NATIVE_GRAPH_SCALE_EPSILON = 1e-6;
+
+/**
+ * Align the graph camera to physical pixels before it reaches the DOM.
+ *
+ * Safari can rasterize a transformed subtree even for `scale(1)`, which makes
+ * recipe text and exported pixel art look soft. At native graph scale the
+ * renderer can use ordinary left/top positioning and avoid that composited
+ * layer entirely. Non-native zoom still needs a scale transform, but its
+ * translation is kept on the device-pixel grid.
+ */
+export function graphDisplayTransform(
+  transform: GraphTransform,
+  devicePixelRatio = 1,
+): GraphDisplayTransform {
+  if (
+    ![transform.x, transform.y, transform.scale, devicePixelRatio].every(Number.isFinite) ||
+    transform.scale <= 0 ||
+    devicePixelRatio <= 0
+  ) {
+    throw new Error('Graph display transform and device pixel ratio must be positive finite values.');
+  }
+  const nativeScale = Math.abs(transform.scale - 1) <= NATIVE_GRAPH_SCALE_EPSILON;
+  return {
+    x: Math.round(transform.x * devicePixelRatio) / devicePixelRatio,
+    y: Math.round(transform.y * devicePixelRatio) / devicePixelRatio,
+    scale: nativeScale ? 1 : transform.scale,
+    nativeScale,
+  };
+}
+
 export function graphViewportPointFromClient(
   clientX: number,
   clientY: number,
