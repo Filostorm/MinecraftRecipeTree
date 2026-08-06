@@ -16,6 +16,7 @@ import {InterfaceZoomSlider} from './src/components/InterfaceZoomSlider';
 import {DatasetPicker} from './src/components/DatasetPicker';
 import {DatasetSwitcher} from './src/components/DatasetSwitcher';
 import {GraphGuideModal} from './src/components/GraphGuideModal';
+import {BugIcon} from './src/components/BugIcon';
 import {IssueReportModal} from './src/components/IssueReportModal';
 import type {GitHubIssueKind, IssueReportContext} from './src/components/githubIssues';
 import {ItemsScreen} from './src/components/ItemsScreen';
@@ -516,13 +517,7 @@ function Shell({
         }}
         accessibilityRole="button"
         accessibilityLabel="Report a bug or send feedback">
-        <Text
-          style={[
-            styles.issueReportHeaderText,
-            showIssueReport && styles.guideHeaderIconActive,
-          ]}>
-          🐛
-        </Text>
+        <BugIcon active={showIssueReport} />
       </TouchableOpacity>
       {recipeStages.catalog.stages.length > 0 && (
         <TouchableOpacity
@@ -975,7 +970,6 @@ const styles = StyleSheet.create({
   recipeStagesHeaderText: {color: theme.text, fontSize: 11, fontWeight: '800'},
   recipeStagesHeaderTextActive: {color: theme.accent},
   issueReportHeaderButton: {width: 34, minWidth: 34, paddingHorizontal: 0},
-  issueReportHeaderText: {color: theme.text, fontSize: 17, lineHeight: 20},
   guideHeaderIcon: {color: theme.text, fontSize: 16, fontWeight: '800'},
   guideHeaderIconActive: {color: theme.accent},
   nativeHeaderMenuText: {color: theme.text, fontSize: 12, fontWeight: '700'},
