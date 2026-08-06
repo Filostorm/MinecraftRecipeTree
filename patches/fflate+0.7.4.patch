@@ -1,0 +1,200 @@
+diff --git a/node_modules/fflate/esm/browser.js b/node_modules/fflate/esm/browser.js
+index 5c4018f..9713d14 100644
+--- a/node_modules/fflate/esm/browser.js
++++ b/node_modules/fflate/esm/browser.js
+@@ -2271,6 +2271,7 @@ var Unzip = /*#__PURE__*/ (function () {
+             0: UnzipPassThrough
+         };
+         this.p = et;
++        this.b = 0;
+     }
+     /**
+      * Pushes a chunk to be unzipped
+@@ -2296,7 +2297,7 @@ var Unzip = /*#__PURE__*/ (function () {
+                 return this.push(chunk, final);
+         }
+         else {
+-            var f = 0, i = 0, is = void 0, buf = void 0;
++            var f = 0, i = 0, de = 0, buf = void 0;
+             if (!this.p.length)
+                 buf = chunk;
+             else if (!chunk.length)
+@@ -2305,12 +2306,26 @@ var Unzip = /*#__PURE__*/ (function () {
+                 buf = new u8(this.p.length + chunk.length);
+                 buf.set(this.p), buf.set(chunk, this.p.length);
+             }
+-            var l = buf.length, oc = this.c, add = oc && this.d;
++            var l = buf.length, oc = this.c, add = oc && this.d, z = oc == -2 && 8;
+             var _loop_2 = function () {
+                 var _a;
+                 var sig = b4(buf, i);
+-                if (sig == 0x4034B50) {
+-                    f = 1, is = i;
++                var ok = !(oc < 0);
++                if (oc < 0) {
++                    if (sig == 0x8074B50) {
++                        if (this_1.b + i == (z ? b8(buf, i + 8) : b4(buf, i + 8)))
++                            ok = true, de = i;
++                    }
++                    else if (sig == 0x4034B50 || sig == 0x2014B50) {
++                        var cs = z ? b8(buf, i - 16) : b4(buf, i - 8), d0 = i - 12 - z;
++                        if (d0 >= 0 && this_1.b + d0 == cs)
++                            ok = true, de = d0;
++                        else if (d0 - 4 >= 0 && this_1.b + d0 - 4 == cs)
++                            ok = true, de = d0 - 4;
++                    }
++                }
++                if (sig == 0x4034B50 && ok) {
++                    f = 1;
+                     this_1.d = null;
+                     this_1.c = 0;
+                     var bf = b2(buf, i + 6), cmp_1 = b2(buf, i + 8), u = bf & 2048, dd = bf & 8, fnl = b2(buf, i + 26), es = b2(buf, i + 28);
+@@ -2327,6 +2342,8 @@ var Unzip = /*#__PURE__*/ (function () {
+                             sc_1 = -1;
+                         i += es;
+                         this_1.c = sc_1;
++                        if (sc_1 < 0)
++                            this_1.b = 0;
+                         var d_1;
+                         var file_1 = {
+                             name: fn_1,
+@@ -2364,12 +2381,12 @@ var Unzip = /*#__PURE__*/ (function () {
+                     return "break";
+                 }
+                 else if (oc) {
+-                    if (sig == 0x8074B50) {
+-                        is = i += 12 + (oc == -2 && 8), f = 3, this_1.c = 0;
++                    if (sig == 0x8074B50 && ok) {
++                        i += 12 + z, f = 3, this_1.c = 0;
+                         return "break";
+                     }
+-                    else if (sig == 0x2014B50) {
+-                        is = i -= 4, f = 3, this_1.c = 0;
++                    else if (sig == 0x2014B50 && ok) {
++                        f = 3, this_1.c = 0;
+                         return "break";
+                     }
+                 }
+@@ -2382,15 +2399,20 @@ var Unzip = /*#__PURE__*/ (function () {
+             }
+             this.p = et;
+             if (oc < 0) {
+-                var dat = f ? buf.subarray(0, is - 12 - (oc == -2 && 8) - (b4(buf, is - 16) == 0x8074B50 && 4)) : buf.subarray(0, i);
++                var end = f ? de : (l > 24 ? l - 24 : 0);
++                var dat = buf.subarray(0, end);
++                this.b += end;
+                 if (add)
+                     add.push(dat, !!f);
+                 else
+                     this.k[+(f == 2)].push(dat);
++                if (!f)
++                    this.p = buf.subarray(end);
+             }
+             if (f & 2)
+                 return this.push(buf.subarray(i), final);
+-            this.p = buf.subarray(i);
++            if (!(oc < 0) || f)
++                this.p = buf.subarray(i);
+         }
+         if (final) {
+             if (this.c)
+diff --git a/node_modules/fflate/esm/index.mjs b/node_modules/fflate/esm/index.mjs
+index 6186bbd..7016fba 100644
+--- a/node_modules/fflate/esm/index.mjs
++++ b/node_modules/fflate/esm/index.mjs
+@@ -2285,6 +2285,7 @@ var Unzip = /*#__PURE__*/ (function () {
+             0: UnzipPassThrough
+         };
+         this.p = et;
++        this.b = 0;
+     }
+     /**
+      * Pushes a chunk to be unzipped
+@@ -2310,7 +2311,7 @@ var Unzip = /*#__PURE__*/ (function () {
+                 return this.push(chunk, final);
+         }
+         else {
+-            var f = 0, i = 0, is = void 0, buf = void 0;
++            var f = 0, i = 0, de = 0, buf = void 0;
+             if (!this.p.length)
+                 buf = chunk;
+             else if (!chunk.length)
+@@ -2319,12 +2320,26 @@ var Unzip = /*#__PURE__*/ (function () {
+                 buf = new u8(this.p.length + chunk.length);
+                 buf.set(this.p), buf.set(chunk, this.p.length);
+             }
+-            var l = buf.length, oc = this.c, add = oc && this.d;
++            var l = buf.length, oc = this.c, add = oc && this.d, z = oc == -2 && 8;
+             var _loop_2 = function () {
+                 var _a;
+                 var sig = b4(buf, i);
+-                if (sig == 0x4034B50) {
+-                    f = 1, is = i;
++                var ok = !(oc < 0);
++                if (oc < 0) {
++                    if (sig == 0x8074B50) {
++                        if (this_1.b + i == (z ? b8(buf, i + 8) : b4(buf, i + 8)))
++                            ok = true, de = i;
++                    }
++                    else if (sig == 0x4034B50 || sig == 0x2014B50) {
++                        var cs = z ? b8(buf, i - 16) : b4(buf, i - 8), d0 = i - 12 - z;
++                        if (d0 >= 0 && this_1.b + d0 == cs)
++                            ok = true, de = d0;
++                        else if (d0 - 4 >= 0 && this_1.b + d0 - 4 == cs)
++                            ok = true, de = d0 - 4;
++                    }
++                }
++                if (sig == 0x4034B50 && ok) {
++                    f = 1;
+                     this_1.d = null;
+                     this_1.c = 0;
+                     var bf = b2(buf, i + 6), cmp_1 = b2(buf, i + 8), u = bf & 2048, dd = bf & 8, fnl = b2(buf, i + 26), es = b2(buf, i + 28);
+@@ -2341,6 +2356,8 @@ var Unzip = /*#__PURE__*/ (function () {
+                             sc_1 = -1;
+                         i += es;
+                         this_1.c = sc_1;
++                        if (sc_1 < 0)
++                            this_1.b = 0;
+                         var d_1;
+                         var file_1 = {
+                             name: fn_1,
+@@ -2378,12 +2395,12 @@ var Unzip = /*#__PURE__*/ (function () {
+                     return "break";
+                 }
+                 else if (oc) {
+-                    if (sig == 0x8074B50) {
+-                        is = i += 12 + (oc == -2 && 8), f = 3, this_1.c = 0;
++                    if (sig == 0x8074B50 && ok) {
++                        i += 12 + z, f = 3, this_1.c = 0;
+                         return "break";
+                     }
+-                    else if (sig == 0x2014B50) {
+-                        is = i -= 4, f = 3, this_1.c = 0;
++                    else if (sig == 0x2014B50 && ok) {
++                        f = 3, this_1.c = 0;
+                         return "break";
+                     }
+                 }
+@@ -2396,15 +2413,20 @@ var Unzip = /*#__PURE__*/ (function () {
+             }
+             this.p = et;
+             if (oc < 0) {
+-                var dat = f ? buf.subarray(0, is - 12 - (oc == -2 && 8) - (b4(buf, is - 16) == 0x8074B50 && 4)) : buf.subarray(0, i);
++                var end = f ? de : (l > 24 ? l - 24 : 0);
++                var dat = buf.subarray(0, end);
++                this.b += end;
+                 if (add)
+                     add.push(dat, !!f);
+                 else
+                     this.k[+(f == 2)].push(dat);
++                if (!f)
++                    this.p = buf.subarray(end);
+             }
+             if (f & 2)
+                 return this.push(buf.subarray(i), final);
+-            this.p = buf.subarray(i);
++            if (!(oc < 0) || f)
++                this.p = buf.subarray(i);
+         }
+         if (final) {
+             if (this.c)

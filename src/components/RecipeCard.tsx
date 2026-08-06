@@ -97,6 +97,9 @@ export function RecipeCard({
       {!recipe.structure && presentation === 'image' && recipe.img ? (
         <RecipePreviewImage
           uri={data.imageUrl(recipeImagePath(dir, recipe.img))!}
+          backgroundUri={
+            recipe.bg ? data.imageUrl(recipeImagePath(dir, recipe.bg)) : undefined
+          }
           context={recipe.id ?? `${catTitle ?? dir} recipe`}
           style={[
             {width: previewSize.width, height: previewSize.height},

@@ -22,7 +22,12 @@ self.addEventListener('fetch', event => {
 
   event.respondWith(
     caches.open(LOCAL_PACK_CACHE).then(async cache => {
-      const response = await cache.match(event.request, {ignoreSearch: true});
+      // Export URLs carry an immutable dataset query for normal HTTP cache busting. Local pack
+      // entries are already isolated by their content-addressed publication ID, so remove only the
+      // query and perform an exact Cache API lookup. `ignoreSearch` may scan every entry in a large
+      // cache and can stall once a pack contains tens of thousands of files.
+      url.search = '';
+      const response = await cache.match(url.href);
       return response ?? new Response('Local pack file not found.', {
         status: 404,
         headers: {

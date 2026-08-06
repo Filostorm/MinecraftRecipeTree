@@ -409,6 +409,7 @@ async function packGtnhStructuredDataOnly() {
           if (!recipe || typeof recipe !== 'object' || Array.isArray(recipe)) return recipe;
           const {
             img: _image,
+            bg: _background,
             w: _width,
             h: _height,
             ...structuredRecipe
@@ -833,7 +834,13 @@ try {
         if (!recipe || typeof recipe !== 'object' || Array.isArray(recipe) || !('img' in recipe)) {
           return recipe;
         }
-        const {img: _image, w: _width, h: _height, ...structuredRecipe} = recipe;
+        const {
+          img: _image,
+          bg: _background,
+          w: _width,
+          h: _height,
+          ...structuredRecipe
+        } = recipe;
         strippedRecipeImageReferences += 1;
         return structuredRecipe;
       });

@@ -2,6 +2,14 @@
 
 Read the exact versioned docs at https://docs.expo.dev/versions/v56.0.0/ before writing any code.
 
+# GitHub authentication checks
+
+- The stored `Filostorm` GitHub CLI credential is expected to authenticate with `repo` and
+  `workflow` scopes. If `gh auth status` reports an invalid token inside the restricted Codex
+  sandbox, treat it as a possible network false negative and rerun the same check with network
+  permission before asking the user to reauthenticate. Never infer stale credentials solely from a
+  sandboxed authentication check.
+
 # Release environments
 
 - Use `beta` as the integration branch for application changes and `main` as the production branch.

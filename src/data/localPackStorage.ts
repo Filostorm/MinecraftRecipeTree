@@ -2,17 +2,24 @@ import {Unzip, UnzipInflate} from 'fflate';
 import type {DatasetDescriptor, DatasetSource} from './datasetCatalog.ts';
 import {
   MAX_EXPORT_ARCHIVE_ENTRIES,
+  isIgnoredArchiveMetadataPath,
   requireSafeArchivePath,
   type LocalPackManifestSummary,
 } from './localPackArchive.ts';
+import type {LocalPackDelta, LocalPackDeltaFile} from './localPackDelta.ts';
 
 const LOCAL_PACK_CACHE = 'minecraft-recipe-tree-local-packs-v1';
 const LOCAL_PACK_CATALOG_PATH = '/__local-packs/catalog.json';
 const LOCAL_PACK_ROUTE_PREFIX = '/__local-packs/';
+const LOCAL_PACK_INVENTORY_NAME = 'inventory.json';
 const ARCHIVE_READ_CHUNK_BYTES = 1024 * 1024;
+const CACHE_DELETE_BATCH_SIZE = 32;
+const CACHE_WRITE_CONCURRENCY = 4;
+const CACHE_WRITE_BACKLOG = 128;
 const MAX_LOCAL_PACKS = 24;
 const MAX_LOCAL_FILE_BYTES = 128 * 1024 * 1024;
 const LOCAL_CATALOG_FORMAT = 1;
+const LOCAL_INVENTORY_FORMAT = 1;
 
 interface LocalPackRecord extends DatasetDescriptor {
   storedAt: number;
@@ -21,6 +28,11 @@ interface LocalPackRecord extends DatasetDescriptor {
 interface LocalPackCatalog {
   format: typeof LOCAL_CATALOG_FORMAT;
   packs: LocalPackRecord[];
+}
+
+interface LocalPackInventory {
+  format: typeof LOCAL_INVENTORY_FORMAT;
+  paths: string[];
 }
 
 export interface InstalledLocalPack {
@@ -104,7 +116,7 @@ function catalogRequest(): Request {
 }
 
 async function readCatalog(cache: Cache): Promise<LocalPackCatalog> {
-  const response = await cache.match(catalogRequest(), {ignoreSearch: true});
+  const response = await cache.match(catalogRequest());
   if (!response) return emptyCatalog();
   try {
     return requireLocalPackCatalog(await response.json());
@@ -134,6 +146,12 @@ function localPackRequest(publicationId: string, relativePath: string): Request 
   return new Request(`${browserOrigin()}${localPackPath(publicationId, relativePath)}`);
 }
 
+function inventoryRequest(publicationId: string): Request {
+  return new Request(
+    `${browserOrigin()}${LOCAL_PACK_ROUTE_PREFIX}${publicationId}/${LOCAL_PACK_INVENTORY_NAME}`,
+  );
+}
+
 function contentType(path: string): string {
   const normalized = path.toLowerCase();
   if (normalized.endsWith('.json')) return 'application/json; charset=utf-8';
@@ -158,23 +176,101 @@ function hex(bytes: Uint8Array): string {
   return [...bytes].map(byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
-async function publicationIdForManifest(manifestBytes: Uint8Array): Promise<string> {
+async function sha256ForBytes(bytes: Uint8Array): Promise<string> {
   if (!globalThis.crypto?.subtle) {
     throw new Error('This browser cannot identify the pack safely.');
   }
-  const digestInput = new Uint8Array(manifestBytes.byteLength);
-  digestInput.set(manifestBytes);
+  const digestInput = new Uint8Array(bytes.byteLength);
+  digestInput.set(bytes);
   return hex(new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', digestInput.buffer)));
 }
 
-async function deletePublication(cache: Cache, publicationId: string): Promise<void> {
-  const prefix = `${browserOrigin()}${LOCAL_PACK_ROUTE_PREFIX}${publicationId}/`;
-  const requests = await cache.keys();
-  await Promise.all(
-    requests
-      .filter(request => request.url.startsWith(prefix))
-      .map(request => cache.delete(request)),
+async function publicationIdForManifest(manifestBytes: Uint8Array): Promise<string> {
+  return sha256ForBytes(manifestBytes);
+}
+
+function requireLocalPackInventory(value: unknown): LocalPackInventory {
+  if (
+    !isRecord(value) ||
+    value.format !== LOCAL_INVENTORY_FORMAT ||
+    !Array.isArray(value.paths) ||
+    value.paths.length > MAX_EXPORT_ARCHIVE_ENTRIES ||
+    !value.paths.every(
+      path => typeof path === 'string' && requireSafeArchivePath(path) === path,
+    )
+  ) {
+    throw new Error('The saved pack file list is unreadable.');
+  }
+  return {
+    format: LOCAL_INVENTORY_FORMAT,
+    paths: [...new Set(value.paths)],
+  };
+}
+
+async function readPublicationInventory(
+  cache: Cache,
+  publicationId: string,
+): Promise<readonly string[] | null> {
+  const response = await cache.match(inventoryRequest(publicationId));
+  if (!response) return null;
+  try {
+    return requireLocalPackInventory(await response.json()).paths;
+  } catch (error) {
+    console.error('A local pack file list could not be read.', error);
+    return null;
+  }
+}
+
+async function writePublicationInventory(
+  cache: Cache,
+  publicationId: string,
+  paths: Iterable<string>,
+): Promise<void> {
+  const inventory: LocalPackInventory = {
+    format: LOCAL_INVENTORY_FORMAT,
+    paths: [...new Set(paths)].sort(),
+  };
+  await cache.put(
+    inventoryRequest(publicationId),
+    new Response(JSON.stringify(inventory), {
+      headers: {
+        'Cache-Control': 'no-store',
+        'Content-Type': 'application/json; charset=utf-8',
+      },
+    }),
   );
+}
+
+async function deletePublicationPaths(
+  cache: Cache,
+  publicationId: string,
+  paths: readonly string[],
+): Promise<void> {
+  for (let offset = 0; offset < paths.length; offset += CACHE_DELETE_BATCH_SIZE) {
+    await Promise.all(
+      paths
+        .slice(offset, offset + CACHE_DELETE_BATCH_SIZE)
+        .map(path => cache.delete(localPackRequest(publicationId, path))),
+    );
+  }
+}
+
+async function deletePublication(
+  cache: Cache,
+  publicationId: string,
+  knownPaths?: Iterable<string>,
+): Promise<void> {
+  const paths = knownPaths
+    ? [...new Set(knownPaths)]
+    : await readPublicationInventory(cache, publicationId);
+  if (paths === null) {
+    console.warn(
+      `The legacy local pack ${publicationId} has no file inventory; its unreferenced cache files were left in place.`,
+    );
+    return;
+  }
+  await deletePublicationPaths(cache, publicationId, paths);
+  await cache.delete(inventoryRequest(publicationId));
 }
 
 export async function registerLocalPackServiceWorker(): Promise<void> {
@@ -235,6 +331,7 @@ export async function installLocalPackArchive(
   manifest: unknown,
   summary: LocalPackManifestSummary,
   onProgress: (progress: LocalPackInstallProgress) => void,
+  delta: LocalPackDelta | null = null,
 ): Promise<InstalledLocalPack> {
   await registerLocalPackServiceWorker();
   const publicationId = await publicationIdForManifest(manifestBytes);
@@ -249,28 +346,175 @@ export async function installLocalPackArchive(
   };
   const prefix = rootPrefix(manifestPath);
   const cache = await cacheApi().open(LOCAL_PACK_CACHE);
+  const initialCatalog = await readCatalog(cache);
+  const alreadyInstalled = initialCatalog.packs.find(
+    pack => pack.publicationId === publicationId,
+  );
+  if (alreadyInstalled) {
+    return {
+      descriptor,
+      viewerHref: `/?pack=${encodeURIComponent(descriptor.slug)}`,
+    };
+  }
+  if (delta !== null && delta.resultPublicationId !== publicationId) {
+    throw new Error('The update ZIP result does not match its manifest.');
+  }
+  const deltaBase = delta === null
+    ? null
+    : initialCatalog.packs.find(pack => pack.publicationId === delta.basePublicationId) ?? null;
+  if (delta !== null && deltaBase === null) {
+    throw new Error(
+      `Install the full ${delta.packName} export before adding this update ZIP.`,
+    );
+  }
+  if (
+    delta !== null &&
+    deltaBase !== null &&
+    (deltaBase.displayName !== delta.packName ||
+      deltaBase.minecraftVersion !== delta.minecraftVersion ||
+      (delta.baseVersion !== null && deltaBase.packVersion !== delta.baseVersion) ||
+      summary.packName !== delta.packName ||
+      summary.minecraftVersion !== delta.minecraftVersion ||
+      (delta.resultVersion !== null && summary.packVersion !== delta.resultVersion))
+  ) {
+    throw new Error('The update ZIP does not match the installed modpack.');
+  }
+  const deltaBasePaths = delta === null
+    ? null
+    : await readPublicationInventory(cache, delta.basePublicationId);
+  if (delta !== null && deltaBasePaths === null) {
+    throw new Error(
+      `Re-add the full ${delta.packName} export once before using update ZIPs.`,
+    );
+  }
+  const deltaFiles = delta === null
+    ? null
+    : new Map(delta.files.map(file => [file.path, file] as const));
+  const deltaDeletedPaths = delta === null ? null : new Set(delta.deletedPaths);
+  const deltaResultPaths = deltaBasePaths === null
+    ? null
+    : new Set(deltaBasePaths.filter(path => !deltaDeletedPaths?.has(path)));
+  if (deltaResultPaths !== null && deltaFiles !== null && delta !== null) {
+    for (const deletedPath of delta.deletedPaths) {
+      if (!deltaBasePaths?.includes(deletedPath)) {
+        throw new Error(`The installed full export does not contain ${deletedPath}.`);
+      }
+    }
+    for (const path of deltaFiles.keys()) deltaResultPaths.add(path);
+    if (deltaResultPaths.size !== delta.counts.resultFiles) {
+      throw new Error('The update ZIP does not match the installed export file list.');
+    }
+  }
+  const previousStoredPaths = await readPublicationInventory(cache, publicationId);
   const storedPaths = new Set<string>();
   let entryCount = 0;
   let archiveError: Error | null = null;
   let writeError: Error | null = null;
-  let writeQueue = Promise.resolve();
+  const writeLanes = Array.from({length: CACHE_WRITE_CONCURRENCY}, () => Promise.resolve());
+  const pendingWriteJobs = new Set<Promise<void>>();
+  let nextWriteLane = 0;
   let lastReportedPercent = 0;
   let queuedWrites = 0;
   let completedWrites = 0;
   let archiveReadComplete = false;
   let lastReportedSavePercent = -1;
+  const expectedWrites = delta === null ? null : Math.max(0, delta.counts.resultFiles - 1);
+
+  const queueCacheOperation = (operation: () => Promise<void>) => {
+    const lane = nextWriteLane;
+    nextWriteLane = (nextWriteLane + 1) % writeLanes.length;
+    queuedWrites += 1;
+    const job = writeLanes[lane]
+      .then(async () => {
+        if (writeError !== null) return;
+        await operation();
+        completedWrites += 1;
+        reportSaveProgress();
+      })
+      .catch(error => {
+        writeError = error instanceof Error ? error : new Error(String(error));
+      });
+    writeLanes[lane] = job;
+    pendingWriteJobs.add(job);
+    void job.finally(() => pendingWriteJobs.delete(job));
+  };
+
+  const queueCacheWrite = (
+    relativePath: string,
+    body: Blob,
+    expected: LocalPackDeltaFile | null,
+  ) => {
+    queueCacheOperation(async () => {
+      if (expected !== null) {
+        if (body.size !== expected.size) {
+          throw new Error(`The update ZIP has the wrong size for ${relativePath}.`);
+        }
+        const bodyHash = await sha256ForBytes(new Uint8Array(await body.arrayBuffer()));
+        if (bodyHash !== expected.sha256) {
+          throw new Error(`The update ZIP failed its integrity check for ${relativePath}.`);
+        }
+      }
+      await cache.put(
+        localPackRequest(publicationId, relativePath),
+        new Response(body, {
+          headers: {
+            'Cache-Control': 'no-store',
+            'Content-Type': contentType(relativePath),
+          },
+        }),
+      );
+    });
+  };
+
+  const queueCacheCopy = (relativePath: string) => {
+    if (delta === null) throw new Error('Internal update copy state is unavailable.');
+    queueCacheOperation(async () => {
+      const response = await cache.match(
+        localPackRequest(delta.basePublicationId, relativePath),
+      );
+      if (!response) {
+        throw new Error(
+          `The installed full export is missing ${relativePath}. Re-add the full export and try again.`,
+        );
+      }
+      await cache.put(localPackRequest(publicationId, relativePath), response);
+    });
+  };
+
+  const throwWriteFailure = (): never => {
+    const failure = writeError;
+    if (
+      failure !== null &&
+      (failure.message.startsWith('The update ZIP') ||
+        failure.message.startsWith('The installed full export'))
+    ) {
+      throw failure;
+    }
+    console.error('A local pack file could not be saved.', failure);
+    throw new Error('There is not enough browser storage to keep this pack.');
+  };
+
+  const applyWriteBackpressure = async () => {
+    while (pendingWriteJobs.size >= CACHE_WRITE_BACKLOG && writeError === null) {
+      await Promise.race(pendingWriteJobs);
+    }
+    if (writeError !== null) {
+      throwWriteFailure();
+    }
+  };
 
   const reportSaveProgress = () => {
     if (!archiveReadComplete) return;
-    const fraction = queuedWrites === 0 ? 1 : completedWrites / queuedWrites;
+    const totalWrites = expectedWrites ?? queuedWrites;
+    const fraction = totalWrites === 0 ? 1 : completedWrites / totalWrites;
     const percent = Math.floor(fraction * 100);
-    if (percent === lastReportedSavePercent && completedWrites !== queuedWrites) return;
+    if (percent === lastReportedSavePercent && completedWrites !== totalWrites) return;
     lastReportedSavePercent = percent;
     onProgress({
       phase: 'saving',
       fraction,
       completedFiles: completedWrites,
-      totalFiles: queuedWrites,
+      totalFiles: totalWrites,
     });
   };
 
@@ -284,13 +528,20 @@ export async function installLocalPackArchive(
     let safePath: string;
     try {
       safePath = requireSafeArchivePath(entry.name);
-    } catch {
-      archiveError = new Error('This ZIP contains a file path that cannot be opened safely.');
+    } catch (error) {
+      archiveError = error instanceof Error ? error : new Error(String(error));
       return;
     }
     if (entry.name.endsWith('/')) return;
     const relativePath = relativeExportPath(safePath, prefix);
     if (relativePath === null || relativePath.length === 0) return;
+    if (isIgnoredArchiveMetadataPath(relativePath)) return;
+    if (delta !== null && relativePath === 'delta.json') return;
+    const expectedDeltaFile = deltaFiles?.get(relativePath) ?? null;
+    if (delta !== null && expectedDeltaFile === null) {
+      archiveError = new Error(`The update ZIP contains an undeclared file: ${relativePath}.`);
+      return;
+    }
     if (storedPaths.has(relativePath)) {
       archiveError = new Error(`The ZIP contains the same file twice: ${relativePath}`);
       return;
@@ -299,6 +550,14 @@ export async function installLocalPackArchive(
 
     if (entry.originalSize !== undefined && entry.originalSize > MAX_LOCAL_FILE_BYTES) {
       archiveError = new Error(`The file ${relativePath} is too large to open in the viewer.`);
+      return;
+    }
+    if (
+      expectedDeltaFile !== null &&
+      entry.originalSize !== undefined &&
+      entry.originalSize !== expectedDeltaFile.size
+    ) {
+      archiveError = new Error(`The update ZIP has the wrong size for ${relativePath}.`);
       return;
     }
 
@@ -325,24 +584,7 @@ export async function installLocalPackArchive(
       }
       const body = new Blob(chunks, {type: contentType(relativePath)});
       chunks = [];
-      queuedWrites += 1;
-      writeQueue = writeQueue
-        .then(async () => {
-          await cache.put(
-            localPackRequest(publicationId, relativePath),
-            new Response(body, {
-              headers: {
-                'Cache-Control': 'no-store',
-                'Content-Type': contentType(relativePath),
-              },
-            }),
-          );
-          completedWrites += 1;
-          reportSaveProgress();
-        })
-        .catch(error => {
-          writeError = error instanceof Error ? error : new Error(String(error));
-        });
+      queueCacheWrite(relativePath, body, expectedDeltaFile);
     };
     try {
       entry.start();
@@ -362,18 +604,39 @@ export async function installLocalPackArchive(
         throw new Error('The ZIP could not be opened.');
       }
       if (archiveError !== null) throw archiveError;
+      await applyWriteBackpressure();
       const percent = Math.floor((end / file.size) * 100);
       if (percent > lastReportedPercent || end === file.size) {
         lastReportedPercent = percent;
         onProgress({phase: 'reading', fraction: end / file.size});
       }
     }
-    archiveReadComplete = true;
-    reportSaveProgress();
-    await writeQueue;
+    if (delta !== null && deltaFiles !== null && deltaResultPaths !== null) {
+      for (const expectedPath of deltaFiles.keys()) {
+        if (!storedPaths.has(expectedPath)) {
+          throw new Error(`The update ZIP is missing ${expectedPath}.`);
+        }
+      }
+      archiveReadComplete = true;
+      reportSaveProgress();
+      const unchangedPaths = [...deltaResultPaths]
+        .filter(path => !deltaFiles.has(path))
+        .sort();
+      for (const unchangedPath of unchangedPaths) {
+        storedPaths.add(unchangedPath);
+        queueCacheCopy(unchangedPath);
+        await applyWriteBackpressure();
+      }
+      if (queuedWrites !== expectedWrites) {
+        throw new Error('The update ZIP produced an inconsistent saved file count.');
+      }
+    } else {
+      archiveReadComplete = true;
+      reportSaveProgress();
+    }
+    await Promise.all(writeLanes);
     if (writeError !== null) {
-      console.error('A local pack file could not be saved.', writeError);
-      throw new Error('There is not enough browser storage to keep this pack.');
+      throwWriteFailure();
     }
 
     onProgress({phase: 'finalizing'});
@@ -397,6 +660,12 @@ export async function installLocalPackArchive(
         },
       }),
     );
+    await writePublicationInventory(cache, publicationId, storedPaths);
+
+    if (previousStoredPaths !== null) {
+      const stalePaths = previousStoredPaths.filter(path => !storedPaths.has(path));
+      await deletePublicationPaths(cache, publicationId, stalePaths);
+    }
 
     const current = await readCatalog(cache);
     const superseded = current.packs.filter(
@@ -417,18 +686,24 @@ export async function installLocalPackArchive(
     await writeCatalog(cache, {format: LOCAL_CATALOG_FORMAT, packs: nextPacks});
 
     const retainedIds = new Set(nextPacks.map(pack => pack.publicationId));
-    await Promise.all(
-      [...superseded, ...retained.slice(MAX_LOCAL_PACKS - 1)]
-        .filter(pack => !retainedIds.has(pack.publicationId))
-        .map(pack => deletePublication(cache, pack.publicationId)),
-    );
+    const publicationsToDelete = [
+      ...new Set(
+        [...superseded, ...retained.slice(MAX_LOCAL_PACKS - 1)]
+          .filter(pack => !retainedIds.has(pack.publicationId))
+          .map(pack => pack.publicationId),
+      ),
+    ];
+    for (const oldPublicationId of publicationsToDelete) {
+      await deletePublication(cache, oldPublicationId);
+    }
 
     return {
       descriptor,
       viewerHref: `/?pack=${encodeURIComponent(descriptor.slug)}`,
     };
   } catch (error) {
-    await deletePublication(cache, publicationId).catch(cleanupError => {
+    await Promise.all(writeLanes);
+    await deletePublication(cache, publicationId, storedPaths).catch(cleanupError => {
       console.error('An incomplete local pack could not be removed.', cleanupError);
     });
     throw error;

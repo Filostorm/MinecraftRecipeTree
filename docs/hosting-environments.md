@@ -15,6 +15,10 @@ The canonical hostname remains in the existing `craftsmann-subdomain-signal` and
 `craftsmann-app-subdomain-router` chain. At cutover, the app router uses a service binding to the
 standalone production Worker. DNS does not change.
 
+The canonical beta endpoint is `https://minecraft-recipe-tree-beta.gtjoe51.workers.dev`. Use it for
+all beta acceptance testing and links. The previous `chatgpt.site` beta endpoint and the obsolete
+`https://minecraftrecipetree.pages.dev` export are not the active beta application.
+
 ## Branch-specific configuration
 
 The `beta` branch retains `.openai/hosting.json` only so the temporary Sites migration bridge can be

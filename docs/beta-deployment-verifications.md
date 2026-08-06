@@ -75,3 +75,29 @@ Deployment status was `succeeded`. The production build, TypeScript validation, 
 A mobile-width, hydrated, end-to-end Worker session reproduced the prior failure as an uncaught 24-pixel ItemIcon alignment error, then passed the repaired flow from the exact deployed archive. Tapping the expanded Iron Ingot starting node kept the graph visible, opened the compact controls, increased the requested amount from 1 to 2, opened the ingredient recipe picker from `Change recipe`, and opened the 1,192-entry usage picker from `Add used by`. The hashed application and GraphScreen assets loaded successfully, and no new render errors appeared after the repair. `/api/datasets` returned HTTP 200 with `X-MRT-Beta-Data-Origin: https://minecraftrecipetree.craftsmannsoftware.com`.
 
 The beta runtime environment remains exactly `BETA_DATA_ORIGIN=https://minecraftrecipetree.craftsmannsoftware.com`. A fresh tab to the deployed private URL reached the Sites sign-in flow, so live-hostname hydration remains blocked without an owner session. Production was not changed.
+
+## 2026-08-02 — ZIP path diagnostics and canonicalization
+
+- Application base commit: `fc473ef`
+- Cloudflare Worker version: `2189195d-4200-48f2-a38b-c3b8b0c78076`
+- URL: `https://minecraft-recipe-tree-beta.gtjoe51.workers.dev`
+
+The Cloudflare beta deployment succeeded from a clean `beta` snapshot containing only the scoped
+ZIP-path changes. Nine focused archive inspection, storage, and upload-message tests passed, and the
+Cloudflare beta production build completed successfully. The broader data suite retained 11
+pre-existing failures in Cloudflare routing and remote preview-verification tests; none exercise the
+local ZIP upload path.
+
+A fresh hydrated browser session accepted a synthetic exporter ZIP whose entries used harmless `./`
+segments and added it to the local viewer without warnings. Unsafe entries continue to reject path
+traversal, absolute paths, Windows separators, null characters, and ambiguous empty path segments;
+the rejection now displays the exact ZIP entry and reason. The initially requested user ZIP was
+processed only in the user's browser and was no longer available, so its historical offending entry
+could not be recovered.
+
+The first fresh-tab check briefly received HTTP 404 for a newly deployed hashed asset during Worker
+asset propagation and logged the hydration failure. The same canonical asset subsequently returned
+HTTP 200 with immutable caching, a fresh reload hydrated successfully, and the interactive upload
+passed. `/api/datasets` returned HTTP 200 with
+`X-MRT-Beta-Data-Origin: https://minecraftrecipetree.craftsmannsoftware.com`. Production was not
+changed.

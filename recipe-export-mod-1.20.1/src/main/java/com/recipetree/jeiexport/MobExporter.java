@@ -52,6 +52,7 @@ final class MobExporter implements ExportJob.PhaseRunner {
     private final JsonArray mobsJson = new JsonArray();
     private int done;
     private boolean written;
+    private boolean mobCacheAvailable = true;
 
     MobExporter(ExportContext ctx) {
         this.ctx = ctx;
@@ -70,6 +71,9 @@ final class MobExporter implements ExportJob.PhaseRunner {
         ResourceLocation id = ForgeRegistries.ENTITY_TYPES.getKey(type);
         if (id == null) {
             ctx.failure("mob registry entry has no resource id: " + type);
+            return !iterator.hasNext();
+        }
+        if (reuseMob(id)) {
             return !iterator.hasNext();
         }
         Entity entity = null;
@@ -92,6 +96,32 @@ final class MobExporter implements ExportJob.PhaseRunner {
             }
         }
         return !iterator.hasNext();
+    }
+
+    private boolean reuseMob(ResourceLocation id) {
+        if (ctx.previous == null || !mobCacheAvailable) {
+            return false;
+        }
+        try {
+            JsonObject previousMob = ctx.previous.mob(id);
+            if (previousMob == null || !previousMob.has("icon")) {
+                return false;
+            }
+            String icon = previousMob.get("icon").getAsString();
+            if (!ctx.reserveAndReusePreviousFile(icon, icon)) {
+                return false;
+            }
+            mobsJson.add(previousMob.deepCopy());
+            ctx.mobCount++;
+            ctx.reusedMobs++;
+            return true;
+        } catch (IOException cacheFailure) {
+            mobCacheAvailable = false;
+            JeiExportMod.LOGGER.warn(
+                    "[jeiexport] Mob cache lookup failed; rendering remaining mobs again",
+                    cacheFailure);
+            return false;
+        }
     }
 
     private boolean exportMob(EntityType<?> type, ResourceLocation id, LivingEntity entity) {

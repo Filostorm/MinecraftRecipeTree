@@ -1321,7 +1321,13 @@ function normalizeRawRecipe(recipe, categoryId, recipeIndex) {
   const label = `Raw category ${JSON.stringify(categoryId)} recipe ${recipeIndex}`;
   if (!isRecord(recipe)) throw new Error(`${label} must be an object.`);
   if (!hasOwn(recipe, 'img')) return recipe;
-  const {img: _image, w: _width, h: _height, ...structuredRecipe} = recipe;
+  const {
+    img: _image,
+    bg: _background,
+    w: _width,
+    h: _height,
+    ...structuredRecipe
+  } = recipe;
   return structuredRecipe;
 }
 
@@ -1331,7 +1337,7 @@ function assertRecipeIdentity(rawRecipe, hostedRecipe, categoryId, recipeIndex) 
     throw new Error(`Hosted ${label} must be an object.`);
   }
   const rawHasImage = isRecord(rawRecipe) && hasOwn(rawRecipe, 'img');
-  if (rawHasImage && ['img', 'w', 'h'].some(key => hasOwn(hostedRecipe, key))) {
+  if (rawHasImage && ['img', 'bg', 'w', 'h'].some(key => hasOwn(hostedRecipe, key))) {
     throw new Error(
       `Hosted ${label} retains img, w, or h after the declared recipe-preview omission transform.`,
     );

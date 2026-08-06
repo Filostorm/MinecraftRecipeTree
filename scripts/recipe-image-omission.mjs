@@ -45,6 +45,15 @@ export async function collectDeclaredRecipePngOmissions(exportRoot, recipeMetada
       }
       keys.add(assetKey);
       references += 1;
+      if ('bg' in recipe) {
+        if (typeof recipe.bg !== 'string' || !recipe.bg.endsWith('.png')) {
+          throw new Error(
+            `${documentKey}[${recipeIndex}].bg must reference its original PNG for omission; ` +
+              `received ${JSON.stringify(recipe.bg)}.`,
+          );
+        }
+        keys.add(normalizedLogicalRecipePngPath(categoryDirectory, recipe.bg));
+      }
     }
   }
   return {keys, references};
