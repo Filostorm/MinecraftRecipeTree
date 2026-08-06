@@ -75,6 +75,16 @@ type UploadState =
     }
   | {status: 'error'; filename: string | null; message: string};
 
+type CheckingUploadState = Extract<UploadState, {status: 'checking'}>;
+type UploadPhase = CheckingUploadState['phase'];
+
+const UPLOAD_PHASES: readonly {phase: UploadPhase; label: string}[] = [
+  {phase: 'checking', label: 'Check ZIP'},
+  {phase: 'adding', label: 'Read files'},
+  {phase: 'saving', label: 'Save locally'},
+  {phase: 'finalizing', label: 'Prepare viewer'},
+];
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -318,6 +328,60 @@ function formatProgressPercent(progress: number): string {
   if (progress <= 0) return 'Starting';
   if (progress < 0.01) return '<1%';
   return `${Math.round(progress * 100)}%`;
+}
+
+function UploadStageProgress({state}: {state: CheckingUploadState}) {
+  const activeIndex = UPLOAD_PHASES.findIndex(stage => stage.phase === state.phase);
+  return (
+    <span className={styles.uploadStages} aria-label="Import stages">
+      {UPLOAD_PHASES.map((stage, index) => {
+        const completed = index < activeIndex;
+        const active = index === activeIndex;
+        const indeterminate = active && stage.phase === 'finalizing';
+        const fraction = completed ? 1 : active && !indeterminate ? state.progress : 0;
+        const detail = completed
+          ? 'Done'
+          : !active
+            ? 'Waiting'
+            : stage.phase === 'saving'
+              ? `${state.completedFiles?.toLocaleString() ?? 0} / ${
+                  state.totalFiles?.toLocaleString() ?? 0
+                } files`
+              : stage.phase === 'adding'
+                ? `${formatProgressPercent(state.progress)} · ${
+                    state.discoveredFiles?.toLocaleString() ?? 0
+                  } files`
+                : stage.phase === 'finalizing'
+                  ? 'Working…'
+                  : formatProgressPercent(state.progress);
+        return (
+          <span
+            key={stage.phase}
+            className={[
+              styles.uploadStage,
+              completed ? styles.uploadStageComplete : '',
+              active ? styles.uploadStageActive : '',
+            ].filter(Boolean).join(' ')}>
+            <span className={styles.uploadStageLabel}>{stage.label}</span>
+            <span
+              className={[
+                styles.uploadStageTrack,
+                indeterminate ? styles.uploadStageTrackWaiting : '',
+              ].filter(Boolean).join(' ')}
+              style={{'--upload-stage-progress': `${fraction * 100}%`} as CSSProperties}
+              role="progressbar"
+              aria-label={stage.label}
+              aria-valuemin={indeterminate ? undefined : 0}
+              aria-valuemax={indeterminate ? undefined : 100}
+              aria-valuenow={indeterminate ? undefined : Math.round(fraction * 100)}>
+              <span className={styles.uploadStageFill} />
+            </span>
+            <span className={styles.uploadStageDetail}>{detail}</span>
+          </span>
+        );
+      })}
+    </span>
+  );
 }
 
 export function PackUploadDropzone() {
@@ -592,38 +656,7 @@ export function PackUploadDropzone() {
                         : ''}`
             : 'or tap to add a file'}
         </span>
-        {state.status === 'checking' && (
-          <span
-            className={[
-              styles.uploadProgress,
-              state.phase === 'finalizing'
-                ? styles.uploadProgressWaiting
-                : '',
-            ].filter(Boolean).join(' ')}
-            style={{'--upload-progress': `${state.progress * 100}%`} as CSSProperties}
-            role="progressbar"
-            aria-label={
-              state.phase === 'finalizing'
-                  ? 'Preparing pack for the viewer'
-                  : state.phase === 'saving'
-                    ? 'Saving pack files'
-                    : state.phase === 'adding'
-                      ? 'Reading pack files'
-                      : 'Checking pack'
-            }
-            aria-valuemin={
-              state.phase === 'finalizing' ? undefined : 0
-            }
-            aria-valuemax={
-              state.phase === 'finalizing' ? undefined : 100
-            }
-            aria-valuenow={
-              state.phase === 'finalizing'
-                ? undefined
-                : Math.round(state.progress * 100)
-            }
-          />
-        )}
+        {state.status === 'checking' && <UploadStageProgress state={state} />}
       </label>
 
       <div className={styles.uploadResult} aria-live="polite">
