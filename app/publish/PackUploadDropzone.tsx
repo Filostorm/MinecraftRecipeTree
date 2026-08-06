@@ -29,6 +29,7 @@ import {
   sendExportFailureReport,
   type ExportFailureReport,
 } from '../../src/data/exportFailureReport';
+import {readLocalFileSlice} from '../../src/data/localFileReader';
 import {localPackUploadErrorMessage} from '../../src/data/localPackUploadError';
 import styles from './publish.module.css';
 
@@ -146,7 +147,6 @@ async function inspectPackArchive(
     chunks: Uint8Array[];
     skipped: boolean;
   }>();
-  let lastReportedPercent = 0;
 
   const unzip = new Unzip(entry => {
     entry.ondata = error => {
@@ -250,19 +250,18 @@ async function inspectPackArchive(
   for (let offset = 0; offset < file.size; offset += ARCHIVE_READ_CHUNK_BYTES) {
     if (!isCurrent()) throw new Error('Archive check was replaced by a newer file.');
     const end = Math.min(offset + ARCHIVE_READ_CHUNK_BYTES, file.size);
-    const chunk = new Uint8Array(await file.slice(offset, end).arrayBuffer());
+    const chunk = await readLocalFileSlice(file, offset, end, loadedBytes => {
+      if (loadedBytes < end - offset && isCurrent()) {
+        onProgress((offset + loadedBytes) / file.size);
+      }
+    });
     try {
       unzip.push(chunk, end === file.size);
     } catch (error) {
       throw new Error(`The selected file is not a readable ZIP archive: ${errorMessage(error)}`);
     }
     if (archiveError !== null) throw archiveError;
-    const progress = end / file.size;
-    const percent = Math.floor(progress * 100);
-    if (percent > lastReportedPercent || end === file.size) {
-      lastReportedPercent = percent;
-      onProgress(progress);
-    }
+    onProgress(end / file.size);
   }
 
   if (manifestPath === null) {
@@ -337,13 +336,15 @@ function UploadStageProgress({state}: {state: CheckingUploadState}) {
       {UPLOAD_PHASES.map((stage, index) => {
         const completed = index < activeIndex;
         const active = index === activeIndex;
-        const indeterminate = active && stage.phase === 'finalizing';
+        const indeterminate = active && (stage.phase === 'finalizing' || state.progress <= 0);
         const fraction = completed ? 1 : active && !indeterminate ? state.progress : 0;
         const detail = completed
           ? 'Done'
           : !active
             ? 'Waiting'
-            : stage.phase === 'saving'
+            : state.progress <= 0 && stage.phase !== 'finalizing'
+              ? 'Opening…'
+              : stage.phase === 'saving'
               ? `${state.completedFiles?.toLocaleString() ?? 0} / ${
                   state.totalFiles?.toLocaleString() ?? 0
                 } files`

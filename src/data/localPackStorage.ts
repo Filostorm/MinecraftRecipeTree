@@ -1,4 +1,5 @@
 import {Unzip, UnzipInflate} from 'fflate';
+import {readLocalFileSlice} from './localFileReader.ts';
 import type {DatasetDescriptor, DatasetSource} from './datasetCatalog.ts';
 import {
   MAX_EXPORT_ARCHIVE_ENTRIES,
@@ -616,7 +617,16 @@ export async function installLocalPackArchive(
   try {
     for (let offset = 0; offset < file.size; offset += ARCHIVE_READ_CHUNK_BYTES) {
       const end = Math.min(offset + ARCHIVE_READ_CHUNK_BYTES, file.size);
-      const chunk = new Uint8Array(await file.slice(offset, end).arrayBuffer());
+      const chunk = await readLocalFileSlice(file, offset, end, loadedBytes => {
+        if (loadedBytes >= end - offset) return;
+        onProgress({
+          phase: 'reading',
+          fraction: (offset + loadedBytes) / file.size,
+          completedBytes: offset + loadedBytes,
+          totalBytes: file.size,
+          discoveredFiles: storedPaths.size,
+        });
+      });
       try {
         unzip.push(chunk, end === file.size);
       } catch {

@@ -4,6 +4,7 @@ function errorMessage(error: unknown): string {
 
 export function localPackUploadErrorMessage(error: unknown): string {
   const message = errorMessage(error);
+  if (message.startsWith('The browser could not read ')) return message;
   if (message.includes('empty')) {
     return 'This ZIP is empty. Run the exporter again and choose the new ZIP.';
   }
