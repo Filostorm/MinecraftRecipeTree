@@ -51,6 +51,37 @@ const LazyGraphScreen = React.lazy(async () => {
   return {default: module.GraphScreen};
 });
 
+class GraphErrorBoundary extends React.Component<
+  {children: React.ReactNode; onReturnToItems(): void},
+  {failed: boolean}
+> {
+  state = {failed: false};
+
+  static getDerivedStateFromError(): {failed: boolean} {
+    return {failed: true};
+  }
+
+  componentDidCatch(error: unknown, info: React.ErrorInfo): void {
+    console.error('The graph workspace stopped rendering.', {error, componentStack: info.componentStack});
+  }
+
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <View style={styles.graphRecovery} accessibilityRole="alert">
+        <Text style={styles.errorTitle}>This tree could not be drawn</Text>
+        <Text style={styles.errorText}>
+          The rest of Recipe Tree is still available. Return to Browse and open the output again;
+          large trees now render only the visible area.
+        </Text>
+        <TouchableOpacity style={styles.reloadBtn} onPress={this.props.onReturnToItems}>
+          <Text style={styles.reloadBtnText}>Return to Browse</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+}
+
 export default function App() {
   return (
     <SafeAreaProvider initialMetrics={initialWindowMetrics}>
@@ -267,7 +298,7 @@ function Shell({
 }) {
   const data = useData();
   const recipeStages = useRecipeStages();
-  const {tab} = useUi();
+  const {tab, setTab, graphRequestId} = useUi();
   const {width} = useWindowDimensions();
   const [hasHydrated, setHasHydrated] = useState(Platform.OS !== 'web');
   const compactHeader = hasHydrated && width < 720;
@@ -545,22 +576,26 @@ function Shell({
               Platform.OS !== 'web' && tab !== 'graph' ? 'no-hide-descendants' : 'auto'
             }>
             {data.indexStatus === 'ready' ? (
-              <Suspense
-                fallback={
-                  <View style={styles.center}>
-                    <ActivityIndicator color={theme.accent} size="large" />
-                    <Text style={styles.loadingText}>loading graph workspace…</Text>
-                  </View>
-                }>
-                <LazyGraphScreen
-                  interfaceZoom={interfaceZoom}
-                  showGraphControls={showGraphControls}
-                  onToggleGraphControls={() =>
-                    setShowGraphControls(value => !value)
-                  }
-                  controlsToggleInHeader={compactHeader}
-                />
-              </Suspense>
+              <GraphErrorBoundary
+                key={graphRequestId}
+                onReturnToItems={() => setTab('items')}>
+                <Suspense
+                  fallback={
+                    <View style={styles.center}>
+                      <ActivityIndicator color={theme.accent} size="large" />
+                      <Text style={styles.loadingText}>loading graph workspace…</Text>
+                    </View>
+                  }>
+                  <LazyGraphScreen
+                    interfaceZoom={interfaceZoom}
+                    showGraphControls={showGraphControls}
+                    onToggleGraphControls={() =>
+                      setShowGraphControls(value => !value)
+                    }
+                    controlsToggleInHeader={compactHeader}
+                  />
+                </Suspense>
+              </GraphErrorBoundary>
             ) : (
               <View style={styles.center}>
                 {data.indexStatus !== 'error' && (
@@ -747,6 +782,13 @@ const styles = StyleSheet.create({
     borderColor: theme.accent,
   },
   reloadBtnText: {color: theme.accent, fontSize: 13, fontWeight: '700'},
+  graphRecovery: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+    backgroundColor: theme.bg,
+  },
   shell: {flex: 1, minHeight: 0},
   headerDetails: {gap: 7},
   compactHeaderNavigation: {

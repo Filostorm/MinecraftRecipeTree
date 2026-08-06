@@ -145,6 +145,7 @@ import type {
   TreeTotal,
   TreeTotals,
 } from './treeTotals';
+import {visibleGraphElements} from './viewportCulling';
 import {
   findTreeTotalTarget,
   type TreeTotalTargetKind,
@@ -513,6 +514,7 @@ export function GraphScreen({
     setTransform(next);
   }, []);
   const viewportRef = useRef({w: 0, h: 0});
+  const [viewportSize, setViewportSize] = useState({w: 0, h: 0});
   const needsFitRef = useRef(false);
   const wrapRef = useRef<View>(null);
   const anchorRef = useRef<View>(null);
@@ -1648,21 +1650,38 @@ export function GraphScreen({
     persistGraphSession(data.descriptor, root, graphDirection);
   }, [data.descriptor, graphDirection, root, version]);
 
-  const graph = useMemo(
-    () =>
-      root
-        ? radialLayout
-          ? layoutRadialTree(
-              root,
-              compactMode,
-              graphDirection === 'outputs'
-                ? item => usagesFor(item.key).length === 0
-                : undefined,
-              true,
-              showRootActions,
-            )
-          : layoutTree(root, compactMode, true, showRootActions)
-        : null,
+  const graphLayout = useMemo(() => {
+    if (!root) return {graph: null, fallback: null as string | null};
+    if (!radialLayout) {
+      return {
+        graph: layoutTree(root, compactMode, true, showRootActions),
+        fallback: null as string | null,
+      };
+    }
+    try {
+      return {
+        graph: layoutRadialTree(
+          root,
+          compactMode,
+          graphDirection === 'outputs'
+            ? item => usagesFor(item.key).length === 0
+            : undefined,
+          true,
+          showRootActions,
+        ),
+        fallback: null as string | null,
+      };
+    } catch (error) {
+      console.error(
+        'Radial layout could not place this tree; the standard large-tree layout is being used.',
+        error,
+      );
+      return {
+        graph: layoutTree(root, compactMode, true, showRootActions),
+        fallback: 'This tree is too complex for Radial placement, so the standard layout is shown.',
+      };
+    }
+  },
     [
       root,
       version,
@@ -1672,6 +1691,16 @@ export function GraphScreen({
       usagesFor,
       showRootActions,
     ],
+  );
+  const graph = graphLayout.graph;
+  const renderedGraph = useMemo(
+    () =>
+      graph
+        ? exportingTree
+          ? {nodes: graph.nodes, edges: graph.edges, culled: false}
+          : visibleGraphElements(graph, transform, viewportSize)
+        : null,
+    [exportingTree, graph, transform, viewportSize],
   );
   const graphRef = useRef(graph);
   graphRef.current = graph;
@@ -2291,10 +2320,16 @@ export function GraphScreen({
         ref={setCanvasRef}
         style={[styles.canvas, noSelect]}
         onLayout={e => {
-          viewportRef.current = {
+          const nextViewport = {
             w: e.nativeEvent.layout.width,
             h: e.nativeEvent.layout.height,
           };
+          viewportRef.current = nextViewport;
+          setViewportSize(current =>
+            current.w === nextViewport.w && current.h === nextViewport.h
+              ? current
+              : nextViewport,
+          );
           // The graph tab mounts hidden; fit once it actually gets a size.
           if (needsFitRef.current && fitView()) {
             needsFitRef.current = false;
@@ -2316,7 +2351,7 @@ export function GraphScreen({
               ],
             },
           ]}>
-          {graph?.edges.map((e, i) => (
+          {renderedGraph?.edges.map((e, i) => (
             <View
               key={`e${i}`}
               style={[
@@ -2334,7 +2369,7 @@ export function GraphScreen({
               ]}
             />
           ))}
-          {graph?.nodes.map(n =>
+          {renderedGraph?.nodes.map(n =>
             compactMode || n.radial ? (
               <CompactItemNodeView
                 key={n.id}
@@ -2451,6 +2486,12 @@ export function GraphScreen({
           )}
         </View>
       </View>
+
+      {graphLayout.fallback && (
+        <View style={styles.layoutFallbackNotice} accessibilityRole="alert">
+          <Text style={[styles.layoutFallbackText, noSelect]}>{graphLayout.fallback}</Text>
+        </View>
+      )}
 
       <View style={styles.controls}>
         {showGraphControls && (
@@ -3806,6 +3847,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 6,
   },
+  layoutFallbackNotice: {
+    position: 'absolute',
+    left: 62,
+    bottom: 10,
+    maxWidth: 420,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderWidth: 1,
+    borderColor: theme.warn,
+    borderRadius: 8,
+    backgroundColor: 'rgba(23,29,38,0.96)',
+  },
+  layoutFallbackText: {color: theme.warn, fontSize: 10, lineHeight: 14},
   recipeLookupBackdrop: {
     position: 'absolute',
     top: 0,
