@@ -41,6 +41,7 @@ final class MobExporter implements ExportJob.PhaseRunner {
     private static final int FPS = 10;
     /** Ticks of game time advanced between frames (20tps / 10fps). */
     private static final int TICKS_PER_FRAME = 2;
+    private static final int RENDER_REVISION = 2;
     private static final int DROP_ROLLS = 600;
     /** Custom hooks are typically deterministic; enough rolls to catch uncommon modded rewards. */
     private static final int CUSTOM_DROP_ROLLS = 64;
@@ -104,13 +105,18 @@ final class MobExporter implements ExportJob.PhaseRunner {
         float scale = Math.min(canvas * 0.85f / effectiveW, canvas * 0.85f / effectiveH);
         float feetY = canvas / 2f + (bbHeight * scale) / 2f;
 
-        // Sprite sheet: render the mob FRAMES times into one wide framebuffer, advancing
-        // game time and the walk cycle between frames so idle/walk animations play.
+        // Keep every pose inside its square. Long modded tails can extend beyond the
+        // entity AABB and would otherwise be written into a neighboring frame.
         NativeImage sheet = ctx.renderer.capture(canvas * FRAMES, canvas, g -> {
-            for (int frame = 0; frame < FRAMES; frame++) {
-                entity.tickCount += TICKS_PER_FRAME;
-                entity.walkAnimation.update(0.6f, 1.0f);
-                renderEntity(g, frame * canvas + canvas / 2f, feetY, scale, entity);
+            try {
+                for (int frame = 0; frame < FRAMES; frame++) {
+                    entity.tickCount += TICKS_PER_FRAME;
+                    entity.walkAnimation.update(0.6f, 1.0f);
+                    RenderSystem.enableScissor(frame * canvas, 0, canvas, canvas);
+                    renderEntity(g, frame * canvas + canvas / 2f, feetY, scale, entity);
+                }
+            } finally {
+                RenderSystem.disableScissor();
             }
         });
         if (!hasVisiblePixel(sheet)) {
@@ -128,6 +134,7 @@ final class MobExporter implements ExportJob.PhaseRunner {
         mj.addProperty("icon", rel);
         mj.addProperty("frames", FRAMES);
         mj.addProperty("fps", FPS);
+        mj.addProperty("renderRevision", RENDER_REVISION);
         mj.addProperty("w", bbWidth);
         mj.addProperty("h", bbHeight);
         try {
