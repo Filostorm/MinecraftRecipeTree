@@ -84,6 +84,7 @@ import {preferredSourceTargets} from './preferencePropagation';
 import {automaticGraphFitScale} from './fitScale';
 import {
   capturePanGestureOrigin,
+  graphDisplayTransform,
   graphPinchZoomFactor,
   graphViewportPointFromClient,
   graphWheelZoomFactor,
@@ -507,6 +508,10 @@ export function GraphScreen({
   const [transform, setTransform] = useState<GraphTransform>({x: 60, y: 60, scale: 1});
   const transformRef = useRef(transform);
   transformRef.current = transform;
+  const displayTransform = graphDisplayTransform(
+    transform,
+    Platform.OS === 'web' && typeof window !== 'undefined' ? window.devicePixelRatio : 1,
+  );
   const applyTransform = useCallback((next: GraphTransform) => {
     // Gesture events may arrive before React commits the preceding render. Keep
     // the imperative reference synchronized so every event sees the newest transform.
@@ -2347,13 +2352,18 @@ export function GraphScreen({
           style={[
             styles.anchor,
             Platform.OS !== 'web' && styles.nativeAnchor,
-            {
-              transform: [
-                {translateX: transform.x},
-                {translateY: transform.y},
-                {scale: transform.scale},
-              ],
-            },
+            Platform.OS === 'web' && displayTransform.nativeScale
+              ? {
+                  left: displayTransform.x,
+                  top: displayTransform.y,
+                }
+              : {
+                  transform: [
+                    {translateX: displayTransform.x},
+                    {translateY: displayTransform.y},
+                    {scale: displayTransform.scale},
+                  ],
+                },
           ]}>
           {renderedGraph?.edges.map((e, i) => (
             <View

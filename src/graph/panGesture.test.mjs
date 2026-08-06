@@ -2,11 +2,31 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   capturePanGestureOrigin,
+  graphDisplayTransform,
   graphPinchZoomFactor,
   graphViewportPointFromClient,
   graphWheelZoomFactor,
   transformForPanGesture,
 } from './panGesture.ts';
+
+test('native graph scale avoids composited scaling and snaps to physical pixels', () => {
+  assert.deepEqual(graphDisplayTransform({x: 10.24, y: 20.26, scale: 1}, 2), {
+    x: 10,
+    y: 20.5,
+    scale: 1,
+    nativeScale: true,
+  });
+  assert.deepEqual(graphDisplayTransform({x: 10.24, y: 20.26, scale: 0.8}, 2), {
+    x: 10,
+    y: 20.5,
+    scale: 0.8,
+    nativeScale: false,
+  });
+  assert.throws(
+    () => graphDisplayTransform({x: 0, y: 0, scale: 1}, 0),
+    /positive finite values/,
+  );
+});
 
 test('wheel coordinates map displayed bounds into the logical graph viewport', () => {
   assert.deepEqual(
