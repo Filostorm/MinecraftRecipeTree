@@ -8,7 +8,7 @@ import {
   transformForPanGesture,
 } from './panGesture.ts';
 
-test('wheel coordinates compensate for interface-level CSS zoom', () => {
+test('wheel coordinates map displayed bounds into the logical graph viewport', () => {
   assert.deepEqual(
     graphViewportPointFromClient(
       450,

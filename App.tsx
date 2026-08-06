@@ -45,6 +45,10 @@ import {
   persistInterfaceZoom,
 } from './src/ui/interfaceZoom';
 import {signalTarget, useSignalSurface} from './src/analytics/signal';
+import {
+  graphRenderRecovery,
+  type GraphRenderRecovery,
+} from './src/graph/graphRenderError';
 
 const LazyGraphScreen = React.lazy(async () => {
   const module = await import('./src/graph/GraphScreen');
@@ -53,30 +57,41 @@ const LazyGraphScreen = React.lazy(async () => {
 
 class GraphErrorBoundary extends React.Component<
   {children: React.ReactNode; onReturnToItems(): void},
-  {failed: boolean}
+  {recovery: GraphRenderRecovery | null}
 > {
-  state = {failed: false};
+  state: {recovery: GraphRenderRecovery | null} = {recovery: null};
 
-  static getDerivedStateFromError(): {failed: boolean} {
-    return {failed: true};
+  static getDerivedStateFromError(error: unknown): {recovery: GraphRenderRecovery} {
+    return {recovery: graphRenderRecovery(error)};
   }
 
   componentDidCatch(error: unknown, info: React.ErrorInfo): void {
-    console.error('The graph workspace stopped rendering.', {error, componentStack: info.componentStack});
+    console.error('The graph workspace stopped rendering.', {
+      error,
+      kind: graphRenderRecovery(error).kind,
+      componentStack: info.componentStack,
+    });
   }
 
   render() {
-    if (!this.state.failed) return this.props.children;
+    const recovery = this.state.recovery;
+    if (!recovery) return this.props.children;
     return (
       <View style={styles.graphRecovery} accessibilityRole="alert">
-        <Text style={styles.errorTitle}>This tree could not be drawn</Text>
-        <Text style={styles.errorText}>
-          The rest of Recipe Tree is still available. Return to Browse and open the output again;
-          large trees now render only the visible area.
-        </Text>
-        <TouchableOpacity style={styles.reloadBtn} onPress={this.props.onReturnToItems}>
-          <Text style={styles.reloadBtnText}>Return to Browse</Text>
-        </TouchableOpacity>
+        <Text style={styles.errorTitle}>{recovery.title}</Text>
+        <Text style={styles.errorText}>{recovery.message}</Text>
+        <View style={styles.graphRecoveryActions}>
+          <TouchableOpacity
+            style={[styles.reloadBtn, styles.graphRecoveryButton]}
+            onPress={() => this.setState({recovery: null})}>
+            <Text style={styles.reloadBtnText}>Try again</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.reloadBtn, styles.graphRecoveryButton]}
+            onPress={this.props.onReturnToItems}>
+            <Text style={styles.reloadBtnText}>Return to Browse</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   }
@@ -347,7 +362,7 @@ function Shell({
       console.error('Interface zoom could not be saved.', error);
     }
   };
-  const scaledWorkspaceStyle =
+  const scaledMobsWorkspaceStyle =
     Platform.OS === 'web'
       ? ({
           zoom: interfaceZoom,
@@ -564,7 +579,6 @@ function Shell({
           <View
             style={[
               styles.body,
-              scaledWorkspaceStyle,
               Platform.OS !== 'web' && styles.nativeWorkspacePane,
               Platform.OS !== 'web' && tab === 'graph' && styles.nativeWorkspacePaneActive,
               Platform.OS !== 'web' && tab !== 'graph' && styles.nativeWorkspacePaneInactive,
@@ -623,7 +637,7 @@ function Shell({
             <View
               style={[
                 styles.body,
-                scaledWorkspaceStyle,
+                scaledMobsWorkspaceStyle,
                 Platform.OS !== 'web' && styles.nativeWorkspacePane,
                 Platform.OS !== 'web' && tab === 'mobs' && styles.nativeWorkspacePaneActive,
                 Platform.OS !== 'web' && tab !== 'mobs' && styles.nativeWorkspacePaneInactive,
@@ -789,6 +803,14 @@ const styles = StyleSheet.create({
     padding: 24,
     backgroundColor: theme.bg,
   },
+  graphRecoveryActions: {
+    marginTop: 18,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  graphRecoveryButton: {marginTop: 0},
   shell: {flex: 1, minHeight: 0},
   headerDetails: {gap: 7},
   compactHeaderNavigation: {
