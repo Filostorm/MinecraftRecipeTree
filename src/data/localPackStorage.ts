@@ -3,6 +3,7 @@ import type {DatasetDescriptor, DatasetSource} from './datasetCatalog.ts';
 import {
   MAX_EXPORT_ARCHIVE_ENTRIES,
   isIgnoredArchiveMetadataPath,
+  localPackVersionLabel,
   requireSafeArchivePath,
   type LocalPackManifestSummary,
 } from './localPackArchive.ts';
@@ -339,7 +340,7 @@ export async function installLocalPackArchive(
     slug: `local-${publicationId.slice(0, 16)}`,
     displayName: summary.packName,
     minecraftVersion: summary.minecraftVersion,
-    packVersion: summary.packVersion ?? 'Unknown',
+    packVersion: localPackVersionLabel(summary.packVersion),
     publicationId,
     previewAssetSetId: publicationId,
     isDefault: false,

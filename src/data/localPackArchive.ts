@@ -3,6 +3,7 @@ const MINECRAFT_VERSION_PATTERN = /^[0-9A-Za-z][0-9A-Za-z.+_-]{0,39}$/u;
 
 export const MAX_EXPORT_MANIFEST_BYTES = 256 * 1024;
 export const MAX_EXPORT_ARCHIVE_ENTRIES = 1_000_000;
+export const LOCAL_PACK_UNVERSIONED_VERSION = 'Unversioned';
 
 export type LocalPackCountKey =
   | 'items'
@@ -22,6 +23,10 @@ export interface LocalPackManifestSummary {
   readonly warningEvents: number;
   readonly readyForHandoff: boolean;
   readonly findings: readonly string[];
+}
+
+export function localPackVersionLabel(packVersion: string | null): string {
+  return packVersion ?? LOCAL_PACK_UNVERSIONED_VERSION;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -177,10 +182,12 @@ export function requireLocalPackManifest(value: unknown): LocalPackManifestSumma
     findings.push('This ZIP only contains a small test. Run a full export and upload that ZIP.');
   }
   if (packVersion === null) {
-    findings.push('The pack version is missing. Open the pack through CurseForge and export it again.');
+    findings.push(
+      `No pack version was supplied. This custom pack will be saved as ${LOCAL_PACK_UNVERSIONED_VERSION}.`,
+    );
   }
   if (identitySource === 'game-directory') {
-    findings.push('The pack name could not be confirmed. Open it through CurseForge and export it again.');
+    findings.push(`Using the instance name “${packName}” for this custom pack.`);
   }
   if (counts.failures > 0) {
     findings.push(
@@ -207,9 +214,7 @@ export function requireLocalPackManifest(value: unknown): LocalPackManifestSumma
     warningEvents,
     readyForHandoff:
       !value.aborted &&
-      value.qualitySample === undefined &&
-      packVersion !== null &&
-      identitySource !== 'game-directory',
+      value.qualitySample === undefined,
     findings: Object.freeze(findings),
   });
 }

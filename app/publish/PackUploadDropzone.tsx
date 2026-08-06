@@ -13,6 +13,7 @@ import {
   isIgnoredArchiveMetadataPath,
   MAX_EXPORT_ARCHIVE_ENTRIES,
   MAX_EXPORT_MANIFEST_BYTES,
+  localPackVersionLabel,
   requireLocalPackManifest,
   requireSafeArchivePath,
   type LocalPackManifestSummary,
@@ -609,7 +610,7 @@ export function PackUploadDropzone() {
             <dl className={styles.uploadFacts}>
               <div>
                 <dt>Pack version</dt>
-                <dd>{state.summary.packVersion ?? 'Missing'}</dd>
+                <dd>{localPackVersionLabel(state.summary.packVersion)}</dd>
               </div>
               <div>
                 <dt>Minecraft</dt>
