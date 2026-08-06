@@ -66,7 +66,32 @@ test('desktop uses natural physical pixels without the previous 360px ceiling', 
   });
 });
 
+test('applies interface zoom to recipe previews without overflowing the card', () => {
+  const mobileWidth = measuredListWidth(390);
+  assert.deepEqual(responsiveRecipePreviewSize(124, 62, 2, mobileWidth, 0.75), {
+    width: 186,
+    height: 93,
+    scale: 1.5,
+    mode: 'fractional-downscale',
+  });
+  assert.deepEqual(responsiveRecipePreviewSize(124, 62, 2, mobileWidth, 1.5), {
+    width: 306,
+    height: 153,
+    scale: 306 / 124,
+    mode: 'fractional-upscale',
+  });
+
+  const desktopWidth = measuredListWidth(1440);
+  assert.deepEqual(responsiveRecipePreviewSize(192, 228, 2, desktopWidth, 1.5), {
+    width: 576,
+    height: 684,
+    scale: 3,
+    mode: 'integer-upscale',
+  });
+});
+
 test('rejects invalid layout inputs rather than silently inventing a size', () => {
   assert.throws(() => recipeCardImageMaxWidth(0), /positive finite/);
-  assert.throws(() => responsiveRecipePreviewSize(124, 62, 0, 328), /positive safe integers/);
+  assert.throws(() => responsiveRecipePreviewSize(124, 62, 0, 328), /positive values/);
+  assert.throws(() => responsiveRecipePreviewSize(124, 62, 2, 328, 0), /positive values/);
 });
