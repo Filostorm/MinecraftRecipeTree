@@ -53,6 +53,9 @@ type UploadState =
       filename: string;
       progress: number;
       phase: 'checking' | 'adding' | 'saving' | 'finalizing';
+      completedBytes: number;
+      totalBytes: number;
+      discoveredFiles?: number;
       completedFiles?: number;
       totalFiles?: number;
     }
@@ -311,6 +314,12 @@ function formatBytes(bytes: number): string {
   return `${value.toFixed(value >= 10 ? 1 : 2)} ${unit}`;
 }
 
+function formatProgressPercent(progress: number): string {
+  if (progress <= 0) return 'Starting';
+  if (progress < 0.01) return '<1%';
+  return `${Math.round(progress * 100)}%`;
+}
+
 export function PackUploadDropzone() {
   const inputRef = useRef<HTMLInputElement>(null);
   const operationRef = useRef(0);
@@ -335,7 +344,14 @@ export function PackUploadDropzone() {
     operationRef.current = operation;
     pendingFailureReportRef.current = null;
     reportSubmissionRef.current = false;
-    setState({status: 'checking', filename: file.name, progress: 0, phase: 'checking'});
+    setState({
+      status: 'checking',
+      filename: file.name,
+      progress: 0,
+      phase: 'checking',
+      completedBytes: 0,
+      totalBytes: file.size,
+    });
     try {
       const result = await inspectPackArchive(
         file,
@@ -346,6 +362,8 @@ export function PackUploadDropzone() {
             filename: file.name,
             progress: fraction,
             phase: 'checking',
+            completedBytes: Math.min(file.size, Math.round(file.size * fraction)),
+            totalBytes: file.size,
           });
         },
         () => operationRef.current === operation,
@@ -359,7 +377,15 @@ export function PackUploadDropzone() {
       let reportStatus: 'sending' | 'sent' | 'duplicate' | 'failed' | null = null;
       let reportAvailable = false;
       if (result.summary.readyForHandoff) {
-        setState({status: 'checking', filename: file.name, progress: 0, phase: 'adding'});
+        setState({
+          status: 'checking',
+          filename: file.name,
+          progress: 0,
+          phase: 'adding',
+          completedBytes: 0,
+          totalBytes: file.size,
+          discoveredFiles: 0,
+        });
         try {
           const installed = await installLocalPackArchive(
             file,
@@ -375,6 +401,8 @@ export function PackUploadDropzone() {
                   filename: file.name,
                   progress: progress.fraction,
                   phase: 'saving',
+                  completedBytes: file.size,
+                  totalBytes: file.size,
                   completedFiles: progress.completedFiles,
                   totalFiles: progress.totalFiles,
                 });
@@ -386,6 +414,8 @@ export function PackUploadDropzone() {
                   filename: file.name,
                   progress: 1,
                   phase: 'finalizing',
+                  completedBytes: file.size,
+                  totalBytes: file.size,
                 });
                 return;
               }
@@ -394,6 +424,9 @@ export function PackUploadDropzone() {
                 filename: file.name,
                 progress: progress.fraction,
                 phase: 'adding',
+                completedBytes: progress.completedBytes,
+                totalBytes: progress.totalBytes,
+                discoveredFiles: progress.discoveredFiles,
               });
             },
             result.delta,
@@ -546,9 +579,17 @@ export function PackUploadDropzone() {
                   ? `${state.completedFiles?.toLocaleString() ?? 0} of ${
                       state.totalFiles?.toLocaleString() ?? 0
                     } files saved`
-                  : `${Math.round(state.progress * 100)}% ${
-                      state.phase === 'adding' ? 'read' : 'checked'
-                    }`
+                  : state.progress <= 0
+                    ? state.phase === 'adding'
+                      ? 'Starting file scan…'
+                      : 'Starting archive check…'
+                    : `${formatBytes(state.completedBytes)} of ${formatBytes(
+                        state.totalBytes,
+                      )} ${state.phase === 'adding' ? 'read' : 'checked'} · ${
+                        formatProgressPercent(state.progress)
+                      }${state.phase === 'adding'
+                        ? ` · ${state.discoveredFiles?.toLocaleString() ?? 0} files found`
+                        : ''}`
             : 'or tap to add a file'}
         </span>
         {state.status === 'checking' && (

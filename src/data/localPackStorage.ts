@@ -42,7 +42,13 @@ export interface InstalledLocalPack {
 }
 
 export type LocalPackInstallProgress =
-  | {phase: 'reading'; fraction: number}
+  | {
+      phase: 'reading';
+      fraction: number;
+      completedBytes: number;
+      totalBytes: number;
+      discoveredFiles: number;
+    }
   | {phase: 'saving'; fraction: number; completedFiles: number; totalFiles: number}
   | {phase: 'finalizing'};
 
@@ -414,7 +420,6 @@ export async function installLocalPackArchive(
   const writeLanes = Array.from({length: CACHE_WRITE_CONCURRENCY}, () => Promise.resolve());
   const pendingWriteJobs = new Set<Promise<void>>();
   let nextWriteLane = 0;
-  let lastReportedPercent = 0;
   let queuedWrites = 0;
   let completedWrites = 0;
   let archiveReadComplete = false;
@@ -605,12 +610,14 @@ export async function installLocalPackArchive(
         throw new Error('The ZIP could not be opened.');
       }
       if (archiveError !== null) throw archiveError;
+      onProgress({
+        phase: 'reading',
+        fraction: end / file.size,
+        completedBytes: end,
+        totalBytes: file.size,
+        discoveredFiles: storedPaths.size,
+      });
       await applyWriteBackpressure();
-      const percent = Math.floor((end / file.size) * 100);
-      if (percent > lastReportedPercent || end === file.size) {
-        lastReportedPercent = percent;
-        onProgress({phase: 'reading', fraction: end / file.size});
-      }
     }
     if (delta !== null && deltaFiles !== null && deltaResultPaths !== null) {
       for (const expectedPath of deltaFiles.keys()) {

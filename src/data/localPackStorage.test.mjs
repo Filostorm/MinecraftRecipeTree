@@ -139,7 +139,13 @@ test('reports file-saving and finalization after archive reading reaches 100%', 
       update => updates.push(update),
     );
 
-    assert.deepEqual(updates[0], {phase: 'reading', fraction: 1});
+    assert.deepEqual(updates[0], {
+      phase: 'reading',
+      fraction: 1,
+      completedBytes: file.size,
+      totalBytes: file.size,
+      discoveredFiles: 4,
+    });
     const saving = updates.filter(update => update.phase === 'saving');
     assert.deepEqual(saving[0], {
       phase: 'saving',
