@@ -517,7 +517,13 @@ export function PackUploadDropzone() {
           }
         } catch (error) {
           console.error('The checked pack could not be added to the viewer.', error);
-          findings = Object.freeze([...findings, localPackUploadErrorMessage(error)]);
+          if (operationRef.current !== operation) return;
+          setState({
+            status: 'error',
+            filename: file.name,
+            message: localPackUploadErrorMessage(error),
+          });
+          return;
         }
       }
       if (operationRef.current !== operation) return;
@@ -676,7 +682,7 @@ export function PackUploadDropzone() {
                     : 'READY IN VIEWER'
                   : 'WE FOUND A PROBLEM'}
               </span>
-              <a href={state.viewerHref}>View pack</a>
+              {state.saved && <a href={state.viewerHref}>View pack</a>}
             </div>
             <h3>{state.summary.packName}</h3>
             <p className={styles.uploadFilename}>

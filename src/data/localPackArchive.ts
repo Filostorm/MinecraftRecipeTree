@@ -188,7 +188,7 @@ export function requireLocalPackManifest(value: unknown): LocalPackManifestSumma
     findings.push(
       `${counts.failures.toLocaleString()} recipe${
         counts.failures === 1 ? '' : 's'
-      } could not be exported. The rest of the pack can still be opened. Use “Share exporter errors” after import if you want to report them.`,
+      } could not be exported, so they are not included in this ZIP. After a successful import, use “Share exporter errors” if you want to report them.`,
     );
   }
   if (warningEvents > 0) {

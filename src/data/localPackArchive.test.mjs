@@ -86,8 +86,9 @@ test('allows a completed export with reported failures to load with a warning', 
     },
   }));
   assert.equal(summary.readyForHandoff, true);
-  assert.match(summary.findings.join('\n'), /rest of the pack can still be opened/);
-  assert.match(summary.findings.join('\n'), /Share exporter errors.*after import/);
+  assert.match(summary.findings.join('\n'), /not included in this ZIP/);
+  assert.match(summary.findings.join('\n'), /After a successful import.*Share exporter errors/);
+  assert.doesNotMatch(summary.findings.join('\n'), /rest of the pack can still be opened/);
 });
 
 test('allows a named custom pack without a version to install and report failures', () => {
