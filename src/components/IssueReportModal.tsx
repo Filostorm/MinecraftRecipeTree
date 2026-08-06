@@ -235,7 +235,7 @@ export function IssueReportModal({
                 </Text>
                 <Text style={styles.diagnosticsNote}>
                   Includes dataset IDs, exporter time, item and recipe counts, browser, platform,
-                  viewport, and the active graph item. It does not include your files or IP address.
+                  viewport, and the active graph item.
                 </Text>
               </View>
 
