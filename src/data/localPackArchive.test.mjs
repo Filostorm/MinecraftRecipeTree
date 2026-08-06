@@ -68,7 +68,7 @@ test('keeps structurally valid incomplete exports visible with actionable findin
     diagnostics: {warningEvents: 2},
   }));
   assert.equal(summary.readyForHandoff, false);
-  assert.equal(summary.findings.length, 6);
+  assert.equal(summary.findings.length, 5);
   assert.match(summary.findings.join('\n'), /stopped before it finished/);
   assert.match(summary.findings.join('\n'), /small test/);
   assert.match(summary.findings.join('\n'), /4 recipes could not be exported/);
@@ -110,7 +110,7 @@ test('allows a named custom pack without a version to install and report failure
   assert.equal(summary.packName, 'My Custom Tech Pack');
   assert.equal(summary.packVersion, null);
   assert.equal(localPackVersionLabel(summary.packVersion), 'Unversioned');
-  assert.match(summary.findings.join('\n'), /custom pack will be saved as Unversioned/);
+  assert.doesNotMatch(summary.findings.join('\n'), /pack version|Unversioned/i);
   assert.match(summary.findings.join('\n'), /instance name “My Custom Tech Pack”/);
   assert.match(summary.findings.join('\n'), /74 recipes could not be exported/);
   assert.match(summary.findings.join('\n'), /Share exporter errors/);

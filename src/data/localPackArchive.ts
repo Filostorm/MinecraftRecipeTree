@@ -181,11 +181,6 @@ export function requireLocalPackManifest(value: unknown): LocalPackManifestSumma
   if (value.qualitySample !== undefined) {
     findings.push('This ZIP only contains a small test. Run a full export and upload that ZIP.');
   }
-  if (packVersion === null) {
-    findings.push(
-      `No pack version was supplied. This custom pack will be saved as ${LOCAL_PACK_UNVERSIONED_VERSION}.`,
-    );
-  }
   if (identitySource === 'game-directory') {
     findings.push(`Using the instance name “${packName}” for this custom pack.`);
   }

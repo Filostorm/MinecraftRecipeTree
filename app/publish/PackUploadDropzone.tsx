@@ -642,7 +642,7 @@ export function PackUploadDropzone() {
                     : 'READY IN VIEWER'
                   : 'WE FOUND A PROBLEM'}
               </span>
-              <a href={state.viewerHref}>Return to viewer</a>
+              <a href={state.viewerHref}>View pack</a>
             </div>
             <h3>{state.summary.packName}</h3>
             <p className={styles.uploadFilename}>

@@ -4,7 +4,11 @@ import {readFile} from 'node:fs/promises';
 import test from 'node:test';
 import {strToU8, zipSync} from 'fflate';
 
-const {installLocalPackArchive, registerLocalPackServiceWorker} = await import('./localPackStorage.ts');
+const {
+  installLocalPackArchive,
+  listLocalPackDescriptors,
+  registerLocalPackServiceWorker,
+} = await import('./localPackStorage.ts');
 
 test('service worker preparation has a bounded failure instead of blocking catalog loading', async () => {
   const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
@@ -208,6 +212,18 @@ test('reports file-saving and finalization after archive reading reaches 100%', 
       ?.clone()
       .json();
     assert.deepEqual(catalog.packs.map(pack => pack.packVersion), ['1.0.1']);
+    assert.deepEqual(
+      (await listLocalPackDescriptors()).map(pack => ({
+        slug: pack.slug,
+        displayName: pack.displayName,
+        packVersion: pack.packVersion,
+      })),
+      [{
+        slug: installed.descriptor.slug,
+        displayName: 'Progress Pack',
+        packVersion: '1.0.1',
+      }],
+    );
   } finally {
     if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
     else delete globalThis.window;

@@ -21,6 +21,7 @@ const MAX_LOCAL_PACKS = 24;
 const MAX_LOCAL_FILE_BYTES = 128 * 1024 * 1024;
 const LOCAL_CATALOG_FORMAT = 1;
 const LOCAL_INVENTORY_FORMAT = 1;
+export const LOCAL_PACK_CATALOG_CHANGED_EVENT = 'mrt:local-pack-catalog-changed';
 
 interface LocalPackRecord extends DatasetDescriptor {
   storedAt: number;
@@ -122,6 +123,16 @@ function catalogRequest(): Request {
   return new Request(`${browserOrigin()}${LOCAL_PACK_CATALOG_PATH}`);
 }
 
+function notifyLocalPackCatalogChanged(): void {
+  if (
+    typeof window !== 'undefined' &&
+    typeof window.dispatchEvent === 'function' &&
+    typeof Event === 'function'
+  ) {
+    window.dispatchEvent(new Event(LOCAL_PACK_CATALOG_CHANGED_EVENT));
+  }
+}
+
 async function readCatalog(cache: Cache): Promise<LocalPackCatalog> {
   const response = await cache.match(catalogRequest());
   if (!response) return emptyCatalog();
@@ -143,6 +154,7 @@ async function writeCatalog(cache: Cache, catalog: LocalPackCatalog): Promise<vo
       },
     }),
   );
+  notifyLocalPackCatalogChanged();
 }
 
 function localPackPath(publicationId: string, relativePath: string): string {
@@ -358,6 +370,7 @@ export async function installLocalPackArchive(
     pack => pack.publicationId === publicationId,
   );
   if (alreadyInstalled) {
+    notifyLocalPackCatalogChanged();
     return {
       descriptor,
       viewerHref: `/?pack=${encodeURIComponent(descriptor.slug)}`,
