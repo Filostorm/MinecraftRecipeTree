@@ -519,10 +519,9 @@ function Shell({
         <Text
           style={[
             styles.issueReportHeaderText,
-            Platform.OS !== 'web' && styles.nativeHeaderMenuText,
             showIssueReport && styles.guideHeaderIconActive,
           ]}>
-          {Platform.OS === 'web' ? '! Report' : '!  Report a bug'}
+          🐛
         </Text>
       </TouchableOpacity>
       {recipeStages.catalog.stages.length > 0 && (
@@ -975,8 +974,8 @@ const styles = StyleSheet.create({
   recipeStagesHeaderButton: {width: 'auto', minWidth: 72, paddingHorizontal: 8},
   recipeStagesHeaderText: {color: theme.text, fontSize: 11, fontWeight: '800'},
   recipeStagesHeaderTextActive: {color: theme.accent},
-  issueReportHeaderButton: {width: 'auto', minWidth: 72, paddingHorizontal: 9},
-  issueReportHeaderText: {color: theme.text, fontSize: 11, fontWeight: '800'},
+  issueReportHeaderButton: {width: 34, minWidth: 34, paddingHorizontal: 0},
+  issueReportHeaderText: {color: theme.text, fontSize: 17, lineHeight: 20},
   guideHeaderIcon: {color: theme.text, fontSize: 16, fontWeight: '800'},
   guideHeaderIconActive: {color: theme.accent},
   nativeHeaderMenuText: {color: theme.text, fontSize: 12, fontWeight: '700'},
