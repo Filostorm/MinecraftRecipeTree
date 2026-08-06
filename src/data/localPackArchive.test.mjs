@@ -85,7 +85,7 @@ test('allows a completed export with recipe failures to load with a warning', ()
   }));
   assert.equal(summary.readyForHandoff, true);
   assert.match(summary.findings.join('\n'), /rest of the pack can still be opened/);
-  assert.match(summary.findings.join('\n'), /failure report will be sent automatically/);
+  assert.match(summary.findings.join('\n'), /Share exporter errors.*after import/);
 });
 
 test('rejects malformed manifest metadata instead of inventing fallback values', () => {
