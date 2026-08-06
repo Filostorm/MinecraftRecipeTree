@@ -184,9 +184,9 @@ export function requireLocalPackManifest(value: unknown): LocalPackManifestSumma
   }
   if (counts.failures > 0) {
     findings.push(
-      `The exporter recorded ${counts.failures.toLocaleString()} issue${
+      `${counts.failures.toLocaleString()} recipe${
         counts.failures === 1 ? '' : 's'
-      }. The rest of the pack can still be opened, and the failure report will be sent automatically.`,
+      } could not be exported. The rest of the pack can still be opened. Use “Share exporter errors” after import if you want to report them.`,
     );
   }
   if (warningEvents > 0) {
