@@ -5,7 +5,7 @@ import styles from './feedback.module.css';
 
 interface FeedbackReport {
   id: string;
-  kind: 'bug' | 'feature';
+  kind: 'bug' | 'feedback' | 'feature';
   title: string;
   message: string;
   contact: string | null;
@@ -88,7 +88,7 @@ export default function FeedbackPage() {
         <section className={styles.intro}>
           <p className={styles.eyebrow}>OPERATOR TOOL</p>
           <h1>Feedback inbox</h1>
-          <p>Review bug reports and feature requests submitted through the graph guide.</p>
+          <p>Review bug reports and feedback submitted through the Recipe Tree app.</p>
         </section>
 
         {inbox.status !== 'ready' ? (
@@ -138,7 +138,7 @@ export default function FeedbackPage() {
                   <article className={styles.report} key={report.id}>
                     <div className={styles.reportHeading}>
                       <span className={report.kind === 'bug' ? styles.bug : styles.feature}>
-                        {report.kind === 'bug' ? 'Bug report' : 'Feature request'}
+                        {report.kind === 'bug' ? 'Bug report' : 'Feedback'}
                       </span>
                       <time dateTime={new Date(report.createdAt).toISOString()}>
                         {formatDate(report.createdAt)}

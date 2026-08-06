@@ -7,7 +7,7 @@ import {
 
 export const FEEDBACK_ROUTE = '/api/feedback';
 
-const MAX_REQUEST_BYTES = 8192;
+const MAX_REQUEST_BYTES = 16 * 1024;
 const MAX_TITLE_LENGTH = 120;
 const MAX_MESSAGE_LENGTH = 2000;
 const MAX_CONTACT_LENGTH = 254;
@@ -20,7 +20,35 @@ const PRODUCTION_ORIGINS = new Set([
   'https://minecraft-recipe-tree.gtjoe51.chatgpt.site',
 ]);
 
-type FeedbackKind = 'bug' | 'feature';
+const GITHUB_ISSUES_API = 'https://api.github.com/repos/Filostorm/MinecraftRecipeTree/issues';
+const DIAGNOSTIC_KEYS = [
+  'packVersion',
+  'minecraftVersion',
+  'publicationId',
+  'previewAssetSetId',
+  'exportGeneratedAt',
+  'exportFormat',
+  'itemCount',
+  'recipeCount',
+  'categoryCount',
+  'modCount',
+  'activeTab',
+  'openItemKey',
+  'graphRootKey',
+  'graphDirection',
+  'interfaceZoom',
+  'platform',
+  'userAgent',
+  'viewport',
+  'language',
+  'online',
+] as const;
+
+type FeedbackKind = 'bug' | 'feedback' | 'feature';
+type SubmittedFeedbackKind = 'bug' | 'feedback';
+type GitHubFetch = typeof fetch;
+
+type FeedbackDiagnostics = Record<(typeof DIAGNOSTIC_KEYS)[number], string>;
 
 interface FeedbackPayload {
   kind?: unknown;
@@ -31,6 +59,116 @@ interface FeedbackPayload {
   packName?: unknown;
   page?: unknown;
   website?: unknown;
+  diagnostics?: unknown;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function parseDiagnostics(value: unknown): FeedbackDiagnostics | null {
+  if (!isRecord(value)) return null;
+  const keys = Object.keys(value).sort();
+  const expected = [...DIAGNOSTIC_KEYS].sort();
+  if (keys.length !== expected.length || keys.some((key, index) => key !== expected[index])) {
+    return null;
+  }
+  const diagnostics = {} as FeedbackDiagnostics;
+  for (const key of DIAGNOSTIC_KEYS) {
+    const maximum = key === 'userAgent' ? 512 : key.endsWith('Id') ? 128 : 200;
+    const parsed = textField(value[key], maximum);
+    if (parsed === null) return null;
+    diagnostics[key] = parsed;
+  }
+  return diagnostics;
+}
+
+function inlineCode(value: string): string {
+  return `\`${value.replace(/`/gu, 'ˋ')}\``;
+}
+
+function issueBody(
+  id: string,
+  kind: SubmittedFeedbackKind,
+  message: string,
+  packSlug: string,
+  packName: string,
+  page: string,
+  diagnostics: FeedbackDiagnostics,
+  userAgent: string,
+): string {
+  return [
+    `<!-- mrt-user-report:${id} -->`,
+    kind === 'bug' ? '## What happened?' : '## Feedback',
+    message,
+    '',
+    '## Diagnostics',
+    `- Modpack: ${inlineCode(packName || 'Unavailable')} (${inlineCode(packSlug || 'Unavailable')})`,
+    `- Pack version: ${inlineCode(diagnostics.packVersion || 'Unavailable')}`,
+    `- Minecraft: ${inlineCode(diagnostics.minecraftVersion || 'Unavailable')}`,
+    `- Dataset publication: ${inlineCode(diagnostics.publicationId || 'Unavailable')}`,
+    `- Preview set: ${inlineCode(diagnostics.previewAssetSetId || 'Unavailable')}`,
+    `- Export generated: ${inlineCode(diagnostics.exportGeneratedAt || 'Unavailable')}`,
+    `- Export format: ${inlineCode(diagnostics.exportFormat || 'Unavailable')}`,
+    `- Catalog: ${inlineCode(`${diagnostics.itemCount || '?'} items · ${diagnostics.recipeCount || '?'} recipes · ${diagnostics.categoryCount || '?'} categories · ${diagnostics.modCount || '?'} mods`)}`,
+    `- Active view: ${inlineCode(`${diagnostics.activeTab || 'Unavailable'} · ${diagnostics.graphDirection || 'Unavailable'}`)}`,
+    `- Open item: ${inlineCode(diagnostics.openItemKey || 'None')}`,
+    `- Graph root: ${inlineCode(diagnostics.graphRootKey || 'None')}`,
+    `- Page: ${inlineCode(page || 'Unavailable')}`,
+    `- Interface zoom: ${inlineCode(diagnostics.interfaceZoom || 'Unavailable')}`,
+    `- Platform: ${inlineCode(diagnostics.platform || 'Unavailable')}`,
+    `- Viewport: ${inlineCode(diagnostics.viewport || 'Unavailable')}`,
+    `- Language: ${inlineCode(diagnostics.language || 'Unavailable')}`,
+    `- Online: ${inlineCode(diagnostics.online || 'Unavailable')}`,
+    `- Browser: ${inlineCode(userAgent || diagnostics.userAgent || 'Unavailable')}`,
+  ].join('\n');
+}
+
+async function publishGitHubIssue(
+  id: string,
+  kind: SubmittedFeedbackKind,
+  title: string,
+  message: string,
+  packSlug: string,
+  packName: string,
+  page: string,
+  diagnostics: FeedbackDiagnostics,
+  userAgent: string,
+  token: string,
+  githubFetch: GitHubFetch,
+): Promise<string> {
+  const response = await githubFetch(GITHUB_ISSUES_API, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/vnd.github+json',
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'User-Agent': 'Minecraft-Recipe-Tree-Feedback',
+      'X-GitHub-Api-Version': '2022-11-28',
+    },
+    body: JSON.stringify({
+      title: `${kind === 'bug' ? '[Bug]' : '[Feedback]'} ${title}`.slice(0, 240),
+      body: issueBody(
+        id,
+        kind,
+        message,
+        packSlug,
+        packName,
+        page,
+        diagnostics,
+        userAgent,
+      ),
+      labels: [kind === 'bug' ? 'bug' : 'enhancement'],
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`GitHub issue creation failed with status ${response.status}.`);
+  }
+  const value = await response.json() as {html_url?: unknown};
+  if (typeof value.html_url !== 'string' || !value.html_url.startsWith('https://github.com/')) {
+    throw new Error('GitHub issue creation returned an invalid issue URL.');
+  }
+  return value.html_url;
 }
 
 interface FeedbackReportRecord {
@@ -163,6 +301,7 @@ export async function handleFeedback(
   request: Request,
   runtime: DatasetRuntime,
   requestUrl: URL,
+  githubFetch: GitHubFetch = fetch,
 ): Promise<Response> {
   if (request.method === 'GET') return listFeedback(request, runtime);
   if (request.method !== 'POST') return methodNotAllowed('GET, POST');
@@ -200,14 +339,18 @@ export async function handleFeedback(
     return noStoreJson({submitted: true}, 202);
   }
 
-  const kind: FeedbackKind | null =
-    payload.kind === 'bug' || payload.kind === 'feature' ? payload.kind : null;
+  const kind: SubmittedFeedbackKind | null = payload.kind === 'bug'
+    ? 'bug'
+    : payload.kind === 'feedback' || payload.kind === 'feature'
+      ? 'feedback'
+      : null;
   const title = textField(payload.title, MAX_TITLE_LENGTH);
   const message = textField(payload.message, MAX_MESSAGE_LENGTH);
   const contact = textField(payload.contact, MAX_CONTACT_LENGTH);
   const packSlug = textField(payload.packSlug, MAX_CONTEXT_LENGTH);
   const packName = textField(payload.packName, MAX_CONTEXT_LENGTH);
   const page = textField(payload.page, MAX_PAGE_LENGTH);
+  const diagnostics = parseDiagnostics(payload.diagnostics);
   if (
     !kind ||
     title === null ||
@@ -218,6 +361,7 @@ export async function handleFeedback(
     packSlug === null ||
     packName === null ||
     page === null ||
+    diagnostics === null ||
     (contact && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact)) ||
     (page && !page.startsWith('/'))
   ) {
@@ -238,6 +382,12 @@ export async function handleFeedback(
   const userAgent = (request.headers.get('user-agent') ?? '').slice(0, 512);
   const fingerprint = await clientFingerprint(address, userAgent);
   const createdAt = Date.now();
+  const token = runtime.GITHUB_ISSUES_TOKEN;
+  if (!token || token.length < 32 || /[\s\u0000-\u001f\u007f]/u.test(token)) {
+    console.error('Feedback issue reporting is disabled because GITHUB_ISSUES_TOKEN is unset or invalid.');
+    return noStoreJson({error: 'GitHub issue reporting is unavailable.'}, 503);
+  }
+  let id = '';
   try {
     const recent = await db
       .prepare(
@@ -263,7 +413,7 @@ export async function handleFeedback(
       );
     }
 
-    const id = crypto.randomUUID();
+    id = crypto.randomUUID();
     const result = await db
       .prepare(
         `INSERT INTO feedback_reports
@@ -287,9 +437,34 @@ export async function handleFeedback(
       .run();
     if (!result.success) throw new Error('D1 reported an unsuccessful feedback insert.');
     console.log('Feedback submission stored.', {id, kind, packSlug: packSlug || null});
-    return noStoreJson({submitted: true}, 201);
   } catch (error) {
     console.error('Feedback submission could not be stored.', error);
     return noStoreJson({error: 'Feedback storage is unavailable.'}, 503);
+  }
+
+  try {
+    const issueUrl = await publishGitHubIssue(
+      id,
+      kind,
+      title,
+      message,
+      packSlug,
+      packName,
+      page,
+      diagnostics,
+      userAgent,
+      token,
+      githubFetch,
+    );
+    console.log('Feedback submission published to GitHub.', {id, kind, issueUrl});
+    return noStoreJson({submitted: true, issueUrl}, 201);
+  } catch (error) {
+    console.error('Feedback submission could not be published to GitHub.', {id, kind, error});
+    try {
+      await db.prepare('DELETE FROM feedback_reports WHERE id = ?').bind(id).run();
+    } catch (cleanupError) {
+      console.error('A failed GitHub feedback reservation could not be removed.', {id, cleanupError});
+    }
+    return noStoreJson({error: 'GitHub issue reporting failed. Please try again.'}, 502);
   }
 }

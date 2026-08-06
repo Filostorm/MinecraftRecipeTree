@@ -16,6 +16,8 @@ import {InterfaceZoomSlider} from './src/components/InterfaceZoomSlider';
 import {DatasetPicker} from './src/components/DatasetPicker';
 import {DatasetSwitcher} from './src/components/DatasetSwitcher';
 import {GraphGuideModal} from './src/components/GraphGuideModal';
+import {IssueReportModal} from './src/components/IssueReportModal';
+import type {GitHubIssueKind, IssueReportContext} from './src/components/githubIssues';
 import {ItemsScreen} from './src/components/ItemsScreen';
 import {MobsScreen} from './src/components/MobsScreen';
 import {RecipeStageModal} from './src/components/RecipeStageModal';
@@ -313,13 +315,16 @@ function Shell({
 }) {
   const data = useData();
   const recipeStages = useRecipeStages();
-  const {tab, setTab, graphRequestId} = useUi();
+  const ui = useUi();
+  const {tab, setTab, graphRequestId} = ui;
   const {width} = useWindowDimensions();
   const [hasHydrated, setHasHydrated] = useState(Platform.OS !== 'web');
   const compactHeader = hasHydrated && width < 720;
   const [showRecipeHistory, setShowRecipeHistory] = useState(false);
   const [showRecipeStages, setShowRecipeStages] = useState(false);
   const [showGraphGuide, setShowGraphGuide] = useState(false);
+  const [showIssueReport, setShowIssueReport] = useState(false);
+  const [issueReportKind, setIssueReportKind] = useState<GitHubIssueKind>('bug');
   const [showGraphControls, setShowGraphControls] = useState(false);
   const [showDatasetDetails, setShowDatasetDetails] = useState(false);
   const [interfaceZoom, setInterfaceZoom] = useState(1);
@@ -327,15 +332,36 @@ function Shell({
       ? 'recipe-stages'
       : showGraphGuide
         ? 'graph-guide'
-        : showRecipeHistory
-          ? 'recipe-history'
-          : tab;
+        : showIssueReport
+          ? 'issue-report'
+          : showRecipeHistory
+            ? 'recipe-history'
+            : tab;
   useSignalSurface(
     shellSurface,
-    showRecipeStages || showGraphGuide || showRecipeHistory
+    showRecipeStages || showGraphGuide || showIssueReport || showRecipeHistory
       ? 'modal'
       : 'screen',
   );
+  const issueReportContext = useMemo<IssueReportContext>(() => ({
+    packSlug: data.descriptor.slug,
+    packName: data.descriptor.displayName,
+    packVersion: data.descriptor.packVersion,
+    minecraftVersion: data.descriptor.minecraftVersion,
+    publicationId: data.datasetIdentity,
+    previewAssetSetId: data.descriptor.previewAssetSetId,
+    exportGeneratedAt: data.manifest.generatedAt,
+    exportFormat: data.manifest.format,
+    itemCount: data.items.length,
+    recipeCount: data.manifest.counts.recipes,
+    categoryCount: data.categories.length,
+    modCount: Object.keys(data.manifest.mods ?? {}).length,
+    activeTab: tab,
+    openItemKey: ui.itemStack[ui.itemStack.length - 1] ?? '',
+    graphRootKey: ui.graphRootKey ?? '',
+    graphDirection: ui.graphDirection,
+    interfaceZoomPercent: Math.round(interfaceZoom * 100),
+  }), [data, interfaceZoom, tab, ui.graphDirection, ui.graphRootKey, ui.itemStack]);
   useEffect(() => {
     if (Platform.OS === 'web') setHasHydrated(true);
   }, []);
@@ -473,6 +499,30 @@ function Shell({
             Platform.OS !== 'web' && styles.nativeHeaderMenuText,
           ]}>
           {Platform.OS === 'web' ? '◷' : '◷  Recipe history'}
+        </Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        {...signalTarget('header.issue-report')}
+        style={[
+          styles.headerUtilityButton,
+          styles.issueReportHeaderButton,
+          Platform.OS !== 'web' && styles.nativeHeaderUtilityButton,
+          showIssueReport && styles.headerUtilityButtonActive,
+        ]}
+        onPress={() => {
+          lightImpactFeedback();
+          setIssueReportKind('bug');
+          setShowIssueReport(true);
+        }}
+        accessibilityRole="button"
+        accessibilityLabel="Report a bug or send feedback">
+        <Text
+          style={[
+            styles.issueReportHeaderText,
+            Platform.OS !== 'web' && styles.nativeHeaderMenuText,
+            showIssueReport && styles.guideHeaderIconActive,
+          ]}>
+          {Platform.OS === 'web' ? '! Report' : '!  Report a bug'}
         </Text>
       </TouchableOpacity>
       {recipeStages.catalog.stages.length > 0 && (
@@ -673,8 +723,19 @@ function Shell({
         <GraphGuideModal
           visible
           onClose={() => setShowGraphGuide(false)}
-          packSlug={data.descriptor.slug}
-          packName={data.descriptor.displayName}
+          onOpenIssueReport={kind => {
+            setShowGraphGuide(false);
+            setIssueReportKind(kind);
+            setShowIssueReport(true);
+          }}
+        />
+      )}
+      {showIssueReport && (
+        <IssueReportModal
+          visible
+          initialKind={issueReportKind}
+          context={issueReportContext}
+          onClose={() => setShowIssueReport(false)}
         />
       )}
     </View>
@@ -914,6 +975,8 @@ const styles = StyleSheet.create({
   recipeStagesHeaderButton: {width: 'auto', minWidth: 72, paddingHorizontal: 8},
   recipeStagesHeaderText: {color: theme.text, fontSize: 11, fontWeight: '800'},
   recipeStagesHeaderTextActive: {color: theme.accent},
+  issueReportHeaderButton: {width: 'auto', minWidth: 72, paddingHorizontal: 9},
+  issueReportHeaderText: {color: theme.text, fontSize: 11, fontWeight: '800'},
   guideHeaderIcon: {color: theme.text, fontSize: 16, fontWeight: '800'},
   guideHeaderIconActive: {color: theme.accent},
   nativeHeaderMenuText: {color: theme.text, fontSize: 12, fontWeight: '700'},
