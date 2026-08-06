@@ -20,7 +20,7 @@ import {installLocalPackArchive} from '../../src/data/localPackStorage';
 import {
   buildExportFailureReport,
   sendExportFailureReport,
-  shouldSendExportFailureReport,
+  type ExportFailureReport,
 } from '../../src/data/exportFailureReport';
 import styles from './publish.module.css';
 
@@ -43,7 +43,7 @@ type UploadState =
       status: 'checking';
       filename: string;
       progress: number;
-      phase: 'checking' | 'adding' | 'saving' | 'finalizing' | 'reporting';
+      phase: 'checking' | 'adding' | 'saving' | 'finalizing';
       completedFiles?: number;
       totalFiles?: number;
     }
@@ -57,8 +57,8 @@ type UploadState =
       findings: readonly string[];
       issueUrl: string | null;
       fileUrl: string | null;
-      reportStatus: 'sent' | 'duplicate' | 'failed' | null;
-      failureReportSharing: boolean;
+      reportStatus: 'sending' | 'sent' | 'duplicate' | 'failed' | null;
+      reportAvailable: boolean;
     }
   | {status: 'error'; filename: string | null; message: string};
 
@@ -319,8 +319,9 @@ function formatBytes(bytes: number): string {
 export function PackUploadDropzone() {
   const inputRef = useRef<HTMLInputElement>(null);
   const operationRef = useRef(0);
+  const pendingFailureReportRef = useRef<ExportFailureReport | null>(null);
+  const reportSubmissionRef = useRef(false);
   const [dragging, setDragging] = useState(false);
-  const [shareFailureReports, setShareFailureReports] = useState(false);
   const [state, setState] = useState<UploadState>({status: 'idle'});
 
   const addFile = async (file: File | undefined) => {
@@ -336,8 +337,9 @@ export function PackUploadDropzone() {
     }
 
     const operation = operationRef.current + 1;
-    const failureReportSharing = shareFailureReports;
     operationRef.current = operation;
+    pendingFailureReportRef.current = null;
+    reportSubmissionRef.current = false;
     setState({status: 'checking', filename: file.name, progress: 0, phase: 'checking'});
     try {
       const result = await inspectPackArchive(
@@ -360,6 +362,7 @@ export function PackUploadDropzone() {
       let issueUrl: string | null = null;
       let fileUrl: string | null = null;
       let reportStatus: 'sent' | 'duplicate' | 'failed' | null = null;
+      let reportAvailable = false;
       if (result.summary.readyForHandoff) {
         setState({status: 'checking', filename: file.name, progress: 0, phase: 'adding'});
         try {
@@ -401,36 +404,20 @@ export function PackUploadDropzone() {
           );
           viewerHref = installed.viewerHref;
           saved = true;
-          if (shouldSendExportFailureReport(
-            result.summary.counts.failures,
-            failureReportSharing,
-          )) {
+          if (result.summary.counts.failures > 0 && result.failures !== null) {
             try {
-              setState({
-                status: 'checking',
-                filename: file.name,
-                progress: 1,
-                phase: 'reporting',
-              });
-              if (result.failures === null) {
-                throw new Error('failures.json is missing from an export that reports failures.');
-              }
-              const report = buildExportFailureReport({
+              pendingFailureReportRef.current = buildExportFailureReport({
                 manifest: result.manifest,
                 failures: result.failures,
                 exportErrors: result.exportErrors ?? undefined,
                 exporterBuild: result.exporterBuild ?? undefined,
               });
-              const submitted = await sendExportFailureReport(report);
-              issueUrl = submitted.issueUrl;
-              fileUrl = submitted.fileUrl;
-              reportStatus = submitted.duplicate ? 'duplicate' : 'sent';
+              reportAvailable = true;
             } catch (error) {
-              console.error('The pack loaded, but its exporter failure report could not be sent.', error);
-              reportStatus = 'failed';
+              console.error('The pack loaded, but its exporter errors could not be prepared.', error);
               findings = Object.freeze([
                 ...findings,
-                'The pack was added, but its optional GitHub failure report could not be sent.',
+                'The pack was added, but its exporter errors could not be prepared for sharing.',
               ]);
             }
           }
@@ -451,7 +438,7 @@ export function PackUploadDropzone() {
         issueUrl,
         fileUrl,
         reportStatus,
-        failureReportSharing,
+        reportAvailable,
       });
     } catch (error) {
       if (operationRef.current !== operation) return;
@@ -472,31 +459,44 @@ export function PackUploadDropzone() {
     void addFile(event.dataTransfer.files?.[0]);
   };
 
+  const shareExporterErrors = async () => {
+    const report = pendingFailureReportRef.current;
+    const operation = operationRef.current;
+    if (
+      !report ||
+      reportSubmissionRef.current ||
+      state.status !== 'ready' ||
+      state.reportStatus === 'sent' ||
+      state.reportStatus === 'duplicate'
+    ) return;
+    reportSubmissionRef.current = true;
+    setState(current => current.status === 'ready'
+      ? {...current, reportStatus: 'sending'}
+      : current);
+    try {
+      const submitted = await sendExportFailureReport(report);
+      if (operationRef.current !== operation) return;
+      setState(current => current.status === 'ready'
+        ? {
+            ...current,
+            issueUrl: submitted.issueUrl,
+            fileUrl: submitted.fileUrl,
+            reportStatus: submitted.duplicate ? 'duplicate' : 'sent',
+          }
+        : current);
+    } catch (error) {
+      if (operationRef.current !== operation) return;
+      console.error('The exporter error report could not be shared.', error);
+      setState(current => current.status === 'ready'
+        ? {...current, reportStatus: 'failed'}
+        : current);
+    } finally {
+      if (operationRef.current === operation) reportSubmissionRef.current = false;
+    }
+  };
+
   return (
     <div className={styles.uploadPanel}>
-      <div className={styles.localOnlyNotice}>
-        <div>
-          <strong>Local-only by default</strong>
-          <span>
-            Your ZIP and pack data stay in this browser. Nothing is published to Recipe Tree.
-          </span>
-        </div>
-        <label className={styles.reportChoice}>
-          <input
-            type="checkbox"
-            checked={shareFailureReports}
-            onChange={event => setShareFailureReports(event.target.checked)}
-            disabled={state.status === 'checking'}
-          />
-          <span>
-            <strong>Share exporter errors</strong>
-            <small>
-              If this export contains failures, send diagnostics to the Recipe Tree GitHub
-              issue tracker. Pack files are never included.
-            </small>
-          </span>
-        </label>
-      </div>
       <label
         className={[
           styles.dropzone,
@@ -530,9 +530,7 @@ export function PackUploadDropzone() {
         <span className={styles.uploadIcon} aria-hidden="true">↑</span>
         <strong>
           {state.status === 'checking'
-            ? state.phase === 'reporting'
-              ? `Reporting errors for ${state.filename}`
-              : state.phase === 'finalizing'
+            ? state.phase === 'finalizing'
                 ? `Preparing ${state.filename}`
                 : state.phase === 'saving'
                   ? `Saving ${state.filename}`
@@ -545,9 +543,7 @@ export function PackUploadDropzone() {
         </strong>
         <span>
           {state.status === 'checking'
-            ? state.phase === 'reporting'
-              ? 'Sending its errors report…'
-              : state.phase === 'finalizing'
+            ? state.phase === 'finalizing'
                 ? 'Preparing it for the viewer…'
                 : state.phase === 'saving'
                   ? `${state.completedFiles?.toLocaleString() ?? 0} of ${
@@ -562,16 +558,14 @@ export function PackUploadDropzone() {
           <span
             className={[
               styles.uploadProgress,
-              state.phase === 'reporting' || state.phase === 'finalizing'
+              state.phase === 'finalizing'
                 ? styles.uploadProgressWaiting
                 : '',
             ].filter(Boolean).join(' ')}
             style={{'--upload-progress': `${state.progress * 100}%`} as CSSProperties}
             role="progressbar"
             aria-label={
-              state.phase === 'reporting'
-                ? 'Waiting for the errors report to finish'
-                : state.phase === 'finalizing'
+              state.phase === 'finalizing'
                   ? 'Preparing pack for the viewer'
                   : state.phase === 'saving'
                     ? 'Saving pack files'
@@ -580,13 +574,13 @@ export function PackUploadDropzone() {
                       : 'Checking pack'
             }
             aria-valuemin={
-              state.phase === 'reporting' || state.phase === 'finalizing' ? undefined : 0
+              state.phase === 'finalizing' ? undefined : 0
             }
             aria-valuemax={
-              state.phase === 'reporting' || state.phase === 'finalizing' ? undefined : 100
+              state.phase === 'finalizing' ? undefined : 100
             }
             aria-valuenow={
-              state.phase === 'reporting' || state.phase === 'finalizing'
+              state.phase === 'finalizing'
                 ? undefined
                 : Math.round(state.progress * 100)
             }
@@ -647,19 +641,30 @@ export function PackUploadDropzone() {
                 No errors found. This pack is now in your local modpack list.
               </p>
             )}
-            {state.saved &&
-              state.summary.counts.failures > 0 &&
-              !state.failureReportSharing && (
-                <p className={styles.uploadSuccessCopy}>
-                  Exporter errors stayed on this device. Import the ZIP again with “Share
-                  exporter errors” enabled if you want to report them.
-                </p>
-              )}
+            {state.saved && state.summary.counts.failures > 0 && state.reportAvailable && (
+              <div className={styles.reportAction}>
+                <button
+                  type="button"
+                  onClick={() => void shareExporterErrors()}
+                  disabled={state.reportStatus === 'sending' || state.reportStatus === 'sent' || state.reportStatus === 'duplicate'}>
+                  {state.reportStatus === 'sending'
+                    ? 'Sharing exporter errors…'
+                    : state.reportStatus === 'failed'
+                      ? 'Try sharing exporter errors again'
+                      : state.reportStatus === 'sent' || state.reportStatus === 'duplicate'
+                        ? 'Exporter errors shared'
+                        : 'Share exporter errors'}
+                </button>
+                <span>Send exporter diagnostics to the Recipe Tree GitHub issue tracker.</span>
+              </div>
+            )}
             {state.reportStatus && (
               <p className={styles.uploadSuccessCopy}>
-                {state.reportStatus === 'failed'
-                  ? 'You can use the pack now; failure reporting can be retried by adding the ZIP again.'
-                  : state.reportStatus === 'duplicate'
+                {state.reportStatus === 'sending'
+                  ? 'Preparing the deduplicated errors report.'
+                  : state.reportStatus === 'failed'
+                    ? 'The errors were not shared. You can try again.'
+                    : state.reportStatus === 'duplicate'
                     ? 'This pack or mod version already had a report, so its errors file was updated.'
                     : 'The exporter failures were saved to errors.json and shared with GitHub.'}
                 {state.issueUrl && (

@@ -15,20 +15,10 @@ export default function PublishPage() {
         </header>
 
         <section className={styles.hero} aria-labelledby="publish-title">
-          <p className={styles.eyebrow}>IMPORT A LOCAL MODPACK</p>
           <h1 id="publish-title">Open your pack without publishing it.</h1>
           <p className={styles.heroCopy}>
-            Follow five short steps to export your pack and save it in this browser. Your ZIP
-            and pack data stay on this device by default.
+            Follow five short steps to export your pack and save it in this browser.
           </p>
-          <div className={styles.heroActions}>
-            <a className={styles.primaryAction} href="#instructions">
-              Get started
-            </a>
-            <a className={styles.secondaryAction} href="#upload">
-              Import your ZIP
-            </a>
-          </div>
         </section>
 
         <section className={styles.section} id="instructions" aria-labelledby="instructions-title">
@@ -47,8 +37,7 @@ export default function PublishPage() {
             </div>
             <h3>Get your pack ready</h3>
             <p className={styles.curseForgeNotice}>
-              Recipe Tree Exporter will be available through CurseForge. There are no mod
-              downloads on this site.
+              Recipe Tree Exporter will be available through CurseForge.
             </p>
             <ol className={styles.guideSteps}>
               <li>
@@ -97,8 +86,7 @@ export default function PublishPage() {
                 <div className={styles.uploadStepContent}>
                   <h4>Import your local exporter ZIP</h4>
                   <p>
-                    Drag it into the box or tap the box to choose it. It stays on this device
-                    unless you explicitly choose to share an exporter error report.
+                    Drag it into the box or tap the box to choose it.
                   </p>
                   <PackUploadDropzone />
                 </div>
