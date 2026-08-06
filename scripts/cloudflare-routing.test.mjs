@@ -55,6 +55,11 @@ test('Cloudflare routes catalog, immutable datasets, and administration through 
   );
   assert.match(
     viteConfig,
+    /isCloudflareProduction[\s\S]*?name:\s*['"]minecraft-recipe-tree-production['"][\s\S]*?vars:\s*\{DATASET_ADMIN_ENABLED:\s*['"]true['"]\}/,
+    'standalone production must enable only token-authenticated dataset administration',
+  );
+  assert.match(
+    viteConfig,
     /publicDir:\s*false(?:\s+as\s+const)?/,
     'production builds must not copy the retired public/exports corpus into dist',
   );

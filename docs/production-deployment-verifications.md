@@ -1,5 +1,79 @@
 # Production deployment verifications
 
+## 2026-08-05 — local-only imports and large-tree stabilization
+
+- Application commit: `fa766d6dc7e2eab40e6645d95578b3267da07cde`
+- Standalone Worker: `minecraft-recipe-tree-production`
+- Standalone Worker version: `a85ed172-824d-4a2f-be47-19eedf1e7a11`
+- Canonical URL: `https://minecraftrecipetree.craftsmannsoftware.com/`
+
+Passed:
+
+- The complete release suite passed 478/478 tests; the focused local-pack, exporter-failure, and
+  large-tree viewport suite passed 16/16 tests; and the production Worker bundle built cleanly.
+- A fresh browser tab hydrated MeatballCraft, opened Stone's recipe picker, added a recipe to the
+  graph, exposed the fit control, and recorded no browser errors or graph recovery state.
+- The homepage, current hashed JavaScript bundle, `/api/datasets`, `/api/modpacks`, the default
+  core manifest, and its paired preview manifest all returned `200` through the canonical router.
+- The catalog retained four channels. Remote D1 readback retained two legacy modpacks, three
+  feedback reports, and zero exporter-failure reports without writing any rows.
+- The default MeatballCraft manifest remained available with 196,161 items, 359,215 recipes, and
+  its 130 logged recipe failures; its paired preview manifest retained 443 packs and 698 category
+  documents.
+- Feedback inbox reads, exporter-failure method handling, and dataset upload administration all
+  remained fail-closed. No synthetic feedback, upload, failure report, or GitHub issue was created.
+- Canonical responses retained the signal-edge compatibility header and identified the standalone
+  Worker as the actual application origin.
+
+## 2026-08-04 — native Cloudflare production cutover
+
+- Application branch: `main`
+- Standalone Worker: `minecraft-recipe-tree-production`
+- Standalone Worker version: `7f45f00b-13e2-4e28-b3b9-5f9ae7532c55`
+- D1 database: `minecraft-recipe-tree-production`
+  (`e6624ef2-8bd9-49e5-8d32-0671351c61c3`)
+- R2 bucket: `minecraft-recipe-tree-production-assets`
+- App-router version: `67124577-753c-4aea-aef0-7be11cb8eb9f`
+- App-router rollback version: `c05bc89e-687c-4b01-b4e4-086f1ea456ab`
+- Canonical URL: `https://minecraftrecipetree.craftsmannsoftware.com/`
+- Direct diagnostic URL:
+  `https://minecraft-recipe-tree-production.gtjoe51.workers.dev/`
+
+Passed:
+
+- The authenticated Sites export and native D1 import matched exactly: 11 dataset publications,
+  four channels, two legacy modpacks, three feedback records, and zero exporter-failure rows.
+- The source and destination R2 inventories matched exactly at 18,585 objects and 6,790,050,371
+  bytes, including HTTP metadata, storage class, custom metadata, and checksummed migrated bodies.
+- The app router was canaried at 5%. A canary catalog response matched the direct standalone
+  response after normalized JSON comparison, then the router version was promoted to 100%.
+- The canonical homepage, a hashed stylesheet, `/api/datasets`, `/api/modpacks`, a core dataset
+  manifest, and a recipe-preview manifest all returned `200` through the standalone Worker.
+- A fresh browser tab hydrated MeatballCraft with 196,160 searchable items. The intentionally
+  misspelled fuzzy query `furnce` returned Furnace and related machine results.
+- An authenticated, idempotent `POST /api/admin/core-datasets/begin` replay returned the exact
+  committed publication through both the direct Worker and canonical hostname. A wrong upload
+  token remained fail-closed.
+- A temporary canonical feedback submission returned `201`, appeared in the authenticated inbox,
+  and was deleted from D1; the inbox returned to its original three records.
+- A temporary canonical exporter-failure report returned `201`; repeating it returned `200` with
+  `duplicate: true`, the same GitHub issue, the same `errors.json` file, and no issue comments. The
+  file used `mrt-export-failure-file-v1`. The synthetic issue was closed and its report file and D1
+  dedupe row were removed after verification.
+- Canonical responses retain the signal-edge compatibility contract in `X-Craftsmann-App-Origin`
+  and identify the actual destination as
+  `X-Craftsmann-Worker-Origin: https://minecraft-recipe-tree-production.gtjoe51.workers.dev`.
+- The Sites origin remains live and unchanged as the rollback source. Migration bridge secrets
+  remain installed only for the rollback soak and must be removed before Sites is retired.
+
+Operational improvements made during migration:
+
+- The R2 migration command now resumes objects whose exact immutable inventory already matches,
+  rejects destination-only keys, and retries bounded transient read and upload failures with a
+  fresh stream per upload attempt.
+- Standalone production explicitly enables token-authenticated dataset administration while
+  anonymous legacy mutations and unscoped preview ingestion remain disabled.
+
 ## 2026-07-31 — hide upload action on mobile
 
 - Application commit: `dc27c6bd38a42c8610a4ae4c6c793de45616b236`

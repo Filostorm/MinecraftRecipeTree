@@ -24,6 +24,9 @@ const METADATA_HEADERS = [
   'x-mrt-migration-http-metadata',
   'x-mrt-migration-storage-class',
 ];
+const TRANSIENT_UPLOAD_STATUSES = new Set([429, 500, 502, 503, 504]);
+const MAX_UPLOAD_ATTEMPTS = 4;
+const MAX_READ_ATTEMPTS = 4;
 
 function usage(message) {
   if (message) console.error(message);
@@ -84,15 +87,65 @@ function endpoint(origin, route, search = {}) {
 }
 
 async function checkedFetch(url, token, init = {}) {
-  const response = await fetch(url, {
-    ...init,
-    headers: {Authorization: `Bearer ${token}`, ...init.headers},
-  });
-  if (!response.ok) {
+  const method = init.method ?? 'GET';
+  const retryable = method === 'GET' || method === 'HEAD';
+  for (let attempt = 1; attempt <= MAX_READ_ATTEMPTS; attempt += 1) {
+    let response;
+    try {
+      response = await fetch(url, {
+        ...init,
+        headers: {Authorization: `Bearer ${token}`, ...init.headers},
+      });
+    } catch (error) {
+      if (!retryable || attempt === MAX_READ_ATTEMPTS) throw error;
+      const delayMs = 250 * (2 ** (attempt - 1));
+      console.warn(
+        `Transient ${method} network failure for ${url.pathname}; ` +
+        `retrying attempt ${attempt + 1}/${MAX_READ_ATTEMPTS} in ${delayMs}ms.`,
+      );
+      await new Promise(resolveDelay => setTimeout(resolveDelay, delayMs));
+      continue;
+    }
+    if (response.ok) return response;
     const detail = (await response.text()).slice(0, 500);
-    throw new Error(`${init.method ?? 'GET'} ${url.pathname} failed with ${response.status}: ${detail}`);
+    if (
+      !retryable ||
+      !TRANSIENT_UPLOAD_STATUSES.has(response.status) ||
+      attempt === MAX_READ_ATTEMPTS
+    ) {
+      throw new Error(`${method} ${url.pathname} failed with ${response.status}: ${detail}`);
+    }
+    const delayMs = 250 * (2 ** (attempt - 1));
+    console.warn(
+      `Transient ${method} ${response.status} for ${url.pathname}; ` +
+      `retrying attempt ${attempt + 1}/${MAX_READ_ATTEMPTS} in ${delayMs}ms.`,
+    );
+    await new Promise(resolveDelay => setTimeout(resolveDelay, delayMs));
   }
-  return response;
+  throw new Error(`${method} ${url.pathname} exhausted its retry loop unexpectedly.`);
+}
+
+async function uploadMigrationObject(url, token, headers, tempPath) {
+  for (let attempt = 1; attempt <= MAX_UPLOAD_ATTEMPTS; attempt += 1) {
+    const response = await fetch(url, {
+      method: 'PUT',
+      headers: {Authorization: `Bearer ${token}`, ...headers},
+      body: createReadStream(tempPath),
+      duplex: 'half',
+    });
+    if (response.ok) return response;
+    const detail = (await response.text()).slice(0, 500);
+    if (!TRANSIENT_UPLOAD_STATUSES.has(response.status) || attempt === MAX_UPLOAD_ATTEMPTS) {
+      throw new Error(`PUT ${url.pathname} failed with ${response.status}: ${detail}`);
+    }
+    const delayMs = 250 * (2 ** (attempt - 1));
+    console.warn(
+      `Transient PUT ${response.status} for ${url.searchParams.get('key')}; ` +
+      `retrying attempt ${attempt + 1}/${MAX_UPLOAD_ATTEMPTS} in ${delayMs}ms.`,
+    );
+    await new Promise(resolveDelay => setTimeout(resolveDelay, delayMs));
+  }
+  throw new Error('Migration upload exhausted its retry loop unexpectedly.');
 }
 
 function sqlValue(value) {
@@ -200,9 +253,12 @@ async function copyObject(sourceOrigin, sourceToken, destinationOrigin, destinat
       if (value === null) throw new Error(`Source omitted ${name} for ${object.key}.`);
       headers[name] = value;
     }
-    const response = await checkedFetch(endpoint(destinationOrigin, 'object', {key: object.key}), destinationToken, {
-      method: 'PUT', headers, body: createReadStream(tempPath), duplex: 'half',
-    });
+    const response = await uploadMigrationObject(
+      endpoint(destinationOrigin, 'object', {key: object.key}),
+      destinationToken,
+      headers,
+      tempPath,
+    );
     const result = await response.json();
     return {bytes: downloaded.bytes, reused: result.reused === true};
   } finally {
@@ -229,20 +285,46 @@ async function copyR2({source, destination, sourceTokenFile, destinationTokenFil
   const destinationToken = await tokenFromFile(destinationTokenFile);
   const parallel = Number(concurrency);
   if (!Number.isSafeInteger(parallel) || parallel < 1 || parallel > 8) throw new Error('--concurrency must be an integer from 1 through 8.');
-  const sourceObjects = await listObjects(sourceOrigin, sourceToken);
+  const [sourceObjects, destinationObjects] = await Promise.all([
+    listObjects(sourceOrigin, sourceToken),
+    listObjects(destinationOrigin, destinationToken),
+  ]);
+  const destinationOnly = [...destinationObjects.keys()].filter(key => !sourceObjects.has(key));
+  if (destinationOnly.length) {
+    throw new Error(
+      `Destination contains ${destinationOnly.length} object(s) absent from the source; ` +
+      `first unexpected key: ${destinationOnly[0]}`,
+    );
+  }
   const values = [...sourceObjects.values()];
   const tempDirectory = await fs.mkdtemp(join(tmpdir(), 'mrt-storage-migration-'));
   let completed = 0;
   let copiedBytes = 0;
   let reused = 0;
+  const recordProgress = (bytes, wasReused) => {
+    completed += 1;
+    copiedBytes += bytes;
+    if (wasReused) reused += 1;
+    if (completed % 100 === 0 || completed === values.length) {
+      console.log(`Objects: ${completed}/${values.length}; bytes accounted: ${copiedBytes}; resumed: ${reused}`);
+    }
+  };
   try {
     console.log(`Copying ${values.length} immutable objects with concurrency ${parallel}.`);
     await concurrentMap(values, parallel, async object => {
+      const existing = destinationObjects.get(object.key);
+      if (existing) {
+        if (comparableObject(existing) !== comparableObject(object)) {
+          throw new Error(`Destination metadata conflicts with the migration source: ${object.key}`);
+        }
+        // The destination bucket was created empty for this migration, and every prior write passed
+        // the import route's SHA-256 check. Matching immutable inventory entries can therefore be
+        // resumed without downloading and uploading their bodies again.
+        recordProgress(object.size, true);
+        return;
+      }
       const result = await copyObject(sourceOrigin, sourceToken, destinationOrigin, destinationToken, object, tempDirectory);
-      completed += 1;
-      copiedBytes += result.bytes;
-      if (result.reused) reused += 1;
-      if (completed % 100 === 0 || completed === values.length) console.log(`Objects: ${completed}/${values.length}; bytes streamed: ${copiedBytes}; resumed: ${reused}`);
+      recordProgress(result.bytes, result.reused);
     });
   } finally {
     await fs.rmdir(tempDirectory).catch(() => {});

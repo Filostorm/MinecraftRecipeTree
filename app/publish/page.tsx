@@ -76,8 +76,10 @@ export default function PublishPage() {
                 <div>
                   <h4>Make your ZIP</h4>
                   <p>
-                    Wait for the export to finish. In CurseForge, choose Open Folder, find
-                    the <code>jei-exports</code> folder, and zip it.
+                    Wait for the export to finish. For your first import, use CurseForge’s Open
+                    Folder action, find <code>jei-exports</code>, and zip that folder. After later
+                    exports, use <code>jei-exports-update.zip</code> when it is available; keep the
+                    full folder as your fallback.
                   </p>
                 </div>
               </li>

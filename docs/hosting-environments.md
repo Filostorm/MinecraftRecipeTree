@@ -1,8 +1,9 @@
 # Hosting environments
 
 Minecraft Recipe Tree uses a beta Cloudflare Worker for live testing before an explicitly approved
-production release. Production is migrating from OpenAI Sites-managed storage to normal Cloudflare
-D1 and R2 bindings without changing the canonical public hostname.
+production release. Production runs on normal Cloudflare Worker, D1, and R2 resources without
+changing the canonical public hostname. The former OpenAI Sites deployment is temporarily retained
+only as the rollback snapshot for the migration soak.
 
 | Environment | Source branch | Runtime | URL | Access |
 | --- | --- | --- | --- | --- |
@@ -13,6 +14,10 @@ D1 and R2 bindings without changing the canonical public hostname.
 The canonical hostname remains in the existing `craftsmann-subdomain-signal` and
 `craftsmann-app-subdomain-router` chain. At cutover, the app router uses a service binding to the
 standalone production Worker. DNS does not change.
+
+The canonical beta endpoint is `https://minecraft-recipe-tree-beta.gtjoe51.workers.dev`. Use it for
+all beta acceptance testing and links. The previous `chatgpt.site` beta endpoint and the obsolete
+`https://minecraftrecipetree.pages.dev` export are not the active beta application.
 
 ## Branch-specific configuration
 

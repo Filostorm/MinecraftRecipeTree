@@ -730,10 +730,31 @@ export async function validateExportData(exportRoot = defaultExportRoot, options
         semanticErrorRecipes += 1;
       }
       if (structuredDataOnly) {
-        for (const field of ['img', 'w', 'h']) {
+        for (const field of ['img', 'bg', 'w', 'h']) {
           if (field in recipe) {
             fail(`${location}.${field} is forbidden by ${GTNH_STRUCTURED_DATA_ONLY_POLICY_ID}.`);
           }
+        }
+      }
+      if (recipe.bg !== undefined) {
+        if (structuredDataOnly) {
+          // The policy violation above is sufficient; do not register a visual asset.
+        } else if (recipe.img === undefined) {
+          fail(`${location}.bg requires an img overlay.`);
+        } else if (typeof recipe.bg !== 'string' || !safeRelativePath(recipe.bg)) {
+          fail(`${location} has an invalid shared background path.`);
+        } else {
+          const width = Number.isFinite(recipe.w) && recipe.w > 0 ? recipe.w : null;
+          const height = Number.isFinite(recipe.h) && recipe.h > 0 ? recipe.h : null;
+          referenceAsset(
+            parsePackedImagePath(recipe.bg)
+              ? recipe.bg
+              : posix.join(category.dir, recipe.bg),
+            width && height && recipeScale && recipeScale > 0
+              ? {width: width * recipeScale, height: height * recipeScale}
+              : null,
+            `${location} shared background`,
+          );
         }
       }
       if (recipe.img !== undefined) {

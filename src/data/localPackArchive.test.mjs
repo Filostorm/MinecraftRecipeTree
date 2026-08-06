@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   isExportManifestPath,
+  isIgnoredArchiveMetadataPath,
   requireLocalPackManifest,
   requireSafeArchivePath,
 } from './localPackArchive.ts';
@@ -72,7 +73,7 @@ test('keeps structurally valid incomplete exports visible with actionable findin
   assert.match(summary.findings.join('\n'), /4 recipes could not be exported/);
 });
 
-test('allows a completed export with recipe failures to load with a warning', () => {
+test('allows a completed export with reported failures to load with a warning', () => {
   const summary = requireLocalPackManifest(manifest({
     counts: {
       items: 10,
@@ -114,15 +115,38 @@ test('rejects malformed manifest metadata instead of inventing fallback values',
   );
 });
 
-test('accepts only a root or one-folder exporter manifest and rejects unsafe ZIP paths', () => {
+test('accepts only a root or one-folder exporter manifest and canonicalizes safe ZIP paths', () => {
   assert.equal(isExportManifestPath('manifest.json'), true);
   assert.equal(isExportManifestPath('jei-export/manifest.json'), true);
   assert.equal(isExportManifestPath('outer/jei-export/manifest.json'), false);
   assert.equal(isExportManifestPath('MANIFEST.JSON'), false);
   assert.equal(requireSafeArchivePath('jei-export/'), 'jei-export/');
-  assert.throws(() => requireSafeArchivePath('../manifest.json'), /unsafe file path/);
-  assert.throws(() => requireSafeArchivePath('folder\\manifest.json'), /unsafe file path/);
-  assert.throws(() => requireSafeArchivePath('/manifest.json'), /unsafe file path/);
+  assert.equal(requireSafeArchivePath('./'), '');
+  assert.equal(requireSafeArchivePath('./jei-export/manifest.json'), 'jei-export/manifest.json');
+  assert.equal(requireSafeArchivePath('jei-export/./items.json'), 'jei-export/items.json');
+});
+
+test('names the ZIP entry and reason when an archive path is unsafe', () => {
+  assert.throws(
+    () => requireSafeArchivePath('../manifest.json'),
+    /ZIP entry "\.\.\/manifest\.json".*tries to leave the export folder/,
+  );
+  assert.throws(
+    () => requireSafeArchivePath('folder\\manifest.json'),
+    /ZIP entry "folder\\\\manifest\.json".*Windows path separator/,
+  );
+  assert.throws(
+    () => requireSafeArchivePath('/manifest.json'),
+    /ZIP entry "\/manifest\.json".*absolute path/,
+  );
+});
+
+test('recognizes Finder metadata without hiding legitimate exporter files', () => {
+  assert.equal(isIgnoredArchiveMetadataPath('jei-exports/._items.json'), true);
+  assert.equal(isIgnoredArchiveMetadataPath('__MACOSX/jei-exports/items.json'), true);
+  assert.equal(isIgnoredArchiveMetadataPath('jei-exports/.DS_Store'), true);
+  assert.equal(isIgnoredArchiveMetadataPath('jei-exports/items.json'), false);
+  assert.equal(isIgnoredArchiveMetadataPath('jei-exports/images/item.png'), false);
 });
 
 test('maps an installed device-local pack to its isolated viewer route', () => {

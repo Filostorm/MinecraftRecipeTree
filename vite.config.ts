@@ -44,7 +44,10 @@ export default defineConfig(async () => {
                 vars: {BETA_DATA_ORIGIN},
               }
             : isCloudflareProduction
-              ? {name: 'minecraft-recipe-tree-production'}
+              ? {
+                  name: 'minecraft-recipe-tree-production',
+                  vars: {DATASET_ADMIN_ENABLED: 'true'},
+                }
               : {}),
           main: './worker/index.ts',
           compatibility_flags: ['nodejs_compat'],

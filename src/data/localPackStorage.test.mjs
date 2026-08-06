@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {File} from 'node:buffer';
+import {readFile} from 'node:fs/promises';
 import test from 'node:test';
 import {strToU8, zipSync} from 'fflate';
 
@@ -45,21 +46,39 @@ test('service worker preparation has a bounded failure instead of blocking catal
   }
 });
 
+test('local pack requests use exact cache keys instead of full-cache scans', async () => {
+  const source = await readFile(new URL('../../public/local-pack-sw.js', import.meta.url), 'utf8');
+  assert.match(source, /url\.search = '';/u);
+  assert.match(source, /cache\.match\(url\.href\)/u);
+  assert.doesNotMatch(source, /ignoreSearch\s*:/u);
+});
+
 test('reports file-saving and finalization after archive reading reaches 100%', async () => {
   const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
   const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
   const originalCaches = Object.getOwnPropertyDescriptor(globalThis, 'caches');
   const responses = new Map();
+  let activeFileWrites = 0;
+  let maximumActiveFileWrites = 0;
   const cache = {
     async match(request) {
       return responses.get(request.url)?.clone();
     },
     async put(request, response) {
-      await Promise.resolve();
-      responses.set(request.url, response.clone());
+      const isPackFile = request.url.includes('/__local-packs/') && request.url.includes('/exports/');
+      if (isPackFile) {
+        activeFileWrites += 1;
+        maximumActiveFileWrites = Math.max(maximumActiveFileWrites, activeFileWrites);
+      }
+      try {
+        await new Promise(resolve => setTimeout(resolve, isPackFile ? 2 : 0));
+        responses.set(request.url, response.clone());
+      } finally {
+        if (isPackFile) activeFileWrites -= 1;
+      }
     },
     async keys() {
-      return [...responses.keys()].map(url => new Request(url));
+      throw new DOMException('Operation too large.', 'QuotaExceededError');
     },
     async delete(request) {
       return responses.delete(request.url);
@@ -97,6 +116,9 @@ test('reports file-saving and finalization after archive reading reaches 100%', 
       'items.json': strToU8('[]'),
       'categories.json': strToU8('[]'),
       'index.json': strToU8('{}'),
+      '._items.json': strToU8('Finder metadata'),
+      '.DS_Store': strToU8('Finder metadata'),
+      '__MACOSX/._items.json': strToU8('Finder metadata'),
     });
     const file = new File([archive], 'progress-pack.zip', {type: 'application/zip'});
     const updates = [];
@@ -132,6 +154,54 @@ test('reports file-saving and finalization after archive reading reaches 100%', 
       totalFiles: 3,
     });
     assert.deepEqual(updates.at(-1), {phase: 'finalizing'});
+    assert.ok(maximumActiveFileWrites > 1);
+    assert.ok(maximumActiveFileWrites <= 4);
+    assert.equal(
+      [...responses.keys()].some(url => /(?:__MACOSX|\.DS_Store|\/\._)/u.test(url)),
+      false,
+    );
+
+    const firstInventoryUrl = [...responses.keys()].find(url => url.endsWith('/inventory.json'));
+    assert.ok(firstInventoryUrl);
+    responses.delete(firstInventoryUrl);
+
+    const updatedManifest = {
+      ...manifest,
+      pack: {name: 'Progress Pack', version: '1.0.1'},
+    };
+    const updatedManifestBytes = strToU8(JSON.stringify(updatedManifest));
+    const updatedArchive = zipSync({
+      'manifest.json': updatedManifestBytes,
+      'items.json': strToU8('[]'),
+      'categories.json': strToU8('[]'),
+      'index.json': strToU8('{}'),
+    });
+    const updatedFile = new File([updatedArchive], 'progress-pack-updated.zip', {
+      type: 'application/zip',
+    });
+
+    const installed = await installLocalPackArchive(
+      updatedFile,
+      'manifest.json',
+      updatedManifestBytes,
+      updatedManifest,
+      {
+        packName: 'Progress Pack',
+        packVersion: '1.0.1',
+        minecraftVersion: '1.20.1',
+        readyForHandoff: true,
+        findings: [],
+        counts: {items: 0, recipes: 0, categories: 0, failures: 0},
+      },
+      () => {},
+    );
+
+    assert.equal(installed.descriptor.packVersion, '1.0.1');
+    const catalog = await responses
+      .get('https://viewer.example/__local-packs/catalog.json')
+      ?.clone()
+      .json();
+    assert.deepEqual(catalog.packs.map(pack => pack.packVersion), ['1.0.1']);
   } finally {
     if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
     else delete globalThis.window;

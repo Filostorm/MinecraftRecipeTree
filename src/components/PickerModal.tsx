@@ -34,6 +34,7 @@ export interface PickerOption {
   groupLabel?: string;
   sublabel?: string;
   imageUri?: string;
+  imageBackgroundUri?: string;
   imageW?: number;
   imageH?: number;
   inputs?: SlotSummary[];
@@ -393,6 +394,7 @@ export function PickerModal({
                           {opt.imageUri && imageSize ? (
                             <RecipePreviewImage
                               uri={opt.imageUri}
+                              backgroundUri={opt.imageBackgroundUri}
                               context={opt.label}
                               style={[imageSize, styles.optionImage, pixelated as object]}
                               resizeMode="contain"
