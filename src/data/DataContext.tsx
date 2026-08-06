@@ -61,6 +61,8 @@ import {
 } from './recipeCategories';
 import {applyRecipeStageMetadata} from './recipeStages';
 import {reconstructLegacyReplaceableInputs} from './legacyReplaceableInputs';
+import {promoteReturnedRecipeIngredients} from './returnedRecipeIngredients';
+import {RecipeSessionCache, recipeSessionCacheKey} from './recipeSessionCache';
 import {
   MAX_NETWORK_DOCUMENT_BYTES,
   isLocalPackExportUrl,
@@ -862,6 +864,8 @@ export interface Data {
   reportItemIconFailure(failure: ItemIconLoadFailure): void;
   /** Load exactly the recipe shards needed by the requested category/index references. */
   getRecipes(refs: readonly RecipeRef[]): Promise<Recipe[]>;
+  /** Read a recently resolved recipe without starting another asynchronous load. */
+  getCachedRecipe(ref: RecipeRef): Recipe | undefined;
 }
 
 export type LoadState =
@@ -907,6 +911,7 @@ export function DataProvider({
   const [state, setState] = useState<LoadState>({status: 'loading', step: 'manifest.json'});
   const recipeDocumentCache = useRef(new Map<number, Promise<RecipeDocument>>());
   const recipePartCache = useRef(new RecipePartCache());
+  const recipeSessionCache = useRef(new RecipeSessionCache());
   const previewCategoryCache = useRef(
     new BoundedPromiseCache<RecipePreviewCategoryDocument>(
       MAX_PREVIEW_METADATA_CACHE_ENTRIES,
@@ -927,6 +932,7 @@ export function DataProvider({
     let alive = true;
     recipeDocumentCache.current.clear();
     recipePartCache.current.clear();
+    recipeSessionCache.current.clear();
     previewCategoryCache.current.clear();
     previewPartCache.current.clear();
     missingPreviewDiagnostics.current.clear();
@@ -1512,7 +1518,7 @@ export function DataProvider({
           );
         };
 
-        const loadRecipes = async (refs: readonly RecipeRef[]): Promise<Recipe[]> => {
+        const loadRecipeBatch = async (refs: readonly RecipeRef[]): Promise<Recipe[]> => {
           const indicesByCategory = new Map<number, Set<number>>();
           for (const ref of refs) {
             if (
@@ -1557,11 +1563,13 @@ export function DataProvider({
             if (!selectedRecipe) {
               throw new Error(`Recipe access did not resolve reference ${catIdx}:${recipeIdx}.`);
             }
-            const recipe = reconstructLegacyReplaceableInputs(
-              applyRecipeStageMetadata(selectedRecipe, descriptor),
-              categories[catIdx],
-              descriptor.minecraftVersion,
-              itemsByKey,
+            const recipe = promoteReturnedRecipeIngredients(
+              reconstructLegacyReplaceableInputs(
+                applyRecipeStageMetadata(selectedRecipe, descriptor),
+                categories[catIdx],
+                descriptor.minecraftVersion,
+                itemsByKey,
+              ),
             );
             if (previewsByCategory) {
               if (!previewsByCategory.get(catIdx)?.has(recipeIdx)) {
@@ -1596,6 +1604,35 @@ export function DataProvider({
             }
             return recipe;
           });
+        };
+
+        const getRecipes = async (refs: readonly RecipeRef[]): Promise<Recipe[]> => {
+          const resolved = new Array<Recipe>(refs.length);
+          const missingByKey = new Map<string, {ref: RecipeRef; positions: number[]}>();
+          refs.forEach((ref, position) => {
+            const cached = recipeSessionCache.current.get(ref);
+            if (cached) {
+              resolved[position] = cached;
+              return;
+            }
+            const key = recipeSessionCacheKey(ref);
+            const missing = missingByKey.get(key) ?? {ref, positions: []};
+            missing.positions.push(position);
+            missingByKey.set(key, missing);
+          });
+
+          const missing = [...missingByKey.values()];
+          if (missing.length > 0) {
+            const loaded = await loadRecipeBatch(missing.map(entry => entry.ref));
+            missing.forEach((entry, index) => {
+              const recipe = loaded[index];
+              recipeSessionCache.current.set(entry.ref, recipe);
+              entry.positions.forEach(position => {
+                resolved[position] = recipe;
+              });
+            });
+          }
+          return resolved;
         };
 
         let loadedIndex: RecipeIndex | null = indexDescriptor ? null : initialIndex;
@@ -1730,8 +1767,9 @@ export function DataProvider({
             return versionExportUrl(`${base}/${rel}`, datasetIdentity);
           },
           reportItemIconFailure: failure => itemIconFailureReporter.report(failure),
+          getCachedRecipe: ref => recipeSessionCache.current.peek(ref),
           getRecipes: refs =>
-            loadRecipes(refs).catch(error => {
+            getRecipes(refs).catch(error => {
               console.error('Required recipe references could not be loaded.', {
                 referenceCount: refs.length,
                 references: refs.slice(0, 40),

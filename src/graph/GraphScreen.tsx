@@ -688,7 +688,7 @@ export function GraphScreen({
           return false;
         }
         if (graphDirection === 'outputs') {
-          const anchor = materialInputSummary(selectedRecipe).find(
+          const anchor = recipeChildrenForDirection(selectedRecipe, 'inputs').find(
             input =>
               input.key === node.key || input.alternatives.includes(node.key),
           );

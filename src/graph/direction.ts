@@ -1,6 +1,7 @@
 import type {Recipe} from '../types.ts';
 import {
   inputSlotSummary,
+  prerequisiteSummary,
   slotSummary,
 } from '../data/slotSummary.ts';
 import type {SlotSummary} from '../data/slotSummary.ts';
@@ -61,15 +62,22 @@ export function recipeChildrenForDirection(
       probabilityRole: 'produce' as const,
     }));
   }
-  return materialInputSummary(recipe).map(input => ({
-    ...input,
-    nonConsumed: false,
-    probabilityRole: 'consume' as const,
-  }));
+  return [
+    ...materialInputSummary(recipe).map(input => ({
+      ...input,
+      nonConsumed: false,
+      probabilityRole: 'consume' as const,
+    })),
+    ...prerequisiteSummary(recipe.cat).map(input => ({
+      ...input,
+      nonConsumed: true,
+      probabilityRole: 'consume' as const,
+    })),
+  ];
 }
 
 export function recipeUsesItem(recipe: Recipe, itemKey: string): boolean {
-  return materialInputSummary(recipe).some(
+  return recipeChildrenForDirection(recipe, 'inputs').some(
     input => input.key === itemKey || input.alternatives.includes(itemKey),
   );
 }

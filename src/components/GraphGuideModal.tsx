@@ -1,8 +1,6 @@
 import React from 'react';
 import {
-  Linking,
   Modal,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -11,10 +9,7 @@ import {
   View,
 } from 'react-native';
 import {theme} from '../theme';
-import {
-  buildGitHubIssueUrl,
-  type GitHubIssueKind,
-} from './githubIssues';
+import type {GitHubIssueKind} from './githubIssues';
 
 const controls = [
   {
@@ -97,29 +92,12 @@ const visualKey: ReadonlyArray<{
 export function GraphGuideModal({
   visible,
   onClose,
-  packSlug,
-  packName,
+  onOpenIssueReport,
 }: {
   visible: boolean;
   onClose: () => void;
-  packSlug: string;
-  packName: string;
+  onOpenIssueReport(kind: GitHubIssueKind): void;
 }) {
-  const openGitHubIssue = (kind: GitHubIssueKind) => {
-    const page =
-      Platform.OS === 'web' && typeof window !== 'undefined'
-        ? `${window.location.pathname}${window.location.search}`
-        : '';
-    const browser =
-      Platform.OS === 'web' && typeof navigator !== 'undefined'
-        ? navigator.userAgent
-        : Platform.OS;
-    const url = buildGitHubIssueUrl({kind, packSlug, packName, page, browser});
-    void Linking.openURL(url).catch(error => {
-      console.error(`Could not open the GitHub ${kind} issue form.`, {url, error});
-    });
-  };
-
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose}>
@@ -176,26 +154,26 @@ export function GraphGuideModal({
 
             <Text style={[styles.sectionTitle, styles.feedbackTitle]}>GitHub Issues</Text>
             <Text style={styles.feedbackIntro}>
-              Report a problem or suggest an improvement in the project repository. GitHub will
-              open with the current modpack, page, and browser details prefilled.
+              Report a problem or suggest an improvement directly to the project repository.
+              Recipe Tree includes the current pack and device diagnostics automatically.
             </Text>
             <View style={styles.feedbackChoiceRow}>
               <TouchableOpacity
                 style={styles.feedbackChoice}
-                onPress={() => openGitHubIssue('bug')}
-                accessibilityRole="link"
-                accessibilityHint="Opens a prefilled bug report on GitHub">
+                onPress={() => onOpenIssueReport('bug')}
+                accessibilityRole="button"
+                accessibilityHint="Opens the Recipe Tree bug report form">
                 <Text style={styles.feedbackChoiceText}>Report a bug</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.feedbackChoice}
-                onPress={() => openGitHubIssue('feature')}
-                accessibilityRole="link"
-                accessibilityHint="Opens a prefilled feature request on GitHub">
-                <Text style={styles.feedbackChoiceText}>Request a feature</Text>
+                onPress={() => onOpenIssueReport('feedback')}
+                accessibilityRole="button"
+                accessibilityHint="Opens the Recipe Tree feedback form">
+                <Text style={styles.feedbackChoiceText}>Send feedback</Text>
               </TouchableOpacity>
             </View>
-            <Text style={styles.githubRequirement}>A GitHub account is required to submit.</Text>
+            <Text style={styles.githubRequirement}>No GitHub account is required.</Text>
           </ScrollView>
         </Pressable>
       </Pressable>

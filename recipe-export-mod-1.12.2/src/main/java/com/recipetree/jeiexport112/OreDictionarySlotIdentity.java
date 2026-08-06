@@ -5,17 +5,23 @@ import net.minecraftforge.oredict.OreDictionary;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /** Resolves one HEI item-alternative slot back to its shared Forge OreDictionary identity. */
 final class OreDictionarySlotIdentity {
+    private static final Map<String, Integer> CARDINALITY_CACHE =
+            new LinkedHashMap<String, Integer>();
+
     private OreDictionarySlotIdentity() {
     }
 
     static Resolution resolve(List<?> alternatives) {
         List<Set<String>> namesByAlternative = new ArrayList<Set<String>>();
+        Map<String, Integer> cardinalities = new LinkedHashMap<String, Integer>();
         for (Object alternative : alternatives) {
             if (!(alternative instanceof ItemStack) || ((ItemStack) alternative).isEmpty()) {
                 return Resolution.none();
@@ -25,6 +31,7 @@ final class OreDictionarySlotIdentity {
                 String name = OreDictionary.getOreName(id);
                 if (name != null && !name.isEmpty()) {
                     names.add(name);
+                    cardinalities.put(name, cardinality(name));
                 }
             }
             if (names.isEmpty()) {
@@ -32,10 +39,15 @@ final class OreDictionarySlotIdentity {
             }
             namesByAlternative.add(names);
         }
-        return resolveNames(namesByAlternative);
+        return resolveNames(namesByAlternative, cardinalities);
     }
 
     static Resolution resolveNames(List<Set<String>> namesByAlternative) {
+        return resolveNames(namesByAlternative, Collections.<String, Integer>emptyMap());
+    }
+
+    static Resolution resolveNames(List<Set<String>> namesByAlternative,
+                                   Map<String, Integer> cardinalities) {
         if (namesByAlternative.isEmpty()) {
             return Resolution.none();
         }
@@ -48,7 +60,44 @@ final class OreDictionarySlotIdentity {
         }
         List<String> canonical = new ArrayList<String>(shared);
         Collections.sort(canonical);
-        return new Resolution("ore:" + canonical.get(0), canonical);
+        String selected = canonical.get(0);
+        int selectedCardinality = normalizedCardinality(cardinalities.get(selected));
+        for (int index = 1; index < canonical.size(); index++) {
+            String candidate = canonical.get(index);
+            int candidateCardinality = normalizedCardinality(cardinalities.get(candidate));
+            if (candidateCardinality < selectedCardinality ||
+                    (candidateCardinality != Integer.MAX_VALUE &&
+                            candidateCardinality == selectedCardinality &&
+                            specificity(candidate) > specificity(selected))) {
+                selected = candidate;
+                selectedCardinality = candidateCardinality;
+            }
+        }
+        return new Resolution("ore:" + selected, canonical);
+    }
+
+    private static int cardinality(String name) {
+        Integer cached = CARDINALITY_CACHE.get(name);
+        if (cached != null) {
+            return cached;
+        }
+        int count = OreDictionary.getOres(name, false).size();
+        int normalized = count <= 0 ? Integer.MAX_VALUE : count;
+        CARDINALITY_CACHE.put(name, normalized);
+        return normalized;
+    }
+
+    private static int normalizedCardinality(Integer value) {
+        return value == null || value.intValue() <= 0 ? Integer.MAX_VALUE : value.intValue();
+    }
+
+    /** Prefer a material-specific name such as oreIron over a broad alias such as ore. */
+    private static int specificity(String name) {
+        int score = name.length();
+        if ("ore".equals(name) || "material".equals(name) || "metal".equals(name)) {
+            score -= 1000;
+        }
+        return score;
     }
 
     static final class Resolution {

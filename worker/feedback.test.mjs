@@ -4,6 +4,30 @@ import test from 'node:test';
 const {FEEDBACK_ROUTE, handleFeedback} = await import('./feedback.ts');
 
 const ORIGIN = 'https://minecraftrecipetree.craftsmannsoftware.com';
+const GITHUB_TOKEN = 'g'.repeat(40);
+const ISSUE_URL = 'https://github.com/Filostorm/MinecraftRecipeTree/issues/123';
+const DIAGNOSTICS = {
+  packVersion: '0.18.6',
+  minecraftVersion: '1.12.2',
+  publicationId: 'a'.repeat(64),
+  previewAssetSetId: 'b'.repeat(64),
+  exportGeneratedAt: '2026-08-06T20:00:00Z',
+  exportFormat: '2',
+  itemCount: '196160',
+  recipeCount: '200000',
+  categoryCount: '180',
+  modCount: '320',
+  activeTab: 'graph',
+  openItemKey: '',
+  graphRootKey: 'item|thaumcraft:cluster',
+  graphDirection: 'inputs',
+  interfaceZoom: '125%',
+  platform: 'web',
+  userAgent: 'Recipe Tree feedback test',
+  viewport: '1280×720 @2x',
+  language: 'en-US',
+  online: 'yes',
+};
 
 function request(payload, headers = {}) {
   return new Request(`${ORIGIN}${FEEDBACK_ROUTE}`, {
@@ -15,8 +39,22 @@ function request(payload, headers = {}) {
       'User-Agent': 'Recipe Tree feedback test',
       ...headers,
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({...payload, diagnostics: payload.diagnostics ?? DIAGNOSTICS}),
   });
+}
+
+function github({status = 201, issueUrl = ISSUE_URL} = {}) {
+  const calls = [];
+  return {
+    calls,
+    async fetch(url, init) {
+      calls.push({url, init});
+      return new Response(JSON.stringify(status === 201 ? {html_url: issueUrl} : {message: 'failed'}), {
+        status,
+        headers: {'Content-Type': 'application/json'},
+      });
+    },
+  };
 }
 
 function inboxRequest(token) {
@@ -113,6 +151,7 @@ test('feedback inbox returns recent reports without client fingerprints', async 
 
 test('feedback submissions store validated context without a raw client address', async () => {
   const DB = database();
+  const GitHub = github();
   const response = await handleFeedback(
     request({
       kind: 'bug',
@@ -124,12 +163,13 @@ test('feedback submissions store validated context without a raw client address'
       page: '/?pack=multiblock-madness',
       website: '',
     }),
-    {DB},
+    {DB, GITHUB_ISSUES_TOKEN: GITHUB_TOKEN},
     new URL(`${ORIGIN}${FEEDBACK_ROUTE}`),
+    GitHub.fetch,
   );
 
   assert.equal(response.status, 201);
-  assert.deepEqual(await response.json(), {submitted: true});
+  assert.deepEqual(await response.json(), {submitted: true, issueUrl: ISSUE_URL});
   assert.equal(DB.calls.length, 2);
   assert.match(DB.calls[0].sql, /SELECT COUNT/);
   assert.match(DB.calls[1].sql, /INSERT INTO feedback_reports/);
@@ -138,6 +178,13 @@ test('feedback submissions store validated context without a raw client address'
   assert.equal(DB.calls[1].values[3], 'The selected recipe does not expand.');
   assert.equal(DB.calls[1].values[9].length, 64);
   assert.equal(DB.calls[1].values.includes('192.0.2.10'), false);
+  assert.equal(GitHub.calls.length, 1);
+  const issue = JSON.parse(GitHub.calls[0].init.body);
+  assert.equal(issue.title, '[Bug] Recipe expansion fails');
+  assert.deepEqual(issue.labels, ['bug']);
+  assert.match(issue.body, /## Diagnostics/);
+  assert.match(issue.body, /0\.18\.6/);
+  assert.match(issue.body, /item\|thaumcraft:cluster/);
 });
 
 test('feedback endpoint rejects cross-origin writes before accessing storage', async () => {
@@ -162,6 +209,7 @@ test('feedback endpoint rejects cross-origin writes before accessing storage', a
 
 test('feedback endpoint accepts the canonical origin through the Sites proxy', async () => {
   const DB = database();
+  const GitHub = github();
   const response = await handleFeedback(
     request({
       kind: 'feature',
@@ -173,8 +221,9 @@ test('feedback endpoint accepts the canonical origin through the Sites proxy', a
       page: '/',
       website: '',
     }),
-    {DB},
+    {DB, GITHUB_ISSUES_TOKEN: GITHUB_TOKEN},
     new URL('https://minecraft-recipe-tree.gtjoe51.chatgpt.site/api/feedback'),
+    GitHub.fetch,
   );
 
   assert.equal(response.status, 201);
@@ -210,11 +259,59 @@ test('feedback endpoint enforces the hashed-client cooldown', async () => {
       page: '/',
       website: '',
     }),
-    {DB},
+    {DB, GITHUB_ISSUES_TOKEN: GITHUB_TOKEN},
     new URL(`${ORIGIN}${FEEDBACK_ROUTE}`),
   );
 
   assert.equal(response.status, 429);
   assert.equal(response.headers.get('retry-after'), '900');
   assert.equal(DB.calls.length, 1);
+});
+
+test('feedback submissions normalize legacy feature requests and use the enhancement label', async () => {
+  const DB = database();
+  const GitHub = github();
+  const response = await handleFeedback(
+    request({
+      kind: 'feature',
+      title: 'Keep totals visible',
+      message: 'Please keep totals visible while the graph is panned.',
+      contact: '',
+      packSlug: 'meatballcraft',
+      packName: 'MeatballCraft',
+      page: '/',
+      website: '',
+    }),
+    {DB, GITHUB_ISSUES_TOKEN: GITHUB_TOKEN},
+    new URL(`${ORIGIN}${FEEDBACK_ROUTE}`),
+    GitHub.fetch,
+  );
+  assert.equal(response.status, 201);
+  assert.equal(DB.calls[1].values[1], 'feedback');
+  const issue = JSON.parse(GitHub.calls[0].init.body);
+  assert.equal(issue.title, '[Feedback] Keep totals visible');
+  assert.deepEqual(issue.labels, ['enhancement']);
+});
+
+test('failed GitHub issue creation removes the stored reservation so the user can retry', async () => {
+  const DB = database();
+  const GitHub = github({status: 502});
+  const response = await handleFeedback(
+    request({
+      kind: 'bug',
+      title: 'Graph is blank',
+      message: 'The graph becomes blank after opening a large tree.',
+      contact: '',
+      packSlug: 'meatballcraft',
+      packName: 'MeatballCraft',
+      page: '/',
+      website: '',
+    }),
+    {DB, GITHUB_ISSUES_TOKEN: GITHUB_TOKEN},
+    new URL(`${ORIGIN}${FEEDBACK_ROUTE}`),
+    GitHub.fetch,
+  );
+  assert.equal(response.status, 502);
+  assert.match((await response.json()).error, /try again/i);
+  assert.match(DB.calls.at(-1).sql, /DELETE FROM feedback_reports/);
 });

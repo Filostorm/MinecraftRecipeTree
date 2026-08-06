@@ -1,48 +1,106 @@
-export type GitHubIssueKind = 'bug' | 'feature';
+export type GitHubIssueKind = 'bug' | 'feedback';
 
 export const GITHUB_REPOSITORY = 'Filostorm/MinecraftRecipeTree';
-export const GITHUB_ISSUES_URL = `https://github.com/${GITHUB_REPOSITORY}/issues/new`;
 
-interface GitHubIssueContext {
+export interface IssueReportContext {
+  packSlug: string;
+  packName: string;
+  packVersion: string;
+  minecraftVersion: string;
+  publicationId: string;
+  previewAssetSetId: string;
+  exportGeneratedAt: string;
+  exportFormat: number;
+  itemCount: number;
+  recipeCount: number;
+  categoryCount: number;
+  modCount: number;
+  activeTab: string;
+  openItemKey: string;
+  graphRootKey: string;
+  graphDirection: string;
+  interfaceZoomPercent: number;
+}
+
+export interface IssueReportRuntime {
+  page: string;
+  platform: string;
+  userAgent: string;
+  viewport: string;
+  language: string;
+  online: string;
+}
+
+export interface IssueReportPayload {
   kind: GitHubIssueKind;
+  title: string;
+  message: string;
+  contact: string;
   packSlug: string;
   packName: string;
   page: string;
-  browser: string;
+  website: string;
+  diagnostics: {
+    packVersion: string;
+    minecraftVersion: string;
+    publicationId: string;
+    previewAssetSetId: string;
+    exportGeneratedAt: string;
+    exportFormat: string;
+    itemCount: string;
+    recipeCount: string;
+    categoryCount: string;
+    modCount: string;
+    activeTab: string;
+    openItemKey: string;
+    graphRootKey: string;
+    graphDirection: string;
+    interfaceZoom: string;
+    platform: string;
+    userAgent: string;
+    viewport: string;
+    language: string;
+    online: string;
+  };
 }
 
-export function buildGitHubIssueUrl({
-  kind,
-  packSlug,
-  packName,
-  page,
-  browser,
-}: GitHubIssueContext): string {
-  const isBug = kind === 'bug';
-  const url = new URL(GITHUB_ISSUES_URL);
-  url.searchParams.set('labels', isBug ? 'bug' : 'enhancement');
-  url.searchParams.set('title', isBug ? '[Bug] ' : '[Feature] ');
-  url.searchParams.set(
-    'body',
-    [
-      isBug ? '## What happened?' : '## Proposed feature',
-      isBug
-        ? 'Describe the problem clearly.'
-        : 'Describe the improvement you would like to see.',
-      '',
-      isBug ? '## Steps to reproduce' : '## Why would this help?',
-      isBug ? '1. ' : 'Explain the use case and expected benefit.',
-      '',
-      isBug ? '## Expected behavior' : '## Suggested behavior',
-      isBug
-        ? 'Describe what you expected to happen.'
-        : 'Describe how the feature should work.',
-      '',
-      '## Recipe Tree context',
-      `- Modpack: ${packName} (\`${packSlug}\`)`,
-      `- Page: ${page || 'Unavailable'}`,
-      `- Browser: ${browser || 'Unavailable'}`,
-    ].join('\n'),
-  );
-  return url.toString();
+export function buildIssueReportPayload(
+  kind: GitHubIssueKind,
+  title: string,
+  message: string,
+  context: IssueReportContext,
+  runtime: IssueReportRuntime,
+): IssueReportPayload {
+  return {
+    kind,
+    title,
+    message,
+    contact: '',
+    packSlug: context.packSlug,
+    packName: context.packName,
+    page: runtime.page,
+    website: '',
+    diagnostics: {
+      packVersion: context.packVersion,
+      minecraftVersion: context.minecraftVersion,
+      publicationId: context.publicationId,
+      previewAssetSetId: context.previewAssetSetId,
+      exportGeneratedAt: context.exportGeneratedAt,
+      exportFormat: String(context.exportFormat),
+      itemCount: String(context.itemCount),
+      recipeCount: String(context.recipeCount),
+      categoryCount: String(context.categoryCount),
+      modCount: String(context.modCount),
+      activeTab: context.activeTab,
+      openItemKey: context.openItemKey,
+      graphRootKey: context.graphRootKey,
+      graphDirection: context.graphDirection,
+      interfaceZoom: `${context.interfaceZoomPercent}%`,
+      platform: runtime.platform,
+      userAgent: runtime.userAgent,
+      viewport: runtime.viewport,
+      language: runtime.language,
+      online: runtime.online,
+    },
+  };
 }

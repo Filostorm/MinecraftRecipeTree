@@ -20,7 +20,7 @@ const recipe = {
   ],
 };
 
-test('input traversal expands consumed material inputs without retained prerequisites', () => {
+test('input traversal includes consumed materials and retained prerequisites', () => {
   assert.deepEqual(
     recipeChildrenForDirection(recipe, 'inputs').map(child => ({
       key: child.key,
@@ -39,6 +39,12 @@ test('input traversal expands consumed material inputs without retained prerequi
         key: 'item|test:catalyst',
         amount: 1,
         nonConsumed: false,
+        probabilityRole: 'consume',
+      },
+      {
+        key: 'item|test:mold',
+        amount: 1,
+        nonConsumed: true,
         probabilityRole: 'consume',
       },
     ],
@@ -76,7 +82,7 @@ test('output traversal expands every recipe output with production probability',
 
 test('detects whether the modal item participates on either recipe side', () => {
   assert.equal(recipeUsesItem(recipe, 'item|test:anchor'), true);
-  assert.equal(recipeUsesItem(recipe, 'item|test:mold'), false);
+  assert.equal(recipeUsesItem(recipe, 'item|test:mold'), true);
   assert.equal(recipeUsesItem(recipe, 'item|test:result'), false);
   assert.equal(recipeProducesItem(recipe, 'item|test:result'), true);
   assert.equal(recipeProducesItem(recipe, 'item|test:anchor'), false);
