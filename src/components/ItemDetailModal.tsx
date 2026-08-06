@@ -56,7 +56,7 @@ function toolLabel(tool: string): string {
   return tool === 'hand' ? 'bare hand' : tool.split(':').pop()!.replace(/_/g, ' ');
 }
 
-export function ItemDetailModal() {
+export function ItemDetailModal({interfaceZoom = 1}: {interfaceZoom?: number}) {
   const data = useData();
   const {itemStack, popItem, closeItems, tab} = useUi();
   const safeAreaInsets = useSafeAreaInsets();
@@ -302,6 +302,7 @@ export function ItemDetailModal() {
                 refs={refs}
                 informational={side === 'i'}
                 graphDirection={side === 'u' ? 'outputs' : 'inputs'}
+                interfaceZoom={interfaceZoom}
               />
             )}
           </ScrollView>
@@ -338,11 +339,13 @@ function RefsList({
   refs,
   informational = false,
   graphDirection,
+  interfaceZoom,
 }: {
   itemKey: string;
   refs: RecipeRef[];
   informational?: boolean;
   graphDirection: GraphDirection;
+  interfaceZoom: number;
 }) {
   const data = useData();
   const {
@@ -804,6 +807,7 @@ function RefsList({
                           dir={category.dir}
                           catTitle={category.title}
                           availableCardWidth={availableCardWidth}
+                          interfaceZoom={interfaceZoom}
                           graphDirection={graphDirection}
                           actionSubject={actionSubject}
                           usageOutputSubject={usageOutputSubject}

@@ -35,6 +35,7 @@ export function RecipeCard({
   actionSubject,
   usageOutputSubject,
   availableCardWidth,
+  interfaceZoom = 1,
   grouped = false,
 }: {
   recipe: Recipe;
@@ -48,6 +49,8 @@ export function RecipeCard({
   usageOutputSubject?: string;
   /** Measured width of the full-width recipe-list container in CSS/layout pixels. */
   availableCardWidth: number;
+  /** User-selected UI zoom applied to the JEI recipe preview within the modal. */
+  interfaceZoom?: number;
   /** Render inside a category frame that supplies the outer border and corner radius. */
   grouped?: boolean;
 }) {
@@ -65,6 +68,7 @@ export function RecipeCard({
     recipe.h ?? 60,
     data.manifest.settings.recipeScale,
     availableCardWidth,
+    interfaceZoom,
   );
   const inputs = materialInputSummary(recipe);
   const outputs = slotSummary(recipe.out);

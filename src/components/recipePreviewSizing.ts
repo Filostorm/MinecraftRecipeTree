@@ -6,7 +6,12 @@ export const RECIPE_CARD_PADDING = 10;
 export const RECIPE_CARD_HORIZONTAL_CHROME =
   2 * (RECIPE_CARD_BORDER_WIDTH + RECIPE_CARD_PADDING);
 
-export type RecipePreviewScaleMode = 'physical' | 'integer-downscale' | 'fractional-downscale';
+export type RecipePreviewScaleMode =
+  | 'physical'
+  | 'integer-downscale'
+  | 'fractional-downscale'
+  | 'integer-upscale'
+  | 'fractional-upscale';
 
 export interface RecipePreviewDisplaySize {
   width: number;
@@ -39,14 +44,19 @@ export function responsiveRecipePreviewSize(
   logicalHeight: number,
   recipeScale: number,
   availableCardWidth: number,
+  interfaceZoom = 1,
 ): RecipePreviewDisplaySize {
   if (
     ![logicalWidth, logicalHeight, recipeScale].every(Number.isSafeInteger) ||
     logicalWidth <= 0 ||
     logicalHeight <= 0 ||
-    recipeScale <= 0
+    recipeScale <= 0 ||
+    !Number.isFinite(interfaceZoom) ||
+    interfaceZoom <= 0
   ) {
-    throw new Error('Recipe preview dimensions and exporter scale must be positive safe integers.');
+    throw new Error(
+      'Recipe preview dimensions, exporter scale, and interface zoom must be positive values.',
+    );
   }
   const physicalWidth = logicalWidth * recipeScale;
   const physicalHeight = logicalHeight * recipeScale;
@@ -64,12 +74,19 @@ export function responsiveRecipePreviewSize(
     physicalHeight,
     recipeScale,
   );
-  const scale = display.w / logicalWidth;
+  const zoomScale = Math.min(interfaceZoom, maxWidth / display.w);
+  const width = Math.max(1, Math.round(display.w * zoomScale));
+  const height = Math.max(1, Math.round(display.h * zoomScale));
+  const scale = width / logicalWidth;
   const mode: RecipePreviewScaleMode =
     scale === recipeScale
       ? 'physical'
-      : Number.isInteger(scale) && scale >= 1
-        ? 'integer-downscale'
-        : 'fractional-downscale';
-  return {width: display.w, height: display.h, scale, mode};
+      : scale > recipeScale
+        ? Number.isInteger(scale)
+          ? 'integer-upscale'
+          : 'fractional-upscale'
+        : Number.isInteger(scale) && scale >= 1
+          ? 'integer-downscale'
+          : 'fractional-downscale';
+  return {width, height, scale, mode};
 }

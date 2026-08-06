@@ -642,7 +642,7 @@ function Shell({
       {Platform.OS !== 'web' && (
         <MobileBottomNavigation hasMobs={data.capabilities.mobs} />
       )}
-      <ItemDetailModal />
+      <ItemDetailModal interfaceZoom={interfaceZoom} />
       {showRecipeStages && (
         <RecipeStageModal
           visible
