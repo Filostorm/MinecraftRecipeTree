@@ -111,6 +111,45 @@ test('preserves repeated required inputs while merging each replaceable set', ()
   assert.equal(materialInputSummary(repaired)[0].amount, 2);
 });
 
+test('collapses MeatballCraft crucible ore variants into one choose-one input', () => {
+  const items = catalog([
+    ['item|minecraft:iron_ore', 'Iron Ore'],
+    ['item|abyssalcraft:abyiroore', 'Abyssal Iron Ore'],
+    ['item|cyclicmagic:nether_iron_ore', 'Nether Iron Ore'],
+    ['item|cyclicmagic:end_iron_ore', 'End Iron Ore'],
+    ['item|erebus:ore_iron', 'Erebus Iron Ore'],
+    ['custom|aspect:metallum', 'Metallum'],
+    ['item|thaumcraft:cluster:0', 'Native Iron Cluster'],
+  ]);
+  const crucible = {...category, id: 'THAUMCRAFT_CRUCIBLE', title: 'Crucible'};
+  const recipe = {
+    in: [
+      [['item|minecraft:iron_ore', 1]],
+      [['item|abyssalcraft:abyiroore', 1]],
+      [['item|cyclicmagic:nether_iron_ore', 1]],
+      [['item|cyclicmagic:end_iron_ore', 1]],
+      [['item|erebus:ore_iron', 1]],
+      [['custom|aspect:metallum', 5]],
+    ],
+    out: [[['item|thaumcraft:cluster:0', 1]]],
+  };
+
+  const repaired = reconstructLegacyReplaceableInputs(recipe, crucible, '1.12.2', items);
+
+  assert.equal(repaired.in.length, 2);
+  assert.deepEqual(
+    repaired.in[0].map(([key]) => key),
+    [
+      'item|minecraft:iron_ore',
+      'item|abyssalcraft:abyiroore',
+      'item|cyclicmagic:nether_iron_ore',
+      'item|cyclicmagic:end_iron_ore',
+      'item|erebus:ore_iron',
+    ],
+  );
+  assert.equal(materialInputSummary(repaired)[0].amount, 1);
+});
+
 test('logs and leaves a workbench recipe unchanged when catalog proof is unavailable', () => {
   const recipe = {
     in: [[['item|missing:first', 1]], [['item|missing:second', 1]]],

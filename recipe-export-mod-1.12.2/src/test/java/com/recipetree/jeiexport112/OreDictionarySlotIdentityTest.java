@@ -5,6 +5,8 @@ import org.junit.Test;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Set;
 
 import static org.junit.Assert.assertEquals;
@@ -48,6 +50,21 @@ public class OreDictionarySlotIdentityTest {
         assertEquals("ore:ingotCopper", resolution.identity);
         assertTrue(resolution.isAmbiguous());
         assertEquals(Arrays.asList("ingotCopper", "metalCopper"), resolution.sharedNames);
+    }
+
+    @Test
+    public void choosesTheNarrowestDictionaryIdentityInsteadOfAGenericOreAlias() {
+        Map<String, Integer> cardinalities = new LinkedHashMap<String, Integer>();
+        cardinalities.put("ore", 900);
+        cardinalities.put("oreIron", 5);
+
+        OreDictionarySlotIdentity.Resolution resolution =
+                OreDictionarySlotIdentity.resolveNames(Arrays.asList(
+                        names("ore", "oreIron"),
+                        names("ore", "oreIron")), cardinalities);
+
+        assertEquals("ore:oreIron", resolution.identity);
+        assertEquals(Arrays.asList("ore", "oreIron"), resolution.sharedNames);
     }
 
     @Test

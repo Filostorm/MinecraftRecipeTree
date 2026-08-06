@@ -351,6 +351,9 @@ final class RecipePhase implements ExportPhase {
         wrapper.getIngredients(recording);
         convertRecorded(recording.allInputs(), data, data.inputs, data.usedKeys, recipeIndex, "input");
         convertRecorded(recording.allOutputs(), data, data.outputs, data.outputKeys, recipeIndex, "output");
+        coalesceFlattenedLogicalAlternatives(data.inputs);
+        promoteReturnedIngredients(data);
+        rebuildIndexKeys(data);
     }
 
     private void convertRecorded(Map<IIngredientType<?>, List<List<?>>> recorded,
@@ -469,6 +472,135 @@ final class RecipePhase implements ExportPhase {
             }
         }
         return false;
+    }
+
+    /**
+     * Some 1.12 HEI wrappers publish one OreDictionary choice as a flat A, B, C slot run.
+     * Reconstruct one alternative slot, while preserving repeated requirements such as
+     * A, B, A, B as two slots that each accept A or B.
+     */
+    static void coalesceFlattenedLogicalAlternatives(List<SlotData> slots) {
+        for (int start = 0; start < slots.size(); ) {
+            String identity = slots.get(start).logicalIdentity;
+            if (identity == null) {
+                start++;
+                continue;
+            }
+            int end = start + 1;
+            while (end < slots.size() && identity.equals(slots.get(end).logicalIdentity)) {
+                end++;
+            }
+            if (end - start < 2) {
+                start = end;
+                continue;
+            }
+
+            List<SlotData> run = new ArrayList<SlotData>(slots.subList(start, end));
+            int period = repeatedSlotPeriod(run);
+            int alternativesLength = period == 0 ? run.size() : period;
+            SlotData alternatives = mergeSlots(run.subList(0, alternativesLength), identity);
+            int requirements = period == 0 ? 1 : run.size() / period;
+            slots.subList(start, end).clear();
+            for (int index = 0; index < requirements; index++) {
+                slots.add(start + index, copySlot(alternatives));
+            }
+            start += requirements;
+        }
+    }
+
+    private static int repeatedSlotPeriod(List<SlotData> slots) {
+        for (int period = 1; period <= slots.size() / 2; period++) {
+            if (slots.size() % period != 0) {
+                continue;
+            }
+            boolean matches = true;
+            for (int index = period; index < slots.size(); index++) {
+                if (!slotSignature(slots.get(index)).equals(slotSignature(slots.get(index % period)))) {
+                    matches = false;
+                    break;
+                }
+            }
+            if (matches) {
+                return period;
+            }
+        }
+        return 0;
+    }
+
+    private static SlotData mergeSlots(List<SlotData> slots, String identity) {
+        SlotData merged = new SlotData();
+        merged.logicalIdentity = identity;
+        Set<String> seen = new LinkedHashSet<String>();
+        for (SlotData slot : slots) {
+            for (IngredientPair pair : slot.pairs) {
+                if (seen.add(pair.identity())) {
+                    merged.pairs.add(pair);
+                }
+            }
+        }
+        return merged;
+    }
+
+    private static SlotData copySlot(SlotData source) {
+        SlotData copy = new SlotData();
+        copy.logicalIdentity = source.logicalIdentity;
+        copy.pairs.addAll(source.pairs);
+        return copy;
+    }
+
+    private static String slotSignature(SlotData slot) {
+        List<String> identities = new ArrayList<String>();
+        for (IngredientPair pair : slot.pairs) {
+            identities.add(pair.identity());
+        }
+        Collections.sort(identities);
+        StringBuilder signature = new StringBuilder();
+        for (String identity : identities) {
+            signature.append(identity).append('\u0002');
+        }
+        return signature.toString();
+    }
+
+    /** Move an input returned unchanged by the recipe into a retained one-item prerequisite. */
+    static void promoteReturnedIngredients(RecipeData data) {
+        for (int inputIndex = data.inputs.size() - 1; inputIndex >= 0; inputIndex--) {
+            SlotData input = data.inputs.get(inputIndex);
+            int outputIndex = equivalentSlotIndex(data.outputs, input);
+            if (outputIndex < 0) {
+                continue;
+            }
+            data.inputs.remove(inputIndex);
+            data.outputs.remove(outputIndex);
+            if (equivalentSlotIndex(data.catalysts, input) < 0) {
+                data.catalysts.add(copySlot(input));
+            }
+        }
+    }
+
+    private static int equivalentSlotIndex(List<SlotData> slots, SlotData expected) {
+        String signature = slotSignature(expected);
+        for (int index = 0; index < slots.size(); index++) {
+            if (signature.equals(slotSignature(slots.get(index)))) {
+                return index;
+            }
+        }
+        return -1;
+    }
+
+    private static void rebuildIndexKeys(RecipeData data) {
+        data.usedKeys.clear();
+        data.outputKeys.clear();
+        addSlotKeys(data.inputs, data.usedKeys);
+        addSlotKeys(data.catalysts, data.usedKeys);
+        addSlotKeys(data.outputs, data.outputKeys);
+    }
+
+    private static void addSlotKeys(List<SlotData> slots, Set<String> keys) {
+        for (SlotData slot : slots) {
+            for (IngredientPair pair : slot.pairs) {
+                keys.add(pair.key);
+            }
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -781,7 +913,7 @@ final class RecipePhase implements ExportPhase {
         closeCurrentCategory();
     }
 
-    private static final class RecipeData {
+    static final class RecipeData {
         String id;
         String image;
         int width;
@@ -797,12 +929,12 @@ final class RecipePhase implements ExportPhase {
         final Set<String> outputKeys = new LinkedHashSet<String>();
     }
 
-    private static final class SlotData {
+    static final class SlotData {
         String logicalIdentity;
         final List<IngredientPair> pairs = new ArrayList<IngredientPair>();
     }
 
-    private static final class IngredientPair {
+    static final class IngredientPair {
         final String key;
         final BigDecimal amount;
 

@@ -61,6 +61,7 @@ import {
 } from './recipeCategories';
 import {applyRecipeStageMetadata} from './recipeStages';
 import {reconstructLegacyReplaceableInputs} from './legacyReplaceableInputs';
+import {promoteReturnedRecipeIngredients} from './returnedRecipeIngredients';
 import {
   MAX_NETWORK_DOCUMENT_BYTES,
   isLocalPackExportUrl,
@@ -1557,11 +1558,13 @@ export function DataProvider({
             if (!selectedRecipe) {
               throw new Error(`Recipe access did not resolve reference ${catIdx}:${recipeIdx}.`);
             }
-            const recipe = reconstructLegacyReplaceableInputs(
-              applyRecipeStageMetadata(selectedRecipe, descriptor),
-              categories[catIdx],
-              descriptor.minecraftVersion,
-              itemsByKey,
+            const recipe = promoteReturnedRecipeIngredients(
+              reconstructLegacyReplaceableInputs(
+                applyRecipeStageMetadata(selectedRecipe, descriptor),
+                categories[catIdx],
+                descriptor.minecraftVersion,
+                itemsByKey,
+              ),
             );
             if (previewsByCategory) {
               if (!previewsByCategory.get(catIdx)?.has(recipeIdx)) {
