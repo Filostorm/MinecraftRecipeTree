@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   datasetMountKey,
   datasetSource,
+  preserveDatasetMount,
   readRequestedDatasetSlug,
   requireDatasetCatalog,
   searchWithDatasetSlug,
@@ -134,6 +135,15 @@ test('pack query writes preserve unrelated state and mount keys change with eith
     datasetMountKey(madness),
     datasetMountKey({...madness, previewAssetSetId: 'e'.repeat(64)}),
   );
+});
+
+test('catalog refreshes preserve a mounted immutable dataset', () => {
+  const refreshedMeatball = {...meatball};
+  assert.equal(preserveDatasetMount(meatball, refreshedMeatball), meatball);
+  assert.equal(preserveDatasetMount(null, refreshedMeatball), refreshedMeatball);
+
+  const nextPreview = {...meatball, previewAssetSetId: 'e'.repeat(64)};
+  assert.equal(preserveDatasetMount(meatball, nextPreview), nextPreview);
 });
 
 test('maps every published modpack to a first-party picker icon', () => {

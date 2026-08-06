@@ -12,6 +12,7 @@ import {
   type DatasetDescriptor,
   type DatasetSource,
   datasetSource,
+  preserveDatasetMount,
   readRequestedDatasetSlug,
   requireDatasetCatalog,
   searchWithDatasetSlug,
@@ -177,12 +178,14 @@ export function DatasetCatalogProvider({children}: {children: React.ReactNode}) 
           if (!requestedSlug?.startsWith('local-')) throw selectionError;
         }
         if (!alive) return;
-        setDatasets(publishedDatasets);
-        setAssetOrigin(configuration.assetOrigin);
-        selectedSlugRef.current = publishedSelection.slug;
-        setSelected(publishedSelection);
-        setError(null);
-        setLoading(false);
+        if (!requestedSlug?.startsWith('local-')) {
+          setDatasets(publishedDatasets);
+          setAssetOrigin(configuration.assetOrigin);
+          selectedSlugRef.current = publishedSelection.slug;
+          setSelected(current => preserveDatasetMount(current, publishedSelection));
+          setError(null);
+          setLoading(false);
+        }
 
         let localDatasets: readonly DatasetDescriptor[] = [];
         if (Platform.OS === 'web') {
@@ -210,7 +213,7 @@ export function DatasetCatalogProvider({children}: {children: React.ReactNode}) 
         sourceFor(nextSelected, configuration.assetOrigin);
         if (!alive) return;
         selectedSlugRef.current = nextSelected.slug;
-        setSelected(nextSelected);
+        setSelected(current => preserveDatasetMount(current, nextSelected));
         setError(null);
         setLoading(false);
       } catch (cause) {

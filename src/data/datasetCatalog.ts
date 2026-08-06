@@ -190,6 +190,16 @@ export function datasetMountKey(descriptor: DatasetDescriptor): string {
   return `${descriptor.slug}:${descriptor.publicationId}:${descriptor.previewAssetSetId}`;
 }
 
+/** Preserve the mounted descriptor when a catalog refresh resolves to the same immutable data. */
+export function preserveDatasetMount(
+  current: DatasetDescriptor | null,
+  refreshed: DatasetDescriptor,
+): DatasetDescriptor {
+  return current && datasetMountKey(current) === datasetMountKey(refreshed)
+    ? current
+    : refreshed;
+}
+
 export function searchWithDatasetSlug(search: string, slug: string): string {
   if (!DATASET_SLUG_PATTERN.test(slug) || slug.length > 80) {
     throw new Error(`Cannot write an invalid dataset slug to the URL: ${JSON.stringify(slug)}.`);

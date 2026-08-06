@@ -363,6 +363,11 @@ function RefsList({
   );
   const [recipesByRef, setRecipesByRef] = useState<Map<string, Recipe>>(() => new Map());
   const [availableCardWidth, setAvailableCardWidth] = useState<number | null>(null);
+  const recipeForRef = useCallback(
+    (ref: RecipeRef) =>
+      recipesByRef.get(recipeRefKey(ref)) ?? data.getCachedRecipe(ref),
+    [data, recipesByRef],
+  );
 
   const categoryGroups = useMemo(() => {
     const counts = new Map<number, number>();
@@ -437,19 +442,19 @@ function RefsList({
       ),
     [filteredRefs, informational, showFluidTransfers, visibleTarget, scanLimit],
   );
-  const loadedScan = refsToLoad.every(ref => recipesByRef.has(recipeRefKey(ref)));
+  const loadedScan = refsToLoad.every(ref => Boolean(recipeForRef(ref)));
   const recipeStageCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const ref of refsToLoad) {
-      const stage = recipesByRef.get(recipeRefKey(ref))?.stage;
+      const stage = recipeForRef(ref)?.stage;
       if (stage) counts.set(stage, (counts.get(stage) ?? 0) + 1);
     }
     return [...counts.entries()].sort(([left], [right]) => left.localeCompare(right));
-  }, [refsToLoad, recipesByRef]);
+  }, [refsToLoad, recipeForRef]);
   const visibleCandidates = useMemo(
     () =>
       refsToLoad.filter(ref => {
-        const recipe = recipesByRef.get(recipeRefKey(ref));
+        const recipe = recipeForRef(ref);
         return (
           isRecipeVisibleForStages(recipe, hiddenRecipeStages) &&
           (informational ||
@@ -459,7 +464,7 @@ function RefsList({
       }),
     [
       refsToLoad,
-      recipesByRef,
+      recipeForRef,
       hiddenRecipeStages,
       informational,
       showFluidTransfers,
@@ -477,12 +482,12 @@ function RefsList({
     return grouped;
   }, [shown]);
   const hiddenFluidTransferCount = refsToLoad.reduce((count, ref) => {
-    const recipe = recipesByRef.get(recipeRefKey(ref));
+    const recipe = recipeForRef(ref);
     return count +
       (!informational && recipe && isFluidContainerTransferRecipe(recipe, data.itemsByKey) ? 1 : 0);
   }, 0);
   const hiddenRecipeStageCount = refsToLoad.reduce((count, ref) => {
-    const stage = recipesByRef.get(recipeRefKey(ref))?.stage;
+    const stage = recipeForRef(ref)?.stage;
     return count + (stage && hiddenRecipeStages.has(stage) ? 1 : 0);
   }, 0);
   const defaultScanMaximum = Math.min(filteredRefs.length, MAX_DEFAULT_FILTER_SCAN);
@@ -550,7 +555,7 @@ function RefsList({
   // Retain resolved cards across pagination/filter changes, while the data layer keeps the
   // underlying parsed-shard cache bounded.
   useEffect(() => {
-    const missing = refsToLoad.filter(ref => !recipesByRef.has(recipeRefKey(ref)));
+    const missing = refsToLoad.filter(ref => !recipeForRef(ref));
     if (missing.length === 0) return;
     let alive = true;
     (async () => {
@@ -569,7 +574,7 @@ function RefsList({
     return () => {
       alive = false;
     };
-  }, [refsToLoad, recipesByRef, data]);
+  }, [refsToLoad, recipeForRef, data]);
 
   const showRecipeFilters =
     informational ||
@@ -780,7 +785,7 @@ function RefsList({
             {categoryRefs.length > 0 ? (
               <View style={styles.categoryRecipes}>
                 {categoryRefs.map(([catIdx, recipeIdx], recipePosition) => {
-                  const recipe = recipesByRef.get(recipeRefKey([catIdx, recipeIdx]));
+                  const recipe = recipeForRef([catIdx, recipeIdx]);
                   const usageStart =
                     graphDirection === 'outputs' && recipe
                       ? usageGraphStart(recipe)
