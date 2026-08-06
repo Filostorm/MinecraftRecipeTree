@@ -249,6 +249,15 @@ final class ExportContext {
         JeiExportMod.LOGGER.warn("[jeiexport] {}", message);
     }
 
+    /**
+     * Records an expected compatibility fallback without marking the completed snapshot as failed.
+     * These warnings remain visible in the game log, while failures.json and export-errors.json stay
+     * reserved for defects that require a rerun or exporter/mod fix.
+     */
+    void warning(String message) {
+        JeiExportMod.LOGGER.warn("[jeiexport] {}", message);
+    }
+
     void failure(String message, Throwable error) {
         ExportFailure failure = ExportFailure.generic(message, error);
         failures.add(failure.message);

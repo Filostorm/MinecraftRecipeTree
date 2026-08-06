@@ -240,17 +240,13 @@ final class RecipeExporter implements ExportJob.PhaseRunner {
         try {
             Optional<IRecipeLayoutDrawable<?>> drawableOpt = createDrawable(category, recipe);
             if (drawableOpt.isEmpty()) {
-                ctx.recipeFailure(
-                        categoryUid,
-                        recipeId,
-                        idx,
-                        recipeClass,
-                        String.format(
+                ctx.warning(String.format(
                         Locale.ROOT,
-                        "recipe %s #%d: JEI returned no layout drawable; omitting the non-renderable placeholder",
+                        "recipe %s #%d (%s): JEI returned no layout drawable; omitting the "
+                                + "non-renderable placeholder",
                         catDir,
-                        idx),
-                        null);
+                        idx,
+                        recipeClass == null ? "unknown recipe class" : recipeClass.getName()));
                 return;
             }
             IRecipeLayoutDrawable<?> drawable = drawableOpt.get();

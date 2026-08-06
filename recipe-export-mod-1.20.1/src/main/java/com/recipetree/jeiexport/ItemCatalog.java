@@ -261,9 +261,10 @@ final class ItemCatalog {
         ImageVisibility.Result visibility = ImageVisibility.repairHiddenRgbAlpha(image);
         if (visibility == ImageVisibility.Result.EMPTY) {
             image.close();
-            ctx.failure("ingredient icon " + key
+            ctx.warning("ingredient icon " + key
                     + ": rendered image is fully transparent; omitting the PNG and JSON icon "
-                    + "reference so the viewer uses its named fallback");
+                    + "reference so the viewer uses its named fallback (this is expected for "
+                    + "invisible, technical, and unconfigured painted ingredients)");
             return null;
         }
         if (visibility == ImageVisibility.Result.REPAIRED_HIDDEN_RGB) {
