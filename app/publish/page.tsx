@@ -15,17 +15,18 @@ export default function PublishPage() {
         </header>
 
         <section className={styles.hero} aria-labelledby="publish-title">
-          <p className={styles.eyebrow}>ADD YOUR MODPACK</p>
-          <h1 id="publish-title">Bring your pack to Recipe Tree.</h1>
+          <p className={styles.eyebrow}>IMPORT A LOCAL MODPACK</p>
+          <h1 id="publish-title">Open your pack without publishing it.</h1>
           <p className={styles.heroCopy}>
-            Follow five short steps to export your pack and open it in the viewer.
+            Follow five short steps to export your pack and save it in this browser. Your ZIP
+            and pack data stay on this device by default.
           </p>
           <div className={styles.heroActions}>
             <a className={styles.primaryAction} href="#instructions">
               Get started
             </a>
             <a className={styles.secondaryAction} href="#upload">
-              Add your ZIP
+              Import your ZIP
             </a>
           </div>
         </section>
@@ -94,8 +95,11 @@ export default function PublishPage() {
               <li className={styles.uploadStep} id="upload">
                 <span className={styles.number}>5</span>
                 <div className={styles.uploadStepContent}>
-                  <h4>Add your exporter ZIP</h4>
-                  <p>Drag it into the box or tap the box to choose it.</p>
+                  <h4>Import your local exporter ZIP</h4>
+                  <p>
+                    Drag it into the box or tap the box to choose it. It stays on this device
+                    unless you explicitly choose to share an exporter error report.
+                  </p>
                   <PackUploadDropzone />
                 </div>
               </li>

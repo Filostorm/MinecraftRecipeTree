@@ -20,6 +20,7 @@ import {installLocalPackArchive} from '../../src/data/localPackStorage';
 import {
   buildExportFailureReport,
   sendExportFailureReport,
+  shouldSendExportFailureReport,
 } from '../../src/data/exportFailureReport';
 import styles from './publish.module.css';
 
@@ -57,6 +58,7 @@ type UploadState =
       issueUrl: string | null;
       fileUrl: string | null;
       reportStatus: 'sent' | 'duplicate' | 'failed' | null;
+      failureReportSharing: boolean;
     }
   | {status: 'error'; filename: string | null; message: string};
 
@@ -318,6 +320,7 @@ export function PackUploadDropzone() {
   const inputRef = useRef<HTMLInputElement>(null);
   const operationRef = useRef(0);
   const [dragging, setDragging] = useState(false);
+  const [shareFailureReports, setShareFailureReports] = useState(false);
   const [state, setState] = useState<UploadState>({status: 'idle'});
 
   const addFile = async (file: File | undefined) => {
@@ -333,6 +336,7 @@ export function PackUploadDropzone() {
     }
 
     const operation = operationRef.current + 1;
+    const failureReportSharing = shareFailureReports;
     operationRef.current = operation;
     setState({status: 'checking', filename: file.name, progress: 0, phase: 'checking'});
     try {
@@ -397,7 +401,10 @@ export function PackUploadDropzone() {
           );
           viewerHref = installed.viewerHref;
           saved = true;
-          if (result.summary.counts.failures > 0) {
+          if (shouldSendExportFailureReport(
+            result.summary.counts.failures,
+            failureReportSharing,
+          )) {
             try {
               setState({
                 status: 'checking',
@@ -423,7 +430,7 @@ export function PackUploadDropzone() {
               reportStatus = 'failed';
               findings = Object.freeze([
                 ...findings,
-                'The pack was added, but its automatic GitHub failure report could not be sent.',
+                'The pack was added, but its optional GitHub failure report could not be sent.',
               ]);
             }
           }
@@ -444,6 +451,7 @@ export function PackUploadDropzone() {
         issueUrl,
         fileUrl,
         reportStatus,
+        failureReportSharing,
       });
     } catch (error) {
       if (operationRef.current !== operation) return;
@@ -466,6 +474,29 @@ export function PackUploadDropzone() {
 
   return (
     <div className={styles.uploadPanel}>
+      <div className={styles.localOnlyNotice}>
+        <div>
+          <strong>Local-only by default</strong>
+          <span>
+            Your ZIP and pack data stay in this browser. Nothing is published to Recipe Tree.
+          </span>
+        </div>
+        <label className={styles.reportChoice}>
+          <input
+            type="checkbox"
+            checked={shareFailureReports}
+            onChange={event => setShareFailureReports(event.target.checked)}
+            disabled={state.status === 'checking'}
+          />
+          <span>
+            <strong>Share exporter errors</strong>
+            <small>
+              If this export contains failures, send diagnostics to the Recipe Tree GitHub
+              issue tracker. Pack files are never included.
+            </small>
+          </span>
+        </label>
+      </div>
       <label
         className={[
           styles.dropzone,
@@ -494,7 +525,7 @@ export function PackUploadDropzone() {
           accept=".zip,application/zip"
           onChange={onInput}
           disabled={state.status === 'checking'}
-          aria-label="Add an exporter ZIP archive"
+          aria-label="Import a local exporter ZIP archive"
         />
         <span className={styles.uploadIcon} aria-hidden="true">↑</span>
         <strong>
@@ -506,11 +537,11 @@ export function PackUploadDropzone() {
                 : state.phase === 'saving'
                   ? `Saving ${state.filename}`
                   : state.phase === 'adding'
-                    ? `Adding ${state.filename} to your viewer`
+                    ? `Adding ${state.filename} locally`
                     : `Checking ${state.filename}`
             : dragging
               ? 'Drop the exporter ZIP here'
-              : 'Drag and drop your exporter ZIP'}
+              : 'Drag and drop a local exporter ZIP'}
         </strong>
         <span>
           {state.status === 'checking'
@@ -573,7 +604,7 @@ export function PackUploadDropzone() {
             }>
             <div className={styles.uploadResultTopline}>
               <span>
-                {state.saved ? 'READY IN VIEWER' : 'WE FOUND A PROBLEM'}
+                {state.saved ? 'READY ON THIS DEVICE' : 'WE FOUND A PROBLEM'}
               </span>
               <a href={state.viewerHref}>Return to viewer</a>
             </div>
@@ -613,16 +644,24 @@ export function PackUploadDropzone() {
               </ul>
             ) : (
               <p className={styles.uploadSuccessCopy}>
-                No errors found. This pack is now in your modpack list.
+                No errors found. This pack is now in your local modpack list.
               </p>
             )}
+            {state.saved &&
+              state.summary.counts.failures > 0 &&
+              !state.failureReportSharing && (
+                <p className={styles.uploadSuccessCopy}>
+                  Exporter errors stayed on this device. Import the ZIP again with “Share
+                  exporter errors” enabled if you want to report them.
+                </p>
+              )}
             {state.reportStatus && (
               <p className={styles.uploadSuccessCopy}>
                 {state.reportStatus === 'failed'
                   ? 'You can use the pack now; failure reporting can be retried by adding the ZIP again.'
                   : state.reportStatus === 'duplicate'
                     ? 'This pack or mod version already had a report, so its errors file was updated.'
-                    : 'The exporter failures were saved to errors.json and reported automatically.'}
+                    : 'The exporter failures were saved to errors.json and shared with GitHub.'}
                 {state.issueUrl && (
                   <> <a href={state.issueUrl} target="_blank" rel="noreferrer">View GitHub issue</a></>
                 )}

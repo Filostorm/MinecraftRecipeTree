@@ -128,15 +128,15 @@ export function DatasetSwitcher({
           : openPackUpload
       }
       accessibilityRole={nativeHeader ? 'button' : 'link'}
-      accessibilityLabel={nativeHeader ? 'How to upload a modpack on desktop' : 'Upload a modpack exporter ZIP'}
+      accessibilityLabel={nativeHeader ? 'How to import a local modpack on desktop' : 'Import a local modpack exporter ZIP'}
       accessibilityHint={
         nativeHeader
-          ? 'Opens desktop upload instructions'
-          : 'Opens the drag-and-drop pack upload page'
+          ? 'Opens desktop local import instructions'
+          : 'Opens the local pack import page'
       }
       focusable>
       <Text style={[styles.uploadButtonText, nativeHeader && styles.nativeUploadButtonText]}>
-        {nativeHeader ? '⇧  Upload pack' : 'Upload pack'}
+        {nativeHeader ? '⇧  Desktop import' : 'Import local pack'}
       </Text>
     </TouchableOpacity>
   );
