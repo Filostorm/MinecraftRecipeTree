@@ -460,6 +460,12 @@ test('preview ingestion stages, verifies, and commits the manifest last', async 
   );
   assert.equal(staged.status, 200);
   assert.equal(staged.headers.get('x-mrt-publication-state'), 'staged');
+  const cloudflareNormalizedStatus = await handlePreviewAssetUpload(
+    new Request(endpoint('status'), {method: 'GET', headers: authorizedHeaders()}),
+    env,
+  );
+  assert.equal(cloudflareNormalizedStatus.status, 200);
+  assert.equal(cloudflareNormalizedStatus.headers.get('x-mrt-publication-state'), 'staged');
 
   const missing = await handlePreviewAssetUpload(
     new Request(endpoint('objects/assets/pack-000.bin'), {
@@ -469,6 +475,14 @@ test('preview ingestion stages, verifies, and commits the manifest last', async 
     env,
   );
   assert.equal(missing.status, 404);
+  const cloudflareNormalizedMissingObject = await handlePreviewAssetUpload(
+    new Request(endpoint('objects/assets/pack-000.bin'), {
+      method: 'GET',
+      headers: authorizedHeaders(),
+    }),
+    env,
+  );
+  assert.equal(cloudflareNormalizedMissingObject.status, 404);
 
   const incompleteCommit = await handlePreviewAssetUpload(
     new Request(endpoint('commit'), {
@@ -492,6 +506,14 @@ test('preview ingestion stages, verifies, and commits the manifest last', async 
     assert.equal(verified.status, 200, path);
     assert.equal(verified.headers.get('x-mrt-content-sha256'), sha256(bytes));
   }
+  const cloudflareNormalizedStoredObject = await handlePreviewAssetUpload(
+    new Request(endpoint('objects/assets/pack-000.bin'), {
+      method: 'GET',
+      headers: authorizedHeaders(),
+    }),
+    env,
+  );
+  assert.equal(cloudflareNormalizedStoredObject.status, 200);
 
   const committed = await handlePreviewAssetUpload(
     new Request(endpoint('commit'), {

@@ -183,8 +183,13 @@ function createIngestionApi(fixtureState, options = {}) {
       const path = tail.join('/');
       const stored = state.objects.get(path);
       if (method === 'HEAD') {
+        const responseHeaders = stored ? responseHeadersForObject(stored) : null;
+        if (responseHeaders && options.cloudflareHeadNormalization) {
+          responseHeaders['content-length'] = '0';
+          responseHeaders['x-mrt-content-bytes'] = String(stored.bytes.length);
+        }
         return stored
-          ? new Response(null, {status: 200, headers: responseHeadersForObject(stored)})
+          ? new Response(null, {status: 200, headers: responseHeaders})
           : new Response(null, {status: 404});
       }
       if (method === 'PUT') {
@@ -510,7 +515,11 @@ test('partial staging skips exact objects and accepts a conditional 412 race onl
       bytes: data.files.get(first.path),
       sha256: first.sha256,
     }]]);
-    const api = createIngestionApi(data, {objects: preseeded, raceStatus: 412});
+    const api = createIngestionApi(data, {
+      objects: preseeded,
+      raceStatus: 412,
+      cloudflareHeadNormalization: true,
+    });
     const originalFetch = api.fetchImpl;
     let injectedRace = false;
     api.fetchImpl = async (url, init) => {

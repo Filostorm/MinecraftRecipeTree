@@ -152,7 +152,6 @@ final class RecipePhase implements ExportPhase {
         int semanticFailuresBefore = context.failureCount();
         try {
             collectSemantics(recipe, data, sourceIndex);
-            data.structure = ModularMachineryStructure.extract(recipe, catalog);
         } catch (IOException e) {
             throw e;
         } catch (Throwable throwable) {
@@ -163,6 +162,10 @@ final class RecipePhase implements ExportPhase {
             }
             data.error = true;
             context.failure("recipe semantics " + safeCurrentUid() + " #" + sourceIndex + ": " + throwable);
+        }
+
+        if (!data.error) {
+            data.structure = extractModularMachineryStructure(recipe, sourceIndex);
         }
 
         if (data.excluded) {
@@ -197,14 +200,16 @@ final class RecipePhase implements ExportPhase {
                 throw new IOException("Quality sample recipe image " + safeCurrentUid() + " #" +
                         sourceIndex + " failed", e);
             }
-            context.failure("recipe image " + safeCurrentUid() + " #" + exportedIndex + ": " + e);
+            context.failure("recipe image " + safeCurrentUid() + " #" + exportedIndex +
+                    " cause=" + describeCauseChain(e));
         } catch (Throwable throwable) {
             FatalErrors.rethrowIfFatal(throwable);
             if (context.request.qualitySample != null) {
                 throw new IOException("Quality sample recipe image " + safeCurrentUid() + " #" +
                         sourceIndex + " failed", throwable);
             }
-            context.failure("recipe image " + safeCurrentUid() + " #" + exportedIndex + ": " + throwable);
+            context.failure("recipe image " + safeCurrentUid() + " #" + exportedIndex +
+                    " cause=" + describeCauseChain(throwable));
         }
         if (context.request.qualitySample != null &&
                 (data.image == null || data.image.isEmpty() || data.width <= 0 || data.height <= 0)) {
@@ -230,6 +235,54 @@ final class RecipePhase implements ExportPhase {
                     currentRecipes.size(), context.pngWriter.getPending());
         }
         return false;
+    }
+
+    private ModularMachineryStructure.Data extractModularMachineryStructure(
+            IRecipeWrapper recipe, int sourceIndex) throws IOException {
+        String categoryUid = safeCurrentUid();
+        if (!ModularMachineryStructure.isPreviewCategory(categoryUid)) {
+            return null;
+        }
+        context.recordModularMachineryStructurePreview();
+        try {
+            ModularMachineryStructure.Data structure = ModularMachineryStructure.extract(
+                    categoryUid, recipe, catalog);
+            if (structure == null) {
+                throw new IOException("extractor returned no structure");
+            }
+            context.recordModularMachineryStructureSuccess();
+            return structure;
+        } catch (Throwable throwable) {
+            FatalErrors.rethrowIfFatal(throwable);
+            context.recordModularMachineryStructureFailure();
+            String diagnostic = "MODULAR_MACHINERY_STRUCTURE_EXPORT_FAILED category=" +
+                    categoryUid + " sourceIndex=" + sourceIndex + " wrapper=" +
+                    recipe.getClass().getName() + " cause=" + describeCauseChain(throwable);
+            if (context.request.qualitySample != null) {
+                throw new IOException(diagnostic, throwable);
+            }
+            context.failure(diagnostic);
+            return null;
+        }
+    }
+
+    private static String describeCauseChain(Throwable throwable) {
+        StringBuilder message = new StringBuilder();
+        Throwable current = throwable;
+        int depth = 0;
+        while (current != null && depth < 8) {
+            if (depth > 0) message.append(" <- ");
+            message.append(current.getClass().getName());
+            String detail = current.getMessage();
+            if (detail != null && !detail.trim().isEmpty()) {
+                message.append(": ").append(detail.trim());
+            }
+            Throwable next = current.getCause();
+            if (next == current) break;
+            current = next;
+            depth++;
+        }
+        return message.toString();
     }
 
     @SuppressWarnings("unchecked")

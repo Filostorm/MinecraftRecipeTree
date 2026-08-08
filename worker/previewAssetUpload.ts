@@ -501,8 +501,8 @@ async function handleObject(
   assetSetId: string,
   rawPath: string,
 ): Promise<Response> {
-  if (request.method !== 'HEAD' && request.method !== 'PUT') {
-    return methodNotAllowed('HEAD, PUT');
+  if (request.method !== 'HEAD' && request.method !== 'GET' && request.method !== 'PUT') {
+    return methodNotAllowed('HEAD, GET, PUT');
   }
   let path: string;
   try {
@@ -549,7 +549,7 @@ async function handleObject(
       path,
     );
   }
-  if (request.method === 'HEAD') {
+  if (request.method === 'HEAD' || request.method === 'GET') {
     return new Response(null, {status: 404, headers: {'Cache-Control': 'no-store'}});
   }
 
@@ -650,7 +650,11 @@ async function handlePublicationStatus(
   bucket: PreviewUploadR2Bucket,
   assetSetId: string,
 ): Promise<Response> {
-  if (request.method !== 'HEAD') return methodNotAllowed('HEAD');
+  // Cloudflare may internally normalize an incoming HEAD request to GET before invoking the
+  // Worker. Both forms are read-only and return the same header-only status response.
+  if (request.method !== 'HEAD' && request.method !== 'GET') {
+    return methodNotAllowed('HEAD, GET');
+  }
   try {
     const published = await loadPublishedManifest(bucket, assetSetId);
     const loaded = published ?? (await loadStagedManifest(bucket, assetSetId));

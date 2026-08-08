@@ -30,6 +30,7 @@ public class QualitySamplePlanTest {
         assertEquals(3, plan.recipeCount());
         assertEquals(3, plan.sourceIndexSelectorCount());
         assertEquals(0, plan.recipeIdSelectorCount());
+        assertFalse(plan.scansAllItems());
         assertTrue(plan.includesCategory("minecraft.crafting"));
         assertFalse(plan.includesCategory("missing"));
         assertEquals(Arrays.asList("minecraft.crafting", "extendedcrafting:table_crafting_3x3"),
@@ -38,6 +39,15 @@ public class QualitySamplePlanTest {
                 "minecraft.crafting", 40000, null));
         assertEquals(Arrays.asList(131), plan.resolveSourceIndexes(
                 "extendedcrafting:table_crafting_3x3", 200, null));
+    }
+
+    @Test
+    public void diagnosticSampleMayReproduceFullItemCatalogSideEffects() throws Exception {
+        QualitySamplePlan plan = parse("{\"scanAllItems\":true,\"recipes\":[{" +
+                "\"category\":\"zmaster587.AR.precisionAssembler\",\"sourceIndex\":0}]}");
+
+        assertTrue(plan.scansAllItems());
+        assertEquals(1, plan.recipeCount());
     }
 
     @Test
@@ -110,6 +120,9 @@ public class QualitySamplePlanTest {
                 "duplicate selector");
         assertRejected("{\"recipes\":[{\"category\":\"minecraft.crafting\",\"sourceIndex\":1.5}]}",
                 "must be an integer");
+        assertRejected("{\"scanAllItems\":\"yes\",\"recipes\":[{" +
+                "\"category\":\"minecraft.crafting\",\"sourceIndex\":1}]}",
+                "scanAllItems must be a boolean");
     }
 
     @Test

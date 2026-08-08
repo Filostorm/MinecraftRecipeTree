@@ -48,6 +48,9 @@ final class ExportContext {
     private final AtomicInteger buildCraftHeatableAbsentOutputLayouts = new AtomicInteger();
     private final AtomicInteger buildCraftCoolableAbsentOutputLayouts = new AtomicInteger();
     private final AtomicInteger multiblocked08ScreenCenteredParentLayouts = new AtomicInteger();
+    private final AtomicInteger modularMachineryStructurePreviews = new AtomicInteger();
+    private final AtomicInteger modularMachineryStructuresExported = new AtomicInteger();
+    private final AtomicInteger modularMachineryStructureFailures = new AtomicInteger();
     private long multiblocked08CorrectedScissorCalls;
     private String firstMultiblocked08Placement;
 
@@ -143,6 +146,18 @@ final class ExportContext {
 
     int warningCount() {
         return totalWarnings.get();
+    }
+
+    void recordModularMachineryStructurePreview() {
+        modularMachineryStructurePreviews.incrementAndGet();
+    }
+
+    void recordModularMachineryStructureSuccess() {
+        modularMachineryStructuresExported.incrementAndGet();
+    }
+
+    void recordModularMachineryStructureFailure() {
+        modularMachineryStructureFailures.incrementAndGet();
     }
 
     synchronized void warnAmountFallback(Class<?> ingredientClass) {
@@ -430,6 +445,11 @@ final class ExportContext {
             writer.name("multiblocked08CorrectedScissorCalls")
                     .value(multiblocked08CorrectedScissorCalls);
             writer.endObject();
+            writer.name("modularMachineryStructures").beginObject();
+            writer.name("previews").value(modularMachineryStructurePreviews.get());
+            writer.name("exported").value(modularMachineryStructuresExported.get());
+            writer.name("failures").value(modularMachineryStructureFailures.get());
+            writer.endObject();
             writer.endObject();
         }
         int multiblockedPlacements = multiblocked08ScreenCenteredParentLayouts.get();
@@ -496,6 +516,12 @@ final class ExportContext {
             writer.name("failureEventsOmitted").value(omitted);
             writer.name("warningEvents").value(warningCount());
             writer.name("warningEventsOmitted").value(omittedWarnings.get());
+            writer.name("modularMachineryStructurePreviews")
+                    .value(modularMachineryStructurePreviews.get());
+            writer.name("modularMachineryStructuresExported")
+                    .value(modularMachineryStructuresExported.get());
+            writer.name("modularMachineryStructureFailures")
+                    .value(modularMachineryStructureFailures.get());
             writer.endObject();
             writer.name("mods").beginObject();
             for (ModContainer mod : Loader.instance().getActiveModList()) {

@@ -326,7 +326,7 @@ const quietLogger = Object.freeze({
   error() {},
 });
 
-test('production contract pins the repaired complete MeatballCraft corpus', () => {
+test('production contract pins the native complete MeatballCraft corpus', () => {
   assert.deepEqual(MEATBALLCRAFT_CONTRACT, {
     format: 1,
     minecraft: '1.12.2',
@@ -335,43 +335,35 @@ test('production contract pins the repaired complete MeatballCraft corpus', () =
       recipeScale: 2,
       mobCanvas: 256,
       worldStartupOptimization: {
-        enabled: true,
+        enabled: false,
         policy: 'dimension-0-plus-should-load-spawn',
-        applied: true,
-        originalDimensions: 93,
-        selectedDimensions: 4,
-        skippedDimensions: 89,
+        applied: false,
       },
     },
     counts: {
-      items: 196161,
-      recipes: 359215,
+      items: 196127,
+      recipes: 359096,
       categories: 674,
       mobs: 0,
       blockDrops: 0,
-      failures: 130,
+      failures: 0,
     },
-    diagnostics: {failureEvents: 130, failureEventsOmitted: 0},
-    recipeImages: {previews: 359215, missing: 0},
+    diagnostics: {
+      failureEvents: 0,
+      failureEventsOmitted: 0,
+      warningEvents: 133,
+      warningEventsOmitted: 0,
+      modularMachineryStructurePreviews: 260,
+      modularMachineryStructuresExported: 260,
+      modularMachineryStructureFailures: 0,
+    },
+    recipeImages: {previews: 359096, missing: 0},
     hostedWeb: {
       format: 2,
       packedImages: 'coordinate-v1',
       maxPackBytes: 1024 * 1024,
       shardedJson: 'mrt-sharded-json-v1',
       maxShardBytes: 8 * 1024 * 1024,
-    },
-    repairProvenance: {
-      format: 'mrt-recipe-preview-repair-overlay-v1',
-      method: 'canonical-deep-equality-sample-overlay',
-      repairedRecipePreviews: 27,
-      compatibilityDiagnostics: {
-        'zmaster587.AR.chemicalReactor': 25,
-        'buildcraft:category_heatable': 1,
-        'buildcraft:category_coolable': 1,
-      },
-      hashAlgorithm: 'sha256',
-      treeHashFormat: 'mrt-plain-content-tree-sha256-v1',
-      canonicalSha256: '11b9cbf2a8b7b1a65995612fa804dbeaf6c2d36ed1b16318783cd4d9064c4af4',
     },
   });
 });

@@ -3,6 +3,8 @@ package com.recipetree.jeiexport112;
 import mezz.jei.api.ingredients.VanillaTypes;
 import mezz.jei.api.recipe.IRecipeWrapper;
 import net.minecraft.block.Block;
+import net.minecraft.block.state.IBlockState;
+import net.minecraft.init.Blocks;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.ResourceLocation;
 import net.minecraft.util.math.BlockPos;
@@ -27,6 +29,7 @@ import java.util.Optional;
  * exporter depend on one optional mod while still auditing the exact upstream wrapper contract.
  */
 final class ModularMachineryStructure {
+    static final String PREVIEW_CATEGORY = "modularmachinery.preview";
     private static final String WRAPPER_CLASS =
             "hellfirepvp.modularmachinery.common.integration.preview.StructurePreviewWrapper";
     private static final ResourceLocation CONTROLLER_ID =
@@ -34,16 +37,22 @@ final class ModularMachineryStructure {
 
     private ModularMachineryStructure() {}
 
-    static Data extract(IRecipeWrapper wrapper, ItemCatalog catalog) throws Exception {
-        if (!WRAPPER_CLASS.equals(wrapper.getClass().getName())) {
+    static boolean isPreviewCategory(String categoryUid) {
+        return PREVIEW_CATEGORY.equals(categoryUid);
+    }
+
+    static Data extract(String categoryUid, IRecipeWrapper wrapper, ItemCatalog catalog)
+            throws Exception {
+        if (!isPreviewCategory(categoryUid)) {
             return null;
         }
 
-        Field machineField = wrapper.getClass().getDeclaredField("machine");
+        Field machineField = findMachineField(wrapper.getClass());
         machineField.setAccessible(true);
         Object machine = machineField.get(wrapper);
         if (machine == null) {
-            throw new IOException("Modular Machinery Structure Preview wrapper has no machine");
+            throw new IOException("wrapper " + wrapper.getClass().getName() +
+                    " has a null machine field");
         }
 
         Object pattern = invokeNoArgs(machine, "getPattern");
@@ -76,7 +85,7 @@ final class ModularMachineryStructure {
         data.controllerKey = controllerKey;
         data.add(new Cell(0, 0, 0, controllerKey));
 
-        Method descriptiveStack = null;
+        DescriptiveStackCall descriptiveStack = null;
         for (Map.Entry<?, ?> entry : entries) {
             BlockPos position = requirePosition(entry.getKey());
             Object information = entry.getValue();
@@ -85,22 +94,121 @@ final class ModularMachineryStructure {
                         position);
             }
             if (descriptiveStack == null ||
-                    descriptiveStack.getDeclaringClass() != information.getClass()) {
-                descriptiveStack = information.getClass().getMethod(
-                        "getDescriptiveStack", Optional.class);
+                    descriptiveStack.informationClass != information.getClass()) {
+                descriptiveStack = resolveDescriptiveStackCall(information.getClass());
             }
-            Object rawStack = descriptiveStack.invoke(information, Optional.of(Long.valueOf(0L)));
-            if (!(rawStack instanceof ItemStack) || ((ItemStack) rawStack).isEmpty()) {
+            data.include(position.getX(), position.getY(), position.getZ());
+            ItemStack representative = resolveRepresentativeStack(information, descriptiveStack);
+            if (representative == null) {
+                // MM/MMCE structure patterns may explicitly require air. JEI does not render or
+                // count those cells, but their coordinates still define the preview envelope.
+                continue;
+            }
+            if (representative.isEmpty()) {
                 throw new IOException("Modular Machinery structure block at " + position +
                         " has no descriptive item stack");
             }
-            ItemStack stack = ((ItemStack) rawStack).copy();
+            ItemStack stack = representative.copy();
             stack.setCount(1);
             String key = catalog.ensure(VanillaTypes.ITEM, stack);
             data.add(new Cell(position.getX(), position.getY(), position.getZ(), key));
         }
         data.finish();
         return data;
+    }
+
+    /**
+     * MMCE chooses a preview sample from the current time. Selector zero is deterministic, but a
+     * rule may place an itemless state (usually air) at that index even when later alternatives
+     * are visible blocks. Prefer the deterministic sample, then use MMCE's own ingredient list to
+     * find the first displayable alternative. A genuinely air-only rule is omitted from cells.
+     */
+    static ItemStack resolveRepresentativeStack(Object information, DescriptiveStackCall call)
+            throws Exception {
+        Object rawStack = call.method.invoke(information, call.argument);
+        if (rawStack instanceof ItemStack && !((ItemStack) rawStack).isEmpty()) {
+            return (ItemStack) rawStack;
+        }
+
+        try {
+            Object rawIngredients = information.getClass().getMethod("getIngredientList")
+                    .invoke(information);
+            if (rawIngredients instanceof Iterable) {
+                for (Object candidate : (Iterable<?>) rawIngredients) {
+                    if (candidate instanceof ItemStack && !((ItemStack) candidate).isEmpty()) {
+                        return (ItemStack) candidate;
+                    }
+                }
+            }
+        } catch (NoSuchMethodException ignored) {
+            // Original Modular Machinery variants may expose only getDescriptiveStack(Optional).
+        }
+
+        IBlockState sampleState = resolveSampleState(information);
+        if (sampleState != null && sampleState.getBlock() == Blocks.AIR) {
+            return null;
+        }
+        return ItemStack.EMPTY;
+    }
+
+    private static IBlockState resolveSampleState(Object information) throws Exception {
+        Class<?>[] parameterTypes = {long.class, Long.class, Optional.class};
+        for (Class<?> parameterType : parameterTypes) {
+            try {
+                Method method = information.getClass().getMethod("getSampleState", parameterType);
+                Object argument = parameterType == Optional.class
+                        ? Optional.of(Long.valueOf(0L))
+                        : Long.valueOf(0L);
+                Object state = method.invoke(information, argument);
+                return state instanceof IBlockState ? (IBlockState) state : null;
+            } catch (NoSuchMethodException ignored) {
+                // Try the next supported upstream/fork signature.
+            }
+        }
+        return null;
+    }
+
+    /**
+     * MMCE 2.x changed the preview selector from {@code Optional<Long>} to primitive
+     * {@code long}. Support both audited contracts and the boxed bridge form used by some forks.
+     */
+    static DescriptiveStackCall resolveDescriptiveStackCall(Class<?> informationClass)
+            throws IOException {
+        Class<?>[] parameterTypes = {long.class, Long.class, Optional.class};
+        for (Class<?> parameterType : parameterTypes) {
+            try {
+                Method method = informationClass.getMethod("getDescriptiveStack", parameterType);
+                Object argument = parameterType == Optional.class
+                        ? Optional.of(Long.valueOf(0L))
+                        : Long.valueOf(0L);
+                return new DescriptiveStackCall(informationClass, method, argument);
+            } catch (NoSuchMethodException ignored) {
+                // Try the next supported upstream/fork signature.
+            }
+        }
+        throw new IOException("Modular Machinery structure block information " +
+                informationClass.getName() + " exposes none of the supported " +
+                "getDescriptiveStack(long), getDescriptiveStack(Long), or " +
+                "getDescriptiveStack(Optional) signatures");
+    }
+
+    /**
+     * Original Modular Machinery and MMCE currently use the same wrapper name. Searching the
+     * hierarchy as well keeps subclasses and compatibility shims working, while the category gate
+     * above prevents an unrelated recipe wrapper with a coincidental field from being inspected.
+     */
+    static Field findMachineField(Class<?> wrapperClass) throws IOException {
+        Class<?> current = wrapperClass;
+        while (current != null && current != Object.class) {
+            try {
+                return current.getDeclaredField("machine");
+            } catch (NoSuchFieldException ignored) {
+                current = current.getSuperclass();
+            }
+        }
+        throw new IOException("unsupported Modular Machinery Structure Preview wrapper " +
+                wrapperClass.getName() + "; expected " + WRAPPER_CLASS +
+                " or a compatible wrapper exposing a machine field");
     }
 
     /**
@@ -171,31 +279,33 @@ final class ModularMachineryStructure {
         final List<Cell> cells = new ArrayList<Cell>();
         final LinkedHashMap<String, BigDecimal> blockCounts =
                 new LinkedHashMap<String, BigDecimal>();
+        private int minX = Integer.MAX_VALUE;
+        private int minY = Integer.MAX_VALUE;
+        private int minZ = Integer.MAX_VALUE;
+        private int maxX = Integer.MIN_VALUE;
+        private int maxY = Integer.MIN_VALUE;
+        private int maxZ = Integer.MIN_VALUE;
 
         private void add(Cell cell) {
+            include(cell.x, cell.y, cell.z);
             cells.add(cell);
             BigDecimal previous = blockCounts.get(cell.key);
             blockCounts.put(cell.key,
                     previous == null ? BigDecimal.ONE : previous.add(BigDecimal.ONE));
         }
 
+        private void include(int x, int y, int z) {
+            minX = Math.min(minX, x);
+            minY = Math.min(minY, y);
+            minZ = Math.min(minZ, z);
+            maxX = Math.max(maxX, x);
+            maxY = Math.max(maxY, y);
+            maxZ = Math.max(maxZ, z);
+        }
+
         private void finish() throws IOException {
             if (cells.isEmpty()) {
                 throw new IOException("Modular Machinery structure exported no cells");
-            }
-            int minX = Integer.MAX_VALUE;
-            int minY = Integer.MAX_VALUE;
-            int minZ = Integer.MAX_VALUE;
-            int maxX = Integer.MIN_VALUE;
-            int maxY = Integer.MIN_VALUE;
-            int maxZ = Integer.MIN_VALUE;
-            for (Cell cell : cells) {
-                minX = Math.min(minX, cell.x);
-                minY = Math.min(minY, cell.y);
-                minZ = Math.min(minZ, cell.z);
-                maxX = Math.max(maxX, cell.x);
-                maxY = Math.max(maxY, cell.y);
-                maxZ = Math.max(maxZ, cell.z);
             }
             sizeX = Math.addExact(Math.subtractExact(maxX, minX), 1);
             sizeY = Math.addExact(Math.subtractExact(maxY, minY), 1);
@@ -214,6 +324,18 @@ final class ModularMachineryStructure {
             this.y = y;
             this.z = z;
             this.key = key;
+        }
+    }
+
+    static final class DescriptiveStackCall {
+        final Class<?> informationClass;
+        final Method method;
+        final Object argument;
+
+        DescriptiveStackCall(Class<?> informationClass, Method method, Object argument) {
+            this.informationClass = informationClass;
+            this.method = method;
+            this.argument = argument;
         }
     }
 }
