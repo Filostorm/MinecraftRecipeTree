@@ -21,6 +21,7 @@ import {
   type GraphDirection,
 } from '../graph/direction';
 import {ItemIcon, pixelated} from './ItemIcon';
+import {itemIconSizeForContentScale} from './itemIconSizing';
 import {RecipePreviewImage} from './RecipePreviewImage';
 import {
   RECIPE_CARD_BORDER_WIDTH,
@@ -226,7 +227,7 @@ export function ItemChip({
       <ItemIcon
         item={item}
         itemKey={itemKey}
-        size={Math.max(12, Math.round(16 * contentScale))}
+        size={itemIconSizeForContentScale(contentScale)}
       />
       <Text
         style={[styles.chipText, {fontSize: Math.max(9, 11 * contentScale)}]}

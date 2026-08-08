@@ -4,6 +4,7 @@ import {signalTarget} from '../analytics/signal';
 import {theme} from '../theme';
 import type {RecipeStructure} from '../types';
 import {ItemIcon} from './ItemIcon';
+import {itemIconSizeForContentScale} from './itemIconSizing';
 import {useData} from '../data/DataContext';
 import {useUi} from '../ui/UiContext';
 import {
@@ -152,7 +153,7 @@ export function MultiblockPreview({
               <ItemIcon
                 item={item}
                 itemKey={itemKey}
-                size={Math.max(12, Math.round(16 * contentScale))}
+                size={itemIconSizeForContentScale(contentScale)}
               />
               <Text
                 style={[
