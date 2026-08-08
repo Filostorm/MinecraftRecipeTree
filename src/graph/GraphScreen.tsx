@@ -46,6 +46,7 @@ import {useRecipeStages} from '../data/RecipeStageContext';
 import {isRecipeVisibleForStages} from '../data/recipeStages';
 import {isFluidContainerTransferRecipe} from '../data/recipeVisibility';
 import {recipeDisplayTitle} from '../data/recipeTitles';
+import {recipeNeedsLayoutPreviewUnavailableNotice} from '../data/recipePresentation';
 import {theme} from '../theme';
 import {DropStat, Mob, Recipe, RecipeRef} from '../types';
 import {useUi} from '../ui/UiContext';
@@ -989,7 +990,7 @@ export function GraphScreen({
                 presentedRecipe?.stage
                   ? `Requires stage ${presentedRecipe.stage}`
                   : undefined,
-                presentedRecipe && !presentedRecipe.img
+                presentedRecipe && recipeNeedsLayoutPreviewUnavailableNotice(presentedRecipe)
                   ? 'JEI layout preview unavailable'
                   : undefined,
               ]
@@ -1005,6 +1006,7 @@ export function GraphScreen({
                 : undefined,
             imageW: presentedRecipe?.w,
             imageH: presentedRecipe?.h,
+            structure: presentedRecipe?.structure,
             inputs:
               recipe && direction === 'inputs'
                 ? materialInputSummary(recipe).map(input => {

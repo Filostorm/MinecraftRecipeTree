@@ -25,6 +25,8 @@ import {ItemChip} from './RecipeCard';
 import {RecipePreviewImage} from './RecipePreviewImage';
 import {VisibilityIcon} from './VisibilityIcon';
 import {groupPickerOptions} from './pickerGroups';
+import {MultiblockPreview} from './MultiblockPreview';
+import type {RecipeStructure} from '../types';
 
 export interface PickerOption {
   label: string;
@@ -37,6 +39,8 @@ export interface PickerOption {
   imageBackgroundUri?: string;
   imageW?: number;
   imageH?: number;
+  /** Exported placed-block geometry for structure-preview recipes. */
+  structure?: RecipeStructure;
   inputs?: SlotSummary[];
   outputs?: SlotSummary[];
   /** Exact JEI/export duration when known. */
@@ -391,7 +395,12 @@ export function PickerModal({
                               ) : null}
                             </View>
                           )}
-                          {opt.imageUri && imageSize ? (
+                          {opt.structure ? (
+                            <MultiblockPreview
+                              structure={opt.structure}
+                              availableWidth={398}
+                            />
+                          ) : opt.imageUri && imageSize ? (
                             <RecipePreviewImage
                               uri={opt.imageUri}
                               backgroundUri={opt.imageBackgroundUri}
@@ -400,7 +409,7 @@ export function PickerModal({
                               resizeMode="contain"
                             />
                           ) : null}
-                          {opt.inputs && opt.inputs.length > 0 ? (
+                          {!opt.structure && opt.inputs && opt.inputs.length > 0 ? (
                             <View style={styles.ingredientGroup}>
                               <Text style={styles.ingredientLabel}>Inputs</Text>
                               <View style={styles.ingredientChips}>
@@ -437,7 +446,7 @@ export function PickerModal({
                               </View>
                             </View>
                           ) : null}
-                          {opt.outputs && opt.outputs.length > 0 ? (
+                          {!opt.structure && opt.outputs && opt.outputs.length > 0 ? (
                             <View style={styles.ingredientGroup}>
                               <Text style={styles.ingredientLabel}>Outputs</Text>
                               <View style={styles.ingredientChips}>

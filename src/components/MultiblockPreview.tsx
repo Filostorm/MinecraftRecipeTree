@@ -24,7 +24,9 @@ export function MultiblockPreview({
   const data = useData();
   const {openItem} = useUi();
   const [rotation, setRotation] = useState(0);
-  const width = Math.max(180, Math.min(430, availableWidth));
+  const targetWidth = Math.max(180, Math.min(430, availableWidth));
+  const [measuredWidth, setMeasuredWidth] = useState<number | null>(null);
+  const width = Math.max(180, Math.min(targetWidth, measuredWidth ?? targetWidth));
   const visibleCells = useMemo(
     () => previewStructureCells(structure.cells),
     [structure.cells],
@@ -36,7 +38,14 @@ export function MultiblockPreview({
   const clipped = visibleCells.length < structure.cells.length;
 
   return (
-    <View style={[styles.wrapper, {width}]}>
+    <View
+      style={[styles.wrapper, {width: targetWidth}]}
+      onLayout={event => {
+        const nextWidth = event.nativeEvent.layout.width;
+        if (Math.abs(nextWidth - (measuredWidth ?? targetWidth)) > 0.5) {
+          setMeasuredWidth(nextWidth);
+        }
+      }}>
       <View style={styles.headingRow}>
         <View>
           <Text style={styles.heading}>MULTIBLOCK PREVIEW</Text>

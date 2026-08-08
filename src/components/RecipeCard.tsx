@@ -1,7 +1,10 @@
 import React from 'react';
 import {StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import {recipeImagePath, useData} from '../data/DataContext';
-import {recipePresentationKind} from '../data/recipePresentation';
+import {
+  recipeHasStructurePreview,
+  recipePresentationKind,
+} from '../data/recipePresentation';
 import {displayIngredientName} from '../data/ingredientTags';
 import {
   formatIngredientQuantityPrefix,
@@ -126,7 +129,7 @@ export function RecipeCard({
           )}
         />
       ) : null}
-      {(inputs.length > 0 || outputs.length > 0) && (
+      {!recipeHasStructurePreview(recipe) && (inputs.length > 0 || outputs.length > 0) && (
         <View style={styles.recipeItems}>
           {inputs.map(item => (
             <ItemChip
