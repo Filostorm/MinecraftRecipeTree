@@ -21,6 +21,7 @@ const context = {
   graphRootKey: 'item|thaumcraft:cluster',
   graphDirection: 'inputs',
   interfaceZoomPercent: 125,
+  contentZoomPercent: 175,
 };
 
 const runtime = {
@@ -49,6 +50,7 @@ test('bug reports include bounded product and runtime diagnostics', () => {
   assert.equal(payload.diagnostics.publicationId, 'a'.repeat(64));
   assert.equal(payload.diagnostics.graphRootKey, 'item|thaumcraft:cluster');
   assert.equal(payload.diagnostics.interfaceZoom, '125%');
+  assert.equal(payload.diagnostics.contentZoom, '175%');
   assert.equal(payload.diagnostics.viewport, '1280×720 @2x');
   assert.equal(payload.contact, '');
   assert.equal(payload.website, '');

@@ -66,7 +66,7 @@ test('desktop uses natural physical pixels without the previous 360px ceiling', 
   });
 });
 
-test('applies interface zoom to recipe previews without overflowing the card', () => {
+test('applies recipe and item zoom to previews without overflowing the card', () => {
   const mobileWidth = measuredListWidth(390);
   assert.deepEqual(responsiveRecipePreviewSize(124, 62, 2, mobileWidth, 0.75), {
     width: 186,

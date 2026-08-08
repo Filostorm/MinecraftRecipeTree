@@ -20,6 +20,7 @@ export interface IssueReportContext {
   graphRootKey: string;
   graphDirection: string;
   interfaceZoomPercent: number;
+  contentZoomPercent: number;
 }
 
 export interface IssueReportRuntime {
@@ -56,6 +57,7 @@ export interface IssueReportPayload {
     graphRootKey: string;
     graphDirection: string;
     interfaceZoom: string;
+    contentZoom: string;
     platform: string;
     userAgent: string;
     viewport: string;
@@ -96,6 +98,7 @@ export function buildIssueReportPayload(
       graphRootKey: context.graphRootKey,
       graphDirection: context.graphDirection,
       interfaceZoom: `${context.interfaceZoomPercent}%`,
+      contentZoom: `${context.contentZoomPercent}%`,
       platform: runtime.platform,
       userAgent: runtime.userAgent,
       viewport: runtime.viewport,

@@ -1,6 +1,7 @@
 import React, {useEffect, useMemo, useState} from 'react';
 import {
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -19,9 +20,11 @@ import {VisibilityIcon} from './VisibilityIcon';
 export function RecipeStageModal({
   visible,
   onClose,
+  interfaceZoom = 1,
 }: {
   visible: boolean;
   onClose(): void;
+  interfaceZoom?: number;
 }) {
   const data = useData();
   const ui = useUi();
@@ -35,6 +38,16 @@ export function RecipeStageModal({
     selectStage,
   } = useRecipeStages();
   const [query, setQuery] = useState('');
+  const scaledCardStyle =
+    Platform.OS === 'web'
+      ? ({
+          zoom: interfaceZoom,
+          width: `${100 / interfaceZoom}%`,
+          maxWidth: 720 / interfaceZoom,
+          maxHeight: `${88 / interfaceZoom}%`,
+          minHeight: 360 / interfaceZoom,
+        } as unknown as object)
+      : null;
 
   useEffect(() => {
     if (!visible) setQuery('');
@@ -72,7 +85,10 @@ export function RecipeStageModal({
       onRequestClose={onClose}
       accessibilityViewIsModal>
       <Pressable style={styles.backdrop} onPress={onClose} accessible={false}>
-        <Pressable style={styles.card} onPress={() => {}} accessible={false}>
+        <Pressable
+          style={[styles.card, scaledCardStyle]}
+          onPress={() => {}}
+          accessible={false}>
           <View style={styles.header}>
             <View style={styles.headerCopy}>
               <Text style={styles.title} accessibilityRole="header">

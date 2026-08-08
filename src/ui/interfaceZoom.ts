@@ -1,3 +1,5 @@
+import {normalizeContentZoom} from './contentZoom.ts';
+
 export const MINIMUM_INTERFACE_ZOOM = 0.75;
 export const MAXIMUM_INTERFACE_ZOOM = 1.5;
 export const INTERFACE_ZOOM_STEP = 0.05;
@@ -37,11 +39,11 @@ export function normalizeInterfaceZoom(value: number): number {
 export function uniformPickerRecipePreviewSize(
   logicalWidth: number,
   logicalHeight: number,
-  interfaceZoom: number,
-  maxWidth = 375,
-  maxHeight = 192,
+  contentZoom: number,
+  maxWidth = 750,
+  maxHeight = 384,
 ): {width: number; height: number} {
-  const normalizedZoom = normalizeInterfaceZoom(interfaceZoom);
+  const normalizedZoom = normalizeContentZoom(contentZoom);
   if (
     ![logicalWidth, logicalHeight, maxWidth, maxHeight].every(Number.isFinite) ||
     logicalWidth <= 0 ||

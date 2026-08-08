@@ -47,6 +47,14 @@ import {
   normalizeInterfaceZoom,
   persistInterfaceZoom,
 } from './src/ui/interfaceZoom';
+import {
+  CONTENT_ZOOM_STEP,
+  MAXIMUM_CONTENT_ZOOM,
+  MINIMUM_CONTENT_ZOOM,
+  loadContentZoom,
+  normalizeContentZoom,
+  persistContentZoom,
+} from './src/ui/contentZoom';
 import {signalTarget, useSignalSurface} from './src/analytics/signal';
 import {
   graphRenderRecovery,
@@ -329,6 +337,7 @@ function Shell({
   const [showGraphControls, setShowGraphControls] = useState(false);
   const [showDatasetDetails, setShowDatasetDetails] = useState(false);
   const [interfaceZoom, setInterfaceZoom] = useState(1);
+  const [contentZoom, setContentZoom] = useState(1);
   const shellSurface = showRecipeStages
       ? 'recipe-stages'
       : showGraphGuide
@@ -362,7 +371,8 @@ function Shell({
     graphRootKey: ui.graphRootKey ?? '',
     graphDirection: ui.graphDirection,
     interfaceZoomPercent: Math.round(interfaceZoom * 100),
-  }), [data, interfaceZoom, tab, ui.graphDirection, ui.graphRootKey, ui.itemStack]);
+    contentZoomPercent: Math.round(contentZoom * 100),
+  }), [contentZoom, data, interfaceZoom, tab, ui.graphDirection, ui.graphRootKey, ui.itemStack]);
   useEffect(() => {
     if (Platform.OS === 'web') setHasHydrated(true);
   }, []);
@@ -373,7 +383,10 @@ function Shell({
     });
   }, [data, tab]);
   useEffect(() => {
-    if (Platform.OS === 'web') setInterfaceZoom(loadInterfaceZoom());
+    if (Platform.OS !== 'web') return;
+    const storedInterfaceZoom = loadInterfaceZoom();
+    setInterfaceZoom(storedInterfaceZoom);
+    setContentZoom(loadContentZoom(storedInterfaceZoom));
   }, []);
   const previewInterfaceZoom = (value: number) => {
     try {
@@ -389,6 +402,24 @@ function Shell({
       console.error('Interface zoom could not be saved.', error);
     }
   };
+  const previewContentZoom = (value: number) => {
+    try {
+      setContentZoom(normalizeContentZoom(value));
+    } catch (error) {
+      console.error('Recipe and item zoom slider produced an invalid value.', error);
+    }
+  };
+  const saveContentZoom = (value: number) => {
+    try {
+      persistContentZoom(normalizeContentZoom(value));
+    } catch (error) {
+      console.error('Recipe and item zoom could not be saved.', error);
+    }
+  };
+  const scaledHeaderStyle =
+    Platform.OS === 'web'
+      ? ({zoom: interfaceZoom} as unknown as object)
+      : null;
   const scaledMobsWorkspaceStyle =
     Platform.OS === 'web'
       ? ({
@@ -439,22 +470,43 @@ function Shell({
     </Text>
   );
   const interfaceZoomControls = Platform.OS === 'web' ? (
-    <View
-      style={styles.interfaceZoomControls}
-      accessibilityLabel="Interface zoom controls">
-      <Text
-        style={styles.interfaceZoomValue}
-        accessibilityLabel={`Interface zoom ${Math.round(interfaceZoom * 100)} percent`}>
-        UI {Math.round(interfaceZoom * 100)}%
-      </Text>
-      <InterfaceZoomSlider
-        minimumValue={MINIMUM_INTERFACE_ZOOM}
-        maximumValue={MAXIMUM_INTERFACE_ZOOM}
-        step={INTERFACE_ZOOM_STEP}
-        value={interfaceZoom}
-        onValueChange={previewInterfaceZoom}
-        onSlidingComplete={saveInterfaceZoom}
-      />
+    <View style={styles.zoomControlGroup}>
+      <View
+        style={styles.interfaceZoomControls}
+        accessibilityLabel="Interface zoom controls">
+        <Text
+          style={styles.interfaceZoomValue}
+          accessibilityLabel={`Interface zoom ${Math.round(interfaceZoom * 100)} percent`}>
+          UI {Math.round(interfaceZoom * 100)}%
+        </Text>
+        <InterfaceZoomSlider
+          minimumValue={MINIMUM_INTERFACE_ZOOM}
+          maximumValue={MAXIMUM_INTERFACE_ZOOM}
+          step={INTERFACE_ZOOM_STEP}
+          value={interfaceZoom}
+          onValueChange={previewInterfaceZoom}
+          onSlidingComplete={saveInterfaceZoom}
+        />
+      </View>
+      <View
+        style={styles.interfaceZoomControls}
+        accessibilityLabel="Recipe and item size controls">
+        <Text
+          style={[styles.interfaceZoomValue, styles.contentZoomValue]}
+          accessibilityLabel={`Recipe and item size ${Math.round(contentZoom * 100)} percent`}>
+          Recipe/items {Math.round(contentZoom * 100)}%
+        </Text>
+        <InterfaceZoomSlider
+          accessibilityLabel="Recipe and item size"
+          testID="content-zoom-slider"
+          minimumValue={MINIMUM_CONTENT_ZOOM}
+          maximumValue={MAXIMUM_CONTENT_ZOOM}
+          step={CONTENT_ZOOM_STEP}
+          value={contentZoom}
+          onValueChange={previewContentZoom}
+          onSlidingComplete={saveContentZoom}
+        />
+      </View>
     </View>
   ) : null;
   const headerDetails = compactHeader ? (
@@ -595,13 +647,15 @@ function Shell({
     ) : null;
   return (
     <View style={styles.shell}>
-      {renderControls(
-        data.manifest,
-        headerDetails,
-        headerActions,
-        fullWidthHeaderControls,
-        graphControlsHeaderAction,
-      )}
+      <View style={scaledHeaderStyle}>
+        {renderControls(
+          data.manifest,
+          headerDetails,
+          headerActions,
+          fullWidthHeaderControls,
+          graphControlsHeaderAction,
+        )}
+      </View>
       <View style={styles.workspaceViewport}>
         <View style={styles.workspace}>
           {/* All tabs stay mounted so graph expansion state survives tab switches. */}
@@ -618,7 +672,7 @@ function Shell({
             importantForAccessibility={
               Platform.OS !== 'web' && tab !== 'items' ? 'no-hide-descendants' : 'auto'
             }>
-            <ItemsScreen interfaceZoom={interfaceZoom} />
+            <ItemsScreen interfaceZoom={interfaceZoom} contentZoom={contentZoom} />
           </View>
           <View
             style={[
@@ -646,6 +700,7 @@ function Shell({
                   }>
                   <LazyGraphScreen
                     interfaceZoom={interfaceZoom}
+                    contentZoom={contentZoom}
                     showGraphControls={showGraphControls}
                     onToggleGraphControls={() =>
                       setShowGraphControls(value => !value)
@@ -700,22 +755,25 @@ function Shell({
       {Platform.OS !== 'web' && (
         <MobileBottomNavigation hasMobs={data.capabilities.mobs} />
       )}
-      <ItemDetailModal interfaceZoom={interfaceZoom} />
+      <ItemDetailModal interfaceZoom={interfaceZoom} contentZoom={contentZoom} />
       {showRecipeStages && (
         <RecipeStageModal
           visible
+          interfaceZoom={interfaceZoom}
           onClose={() => setShowRecipeStages(false)}
         />
       )}
       {showRecipeHistory && (
         <RecipeHistoryModal
           visible
+          interfaceZoom={interfaceZoom}
           onClose={() => setShowRecipeHistory(false)}
         />
       )}
       {showGraphGuide && (
         <GraphGuideModal
           visible
+          interfaceZoom={interfaceZoom}
           onClose={() => setShowGraphGuide(false)}
           onOpenIssueReport={kind => {
             setShowGraphGuide(false);
@@ -727,6 +785,7 @@ function Shell({
       {showIssueReport && (
         <IssueReportModal
           visible
+          interfaceZoom={interfaceZoom}
           initialKind={issueReportKind}
           context={issueReportContext}
           onClose={() => setShowIssueReport(false)}
@@ -983,6 +1042,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 9,
     backgroundColor: theme.panelAlt,
   },
+  zoomControlGroup: {flexDirection: 'row', alignItems: 'center', gap: 6},
   interfaceZoomValue: {
     minWidth: 60,
     marginRight: 5,
@@ -991,6 +1051,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
   },
+  contentZoomValue: {minWidth: 112},
   workspaceViewport: {flex: 1, minHeight: 0, overflow: 'hidden'},
   workspace: {flex: 1, minHeight: 0, position: 'relative'},
   body: {flex: 1, minHeight: 0},

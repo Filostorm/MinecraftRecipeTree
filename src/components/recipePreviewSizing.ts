@@ -44,18 +44,18 @@ export function responsiveRecipePreviewSize(
   logicalHeight: number,
   recipeScale: number,
   availableCardWidth: number,
-  interfaceZoom = 1,
+  contentZoom = 1,
 ): RecipePreviewDisplaySize {
   if (
     ![logicalWidth, logicalHeight, recipeScale].every(Number.isSafeInteger) ||
     logicalWidth <= 0 ||
     logicalHeight <= 0 ||
     recipeScale <= 0 ||
-    !Number.isFinite(interfaceZoom) ||
-    interfaceZoom <= 0
+    !Number.isFinite(contentZoom) ||
+    contentZoom <= 0
   ) {
     throw new Error(
-      'Recipe preview dimensions, exporter scale, and interface zoom must be positive values.',
+      'Recipe preview dimensions, exporter scale, and content zoom must be positive values.',
     );
   }
   const physicalWidth = logicalWidth * recipeScale;
@@ -74,7 +74,7 @@ export function responsiveRecipePreviewSize(
     physicalHeight,
     recipeScale,
   );
-  const zoomScale = Math.min(interfaceZoom, maxWidth / display.w);
+  const zoomScale = Math.min(contentZoom, maxWidth / display.w);
   const width = Math.max(1, Math.round(display.w * zoomScale));
   const height = Math.max(1, Math.round(display.h * zoomScale));
   const scale = width / logicalWidth;

@@ -56,10 +56,25 @@ function toolLabel(tool: string): string {
   return tool === 'hand' ? 'bare hand' : tool.split(':').pop()!.replace(/_/g, ' ');
 }
 
-export function ItemDetailModal({interfaceZoom = 1}: {interfaceZoom?: number}) {
+export function ItemDetailModal({
+  interfaceZoom = 1,
+  contentZoom = 1,
+}: {
+  interfaceZoom?: number;
+  contentZoom?: number;
+}) {
   const data = useData();
   const {itemStack, popItem, closeItems, tab} = useUi();
   const safeAreaInsets = useSafeAreaInsets();
+  const scaledCardStyle =
+    Platform.OS === 'web'
+      ? ({
+          zoom: interfaceZoom,
+          width: `${100 / interfaceZoom}%`,
+          maxWidth: 760 / interfaceZoom,
+          maxHeight: `${88 / interfaceZoom}%`,
+        } as unknown as object)
+      : null;
   const key = itemStack[itemStack.length - 1];
   const itemDetailVisible = Boolean(key) && (Platform.OS === 'web' || tab === 'items');
   /** 'p' | 'u' | 'i' | 'd' | a secondary category index */
@@ -101,6 +116,7 @@ export function ItemDetailModal({interfaceZoom = 1}: {interfaceZoom?: number}) {
           <Pressable
             style={[
               styles.card,
+              scaledCardStyle,
               Platform.OS !== 'web' && styles.cardNative,
               Platform.OS !== 'web' && {paddingBottom: Math.max(14, safeAreaInsets.bottom)},
               {alignItems: 'center', justifyContent: 'center'},
@@ -195,6 +211,7 @@ export function ItemDetailModal({interfaceZoom = 1}: {interfaceZoom?: number}) {
         <Pressable
           style={[
             styles.card,
+            scaledCardStyle,
             Platform.OS !== 'web' && styles.cardNative,
             Platform.OS !== 'web' && {paddingBottom: Math.max(14, safeAreaInsets.bottom)},
           ]}
@@ -303,6 +320,7 @@ export function ItemDetailModal({interfaceZoom = 1}: {interfaceZoom?: number}) {
                 informational={side === 'i'}
                 graphDirection={side === 'u' ? 'outputs' : 'inputs'}
                 interfaceZoom={interfaceZoom}
+                contentZoom={contentZoom}
               />
             )}
           </ScrollView>
@@ -340,12 +358,14 @@ function RefsList({
   informational = false,
   graphDirection,
   interfaceZoom,
+  contentZoom,
 }: {
   itemKey: string;
   refs: RecipeRef[];
   informational?: boolean;
   graphDirection: GraphDirection;
   interfaceZoom: number;
+  contentZoom: number;
 }) {
   const data = useData();
   const {
@@ -363,6 +383,10 @@ function RefsList({
   );
   const [recipesByRef, setRecipesByRef] = useState<Map<string, Recipe>>(() => new Map());
   const [availableCardWidth, setAvailableCardWidth] = useState<number | null>(null);
+  const isolatedRecipeStyle =
+    Platform.OS === 'web'
+      ? ({zoom: 1 / interfaceZoom} as unknown as object)
+      : null;
   const recipeForRef = useCallback(
     (ref: RecipeRef) =>
       recipesByRef.get(recipeRefKey(ref)) ?? data.getCachedRecipe(ref),
@@ -804,6 +828,7 @@ function RefsList({
                       key={`${catIdx}-${recipeIdx}`}
                       style={[
                         styles.categoryRecipe,
+                        isolatedRecipeStyle,
                         recipePosition > 0 && styles.categoryRecipeSeparated,
                       ]}>
                       {recipe && availableCardWidth !== null ? (
@@ -812,7 +837,7 @@ function RefsList({
                           dir={category.dir}
                           catTitle={category.title}
                           availableCardWidth={availableCardWidth}
-                          interfaceZoom={interfaceZoom}
+                          contentZoom={contentZoom}
                           graphDirection={graphDirection}
                           actionSubject={actionSubject}
                           usageOutputSubject={usageOutputSubject}

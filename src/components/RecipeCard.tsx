@@ -38,7 +38,7 @@ export function RecipeCard({
   actionSubject,
   usageOutputSubject,
   availableCardWidth,
-  interfaceZoom = 1,
+  contentZoom = 1,
   grouped = false,
 }: {
   recipe: Recipe;
@@ -52,8 +52,8 @@ export function RecipeCard({
   usageOutputSubject?: string;
   /** Measured width of the full-width recipe-list container in CSS/layout pixels. */
   availableCardWidth: number;
-  /** User-selected UI zoom applied to the JEI recipe preview within the modal. */
-  interfaceZoom?: number;
+  /** User-selected recipe and item scale within recipe surfaces. */
+  contentZoom?: number;
   /** Render inside a category frame that supplies the outer border and corner radius. */
   grouped?: boolean;
 }) {
@@ -71,7 +71,7 @@ export function RecipeCard({
     recipe.h ?? 60,
     data.manifest.settings.recipeScale,
     availableCardWidth,
-    interfaceZoom,
+    contentZoom,
   );
   const inputs = materialInputSummary(recipe);
   const outputs = slotSummary(recipe.out);
@@ -125,8 +125,10 @@ export function RecipeCard({
           structure={recipe.structure}
           availableWidth={Math.max(
             180,
-            availableCardWidth - (RECIPE_CARD_BORDER_WIDTH + RECIPE_CARD_PADDING) * 2,
+            (availableCardWidth - (RECIPE_CARD_BORDER_WIDTH + RECIPE_CARD_PADDING) * 2) *
+              contentZoom,
           )}
+          contentScale={contentZoom}
         />
       ) : null}
       {!recipeHasStructurePreview(recipe) && (inputs.length > 0 || outputs.length > 0) && (
@@ -141,6 +143,7 @@ export function RecipeCard({
               tag={item.tag}
               probability={item.probability}
               probabilityRole="consume"
+              contentScale={contentZoom}
               interactive={!onPress}
             />
           ))}
@@ -155,6 +158,7 @@ export function RecipeCard({
               tag={item.tag}
               probability={item.probability}
               probabilityRole="produce"
+              contentScale={contentZoom}
               highlight
               interactive={!onPress}
             />
@@ -189,6 +193,7 @@ export function ItemChip({
   interactive = true,
   onPress,
   accessibilityLabel,
+  contentScale = 1,
 }: {
   itemKey: string;
   amount?: number | null;
@@ -204,6 +209,8 @@ export function ItemChip({
   /** Overrides the normal item-detail action, for contextual ingredient selection. */
   onPress?: () => void;
   accessibilityLabel?: string;
+  /** Independent item/icon scale used by recipe and ingredient surfaces. */
+  contentScale?: number;
 }) {
   const data = useData();
   const {openItem} = useUi();
@@ -216,8 +223,14 @@ export function ItemChip({
   );
   const content = (
     <>
-      <ItemIcon item={item} itemKey={itemKey} size={16} />
-      <Text style={styles.chipText} numberOfLines={1}>
+      <ItemIcon
+        item={item}
+        itemKey={itemKey}
+        size={Math.max(12, Math.round(16 * contentScale))}
+      />
+      <Text
+        style={[styles.chipText, {fontSize: Math.max(9, 11 * contentScale)}]}
+        numberOfLines={1}>
         {amount !== undefined && shouldShowIngredientQuantity(itemKey, amount)
           ? `${formatIngredientQuantityPrefix(itemKey, amount)} `
           : ''}
@@ -236,14 +249,37 @@ export function ItemChip({
     </>
   );
   if (!interactive) {
-    return <View style={[styles.chip, highlight && styles.chipHighlight]}>{content}</View>;
+    return (
+      <View
+        style={[
+          styles.chip,
+          {
+            gap: Math.max(4, 5 * contentScale),
+            maxWidth: 240 * contentScale,
+            paddingHorizontal: Math.max(5, 6 * contentScale),
+            paddingVertical: Math.max(3, 3 * contentScale),
+          },
+          highlight && styles.chipHighlight,
+        ]}>
+        {content}
+      </View>
+    );
   }
   return (
     <TouchableOpacity
       {...signalTarget(onPress ? 'graph.source-picker.alternative.open' : 'item-detail.item.open')}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel ?? `Open ${displayName}`}
-      style={[styles.chip, highlight && styles.chipHighlight]}
+      style={[
+        styles.chip,
+        {
+          gap: Math.max(4, 5 * contentScale),
+          maxWidth: 240 * contentScale,
+          paddingHorizontal: Math.max(5, 6 * contentScale),
+          paddingVertical: Math.max(3, 3 * contentScale),
+        },
+        highlight && styles.chipHighlight,
+      ]}
       onPress={event => {
         event.stopPropagation();
         if (onPress) onPress();

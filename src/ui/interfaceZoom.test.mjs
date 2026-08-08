@@ -44,8 +44,12 @@ test('picker applies one uniform recipe scale before proportional fit constraint
     height: 90,
   });
   assert.deepEqual(uniformPickerRecipePreviewSize(300, 100, 1.5), {
-    width: 375,
-    height: 125,
+    width: 450,
+    height: 150,
+  });
+  assert.deepEqual(uniformPickerRecipePreviewSize(160, 60, 3), {
+    width: 480,
+    height: 180,
   });
   assert.throws(
     () => uniformPickerRecipePreviewSize(160, 60, 1.09),
