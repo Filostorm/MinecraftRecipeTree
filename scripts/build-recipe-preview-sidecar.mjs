@@ -74,6 +74,14 @@ const DATASET_DIAGNOSTIC_KEYS = Object.freeze([
   'failureEvents',
   'failureEventsOmitted',
 ]);
+const MEATBALLCRAFT_DATASET_DIAGNOSTIC_KEYS = Object.freeze([
+  ...DATASET_DIAGNOSTIC_KEYS,
+  'warningEvents',
+  'warningEventsOmitted',
+  'modularMachineryStructurePreviews',
+  'modularMachineryStructuresExported',
+  'modularMachineryStructureFailures',
+]);
 const MM1_DATASET_DIAGNOSTIC_KEYS = Object.freeze([
   ...DATASET_DIAGNOSTIC_KEYS,
   'warningEvents',
@@ -120,38 +128,30 @@ export const MEATBALLCRAFT_CONTRACT = Object.freeze({
     recipeScale: 2,
     mobCanvas: 256,
     worldStartupOptimization: Object.freeze({
-      enabled: true,
+      enabled: false,
       policy: 'dimension-0-plus-should-load-spawn',
-      applied: true,
-      originalDimensions: 93,
-      selectedDimensions: 4,
-      skippedDimensions: 89,
+      applied: false,
     }),
   }),
   counts: Object.freeze({
-    items: 196161,
-    recipes: 359215,
+    items: 196127,
+    recipes: 359096,
     categories: 674,
     mobs: 0,
     blockDrops: 0,
-    failures: 130,
+    failures: 0,
   }),
-  diagnostics: Object.freeze({failureEvents: 130, failureEventsOmitted: 0}),
-  recipeImages: Object.freeze({previews: 359215, missing: 0}),
+  diagnostics: Object.freeze({
+    failureEvents: 0,
+    failureEventsOmitted: 0,
+    warningEvents: 133,
+    warningEventsOmitted: 0,
+    modularMachineryStructurePreviews: 260,
+    modularMachineryStructuresExported: 260,
+    modularMachineryStructureFailures: 0,
+  }),
+  recipeImages: Object.freeze({previews: 359096, missing: 0}),
   hostedWeb: HOSTED_WEB_CONTRACT,
-  repairProvenance: Object.freeze({
-    format: 'mrt-recipe-preview-repair-overlay-v1',
-    method: 'canonical-deep-equality-sample-overlay',
-    repairedRecipePreviews: 27,
-    compatibilityDiagnostics: Object.freeze({
-      'zmaster587.AR.chemicalReactor': 25,
-      'buildcraft:category_heatable': 1,
-      'buildcraft:category_coolable': 1,
-    }),
-    hashAlgorithm: 'sha256',
-    treeHashFormat: 'mrt-plain-content-tree-sha256-v1',
-    canonicalSha256: '11b9cbf2a8b7b1a65995612fa804dbeaf6c2d36ed1b16318783cd4d9064c4af4',
-  }),
 });
 
 function isRecord(value) {
@@ -173,6 +173,7 @@ function manifestCountKeysForProfile(profile) {
 }
 
 function manifestDiagnosticKeysForProfile(profile) {
+  if (profile === MEATBALLCRAFT_112_PROFILE) return MEATBALLCRAFT_DATASET_DIAGNOSTIC_KEYS;
   if (profile === MULTIBLOCK_MADNESS_112_PROFILE) return MM1_DATASET_DIAGNOSTIC_KEYS;
   if (profile === MULTIBLOCK_MADNESS_2_118_PROFILE) return MM2_DATASET_DIAGNOSTIC_KEYS;
   if (profile === GTNH_1710_PROFILE) return GTNH_DATASET_DIAGNOSTIC_KEYS;
@@ -589,26 +590,31 @@ function canonicalJsonSha256(value) {
 }
 
 function validateWorldStartupOptimization(value, label) {
-  if (!hasExactKeys(value, [
-    'enabled',
-    'policy',
-    'applied',
-    'originalDimensions',
-    'selectedDimensions',
-    'skippedDimensions',
-  ])) {
+  const disabled = value?.enabled === false && value?.applied === false;
+  const expectedKeys = disabled
+    ? ['enabled', 'policy', 'applied']
+    : [
+        'enabled',
+        'policy',
+        'applied',
+        'originalDimensions',
+        'selectedDimensions',
+        'skippedDimensions',
+      ];
+  if (!hasExactKeys(value, expectedKeys)) {
     throw new Error(
       `${label} must contain the exact audited dimension-selection fields.`,
     );
   }
-  if (value.enabled !== true || value.applied !== true) {
-    throw new Error(`${label}.enabled and ${label}.applied must both be true.`);
+  if (value.enabled !== value.applied) {
+    throw new Error(`${label}.enabled and ${label}.applied must agree.`);
   }
   if (value.policy !== 'dimension-0-plus-should-load-spawn') {
     throw new Error(
       `${label}.policy must be "dimension-0-plus-should-load-spawn".`,
     );
   }
+  if (disabled) return;
   for (const name of ['originalDimensions', 'selectedDimensions', 'skippedDimensions']) {
     if (!Number.isSafeInteger(value[name]) || value[name] < 0) {
       throw new Error(`${label}.${name} must be a non-negative safe integer.`);

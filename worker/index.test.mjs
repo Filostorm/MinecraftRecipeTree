@@ -689,10 +689,29 @@ test('core ingestion authenticates, stages exact publication.json, commits its m
   assert.equal(staged.headers.get('x-mrt-publication-state'), 'staged');
   assert.equal(staged.headers.get('x-mrt-content-sha256'), fixture.publicationDigest);
   assert.equal(staged.headers.get('x-mrt-manifest-bytes'), String(fixture.publicationBytes.length));
+  const cloudflareNormalizedStatus = await send(env, '/api/admin/core-datasets/status', {
+    method: 'GET',
+    headers: adminHeaders(),
+  });
+  assert.equal(cloudflareNormalizedStatus.status, 200);
+  assert.equal(cloudflareNormalizedStatus.headers.get('x-mrt-publication-state'), 'staged');
+  const firstObjectPath = fixture.objects.keys().next().value;
+  const cloudflareNormalizedMissingObject = await send(
+    env,
+    `/api/admin/core-datasets/object/${firstObjectPath}`,
+    {method: 'GET', headers: adminHeaders()},
+  );
+  assert.equal(cloudflareNormalizedMissingObject.status, 404);
 
   for (const [path, bytes] of fixture.objects) {
     assert.equal((await putCoreObject(env, path, bytes)).status, 201, path);
   }
+  const cloudflareNormalizedStoredObject = await send(
+    env,
+    `/api/admin/core-datasets/object/${firstObjectPath}`,
+    {method: 'GET', headers: adminHeaders()},
+  );
+  assert.equal(cloudflareNormalizedStoredObject.status, 200);
   const response = await commitCore(env, fixture);
   assert.equal(response.status, 201);
   assert.equal((await response.json()).state, 'committed');

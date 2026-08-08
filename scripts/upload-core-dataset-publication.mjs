@@ -215,10 +215,9 @@ function exactObjectBytes(response, expected, label) {
   }
   if (proxyStableBytes !== null) {
     exactHeader(response, CONTENT_BYTES_HEADER, expected, label);
+    return;
   }
-  if (contentLength !== null) {
-    exactHeader(response, 'content-length', expected, label);
-  }
+  exactHeader(response, 'content-length', expected, label);
 }
 
 function statusError(response, label) {

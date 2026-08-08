@@ -947,7 +947,7 @@ async function publishDirectoryExclusive(staging, output) {
 /**
  * Runs the forced-clone transaction for an explicit contract. The CLI never
  * accepts a contract override; this export exists so small fixtures can test
- * publication and rollback without fabricating a 359,215-recipe corpus.
+ * publication and rollback without fabricating a 359,096-recipe corpus.
  */
 export async function repairPreviewOverlayTransaction(
   {fullRoot, sampleRoot, outputRoot},

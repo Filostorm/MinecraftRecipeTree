@@ -43,9 +43,14 @@ final class ExportJob {
         Files.createDirectories(parent);
         this.stagingOutput = parent.resolve("." + finalOutput.getFileName() + ".staging-" + UUID.randomUUID());
         this.context = new ExportContext(stagingOutput, request);
-        if (request.qualitySample == null) {
+        if (request.qualitySample == null || request.qualitySample.scansAllItems()) {
             this.phase = new ItemPhase(context, ingredientRegistry);
             this.phaseNumber = 1;
+            if (request.qualitySample != null) {
+                JeiExportMod.LOGGER.info(
+                        "[jeiexport] Quality sample mode: scanning the full item catalog before {} selected recipes",
+                        request.qualitySample.recipeCount());
+            }
         } else {
             this.phase = new RecipePhase(context, runtime.getRecipeRegistry(), ingredientRegistry);
             this.phaseNumber = 2;

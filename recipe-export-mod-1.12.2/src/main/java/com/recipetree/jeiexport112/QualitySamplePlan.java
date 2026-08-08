@@ -23,13 +23,16 @@ final class QualitySamplePlan {
     private final int recipeCount;
     private final int sourceIndexSelectorCount;
     private final int recipeIdSelectorCount;
+    private final boolean scanAllItems;
 
     private QualitySamplePlan(Map<String, List<RecipeTarget>> recipesByCategory, int recipeCount,
-                              int sourceIndexSelectorCount, int recipeIdSelectorCount) {
+                              int sourceIndexSelectorCount, int recipeIdSelectorCount,
+                              boolean scanAllItems) {
         this.recipesByCategory = recipesByCategory;
         this.recipeCount = recipeCount;
         this.sourceIndexSelectorCount = sourceIndexSelectorCount;
         this.recipeIdSelectorCount = recipeIdSelectorCount;
+        this.scanAllItems = scanAllItems;
     }
 
     static QualitySamplePlan parse(JsonElement value) throws IOException {
@@ -43,7 +46,11 @@ final class QualitySamplePlan {
             throw new IOException("qualitySample must be an object");
         }
         JsonObject object = value.getAsJsonObject();
-        requireOnlyKeys(object, Collections.singleton("recipes"), "qualitySample");
+        Set<String> sampleKeys = new HashSet<String>();
+        sampleKeys.add("recipes");
+        sampleKeys.add("scanAllItems");
+        requireOnlyKeys(object, sampleKeys, "qualitySample");
+        boolean scanAllItems = optionalBoolean(object, "scanAllItems", false);
         JsonElement recipesElement = object.get("recipes");
         if (recipesElement == null || !recipesElement.isJsonArray()) {
             throw new IOException("qualitySample.recipes must be a non-empty array");
@@ -106,7 +113,19 @@ final class QualitySamplePlan {
             entry.setValue(Collections.unmodifiableList(entry.getValue()));
         }
         return new QualitySamplePlan(Collections.unmodifiableMap(selections), recipes.size(),
-                sourceIndexCount, recipeIdCount);
+                sourceIndexCount, recipeIdCount, scanAllItems);
+    }
+
+    private static boolean optionalBoolean(JsonObject object, String name, boolean fallback)
+            throws IOException {
+        JsonElement value = object.get(name);
+        if (value == null) {
+            return fallback;
+        }
+        if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isBoolean()) {
+            throw new IOException("qualitySample." + name + " must be a boolean");
+        }
+        return value.getAsBoolean();
     }
 
     private static void requireOnlyKeys(JsonObject object, Set<String> allowed, String label)
@@ -267,6 +286,10 @@ final class QualitySamplePlan {
 
     int recipeIdSelectorCount() {
         return recipeIdSelectorCount;
+    }
+
+    boolean scansAllItems() {
+        return scanAllItems;
     }
 
     private static final class RecipeTarget {

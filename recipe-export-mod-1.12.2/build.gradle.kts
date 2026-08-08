@@ -6,7 +6,7 @@ plugins {
 apply(from = "gradle/exporter-provenance.gradle")
 
 group = "com.recipetree"
-version = "1.1.1"
+version = "1.1.4"
 
 val minimumJeiApiVersion = "4.12.0.214"
 val maximumJeiApiVersionExclusive = "5.0.0"

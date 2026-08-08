@@ -200,7 +200,12 @@ function createIngestionApi(data, options = {}) {
       return new Response(null, {
         status: 200,
         headers: {
-          'content-length': String(stored.bytes.length),
+          'content-length': options.cloudflareHeadNormalization
+            ? '0'
+            : String(stored.bytes.length),
+          ...(options.cloudflareHeadNormalization
+            ? {'x-mrt-content-bytes': String(stored.bytes.length)}
+            : {}),
           'x-mrt-content-sha256': stored.sha256,
           'x-mrt-dataset-publication-id': PUBLICATION_ID,
         },
@@ -438,6 +443,7 @@ test('partial staging reuses exact objects and bounded retries resolve transient
       objects: [[first.path, {bytes: data.files.get(first.path), sha256: first.sha256}]],
       headConflicts: [[first.path, 2]],
       racePath: race.path,
+      cloudflareHeadNormalization: true,
     });
     const delays = [];
     const {result, capture} = await runUpload(data, api, {
