@@ -36,13 +36,13 @@ import type {GraphDirection} from '../graph/direction';
 import {theme} from '../theme';
 import {Recipe, RecipeRef} from '../types';
 import {useUi} from '../ui/UiContext';
-import {disclosureChevron} from '../ui/disclosureChevron';
 import {signalTarget, useSignalSurface} from '../analytics/signal';
 import {DropList, DropRow, formatDropStat} from './DropList';
 import {ItemIcon} from './ItemIcon';
 import {MobSprite} from './MobSprite';
 import {ItemChip, RecipeCard} from './RecipeCard';
 import {VisibilityIcon} from './VisibilityIcon';
+import {DisclosureChevron} from './DisclosureChevron';
 
 const PAGE = 15;
 const MAX_DEFAULT_FILTER_SCAN = 400;
@@ -654,9 +654,12 @@ function RefsList({
                   hitSlop={{top: 7, right: 7, bottom: 7, left: 7}}
                   onPress={() => setShowAllCollapsedCategoryTypes(show => !show)}
                   style={styles.showMoreTypesButton}>
-                  <Text accessibilityElementsHidden style={styles.showMoreTypesChevron}>
-                    {disclosureChevron(showAllCollapsedCategoryTypes)}
-                  </Text>
+                  <DisclosureChevron
+                    expanded={showAllCollapsedCategoryTypes}
+                    color={theme.accent}
+                    size={18}
+                    strokeWidth={2.3}
+                  />
                 </TouchableOpacity>
               )}
             </View>
@@ -1023,12 +1026,6 @@ const styles = StyleSheet.create({
     borderRadius: 7,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  showMoreTypesChevron: {
-    color: theme.accent,
-    fontSize: 20,
-    fontWeight: '700',
-    lineHeight: 20,
   },
   disabledTypeRow: {
     flexDirection: 'row',

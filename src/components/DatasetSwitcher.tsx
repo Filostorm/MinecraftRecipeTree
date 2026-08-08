@@ -12,7 +12,7 @@ import type {DatasetDescriptor} from '../data/datasetCatalog';
 import {loadedDatasetAttribution} from '../data/datasetAttribution';
 import {theme} from '../theme';
 import type {Manifest} from '../types';
-import {COLLAPSED_DISCLOSURE_CHEVRON} from '../ui/disclosureChevron';
+import {DisclosureChevron} from './DisclosureChevron';
 import {DatasetDisclaimer} from './DatasetDisclaimer';
 import {MobileUploadGuide} from './MobileUploadGuide';
 
@@ -97,7 +97,9 @@ export function DatasetSwitcher({
       <Text style={styles.compactDatasetText} numberOfLines={1}>
         {selectedLabel}
       </Text>
-      <Text style={styles.compactDatasetChevron}>{COLLAPSED_DISCLOSURE_CHEVRON}</Text>
+      <View style={styles.compactDatasetChevron}>
+        <DisclosureChevron expanded={false} color={theme.accent} size={14} />
+      </View>
     </TouchableOpacity>
   );
   const expandButton = compact || nativeHeader ? (
@@ -336,8 +338,6 @@ const styles = StyleSheet.create({
   compactDatasetChevron: {
     position: 'absolute',
     right: 10,
-    color: theme.accent,
-    fontSize: 13,
   },
   expandButton: {
     width: 36,

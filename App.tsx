@@ -17,6 +17,7 @@ import {DatasetPicker} from './src/components/DatasetPicker';
 import {DatasetSwitcher} from './src/components/DatasetSwitcher';
 import {GraphGuideModal} from './src/components/GraphGuideModal';
 import {BugIcon} from './src/components/BugIcon';
+import {DisclosureChevron} from './src/components/DisclosureChevron';
 import {IssueReportModal} from './src/components/IssueReportModal';
 import type {GitHubIssueKind, IssueReportContext} from './src/components/githubIssues';
 import {ItemsScreen} from './src/components/ItemsScreen';
@@ -38,7 +39,6 @@ import {theme} from './src/theme';
 import type {Manifest} from './src/types';
 import {Tab, UiProvider, useUi} from './src/ui/UiContext';
 import {lightImpactFeedback, selectionFeedback} from './src/ui/haptics';
-import {disclosureChevron} from './src/ui/disclosureChevron';
 import {
   INTERFACE_ZOOM_STEP,
   MAXIMUM_INTERFACE_ZOOM,
@@ -636,13 +636,12 @@ function Shell({
           lightImpactFeedback();
           setShowGraphControls(value => !value);
         }}>
-        <Text
-          style={[
-            styles.graphControlsHeaderButtonText,
-            showGraphControls && styles.graphControlsHeaderButtonTextActive,
-          ]}>
-          {disclosureChevron(showGraphControls)}
-        </Text>
+        <DisclosureChevron
+          expanded={showGraphControls}
+          color={showGraphControls ? theme.accent : theme.textDim}
+          size={20}
+          strokeWidth={2.4}
+        />
       </TouchableOpacity>
     ) : null;
   return (
@@ -1017,13 +1016,6 @@ const styles = StyleSheet.create({
     borderColor: theme.borderLight,
     backgroundColor: theme.panelAlt,
   },
-  graphControlsHeaderButtonText: {
-    color: theme.textDim,
-    fontSize: 20,
-    lineHeight: 22,
-    fontWeight: '800',
-  },
-  graphControlsHeaderButtonTextActive: {color: theme.accent},
   historyHeaderIcon: {color: theme.text, fontSize: 17, fontWeight: '700'},
   recipeStagesHeaderButton: {width: 'auto', minWidth: 72, paddingHorizontal: 8},
   recipeStagesHeaderText: {color: theme.text, fontSize: 11, fontWeight: '800'},

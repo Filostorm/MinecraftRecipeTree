@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import {formatDropStat} from '../components/DropList';
+import {DisclosureChevron} from '../components/DisclosureChevron';
 import {ItemIcon, pixelated} from '../components/ItemIcon';
 import {
   RADIAL_ROOT_ITEM_ICON_SIZE,
@@ -50,10 +51,6 @@ import {recipeNeedsLayoutPreviewUnavailableNotice} from '../data/recipePresentat
 import {theme} from '../theme';
 import {DropStat, Mob, Recipe, RecipeRef} from '../types';
 import {useUi} from '../ui/UiContext';
-import {
-  EXPANDED_DISCLOSURE_CHEVRON,
-  disclosureChevron,
-} from '../ui/disclosureChevron';
 import {
   COMPACT_LABEL_WIDTH,
   COMPACT_ITEM_SIZE,
@@ -2529,7 +2526,8 @@ export function GraphScreen({
           <View style={styles.controlOptions}>
             {graphDirection === 'inputs' && (
               <CtrlBtn
-                label={`Totals ${disclosureChevron(showTreeTotals)}`}
+                label="Totals"
+                expanded={showTreeTotals}
                 accessibilityLabel={showTreeTotals ? 'Collapse tree totals' : 'Expand tree totals'}
                 metricsId="graph.control.totals"
                 active={showTreeTotals}
@@ -2570,14 +2568,12 @@ export function GraphScreen({
             accessibilityState={{expanded: showGraphControls}}
             style={[styles.ctrlBtn, styles.controlMenuBtn, showGraphControls && styles.ctrlBtnActive]}
             onPress={onToggleGraphControls}>
-            <Text
-              style={[
-                styles.ctrlBtnText,
-                styles.controlMenuBtnText,
-                showGraphControls && styles.ctrlBtnTextActive,
-              ]}>
-              {disclosureChevron(showGraphControls)}
-            </Text>
+            <DisclosureChevron
+              expanded={showGraphControls}
+              color={showGraphControls ? theme.accent : theme.text}
+              size={18}
+              strokeWidth={2.4}
+            />
           </TouchableOpacity>
         )}
       </View>
@@ -3504,7 +3500,7 @@ function SourceNodeView({
           style={styles.headerBtn}>
           <Text style={[styles.smallBtnText, noSelect]}>ⓘ</Text>
         </TouchableOpacity>
-        <Text style={[styles.smallBtnText, noSelect]}>{EXPANDED_DISCLOSURE_CHEVRON}</Text>
+        <DisclosureChevron expanded color={theme.textDim} size={14} />
       </Pressable>
 
       {source.kind === 'recipe' && source.recipe?.img && source.dir && (
@@ -3579,12 +3575,14 @@ function CtrlBtn({
   accessibilityLabel,
   metricsId,
   active = false,
+  expanded,
   onPress,
 }: {
   label: string;
   accessibilityLabel?: string;
   metricsId: string;
   active?: boolean;
+  expanded?: boolean;
   onPress: () => void;
 }) {
   return (
@@ -3595,7 +3593,16 @@ function CtrlBtn({
       accessibilityState={{selected: active}}
       style={[styles.ctrlBtn, active && styles.ctrlBtnActive]}
       onPress={onPress}>
-      <Text style={[styles.ctrlBtnText, active && styles.ctrlBtnTextActive]}>{label}</Text>
+      <View style={styles.ctrlBtnContent}>
+        <Text style={[styles.ctrlBtnText, active && styles.ctrlBtnTextActive]}>{label}</Text>
+        {expanded !== undefined && (
+          <DisclosureChevron
+            expanded={expanded}
+            color={active ? theme.accent : theme.text}
+            size={13}
+          />
+        )}
+      </View>
     </TouchableOpacity>
   );
 }
@@ -4026,16 +4033,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   ctrlBtnActive: {borderColor: theme.accent, backgroundColor: '#173724'},
+  ctrlBtnContent: {flexDirection: 'row', alignItems: 'center', gap: 4},
   ctrlBtnText: {color: theme.text, fontSize: 13},
   ctrlBtnTextActive: {color: theme.accent, fontWeight: '700'},
   controlMenuBtn: {
     width: 38,
     paddingHorizontal: 0,
-  },
-  controlMenuBtnText: {
-    fontSize: 18,
-    lineHeight: 18,
-    fontWeight: '800',
   },
   fitControl: {
     position: 'absolute',
