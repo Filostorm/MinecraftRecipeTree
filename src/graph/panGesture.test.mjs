@@ -41,6 +41,28 @@ test('web graph zoom uses layout scaling instead of a composited scale transform
   assert.match(anchorMarkup, /Platform\.OS !== 'web'[\s\S]*?translateX:\s*displayTransform\.x/u);
 });
 
+test('interface zoom scales graph menu chrome without scaling the graph canvas', () => {
+  assert.match(
+    graphScreenSource,
+    /const graphMenuScaleStyle[\s\S]*?zoom:\s*interfaceZoom/u,
+  );
+  assert.match(graphScreenSource, /style=\{\[styles\.controls, graphMenuScaleStyle\]\}/u);
+  assert.match(
+    graphScreenSource,
+    /style=\{\[styles\.ctrlBtn, styles\.fitControl, graphMenuScaleStyle\]\}/u,
+  );
+  assert.match(graphScreenSource, /interfaceZoom=\{interfaceZoom\}[\s\S]*?totals=\{treeTotals\}/u);
+  assert.match(
+    graphScreenSource,
+    /style=\{\[styles\.recipeLookupCard, graphMenuScaleStyle\]\}/u,
+  );
+  const graphCanvasMarkup = graphScreenSource.slice(
+    graphScreenSource.indexOf('<View\n        ref={setCanvasRef}'),
+    graphScreenSource.indexOf('{graphLayout.fallback'),
+  );
+  assert.doesNotMatch(graphCanvasMarkup, /graphMenuScaleStyle|zoom:\s*interfaceZoom/u);
+});
+
 test('wheel coordinates map displayed bounds into the logical graph viewport', () => {
   assert.deepEqual(
     graphViewportPointFromClient(

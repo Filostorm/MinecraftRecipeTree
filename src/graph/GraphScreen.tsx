@@ -2353,8 +2353,12 @@ export function GraphScreen({
         onAmountChange: updateRootRequestedAmount,
         onChangeRecipe: () => openRootPicker('inputs'),
         onAddUsedBy: () => openRootPicker('outputs'),
-      }
+    }
     : undefined;
+  const graphMenuScaleStyle =
+    Platform.OS === 'web'
+      ? ({zoom: interfaceZoom} as unknown as object)
+      : null;
 
   return (
     <View style={styles.root}>
@@ -2548,12 +2552,14 @@ export function GraphScreen({
       </View>
 
       {graphLayout.fallback && (
-        <View style={styles.layoutFallbackNotice} accessibilityRole="alert">
+        <View
+          style={[styles.layoutFallbackNotice, graphMenuScaleStyle]}
+          accessibilityRole="alert">
           <Text style={[styles.layoutFallbackText, noSelect]}>{graphLayout.fallback}</Text>
         </View>
       )}
 
-      <View style={styles.controls}>
+      <View style={[styles.controls, graphMenuScaleStyle]}>
         {showGraphControls && (
           <View style={styles.controlOptions}>
             {graphDirection === 'inputs' && (
@@ -2613,12 +2619,13 @@ export function GraphScreen({
         {...signalTarget('graph.control.fit')}
         accessibilityRole="button"
         accessibilityLabel="Fit graph to view"
-        style={[styles.ctrlBtn, styles.fitControl]}
+        style={[styles.ctrlBtn, styles.fitControl, graphMenuScaleStyle]}
         onPress={fitView}>
         <Text style={[styles.ctrlBtnText, styles.fitControlIcon]}>⛶</Text>
       </TouchableOpacity>
       {showGraphControls && graphDirection === 'inputs' && showTreeTotals && (
         <TreeTotalsPanel
+          interfaceZoom={interfaceZoom}
           totals={treeTotals}
           useByproducts={useByproducts}
           exportingTree={exportingTree}
@@ -2635,7 +2642,7 @@ export function GraphScreen({
           style={styles.recipeLookupBackdrop}
           accessibilityViewIsModal
           accessibilityLabel={pickerLookup.title}>
-          <View style={styles.recipeLookupCard}>
+          <View style={[styles.recipeLookupCard, graphMenuScaleStyle]}>
             <ActivityIndicator color={theme.accent} size="large" />
             <Text style={styles.recipeLookupTitle}>{pickerLookup.title}</Text>
             <Text style={styles.recipeLookupHint}>Loading recipe options…</Text>
@@ -2869,6 +2876,7 @@ export function GraphScreen({
       )}
       <TreeShareModal
         visible={showTreeShare}
+        interfaceZoom={interfaceZoom}
         onClose={() => setShowTreeShare(false)}
         onShare={shareCurrentTree}
         onImport={importPortableTree}
@@ -3010,6 +3018,7 @@ function AttachedRootActions({
 }
 
 function TreeTotalsPanel({
+  interfaceZoom,
   totals,
   useByproducts,
   exportingTree,
@@ -3020,6 +3029,7 @@ function TreeTotalsPanel({
   onIngredientTap,
   onOpenItem,
 }: {
+  interfaceZoom: number;
   totals: TreeTotals;
   useByproducts: boolean;
   exportingTree: boolean;
@@ -3031,7 +3041,13 @@ function TreeTotalsPanel({
   onOpenItem: (key: string) => void;
 }) {
   return (
-    <View style={styles.totalsPanel}>
+    <View
+      style={[
+        styles.totalsPanel,
+        Platform.OS === 'web'
+          ? ({zoom: interfaceZoom} as unknown as object)
+          : null,
+      ]}>
       <View style={styles.totalsHeader}>
         <Text style={[styles.totalsTitle, noSelect]}>Tree totals</Text>
         <TouchableOpacity
