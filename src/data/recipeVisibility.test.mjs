@@ -56,6 +56,17 @@ test('does not hide legitimate fluid infusion or extraction recipes', () => {
   assert.equal(
     isFluidContainerTransferRecipe(
       {
+        in: [[['item|test:tank:water', 1]]],
+        out: [[['item|test:tank:empty', 1]], [['fluid|fluid:water', 1000]]],
+      },
+      items,
+      {id: 'nuclearcraft_extractor', title: 'Fluid Extractor'},
+    ),
+    false,
+  );
+  assert.equal(
+    isFluidContainerTransferRecipe(
+      {
         in: [[['item|test:fruit', 1]]],
         out: [[['item|test:mulch', 1]], [['fluid|fluid:juice', 250]]],
       },

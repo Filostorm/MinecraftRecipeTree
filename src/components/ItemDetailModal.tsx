@@ -486,7 +486,11 @@ function RefsList({
           isRecipeVisibleForStages(recipe, hiddenRecipeStages) &&
           (informational ||
             showFluidTransfers ||
-            !isFluidContainerTransferRecipe(recipe, data.itemsByKey))
+            !isFluidContainerTransferRecipe(
+              recipe,
+              data.itemsByKey,
+              data.categories[ref[0]],
+            ))
         );
       }),
     [
@@ -496,6 +500,7 @@ function RefsList({
       informational,
       showFluidTransfers,
       data.itemsByKey,
+      data.categories,
     ],
   );
   const shown = visibleCandidates.slice(0, visibleTarget);
@@ -511,7 +516,11 @@ function RefsList({
   const hiddenFluidTransferCount = refsToLoad.reduce((count, ref) => {
     const recipe = recipeForRef(ref);
     return count +
-      (!informational && recipe && isFluidContainerTransferRecipe(recipe, data.itemsByKey) ? 1 : 0);
+      (!informational &&
+        recipe &&
+        isFluidContainerTransferRecipe(recipe, data.itemsByKey, data.categories[ref[0]])
+        ? 1
+        : 0);
   }, 0);
   const hiddenRecipeStageCount = refsToLoad.reduce((count, ref) => {
     const stage = recipeForRef(ref)?.stage;

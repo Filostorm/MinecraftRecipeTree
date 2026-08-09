@@ -1,4 +1,4 @@
-import type {CatalogItem, Recipe, SlotEntry} from '../types';
+import type {CatalogItem, Category, Recipe, SlotEntry} from '../types';
 
 const CONTAINER_TOKEN =
   /(?:^|[\s_:.\-/])(bucket|bottle|bowl|can|cell|capsule|container|flask|jar|tank|reservoir|drum|canteen|vial|feeder|sponge)(?:$|[\s_:.\-/])/i;
@@ -66,8 +66,15 @@ function looksLikeContainerTransition(
 export function isFluidContainerTransferRecipe(
   recipe: Recipe | undefined,
   itemsByKey?: ReadonlyMap<string, CatalogItem>,
+  category?: Pick<Category, 'id' | 'title'>,
 ): boolean {
   if (!recipe || recipe.err) return false;
+  if (
+    category?.id === 'nuclearcraft_extractor' ||
+    category?.title.trim().toLocaleLowerCase() === 'fluid extractor'
+  ) {
+    return false;
+  }
   const inputs = partitionSlots(recipe.in);
   const outputs = partitionSlots(recipe.out);
   if (!inputs || !outputs) return false;

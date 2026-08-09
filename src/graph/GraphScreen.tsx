@@ -677,7 +677,7 @@ export function GraphScreen({
         const selectedRecipe = applyIngredientSelections(recipe, ingredientSelections);
         if (
           !allowFluidTransfer &&
-          isFluidContainerTransferRecipe(selectedRecipe, data.itemsByKey)
+          isFluidContainerTransferRecipe(selectedRecipe, data.itemsByKey, cat)
         ) {
           console.info('A fluid container-transfer recipe was suppressed by the default filter.', {
             itemKey: node.key,
@@ -1115,7 +1115,13 @@ export function GraphScreen({
         const refKey = recipeRefKey(choice.ref);
         recipesByRef.set(refKey, recipe);
         loadedRefKeys.add(refKey);
-        if (isFluidContainerTransferRecipe(recipe, data.itemsByKey)) {
+        if (
+          isFluidContainerTransferRecipe(
+            recipe,
+            data.itemsByKey,
+            data.categories[choice.ref[0]],
+          )
+        ) {
           identifiedFluidTransferCount += 1;
           fluidTransferChoices.push({...choice, allowFluidTransfer: true});
         } else {
@@ -1133,7 +1139,13 @@ export function GraphScreen({
           const preferredRefKey = recipeRefKey(preferredChoice.ref);
           recipesByRef.set(preferredRefKey, recipe);
           loadedRefKeys.add(preferredRefKey);
-          if (isFluidContainerTransferRecipe(recipe, data.itemsByKey)) {
+          if (
+            isFluidContainerTransferRecipe(
+              recipe,
+              data.itemsByKey,
+              data.categories[preferredChoice.ref[0]],
+            )
+          ) {
             identifiedFluidTransferCount += 1;
             const explicitChoice = {...preferredChoice, allowFluidTransfer: true as const};
             fluidTransferChoices.push(explicitChoice);
@@ -1262,7 +1274,13 @@ export function GraphScreen({
         let identifiedFluidTransferCount = 0;
         batch.forEach((choice, index) => {
           const recipe = recipes[index];
-          if (isFluidContainerTransferRecipe(recipe, data.itemsByKey)) {
+          if (
+            isFluidContainerTransferRecipe(
+              recipe,
+              data.itemsByKey,
+              data.categories[choice.ref[0]],
+            )
+          ) {
             identifiedFluidTransferCount += 1;
             const explicitChoice = {...choice, allowFluidTransfer: true as const};
             fluidTransferEntries.push(
@@ -1419,7 +1437,11 @@ export function GraphScreen({
       if (choice.t === 'recipe') {
         const [recipe] = await data.getRecipes([choice.ref]);
         if (
-          isFluidContainerTransferRecipe(recipe, data.itemsByKey) ||
+          isFluidContainerTransferRecipe(
+            recipe,
+            data.itemsByKey,
+            data.categories[choice.ref[0]],
+          ) ||
           (recipe.stage && hiddenRecipeStages.has(recipe.stage))
         ) {
           await openPicker(node);
