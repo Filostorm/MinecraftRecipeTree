@@ -77,6 +77,7 @@ export function ItemDetailModal({
       : null;
   const key = itemStack[itemStack.length - 1];
   const itemDetailVisible = Boolean(key) && (Platform.OS === 'web' || tab === 'items');
+  const canGoBack = itemStack.length > 1 || tab === 'graph';
   /** 'p' | 'u' | 'i' | 'd' | a secondary category index */
   const [side, setSide] = useState<'p' | 'u' | 'i' | 'd' | number>('p');
   const sideName =
@@ -217,12 +218,14 @@ export function ItemDetailModal({
           ]}
           onPress={() => {}}>
           <View style={styles.header}>
-            {itemStack.length > 1 && (
+            {canGoBack && (
               <TouchableOpacity
                 {...signalTarget('item-detail.back')}
+                accessibilityRole="button"
+                accessibilityLabel="Back to recipe viewer"
                 onPress={popItem}
                 style={styles.headerBtn}>
-                <Text style={styles.headerBtnText}>‹ back</Text>
+                <Text style={styles.headerBtnText}>‹ Back</Text>
               </TouchableOpacity>
             )}
             <View style={{flex: 1}} />

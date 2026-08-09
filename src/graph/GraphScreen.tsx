@@ -2758,7 +2758,6 @@ export function GraphScreen({
           }}
           productionPlan={picker.productionPlan}
           onOpenMachine={machineKey => {
-            setPicker(null);
             openItem(machineKey);
           }}
           onSelect={i => {
