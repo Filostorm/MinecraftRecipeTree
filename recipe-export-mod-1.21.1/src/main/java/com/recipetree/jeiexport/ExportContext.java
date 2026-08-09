@@ -163,6 +163,11 @@ final class ExportContext {
         JeiExportMod.LOGGER.warn("[jeiexport] {}", message);
     }
 
+    /** Logs an expected compatibility fallback without marking the export as failed. */
+    void warning(String message) {
+        JeiExportMod.LOGGER.warn("[jeiexport] {}", message);
+    }
+
     /** Reserve a unique sanitized relative file path like "icons/item/minecraft/stone.png". */
     String uniquePath(String dir, String baseName, String extension) {
         String base = dir + "/" + Naming.sanitize(baseName);

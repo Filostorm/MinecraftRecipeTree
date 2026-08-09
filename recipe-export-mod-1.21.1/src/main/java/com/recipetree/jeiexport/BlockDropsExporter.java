@@ -138,7 +138,7 @@ final class BlockDropsExporter implements ExportJob.PhaseRunner {
         }
         if (bestScore < 0) {
             // Needs a tool none of our candidates qualify as (modded tiers); sample with a pickaxe.
-            ctx.failure("blockdrops " + BuiltInRegistries.ITEM.getKey(item)
+            ctx.warning("blockdrops " + BuiltInRegistries.ITEM.getKey(item)
                     + ": no standard candidate tool satisfies requiresCorrectToolForDrops; "
                     + "probing with a netherite pickaxe");
             bestTool = new ItemStack(Items.NETHERITE_PICKAXE);
