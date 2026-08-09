@@ -19,6 +19,38 @@ const pickerSource = await readFile(
   new URL('../components/PickerModal.tsx', import.meta.url),
   'utf8',
 );
+const switcherSource = await readFile(
+  new URL('../components/DatasetSwitcher.tsx', import.meta.url),
+  'utf8',
+);
+
+test('secondary information actions share one anchored header menu', () => {
+  assert.match(
+    appSource,
+    /accessibilityLabel=\{showInfoMenu \? 'Close information menu' : 'Open information menu'\}/u,
+  );
+  assert.match(appSource, /accessibilityRole="menu"/u);
+  assert.match(appSource, />\s*Details\s*</u);
+  assert.match(appSource, />\s*Info\s*</u);
+  assert.match(appSource, />\s*Bug report\s*</u);
+  assert.match(appSource, />\s*History\s*</u);
+  assert.match(appSource, /headerSurface: \{position: 'relative', zIndex: 200\}/u);
+});
+
+test('desktop and compact web title rows own the pack picker and local import action', () => {
+  assert.match(
+    switcherSource,
+    /<View style=\{styles\.fullTitleRow\}>\s*\{brand\}\s*\{datasetButton\}\s*\{uploadButton\}\s*<\/View>/u,
+  );
+  assert.match(
+    switcherSource,
+    /<View style=\{styles\.fullControlRow\}>\s*\{leadingAction\}\s*\{fullWidthControls\}\s*<\/View>/u,
+  );
+  assert.match(
+    switcherSource,
+    /<View style=\{styles\.compactTitleRow\}>\s*\{brand\}\s*\{datasetButton\}\s*\{uploadButton\}\s*<\/View>/u,
+  );
+});
 
 test('interface zoom accepts every bounded twenty-five-percent step', () => {
   assert.equal(normalizeInterfaceZoom(DEFAULT_INTERFACE_ZOOM), 1);

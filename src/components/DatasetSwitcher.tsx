@@ -120,7 +120,11 @@ export function DatasetSwitcher({
   ) : null;
   const uploadButton = (
     <TouchableOpacity
-      style={[styles.uploadButton, nativeHeader && styles.nativeUploadButton]}
+      style={[
+        styles.uploadButton,
+        compact && !nativeHeader && styles.compactUploadButton,
+        nativeHeader && styles.nativeUploadButton,
+      ]}
       onPress={
         nativeHeader
           ? () => {
@@ -138,7 +142,7 @@ export function DatasetSwitcher({
       }
       focusable>
       <Text style={[styles.uploadButtonText, nativeHeader && styles.nativeUploadButtonText]}>
-        {nativeHeader ? '⇧  Desktop import' : 'Import local pack'}
+        {nativeHeader ? '⇧  Desktop import' : compact ? 'Import pack' : 'Import local pack'}
       </Text>
     </TouchableOpacity>
   );
@@ -171,6 +175,7 @@ export function DatasetSwitcher({
             <View style={styles.compactTitleRow}>
               {brand}
               {datasetButton}
+              {uploadButton}
             </View>
             <View style={styles.compactControlRow}>
               {leadingAction}
@@ -180,11 +185,13 @@ export function DatasetSwitcher({
           </View>
         ) : (
           <View style={styles.fullRows}>
-            <View style={styles.fullTitleRow}>{brand}</View>
-            <View style={styles.fullControlRow}>
-              {uploadButton}
-              {leadingAction}
+            <View style={styles.fullTitleRow}>
+              {brand}
               {datasetButton}
+              {uploadButton}
+            </View>
+            <View style={styles.fullControlRow}>
+              {leadingAction}
               {fullWidthControls}
             </View>
           </View>
@@ -208,6 +215,9 @@ export function DatasetSwitcher({
 
 const styles = StyleSheet.create({
   bar: {
+    position: 'relative',
+    zIndex: 100,
+    overflow: 'visible',
     paddingHorizontal: 14,
     paddingVertical: 9,
     borderBottomWidth: 1,
@@ -220,6 +230,7 @@ const styles = StyleSheet.create({
   fullTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 8,
     minHeight: 26,
   },
   fullControlRow: {
@@ -290,6 +301,7 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     fontWeight: '900',
   },
+  compactUploadButton: {paddingHorizontal: 10},
   nativeUploadButton: {
     width: '100%',
     minHeight: 44,
