@@ -63,6 +63,25 @@ test('interface zoom scales graph menu chrome without scaling the graph canvas',
   assert.doesNotMatch(graphCanvasMarkup, /graphMenuScaleStyle|zoom:\s*interfaceZoom/u);
 });
 
+test('compact byproduct nodes support alternate recipe gestures', () => {
+  assert.match(
+    graphScreenSource,
+    /double tap or right click to change recipe/u,
+  );
+  assert.match(
+    graphScreenSource,
+    /onContextMenu:[\s\S]*?preventDefault[\s\S]*?onChangeRecipe\(\)/u,
+  );
+  assert.match(
+    graphScreenSource,
+    /pendingTapRef\.current = setTimeout\([\s\S]*?onTap\(\)[\s\S]*?280/u,
+  );
+  assert.match(
+    graphScreenSource,
+    /treeTotals\.byproductCoverageByNode\.has\(n\.item\.id\)[\s\S]*?openPickerWithErrorHandling/u,
+  );
+});
+
 test('wheel coordinates map displayed bounds into the logical graph viewport', () => {
   assert.deepEqual(
     graphViewportPointFromClient(

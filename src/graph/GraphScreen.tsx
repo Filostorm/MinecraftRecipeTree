@@ -62,7 +62,9 @@ import {
   ROOT_ATTACHED_ACTIONS_WIDTH,
   ROOT_SOURCE_ACTIONS_WIDTH,
   SOURCE_HEADER,
+  type ByproductSupplyEdge,
   attachedRootVisualX,
+  byproductSupplyEdges,
   layoutTree,
   recipeImageDisplay,
   shouldShowCompactQuantity,
@@ -1736,15 +1738,6 @@ export function GraphScreen({
     ],
   );
   const graph = graphLayout.graph;
-  const renderedGraph = useMemo(
-    () =>
-      graph
-        ? exportingTree
-          ? {nodes: graph.nodes, edges: graph.edges, culled: false}
-          : visibleGraphElements(graph, transform, viewportSize)
-        : null,
-    [exportingTree, graph, transform, viewportSize],
-  );
   const graphRef = useRef(graph);
   graphRef.current = graph;
   const treeTotals = useMemo(() => {
@@ -1778,6 +1771,34 @@ export function GraphScreen({
     useByproducts,
     expandRecipesOnce,
   ]);
+  const supplyEdges = useMemo(
+    () =>
+      graph
+        ? byproductSupplyEdges(
+            graph.nodes,
+            treeTotals.byproductCoverageByNode.values(),
+          )
+        : [],
+    [graph, treeTotals],
+  );
+  const renderedGraph = useMemo(() => {
+    if (!graph) return null;
+    if (exportingTree) {
+      return {
+        nodes: graph.nodes,
+        edges: graph.edges,
+        supplyEdges,
+        culled: false,
+      };
+    }
+    const visible = visibleGraphElements(graph, transform, viewportSize);
+    const visibleSupplyEdges = visibleGraphElements(
+      {...graph, edges: supplyEdges},
+      transform,
+      viewportSize,
+    ).edges as ByproductSupplyEdge[];
+    return {...visible, supplyEdges: visibleSupplyEdges};
+  }, [exportingTree, graph, supplyEdges, transform, viewportSize]);
   const displayedAmountFor = useCallback(
     (node: ItemTreeNode) =>
       graphDirection === 'outputs'
@@ -2433,6 +2454,22 @@ export function GraphScreen({
               ]}
             />
           ))}
+          {renderedGraph?.supplyEdges.map(edge => (
+            <View
+              key={`byproduct:${edge.targetNodeId}:${edge.producerSourceId}`}
+              pointerEvents="none"
+              style={[
+                styles.byproductSupplyEdge,
+                {
+                  left: edge.x,
+                  top: edge.y,
+                  width: edge.w,
+                  height: edge.h,
+                  transform: [{rotate: `${String(edge.angle ?? 0)}rad`}],
+                },
+              ]}
+            />
+          ))}
           {renderedGraph?.nodes.map(n =>
             compactMode || n.radial ? (
               <CompactItemNodeView
@@ -2477,6 +2514,17 @@ export function GraphScreen({
                 showLabel
                 deferredDuplicate={!!n.item.deferredRecipeExpansion}
                 rootActions={n.item.id === 'root' ? rootNodeActions : undefined}
+                onChangeRecipe={
+                  n.item.id !== 'root' &&
+                  treeTotals.byproductCoverageByNode.has(n.item.id) &&
+                  choicesFor(n.item.key).length > 0
+                    ? () =>
+                        openPickerWithErrorHandling(
+                          n.item,
+                          treeTotals.byproductCoverageByNode.get(n.item.id),
+                        )
+                    : undefined
+                }
                 onTap={() =>
                   n.item.id === 'root'
                     ? setShowRootActions(value => !value)
@@ -3161,6 +3209,7 @@ function CompactItemNodeView({
   showLabel,
   deferredDuplicate,
   rootActions,
+  onChangeRecipe,
   onTap,
 }: {
   x: number;
@@ -3178,6 +3227,7 @@ function CompactItemNodeView({
   showLabel: boolean;
   deferredDuplicate: boolean;
   rootActions?: RootNodeActionProps;
+  onChangeRecipe?: () => void;
   onTap: () => void;
 }) {
   const data = useData();
@@ -3203,14 +3253,56 @@ function CompactItemNodeView({
       ? `completed by byproduct ${formatIngredientQuantity(node.key, byproductCoverage.creditedAmount)}`
       : `${formatIngredientQuantity(node.key, byproductCoverage.creditedAmount)} supplied by byproduct, ${formatIngredientQuantity(node.key, byproductCoverage.remainingAmount)} still needed`
     : null;
+  const pendingTapRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (pendingTapRef.current) clearTimeout(pendingTapRef.current);
+    },
+    [],
+  );
+  const clearPendingTap = () => {
+    if (!pendingTapRef.current) return;
+    clearTimeout(pendingTapRef.current);
+    pendingTapRef.current = null;
+  };
+  const handleTap = () => {
+    if (!onChangeRecipe) {
+      onTap();
+      return;
+    }
+    if (pendingTapRef.current) {
+      clearPendingTap();
+      onChangeRecipe();
+      return;
+    }
+    pendingTapRef.current = setTimeout(() => {
+      pendingTapRef.current = null;
+      onTap();
+    }, 280);
+  };
+  const webContextMenuProps =
+    Platform.OS === 'web' && onChangeRecipe
+      ? ({
+          onContextMenu: (event: {
+            preventDefault?: () => void;
+            stopPropagation?: () => void;
+          }) => {
+            event.preventDefault?.();
+            event.stopPropagation?.();
+            clearPendingTap();
+            onChangeRecipe();
+          },
+        } as object)
+      : {};
   return (
     <>
       <Pressable
       {...signalTarget(`graph.node.expand.${nodeDepthBucket(node)}`)}
+      {...webContextMenuProps}
       accessibilityRole={selectable ? 'button' : undefined}
-      accessibilityLabel={`${name}, quantity ${formatIngredientQuantity(node.key, requiredAmount)}${terminal ? `, ${terminalLabel}` : ''}${deferredDuplicate ? ', recipe expanded elsewhere, tap to move expansion here' : ''}${byproductLabel ? `, ${byproductLabel}` : ''}${node.nonConsumed ? ', not consumed' : ''}${node.consumptionProbability !== undefined ? `, ${node.consumptionProbability == null ? 'unknown' : `${String(Math.round(node.consumptionProbability * 10_000) / 100)} percent`} consume chance` : ''}${node.productionProbability !== undefined ? `, ${node.productionProbability == null ? 'unknown' : `${String(Math.round(node.productionProbability * 10_000) / 100)} percent`} produce chance` : ''}${isRoot ? ', open amount and recipe controls' : selectable && !deferredDuplicate ? byproductCoverage?.remainingAmount === 0 ? ', navigate to producing recipe' : ', choose source' : ''}`}
+      accessibilityLabel={`${name}, quantity ${formatIngredientQuantity(node.key, requiredAmount)}${terminal ? `, ${terminalLabel}` : ''}${deferredDuplicate ? ', recipe expanded elsewhere, tap to move expansion here' : ''}${byproductLabel ? `, ${byproductLabel}` : ''}${node.nonConsumed ? ', not consumed' : ''}${node.consumptionProbability !== undefined ? `, ${node.consumptionProbability == null ? 'unknown' : `${String(Math.round(node.consumptionProbability * 10_000) / 100)} percent`} consume chance` : ''}${node.productionProbability !== undefined ? `, ${node.productionProbability == null ? 'unknown' : `${String(Math.round(node.productionProbability * 10_000) / 100)} percent`} produce chance` : ''}${isRoot ? ', open amount and recipe controls' : selectable && !deferredDuplicate ? byproductCoverage?.remainingAmount === 0 ? ', navigate to producing recipe' : ', choose source' : ''}${onChangeRecipe ? ', double tap or right click to change recipe' : ''}`}
       disabled={!selectable || node.loading}
-      onPress={onTap}
+      onPress={handleTap}
       style={[
         radial ? styles.radialItemNode : styles.compactItemNode,
         branchLabel && styles.compactBranchNode,
@@ -3672,6 +3764,13 @@ const styles = StyleSheet.create({
   anchor: {position: 'absolute', left: 0, top: 0, width: 0, height: 0},
   nativeAnchor: {width: 1, height: 1},
   edge: {position: 'absolute', backgroundColor: theme.borderLight},
+  byproductSupplyEdge: {
+    position: 'absolute',
+    borderTopWidth: 2,
+    borderTopColor: theme.accentAlt,
+    borderStyle: 'dotted',
+    opacity: 0.9,
+  },
   itemNode: {
     position: 'absolute',
     flexDirection: 'row',
