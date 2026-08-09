@@ -425,12 +425,16 @@ function nodeDepthBucket(
 export function GraphScreen({
   interfaceZoom = 1,
   contentZoom = 1,
+  onContentZoomChange,
+  onContentZoomComplete,
   showGraphControls,
   onToggleGraphControls,
   controlsToggleInHeader = false,
 }: {
   interfaceZoom?: number;
   contentZoom?: number;
+  onContentZoomChange?: (value: number) => void;
+  onContentZoomComplete?: (value: number) => void;
   showGraphControls: boolean;
   onToggleGraphControls(): void;
   controlsToggleInHeader?: boolean;
@@ -2623,6 +2627,8 @@ export function GraphScreen({
           visible
           interfaceZoom={interfaceZoom}
           contentZoom={contentZoom}
+          onContentZoomChange={onContentZoomChange}
+          onContentZoomComplete={onContentZoomComplete}
           title={picker.title}
           direction={picker.target.id === 'root' ? picker.direction : undefined}
           onDirectionChange={

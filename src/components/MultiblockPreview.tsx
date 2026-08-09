@@ -3,6 +3,7 @@ import {StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import {signalTarget} from '../analytics/signal';
 import {theme} from '../theme';
 import type {RecipeStructure} from '../types';
+import {contentTextScale} from '../ui/contentZoom';
 import {ItemIcon} from './ItemIcon';
 import {itemIconSizeForContentScale} from './itemIconSizing';
 import {useData} from '../data/DataContext';
@@ -32,6 +33,7 @@ export function MultiblockPreview({
     PREVIEW_HEIGHT,
     Math.min(PREVIEW_HEIGHT * 3, PREVIEW_HEIGHT * contentScale),
   );
+  const textScale = contentTextScale(contentScale);
   const [measuredWidth, setMeasuredWidth] = useState<number | null>(null);
   const width = Math.max(180, Math.min(targetWidth, measuredWidth ?? targetWidth));
   const visibleCells = useMemo(
@@ -158,7 +160,7 @@ export function MultiblockPreview({
               <Text
                 style={[
                   styles.partText,
-                  {fontSize: Math.max(9, 11 * contentScale)},
+                  {fontSize: Math.max(9, 11 * textScale)},
                 ]}
                 numberOfLines={1}>
                 {count.toLocaleString()}× {name}

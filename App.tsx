@@ -700,6 +700,8 @@ function Shell({
                   <LazyGraphScreen
                     interfaceZoom={interfaceZoom}
                     contentZoom={contentZoom}
+                    onContentZoomChange={previewContentZoom}
+                    onContentZoomComplete={saveContentZoom}
                     showGraphControls={showGraphControls}
                     onToggleGraphControls={() =>
                       setShowGraphControls(value => !value)

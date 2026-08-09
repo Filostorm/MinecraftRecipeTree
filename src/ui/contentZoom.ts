@@ -3,6 +3,18 @@ export const MAXIMUM_CONTENT_ZOOM = 3;
 export const CONTENT_ZOOM_STEP = 0.05;
 export const DEFAULT_CONTENT_ZOOM = 1;
 
+/**
+ * Recipe imagery and icons can use the full content zoom range, but labels
+ * become difficult to scan when their font size grows at the same rate.
+ * Keep text responsive while limiting 300% content zoom to 150% text.
+ */
+export function contentTextScale(contentZoom: number): number {
+  const safeZoom = Number.isFinite(contentZoom)
+    ? Math.min(MAXIMUM_CONTENT_ZOOM, Math.max(MINIMUM_CONTENT_ZOOM, contentZoom))
+    : DEFAULT_CONTENT_ZOOM;
+  return 1 + (safeZoom - 1) * 0.25;
+}
+
 const CONTENT_ZOOM_STORAGE_KEY = 'contentZoom';
 const ZOOM_PRECISION = 2;
 

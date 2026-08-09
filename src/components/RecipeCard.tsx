@@ -16,6 +16,7 @@ import {slotSummary} from '../data/slotSummary';
 import {Recipe} from '../types';
 import {useUi} from '../ui/UiContext';
 import {signalTarget} from '../analytics/signal';
+import {contentTextScale} from '../ui/contentZoom';
 import {
   materialInputSummary,
   type GraphDirection,
@@ -222,6 +223,7 @@ export function ItemChip({
     tag,
     data.descriptor.minecraftVersion,
   );
+  const textScale = contentTextScale(contentScale);
   const content = (
     <>
       <ItemIcon
@@ -230,7 +232,7 @@ export function ItemChip({
         size={itemIconSizeForContentScale(contentScale)}
       />
       <Text
-        style={[styles.chipText, {fontSize: Math.max(9, 11 * contentScale)}]}
+        style={[styles.chipText, {fontSize: Math.max(9, 11 * textScale)}]}
         numberOfLines={1}>
         {amount !== undefined && shouldShowIngredientQuantity(itemKey, amount)
           ? `${formatIngredientQuantityPrefix(itemKey, amount)} `
