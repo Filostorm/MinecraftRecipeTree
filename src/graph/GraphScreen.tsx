@@ -92,6 +92,10 @@ import type {GraphTransform, PanGestureOrigin} from './panGesture';
 import {recordRecipeHistory} from './recipeHistory';
 import {planRecipePickerChoices} from './recipePickerPlan';
 import {
+  DEFAULT_USE_BYPRODUCTS,
+  useByproductsFromStoredValue,
+} from './byproductPreference';
+import {
   materialInputSummary,
   recipeChildrenForDirection,
   usageGraphStart,
@@ -397,10 +401,12 @@ function loadRadialLayout(): boolean {
 
 function loadUseByproducts(): boolean {
   try {
-    return globalThis.localStorage?.getItem(USE_BYPRODUCTS_KEY) === '1';
+    return useByproductsFromStoredValue(
+      globalThis.localStorage?.getItem(USE_BYPRODUCTS_KEY),
+    );
   } catch (error) {
     console.error('Byproduct-credit preference could not be loaded from localStorage.', error);
-    return false;
+    return DEFAULT_USE_BYPRODUCTS;
   }
 }
 

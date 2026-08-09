@@ -1,7 +1,19 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import {
+  DEFAULT_USE_BYPRODUCTS,
+  useByproductsFromStoredValue,
+} from './byproductPreference.ts';
 import {createDeferredRecipeSourceResolver} from './expansionOwnership.ts';
 import {calculateTreeTotals} from './treeTotals.ts';
+
+test('byproduct credits default on while preserving an explicit opt-out', () => {
+  assert.equal(DEFAULT_USE_BYPRODUCTS, true);
+  assert.equal(useByproductsFromStoredValue(undefined), true);
+  assert.equal(useByproductsFromStoredValue(null), true);
+  assert.equal(useByproductsFromStoredValue('1'), true);
+  assert.equal(useByproductsFromStoredValue('0'), false);
+});
 
 const item = (id, key, amount, options = {}) => ({
   id,
