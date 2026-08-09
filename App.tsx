@@ -1030,7 +1030,7 @@ const styles = StyleSheet.create({
   infoMenu: {
     position: 'absolute',
     top: 40,
-    right: 0,
+    left: 0,
     zIndex: 121,
     elevation: 20,
     width: 178,
@@ -1045,7 +1045,7 @@ const styles = StyleSheet.create({
     shadowRadius: 18,
     shadowOffset: {width: 0, height: 10},
   },
-  nativeInfoMenu: {position: 'relative', top: 0, right: 0, width: '100%', elevation: 0},
+  nativeInfoMenu: {position: 'relative', top: 0, left: 0, width: '100%', elevation: 0},
   infoMenuItem: {
     minHeight: 38,
     flexDirection: 'row',
