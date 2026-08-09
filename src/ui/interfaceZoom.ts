@@ -2,7 +2,7 @@ import {normalizeContentZoom} from './contentZoom.ts';
 
 export const MINIMUM_INTERFACE_ZOOM = 0.75;
 export const MAXIMUM_INTERFACE_ZOOM = 1.5;
-export const INTERFACE_ZOOM_STEP = 0.05;
+export const INTERFACE_ZOOM_STEP = 0.25;
 export const DEFAULT_INTERFACE_ZOOM = 1;
 
 const INTERFACE_ZOOM_STORAGE_KEY = 'interfaceZoom';
@@ -26,10 +26,21 @@ export function normalizeInterfaceZoom(value: number): number {
     Math.abs(normalized - value) > 1e-6
   ) {
     throw new Error(
-      `Interface zoom ${String(value)} is outside the supported slider range or step interval.`,
+      `Interface zoom ${String(value)} is outside the supported control range or step interval.`,
     );
   }
   return normalized;
+}
+
+export function stepInterfaceZoom(value: number, direction: -1 | 1): number {
+  const normalized = normalizeInterfaceZoom(value);
+  const stepped = Number(
+    (normalized + direction * INTERFACE_ZOOM_STEP).toFixed(ZOOM_PRECISION),
+  );
+  return Math.min(
+    MAXIMUM_INTERFACE_ZOOM,
+    Math.max(MINIMUM_INTERFACE_ZOOM, stepped),
+  );
 }
 
 /**

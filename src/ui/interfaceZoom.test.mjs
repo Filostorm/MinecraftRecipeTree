@@ -6,24 +6,38 @@ import {
   MAXIMUM_INTERFACE_ZOOM,
   MINIMUM_INTERFACE_ZOOM,
   normalizeInterfaceZoom,
+  stepInterfaceZoom,
   uniformPickerRecipePreviewSize,
 } from './interfaceZoom.ts';
 
 const appSource = await readFile(new URL('../../App.tsx', import.meta.url), 'utf8');
 
-test('interface zoom accepts every bounded five-percent slider stop', () => {
+test('interface zoom accepts every bounded twenty-five-percent step', () => {
   assert.equal(normalizeInterfaceZoom(DEFAULT_INTERFACE_ZOOM), 1);
   assert.equal(normalizeInterfaceZoom(MINIMUM_INTERFACE_ZOOM), 0.75);
-  assert.equal(normalizeInterfaceZoom(1.05), 1.05);
-  assert.equal(normalizeInterfaceZoom(1.45), 1.45);
+  assert.equal(normalizeInterfaceZoom(1.25), 1.25);
   assert.equal(normalizeInterfaceZoom(MAXIMUM_INTERFACE_ZOOM), 1.5);
 });
 
 test('interface zoom rejects out-of-range and off-step values instead of silently approximating', () => {
-  assert.throws(() => normalizeInterfaceZoom(0.7), /outside the supported slider range/);
-  assert.throws(() => normalizeInterfaceZoom(1.09), /outside the supported slider range/);
-  assert.throws(() => normalizeInterfaceZoom(1.55), /outside the supported slider range/);
+  assert.throws(() => normalizeInterfaceZoom(0.7), /outside the supported control range/);
+  assert.throws(() => normalizeInterfaceZoom(1.09), /outside the supported control range/);
+  assert.throws(() => normalizeInterfaceZoom(1.55), /outside the supported control range/);
   assert.throws(() => normalizeInterfaceZoom(Number.NaN), /finite number/);
+});
+
+test('interface zoom stepper moves twenty-five percent and stops at its bounds', () => {
+  assert.equal(stepInterfaceZoom(1, 1), 1.25);
+  assert.equal(stepInterfaceZoom(1, -1), 0.75);
+  assert.equal(stepInterfaceZoom(MINIMUM_INTERFACE_ZOOM, -1), MINIMUM_INTERFACE_ZOOM);
+  assert.equal(stepInterfaceZoom(MAXIMUM_INTERFACE_ZOOM, 1), MAXIMUM_INTERFACE_ZOOM);
+});
+
+test('header uses a stepper for UI zoom while retaining the recipe and item slider', () => {
+  assert.match(appSource, /accessibilityLabel="Decrease interface zoom"/u);
+  assert.match(appSource, /accessibilityLabel="Increase interface zoom"/u);
+  assert.doesNotMatch(appSource, /testID="interface-zoom-slider"/u);
+  assert.match(appSource, /testID="content-zoom-slider"/u);
 });
 
 test('picker applies one uniform recipe scale before proportional fit constraints', () => {

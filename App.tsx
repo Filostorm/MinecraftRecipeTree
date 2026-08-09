@@ -40,12 +40,11 @@ import type {Manifest} from './src/types';
 import {Tab, UiProvider, useUi} from './src/ui/UiContext';
 import {lightImpactFeedback, selectionFeedback} from './src/ui/haptics';
 import {
-  INTERFACE_ZOOM_STEP,
   MAXIMUM_INTERFACE_ZOOM,
   MINIMUM_INTERFACE_ZOOM,
   loadInterfaceZoom,
-  normalizeInterfaceZoom,
   persistInterfaceZoom,
+  stepInterfaceZoom,
 } from './src/ui/interfaceZoom';
 import {
   CONTENT_ZOOM_STEP,
@@ -388,18 +387,15 @@ function Shell({
     setInterfaceZoom(storedInterfaceZoom);
     setContentZoom(loadContentZoom(storedInterfaceZoom));
   }, []);
-  const previewInterfaceZoom = (value: number) => {
+  const adjustInterfaceZoom = (direction: -1 | 1) => {
     try {
-      setInterfaceZoom(normalizeInterfaceZoom(value));
+      const nextZoom = stepInterfaceZoom(interfaceZoom, direction);
+      if (nextZoom === interfaceZoom) return;
+      setInterfaceZoom(nextZoom);
+      persistInterfaceZoom(nextZoom);
+      lightImpactFeedback();
     } catch (error) {
-      console.error('Interface zoom slider produced an invalid value.', error);
-    }
-  };
-  const saveInterfaceZoom = (value: number) => {
-    try {
-      persistInterfaceZoom(normalizeInterfaceZoom(value));
-    } catch (error) {
-      console.error('Interface zoom could not be saved.', error);
+      console.error('Interface zoom could not be changed.', error);
     }
   };
   const previewContentZoom = (value: number) => {
@@ -472,21 +468,39 @@ function Shell({
   const interfaceZoomControls = Platform.OS === 'web' ? (
     <View style={styles.zoomControlGroup}>
       <View
-        style={styles.interfaceZoomControls}
+        style={[styles.interfaceZoomControls, styles.interfaceZoomStepper]}
         accessibilityLabel="Interface zoom controls">
+        <TouchableOpacity
+          {...signalTarget('header.interface-zoom.decrease')}
+          style={[
+            styles.interfaceZoomStepButton,
+            interfaceZoom <= MINIMUM_INTERFACE_ZOOM && styles.interfaceZoomStepButtonDisabled,
+          ]}
+          disabled={interfaceZoom <= MINIMUM_INTERFACE_ZOOM}
+          onPress={() => adjustInterfaceZoom(-1)}
+          accessibilityRole="button"
+          accessibilityLabel="Decrease interface zoom"
+          accessibilityState={{disabled: interfaceZoom <= MINIMUM_INTERFACE_ZOOM}}>
+          <Text style={styles.interfaceZoomStepButtonText}>−</Text>
+        </TouchableOpacity>
         <Text
-          style={styles.interfaceZoomValue}
+          style={[styles.interfaceZoomValue, styles.interfaceZoomStepValue]}
           accessibilityLabel={`Interface zoom ${Math.round(interfaceZoom * 100)} percent`}>
           UI {Math.round(interfaceZoom * 100)}%
         </Text>
-        <InterfaceZoomSlider
-          minimumValue={MINIMUM_INTERFACE_ZOOM}
-          maximumValue={MAXIMUM_INTERFACE_ZOOM}
-          step={INTERFACE_ZOOM_STEP}
-          value={interfaceZoom}
-          onValueChange={previewInterfaceZoom}
-          onSlidingComplete={saveInterfaceZoom}
-        />
+        <TouchableOpacity
+          {...signalTarget('header.interface-zoom.increase')}
+          style={[
+            styles.interfaceZoomStepButton,
+            interfaceZoom >= MAXIMUM_INTERFACE_ZOOM && styles.interfaceZoomStepButtonDisabled,
+          ]}
+          disabled={interfaceZoom >= MAXIMUM_INTERFACE_ZOOM}
+          onPress={() => adjustInterfaceZoom(1)}
+          accessibilityRole="button"
+          accessibilityLabel="Increase interface zoom"
+          accessibilityState={{disabled: interfaceZoom >= MAXIMUM_INTERFACE_ZOOM}}>
+          <Text style={styles.interfaceZoomStepButtonText}>+</Text>
+        </TouchableOpacity>
       </View>
       <View
         style={styles.interfaceZoomControls}
@@ -1037,6 +1051,24 @@ const styles = StyleSheet.create({
     backgroundColor: theme.panelAlt,
   },
   zoomControlGroup: {flexDirection: 'row', alignItems: 'center', gap: 6},
+  interfaceZoomStepper: {paddingHorizontal: 4, gap: 2},
+  interfaceZoomStepButton: {
+    width: 26,
+    height: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: theme.borderLight,
+    backgroundColor: theme.panel,
+  },
+  interfaceZoomStepButtonDisabled: {opacity: 0.35},
+  interfaceZoomStepButtonText: {
+    color: theme.text,
+    fontSize: 16,
+    fontWeight: '800',
+    lineHeight: 18,
+  },
   interfaceZoomValue: {
     minWidth: 60,
     marginRight: 5,
@@ -1045,6 +1077,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
   },
+  interfaceZoomStepValue: {minWidth: 54, marginRight: 0},
   contentZoomValue: {minWidth: 112},
   workspaceViewport: {flex: 1, minHeight: 0, overflow: 'hidden'},
   workspace: {flex: 1, minHeight: 0, position: 'relative'},
