@@ -42,6 +42,8 @@ export function RecipeCard({
   availableCardWidth,
   contentZoom = 1,
   grouped = false,
+  machineKey,
+  machineLabel,
 }: {
   recipe: Recipe;
   dir: string;
@@ -58,8 +60,12 @@ export function RecipeCard({
   contentZoom?: number;
   /** Render inside a category frame that supplies the outer border and corner radius. */
   grouped?: boolean;
+  /** First JEI catalyst for the recipe category, used to open the machine's own recipes. */
+  machineKey?: string;
+  machineLabel?: string;
 }) {
   const data = useData();
+  const {openItem} = useUi();
   const presentation = recipePresentationKind(recipe);
   if (presentation === 'failure') {
     return (
@@ -90,7 +96,7 @@ export function RecipeCard({
           : undefined
       }
       activeOpacity={onPress ? 0.72 : 1}
-      disabled={!onPress}
+      disabled={!onPress && !machineKey}
       onPress={onPress}
       style={[
         styles.card,
@@ -171,6 +177,27 @@ export function RecipeCard({
         <Text style={styles.recipeId} numberOfLines={1}>
           {recipe.id}
         </Text>
+      ) : null}
+      {machineKey ? (
+        <View style={styles.machineRow}>
+          <View style={styles.machineCopy}>
+            <Text style={styles.machineLabel}>CRAFTING MACHINE</Text>
+            <Text style={styles.machineName} numberOfLines={1}>
+              {machineLabel ?? data.itemsByKey.get(machineKey)?.n ?? machineKey}
+            </Text>
+          </View>
+          <TouchableOpacity
+            {...signalTarget('item-detail.machine.open')}
+            accessibilityRole="button"
+            accessibilityLabel={`View recipe for ${machineLabel ?? data.itemsByKey.get(machineKey)?.n ?? machineKey}`}
+            style={styles.machineButton}
+            onPress={event => {
+              event.stopPropagation();
+              openItem(machineKey);
+            }}>
+            <Text style={styles.machineButtonText}>View machine recipe</Text>
+          </TouchableOpacity>
+        </View>
       ) : null}
       {onPress ? (
         <Text style={styles.cardActionHint}>
@@ -361,4 +388,25 @@ const styles = StyleSheet.create({
   chipText: {color: theme.text, fontSize: 11},
   errText: {color: theme.danger, fontSize: 12},
   recipeId: {color: theme.textDim, fontSize: 10, marginTop: 6},
+  machineRow: {
+    marginTop: 9,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: theme.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  machineCopy: {flex: 1, minWidth: 0},
+  machineLabel: {color: theme.textDim, fontSize: 8, fontWeight: '800'},
+  machineName: {color: theme.text, fontSize: 10, fontWeight: '700', marginTop: 2},
+  machineButton: {
+    minHeight: 30,
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: theme.accent,
+  },
+  machineButtonText: {color: theme.accent, fontSize: 9, fontWeight: '800'},
 });

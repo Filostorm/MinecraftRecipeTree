@@ -815,6 +815,10 @@ function RefsList({
       {sectionGroups.map(group => {
         const category = group.category!;
         const categoryRefs = shownByCategory.get(group.catIdx) ?? [];
+        const machineKey = category.catalysts[0];
+        const machineLabel = machineKey
+          ? data.itemsByKey.get(machineKey)?.n ?? machineKey
+          : undefined;
         return (
           <View
             key={category.id}
@@ -868,6 +872,8 @@ function RefsList({
                           catTitle={category.title}
                           availableCardWidth={availableCardWidth}
                           contentZoom={contentZoom}
+                          machineKey={machineKey}
+                          machineLabel={machineLabel}
                           graphDirection={graphDirection}
                           actionSubject={actionSubject}
                           usageOutputSubject={usageOutputSubject}
