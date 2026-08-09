@@ -5,6 +5,7 @@ import {
   type DatasetRuntime,
 } from './datasetRuntime.ts';
 import {GITHUB_REPOSITORY} from '../src/components/githubIssues.ts';
+import {isReportableExportFailureMessage} from '../src/data/exportFailurePolicy.ts';
 
 export const EXPORT_FAILURE_ROUTE = '/api/export-failures';
 
@@ -213,12 +214,14 @@ function parseReport(value: unknown): ExportFailureReport | null {
     exporterBuild === undefined || generatedAt === undefined || failures.some(failure => !failure)
   ) return null;
   const unique = new Map<string, ExportFailure>();
-  for (const failure of failures as ExportFailure[]) {
+  for (const failure of (failures as ExportFailure[])
+    .filter(candidate => isReportableExportFailureMessage(candidate.message))) {
     const canonical = JSON.stringify(failure);
     if (!unique.has(canonical)) unique.set(canonical, failure);
   }
   const uniqueFailures = [...unique.values()].sort((left, right) =>
     JSON.stringify(left).localeCompare(JSON.stringify(right)));
+  if (uniqueFailures.length === 0) return null;
   const modVersions = parseModVersions(value.modVersions, uniqueFailures);
   if (!modVersions) return null;
   return {
