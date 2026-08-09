@@ -153,6 +153,7 @@ function DatasetRoot() {
             catalog.select(slug);
             setShowDatasetPicker(false);
           }}
+          onDeleteLocal={catalog.removeLocal}
           onClose={() => setShowDatasetPicker(false)}
         />
       )}

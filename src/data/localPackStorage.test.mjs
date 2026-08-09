@@ -8,6 +8,7 @@ const {
   installLocalPackArchive,
   listLocalPackDescriptors,
   registerLocalPackServiceWorker,
+  removeLocalPack,
 } = await import('./localPackStorage.ts');
 
 test('service worker preparation has a bounded failure instead of blocking catalog loading', async () => {
@@ -223,6 +224,14 @@ test('reports file-saving and finalization after archive reading reaches 100%', 
         displayName: 'Progress Pack',
         packVersion: '1.0.1',
       }],
+    );
+
+    assert.equal(await removeLocalPack(installed.descriptor.slug), true);
+    assert.deepEqual(await listLocalPackDescriptors(), []);
+    assert.equal(await removeLocalPack(installed.descriptor.slug), false);
+    assert.equal(
+      [...responses.keys()].some(url => url.includes(installed.descriptor.publicationId)),
+      false,
     );
   } finally {
     if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);

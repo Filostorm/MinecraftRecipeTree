@@ -336,6 +336,37 @@ export async function listLocalPackDescriptors(): Promise<readonly DatasetDescri
     .map(({storedAt: _storedAt, ...descriptor}) => descriptor);
 }
 
+export async function removeLocalPack(slug: string): Promise<boolean> {
+  if (typeof window === 'undefined' || typeof caches === 'undefined') {
+    throw new Error('Saved packs can only be deleted in a web browser.');
+  }
+  if (!/^local-[a-f0-9]{16}$/u.test(slug)) {
+    throw new Error('Only a saved local pack can be deleted.');
+  }
+
+  const cache = await cacheApi().open(LOCAL_PACK_CACHE);
+  const catalog = await readCatalog(cache);
+  const record = catalog.packs.find(pack => pack.slug === slug);
+  if (!record) return false;
+
+  await writeCatalog(cache, {
+    format: LOCAL_CATALOG_FORMAT,
+    packs: catalog.packs.filter(pack => pack.slug !== slug),
+  });
+  try {
+    await deletePublication(cache, record.publicationId);
+  } catch (error) {
+    // The catalog is the source of truth. Keep the removed pack hidden even if the browser
+    // refuses a best-effort cleanup of one of its now-unreferenced cached files.
+    console.error('Some cached files for the deleted local pack could not be removed.', {
+      slug,
+      publicationId: record.publicationId,
+      error,
+    });
+  }
+  return true;
+}
+
 export function localDatasetSource(descriptor: DatasetDescriptor): DatasetSource {
   return {
     descriptor,

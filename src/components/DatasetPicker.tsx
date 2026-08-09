@@ -1,5 +1,6 @@
 import React, {useEffect, useMemo, useState} from 'react';
 import {
+  Alert,
   Image,
   Modal,
   Platform,
@@ -74,20 +75,55 @@ export function DatasetPicker({
   datasets,
   selectedSlug,
   onSelect,
+  onDeleteLocal,
   onClose,
 }: {
   visible: boolean;
   datasets: readonly DatasetDescriptor[];
   selectedSlug: string | null;
   onSelect(slug: string): void;
+  onDeleteLocal(slug: string): Promise<void>;
   onClose(): void;
 }) {
   const [query, setQuery] = useState('');
+  const [deletingSlug, setDeletingSlug] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const safeAreaInsets = useSafeAreaInsets();
 
   useEffect(() => {
-    if (!visible) setQuery('');
+    if (!visible) {
+      setQuery('');
+      setDeletingSlug(null);
+      setDeleteError(null);
+    }
   }, [visible]);
+
+  const confirmDelete = (dataset: DatasetDescriptor): Promise<boolean> => {
+    const message =
+      'This removes the saved pack and its recipe files from this browser. Your original ZIP is not affected.';
+    if (Platform.OS === 'web') {
+      return Promise.resolve(window.confirm(`Delete ${dataset.displayName}?\n\n${message}`));
+    }
+    return new Promise(resolve => {
+      Alert.alert(`Delete ${dataset.displayName}?`, message, [
+        {text: 'Cancel', style: 'cancel', onPress: () => resolve(false)},
+        {text: 'Delete', style: 'destructive', onPress: () => resolve(true)},
+      ], {cancelable: true, onDismiss: () => resolve(false)});
+    });
+  };
+
+  const deleteDataset = async (dataset: DatasetDescriptor) => {
+    if (deletingSlug !== null || !(await confirmDelete(dataset))) return;
+    setDeletingSlug(dataset.slug);
+    setDeleteError(null);
+    try {
+      await onDeleteLocal(dataset.slug);
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setDeletingSlug(null);
+    }
+  };
 
   const filteredDatasets = useMemo(() => {
     const normalizedQuery = normalizeSearchText(query);
@@ -180,6 +216,11 @@ export function DatasetPicker({
               {filteredDatasets.length} of {datasets.length}{' '}
               {datasets.length === 1 ? 'pack' : 'packs'}
             </Text>
+            {deleteError !== null && (
+              <Text style={styles.deleteError} accessibilityRole="alert">
+                {deleteError}
+              </Text>
+            )}
           </View>
 
           <ScrollView
@@ -197,30 +238,48 @@ export function DatasetPicker({
               </View>
             ) : filteredDatasets.map(dataset => {
               const selected = dataset.slug === selectedSlug;
+              const local = isLocalPackDescriptor(dataset);
+              const deleting = deletingSlug === dataset.slug;
               return (
-                <TouchableOpacity
+                <View
                   key={dataset.slug}
-                  style={[styles.option, selected && styles.optionSelected]}
-                  onPress={() => onSelect(dataset.slug)}
-                  accessibilityRole="button"
-                  accessibilityState={{selected}}
-                  accessibilityLabel={`${dataset.displayName}, Minecraft ${dataset.minecraftVersion}, pack version ${dataset.packVersion}${selected ? ', selected' : ''}`}
-                  accessibilityHint="Loads this modpack's recipe dataset"
-                  focusable>
-                  <PackIcon dataset={dataset} />
-                  <View style={styles.optionCopy}>
-                    <Text style={[styles.optionName, selected && styles.optionNameSelected]}>
-                      {dataset.displayName}
+                  style={[styles.option, selected && styles.optionSelected]}>
+                  <TouchableOpacity
+                    style={styles.optionSelect}
+                    onPress={() => onSelect(dataset.slug)}
+                    accessibilityRole="button"
+                    accessibilityState={{selected}}
+                    accessibilityLabel={`${dataset.displayName}, Minecraft ${dataset.minecraftVersion}, pack version ${dataset.packVersion}${selected ? ', selected' : ''}`}
+                    accessibilityHint="Loads this modpack's recipe dataset"
+                    focusable>
+                    <PackIcon dataset={dataset} />
+                    <View style={styles.optionCopy}>
+                      <Text style={[styles.optionName, selected && styles.optionNameSelected]}>
+                        {dataset.displayName}
+                      </Text>
+                      <Text style={styles.optionMeta}>
+                        {local ? 'On this device · ' : ''}
+                        Minecraft {dataset.minecraftVersion} · pack {dataset.packVersion}
+                      </Text>
+                    </View>
+                    <Text style={[styles.selection, selected && styles.selectionActive]}>
+                      {selected ? 'Active' : 'Open'}
                     </Text>
-                    <Text style={styles.optionMeta}>
-                      {isLocalPackDescriptor(dataset) ? 'On this device · ' : ''}
-                      Minecraft {dataset.minecraftVersion} · pack {dataset.packVersion}
-                    </Text>
-                  </View>
-                  <Text style={[styles.selection, selected && styles.selectionActive]}>
-                    {selected ? 'Active' : 'Open'}
-                  </Text>
-                </TouchableOpacity>
+                  </TouchableOpacity>
+                  {local && (
+                    <TouchableOpacity
+                      style={[styles.deleteButton, deleting && styles.deleteButtonDisabled]}
+                      onPress={() => void deleteDataset(dataset)}
+                      disabled={deletingSlug !== null}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Delete local pack ${dataset.displayName}`}
+                      accessibilityHint="Removes this pack and its recipe files from this browser"
+                      accessibilityState={{disabled: deletingSlug !== null, busy: deleting}}
+                      focusable>
+                      <Text style={styles.deleteButtonText}>{deleting ? 'Deleting…' : 'Delete'}</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
               );
             })}
           </ScrollView>
@@ -318,16 +377,25 @@ const styles = StyleSheet.create({
   },
   clearButtonText: {color: theme.accent, fontSize: 12, fontWeight: '700'},
   resultCount: {color: theme.textDim, fontSize: 10, paddingHorizontal: 2},
+  deleteError: {width: '100%', color: '#fb7185', fontSize: 12, lineHeight: 17},
   list: {minHeight: 0},
   listContent: {padding: 12, gap: 10},
   option: {
     minHeight: 68,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
     borderRadius: 10,
     borderWidth: 1,
     borderColor: theme.border,
     backgroundColor: theme.panelAlt,
+    flexDirection: 'row',
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
+  optionSelect: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 68,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
@@ -363,6 +431,20 @@ const styles = StyleSheet.create({
   optionMeta: {color: theme.textDim, fontSize: 12, lineHeight: 17, marginTop: 3},
   selection: {color: theme.textDim, fontSize: 12, fontWeight: '700'},
   selectionActive: {color: theme.accent},
+  deleteButton: {
+    minWidth: 64,
+    minHeight: 44,
+    marginRight: 10,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#be123c',
+    backgroundColor: 'rgba(190, 18, 60, 0.12)',
+  },
+  deleteButtonDisabled: {opacity: 0.55},
+  deleteButtonText: {color: '#fb7185', fontSize: 12, fontWeight: '800'},
   emptyState: {alignItems: 'center', paddingHorizontal: 18, paddingVertical: 38},
   emptyTitle: {color: theme.text, fontSize: 15, fontWeight: '700'},
   emptyText: {color: theme.textDim, fontSize: 12, lineHeight: 18, marginTop: 5, textAlign: 'center'},

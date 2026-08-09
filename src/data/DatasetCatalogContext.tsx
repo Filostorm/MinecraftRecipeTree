@@ -20,9 +20,11 @@ import {
 } from './datasetCatalog';
 import {
   LOCAL_PACK_CATALOG_CHANGED_EVENT,
+  isLocalPackDescriptor,
   listLocalPackDescriptors,
   localDatasetSource,
   registerLocalPackServiceWorker,
+  removeLocalPack as removeStoredLocalPack,
 } from './localPackStorage';
 
 const PRODUCTION_ORIGIN = 'https://minecraftrecipetree.craftsmannsoftware.com';
@@ -45,6 +47,7 @@ export type DatasetCatalogState =
 interface DatasetCatalogContextValue {
   state: DatasetCatalogState;
   select(slug: string): void;
+  removeLocal(slug: string): Promise<void>;
 }
 
 function absoluteHttpUrl(value: string, label: string): URL {
@@ -272,6 +275,35 @@ export function DatasetCatalogProvider({children}: {children: React.ReactNode}) 
     [assetOrigin, datasets, sourceFor],
   );
 
+  const removeLocal = useCallback(
+    async (slug: string) => {
+      const descriptor = datasets.find(dataset => dataset.slug === slug);
+      if (!descriptor || !isLocalPackDescriptor(descriptor)) {
+        throw new Error('Only a saved local pack can be deleted.');
+      }
+
+      const remaining = datasets.filter(dataset => dataset.slug !== slug);
+      const deletingSelection = selectedSlugRef.current === slug;
+      const fallback = deletingSelection ? selectDataset(remaining, null) : null;
+      if (fallback) writeWebRequestSlug(fallback.slug);
+
+      const removed = await removeStoredLocalPack(slug);
+      if (!removed) {
+        throw new Error(`${descriptor.displayName} is no longer saved in this browser.`);
+      }
+
+      localPublicationIdsRef.current.delete(descriptor.publicationId);
+      setDatasets(remaining);
+      if (fallback) {
+        sourceFor(fallback, assetOrigin);
+        selectedSlugRef.current = fallback.slug;
+        setSelected(fallback);
+      }
+      setError(null);
+    },
+    [assetOrigin, datasets, sourceFor],
+  );
+
   useEffect(() => {
     if (Platform.OS !== 'web' || datasets.length === 0) return;
     const handlePopState = () => {
@@ -310,7 +342,10 @@ export function DatasetCatalogProvider({children}: {children: React.ReactNode}) 
     };
   }, [assetOrigin, datasets, error, loading, selected, sourceFor]);
 
-  const value = useMemo<DatasetCatalogContextValue>(() => ({state, select}), [select, state]);
+  const value = useMemo<DatasetCatalogContextValue>(
+    () => ({state, select, removeLocal}),
+    [removeLocal, select, state],
+  );
   return <DatasetCatalogContext.Provider value={value}>{children}</DatasetCatalogContext.Provider>;
 }
 
