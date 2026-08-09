@@ -84,9 +84,31 @@ test('prepares a shareable report for a named unversioned custom pack', () => {
   assert.equal(report.failures.length, 1);
 });
 
-test('rejects an empty failure report', () => {
-  assert.throws(
-    () => buildExportFailureReport({manifest, failures: []}),
-    /does not contain reportable failures/,
-  );
+test('returns no report for an empty failure list', () => {
+  assert.equal(buildExportFailureReport({manifest, failures: []}), null);
+});
+
+test('suppresses expected compatibility fallbacks from older exporters', () => {
+  const report = buildExportFailureReport({
+    manifest,
+    failures: [
+      'mob example_mod:invisible_helper rendered fully transparent and was omitted',
+      'blockdrops another_mod:machine_casing: no standard candidate tool satisfies requiresCorrectToolForDrops; probing with a netherite pickaxe',
+    ],
+  });
+
+  assert.equal(report, null);
+});
+
+test('retains actionable failures while suppressing compatibility fallbacks', () => {
+  const report = buildExportFailureReport({
+    manifest,
+    failures: [
+      'mob example_mod:invisible_helper rendered fully transparent and was omitted',
+      'mob drops iceandfire:myrmex_swarmer: null loot table id',
+    ],
+  });
+
+  assert.equal(report.failures.length, 1);
+  assert.match(report.failures[0].message, /myrmex_swarmer/);
 });

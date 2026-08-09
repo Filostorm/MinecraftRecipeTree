@@ -127,6 +127,27 @@ test('stores all exporter failures in errors.json and links one issue without co
   assert.equal(github.calls.every(call => call.init.headers.Authorization === `Bearer ${TOKEN}`), true);
 });
 
+test('rejects reports containing only expected compatibility fallbacks', async () => {
+  const payload = report();
+  payload.failures = [
+    {...payload.failures[0], message: 'mob example_mod:invisible_helper rendered fully transparent and was omitted'},
+    {
+      ...payload.failures[0],
+      message: 'blockdrops another_mod:machine_casing: no standard candidate tool satisfies requiresCorrectToolForDrops; probing with a netherite pickaxe',
+    },
+  ];
+  const github = githubMock();
+  const response = await handleExportFailureIssue(
+    request(payload),
+    {GITHUB_ISSUES_TOKEN: TOKEN},
+    new URL(`${ORIGIN}${EXPORT_FAILURE_ROUTE}`),
+    github.fetch,
+  );
+
+  assert.equal(response.status, 400);
+  assert.equal(github.calls.length, 0);
+});
+
 test('deduplicates different failures from the same pack version', () => {
   const first = report();
   const second = report();

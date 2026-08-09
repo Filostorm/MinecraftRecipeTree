@@ -1,3 +1,5 @@
+import {isReportableExportFailureMessage} from './exportFailurePolicy.ts';
+
 export const EXPORT_FAILURE_REPORT_FORMAT = 'mrt-export-failure-report-v1';
 export const EXPORT_ERRORS_FILE_FORMAT = 'mrt-export-errors-v1';
 export const MAX_EXPORT_FAILURES = 20_000;
@@ -135,7 +137,7 @@ export function buildExportFailureReport({
   failures,
   exportErrors,
   exporterBuild,
-}: ReportInputs): ExportFailureReport {
+}: ReportInputs): ExportFailureReport | null {
   if (!isRecord(manifest) || !isRecord(manifest.pack)) {
     throw new Error('The exporter manifest cannot identify the failed pack.');
   }
@@ -149,12 +151,13 @@ export function buildExportFailureReport({
       Array.isArray(exportErrors.failures)
     ? exportErrors.failures.map(structuredFailure).filter((failure): failure is ExportFailureDetail => failure !== null)
     : [];
-  const parsedFailures = richFailures.length > 0
+  const parsedFailures = (richFailures.length > 0
     ? richFailures
-    : failures.map(fallbackFailure);
+    : failures.map(fallbackFailure))
+    .filter(failure => isReportableExportFailureMessage(failure.message));
   const uniqueFailures = dedupeFailures(parsedFailures);
   if (uniqueFailures.length === 0) {
-    throw new Error('The export does not contain reportable failures.');
+    return null;
   }
 
   const manifestExporter = isRecord(manifest.exporter) ? manifest.exporter : {};

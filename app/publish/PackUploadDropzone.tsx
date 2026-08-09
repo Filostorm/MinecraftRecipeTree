@@ -29,6 +29,7 @@ import {
   sendExportFailureReport,
   type ExportFailureReport,
 } from '../../src/data/exportFailureReport';
+import {findingsForNonReportableExportFailures} from '../../src/data/exportFailurePolicy';
 import {readLocalFileSlice} from '../../src/data/localFileReader';
 import {localPackUploadErrorMessage} from '../../src/data/localPackUploadError';
 import styles from './publish.module.css';
@@ -506,7 +507,13 @@ export function PackUploadDropzone() {
                 exportErrors: result.exportErrors ?? undefined,
                 exporterBuild: result.exporterBuild ?? undefined,
               });
-              reportAvailable = true;
+              reportAvailable = pendingFailureReportRef.current !== null;
+              if (!reportAvailable) {
+                findings = findingsForNonReportableExportFailures(
+                  findings,
+                  result.summary.counts.failures,
+                );
+              }
             } catch (error) {
               console.error('The pack loaded, but its exporter errors could not be prepared.', error);
               findings = Object.freeze([
