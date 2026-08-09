@@ -10,7 +10,20 @@ import {
   ROOT_ATTACHED_ACTIONS_WIDTH,
   attachedRootVisualX,
   layoutTree,
+  shouldShowCompactQuantity,
 } from './layout.ts';
+
+test('hides compact quantities wider than half of the item icon', () => {
+  assert.equal(shouldShowCompactQuantity('×1'), true);
+  assert.equal(shouldShowCompactQuantity('×12'), true);
+  assert.equal(shouldShowCompactQuantity('×123'), false);
+  assert.equal(shouldShowCompactQuantity('1 mB'), false);
+  assert.equal(shouldShowCompactQuantity('×123', 48), true);
+  assert.throws(
+    () => shouldShowCompactQuantity('×1', 0),
+    /positive finite number/,
+  );
+});
 
 function deepChain(nodeCount) {
   let root = {

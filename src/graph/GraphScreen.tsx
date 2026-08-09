@@ -65,6 +65,7 @@ import {
   attachedRootVisualX,
   layoutTree,
   recipeImageDisplay,
+  shouldShowCompactQuantity,
 } from './layout';
 import {
   RADIAL_ITEM_SIZE,
@@ -3190,6 +3191,13 @@ function CompactItemNodeView({
     node.key,
     byproductCoverage?.remainingAmount ?? requiredAmount,
   );
+  const countBadgeText = byproductCoverage?.remainingAmount === 0 ? '✓' : amount;
+  const showCountBadge =
+    countBadgeText === '✓' ||
+    shouldShowCompactQuantity(
+      countBadgeText,
+      radialRoot ? RADIAL_ROOT_ITEM_ICON_SIZE : 32,
+    );
   const byproductLabel = byproductCoverage
     ? byproductCoverage.remainingAmount === 0
       ? `completed by byproduct ${formatIngredientQuantity(node.key, byproductCoverage.creditedAmount)}`
@@ -3233,22 +3241,24 @@ function CompactItemNodeView({
         itemKey={node.key}
         size={radialRoot ? RADIAL_ROOT_ITEM_ICON_SIZE : 32}
       />
-      <View
-        style={[
-          styles.compactCountBadge,
-          isRoot && !radialRoot && styles.compactRootCountBadge,
-          radialRoot && styles.radialRootCountBadge,
-          byproductCoverage && styles.compactByproductCountBadge,
-        ]}>
-        <Text
+      {showCountBadge && (
+        <View
           style={[
-            styles.compactCountText,
-            byproductCoverage && styles.compactByproductCountText,
-            noSelect,
+            styles.compactCountBadge,
+            isRoot && !radialRoot && styles.compactRootCountBadge,
+            radialRoot && styles.radialRootCountBadge,
+            byproductCoverage && styles.compactByproductCountBadge,
           ]}>
-          {byproductCoverage?.remainingAmount === 0 ? '✓' : amount}
-        </Text>
-      </View>
+          <Text
+            style={[
+              styles.compactCountText,
+              byproductCoverage && styles.compactByproductCountText,
+              noSelect,
+            ]}>
+            {countBadgeText}
+          </Text>
+        </View>
+      )}
       {showLabel && (
         <View
           pointerEvents="none"

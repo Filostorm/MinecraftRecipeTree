@@ -25,6 +25,36 @@ const LEVEL_GAP = 48;
 const SIBLING_GAP = 18;
 const EDGE_T = 2;
 
+function compactQuantityGlyphWidth(glyph: string): number {
+  if (glyph === '1') return 4;
+  if (/\d/u.test(glyph)) return 5.5;
+  if (glyph === '.') return 3;
+  if (glyph === ' ') return 2.5;
+  if (glyph === 'm') return 7.5;
+  if (glyph === 'M') return 7;
+  if (glyph === '×' || glyph === '<' || glyph === 'B') return 6;
+  return 5.5;
+}
+
+/**
+ * Compact quantities are overlaid on a 32 px item icon. Avoid drawing a label
+ * once its text would cover more than half of that icon; the full amount stays
+ * available through the node's accessibility label and totals panel.
+ */
+export function shouldShowCompactQuantity(
+  formattedAmount: string,
+  itemIconSize = 32,
+): boolean {
+  if (!Number.isFinite(itemIconSize) || itemIconSize <= 0) {
+    throw new Error('Compact quantity item size must be a positive finite number.');
+  }
+  const estimatedTextWidth = [...formattedAmount].reduce(
+    (width, glyph) => width + compactQuantityGlyphWidth(glyph),
+    0,
+  );
+  return estimatedTextWidth <= itemIconSize / 2;
+}
+
 /**
  * Keep the starting item's visual center independent from the extra collision
  * space reserved for its controls. Radial layout already returns the visual
