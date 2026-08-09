@@ -52,6 +52,22 @@ test('desktop and compact web title rows own the pack picker and local import ac
   );
 });
 
+test('compact web keeps the Items and Graph picker outside the collapsible details area', () => {
+  assert.match(
+    appSource,
+    /const compactHeaderNavigation = compactHeader && headerTabs \? \([\s\S]*?styles\.compactHeaderNavigation[\s\S]*?\{headerTabs\}/u,
+  );
+  assert.match(
+    appSource,
+    /styles\.compactHeaderUtilityRow[\s\S]*?\{compactHeaderNavigation\}[\s\S]*?\{infoMenu\}/u,
+  );
+  const compactDetails = appSource.slice(
+    appSource.indexOf('const headerDetails = compactHeader ?'),
+    appSource.indexOf('const fullWidthHeaderControls ='),
+  );
+  assert.doesNotMatch(compactDetails, /headerTabs|compactHeaderNavigation/u);
+});
+
 test('interface zoom accepts every bounded twenty-five-percent step', () => {
   assert.equal(normalizeInterfaceZoom(DEFAULT_INTERFACE_ZOOM), 1);
   assert.equal(normalizeInterfaceZoom(MINIMUM_INTERFACE_ZOOM), 0.75);

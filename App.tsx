@@ -428,6 +428,9 @@ function Shell({
         {data.capabilities.mobs && <TabBtn tab="mobs" label="Mobs" />}
       </View>
     ) : null;
+  const compactHeaderNavigation = compactHeader && headerTabs ? (
+    <View style={styles.compactHeaderNavigation}>{headerTabs}</View>
+  ) : null;
   const datasetMetadata = (
     <Text style={styles.subtitle}>
       Minecraft {data.descriptor.minecraftVersion} · pack {data.descriptor.packVersion} ·{' '}
@@ -488,7 +491,6 @@ function Shell({
   ) : null;
   const headerDetails = compactHeader ? (
     <View style={styles.headerDetails}>
-      <View style={styles.compactHeaderNavigation}>{headerTabs}</View>
       {showDatasetDetails && datasetMetadata}
       {interfaceZoomControls}
     </View>
@@ -607,8 +609,10 @@ function Shell({
     <View
       style={[
         styles.headerUtilityRow,
+        compactHeader && Platform.OS === 'web' && styles.compactHeaderUtilityRow,
         Platform.OS !== 'web' && styles.nativeHeaderUtilityRow,
       ]}>
+      {compactHeaderNavigation}
       {infoMenu}
       {recipeStages.catalog.stages.length > 0 && (
         <TouchableOpacity
@@ -985,6 +989,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     flexShrink: 0,
+  },
+  compactHeaderUtilityRow: {
+    flex: 1,
+    minWidth: 0,
+    flexWrap: 'wrap',
   },
   nativeHeaderUtilityRow: {
     width: '100%',
