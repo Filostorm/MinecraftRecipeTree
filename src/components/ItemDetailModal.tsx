@@ -43,6 +43,7 @@ import {MobSprite} from './MobSprite';
 import {ItemChip, RecipeCard} from './RecipeCard';
 import {VisibilityIcon} from './VisibilityIcon';
 import {DisclosureChevron} from './DisclosureChevron';
+import {ContentZoomControl} from './ContentZoomControl';
 
 const PAGE = 15;
 const MAX_DEFAULT_FILTER_SCAN = 400;
@@ -59,9 +60,13 @@ function toolLabel(tool: string): string {
 export function ItemDetailModal({
   interfaceZoom = 1,
   contentZoom = 1,
+  onContentZoomChange,
+  onContentZoomComplete,
 }: {
   interfaceZoom?: number;
   contentZoom?: number;
+  onContentZoomChange?: (value: number) => void;
+  onContentZoomComplete?: (value: number) => void;
 }) {
   const data = useData();
   const {itemStack, popItem, closeItems, tab} = useUi();
@@ -247,6 +252,16 @@ export function ItemDetailModal({
               </Text>
             </View>
           </View>
+
+          {onContentZoomChange ? (
+            <ContentZoomControl
+              value={contentZoom}
+              onValueChange={onContentZoomChange}
+              onSlidingComplete={onContentZoomComplete}
+              testID="item-detail-content-zoom-slider"
+              style={styles.contentZoomControl}
+            />
+          ) : null}
 
           <View style={styles.tabsRow}>
             <SideTab metricsId="item-detail.tab.recipes" label={`Recipes (${produced.length})`} active={side === 'p'} onPress={() => setSide('p')} />
@@ -960,6 +975,7 @@ const styles = StyleSheet.create({
   titleRow: {flexDirection: 'row', alignItems: 'center', marginTop: 2},
   title: {color: theme.text, fontSize: 18, fontWeight: '700'},
   subtitle: {color: theme.textDim, fontSize: 12, marginTop: 2},
+  contentZoomControl: {marginTop: 12},
   tabsRow: {flexDirection: 'row', flexWrap: 'wrap', marginTop: 12, gap: 8},
   sideTab: {
     borderColor: theme.border,

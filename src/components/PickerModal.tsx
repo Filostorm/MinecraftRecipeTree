@@ -15,11 +15,6 @@ import type {SlotSummary} from '../data/slotSummary';
 import {signalTarget} from '../analytics/signal';
 import {theme} from '../theme';
 import {uniformPickerRecipePreviewSize} from '../ui/interfaceZoom';
-import {
-  CONTENT_ZOOM_STEP,
-  MAXIMUM_CONTENT_ZOOM,
-  MINIMUM_CONTENT_ZOOM,
-} from '../ui/contentZoom';
 import type {GraphDirection} from '../graph/direction';
 import {
   MINECRAFT_TICKS_PER_SECOND,
@@ -32,7 +27,7 @@ import {VisibilityIcon} from './VisibilityIcon';
 import {groupPickerOptions} from './pickerGroups';
 import {MultiblockPreview} from './MultiblockPreview';
 import type {RecipeStructure} from '../types';
-import {InterfaceZoomSlider} from './InterfaceZoomSlider';
+import {ContentZoomControl} from './ContentZoomControl';
 
 export interface PickerOption {
   label: string;
@@ -186,25 +181,12 @@ export function PickerModal({
           onPress={() => {}}>
           <Text style={styles.title}>{title}</Text>
           {onContentZoomChange ? (
-            <View
-              style={styles.recipeSizeRow}
-              accessibilityLabel="Recipe and item size controls">
-              <Text
-                style={styles.recipeSizeValue}
-                accessibilityLabel={`Recipe and item size ${Math.round(contentZoom * 100)} percent`}>
-                Recipe/items {Math.round(contentZoom * 100)}%
-              </Text>
-              <InterfaceZoomSlider
-                accessibilityLabel="Recipe and item size"
-                testID="picker-content-zoom-slider"
-                minimumValue={MINIMUM_CONTENT_ZOOM}
-                maximumValue={MAXIMUM_CONTENT_ZOOM}
-                step={CONTENT_ZOOM_STEP}
-                value={contentZoom}
-                onValueChange={onContentZoomChange}
-                onSlidingComplete={onContentZoomComplete ?? onContentZoomChange}
-              />
-            </View>
+            <ContentZoomControl
+              value={contentZoom}
+              onValueChange={onContentZoomChange}
+              onSlidingComplete={onContentZoomComplete}
+              testID="picker-content-zoom-slider"
+            />
           ) : null}
           {direction && onDirectionChange ? (
             <View
@@ -652,26 +634,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: 0,
   },
   title: {color: theme.text, fontSize: 15, fontWeight: '700', marginBottom: 10},
-  recipeSizeRow: {
-    minHeight: 38,
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    gap: 10,
-    borderColor: theme.border,
-    borderWidth: 1,
-    borderRadius: 8,
-    backgroundColor: theme.panelAlt,
-    paddingLeft: 10,
-    paddingRight: 6,
-    marginBottom: 10,
-  },
-  recipeSizeValue: {
-    minWidth: 112,
-    color: theme.text,
-    fontSize: 10,
-    fontWeight: '700',
-  },
   directionTabs: {
     flexDirection: 'row',
     alignSelf: 'flex-start',

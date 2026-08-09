@@ -11,6 +11,14 @@ import {
 } from './interfaceZoom.ts';
 
 const appSource = await readFile(new URL('../../App.tsx', import.meta.url), 'utf8');
+const itemDetailSource = await readFile(
+  new URL('../components/ItemDetailModal.tsx', import.meta.url),
+  'utf8',
+);
+const pickerSource = await readFile(
+  new URL('../components/PickerModal.tsx', import.meta.url),
+  'utf8',
+);
 
 test('interface zoom accepts every bounded twenty-five-percent step', () => {
   assert.equal(normalizeInterfaceZoom(DEFAULT_INTERFACE_ZOOM), 1);
@@ -38,6 +46,22 @@ test('header uses a stepper for UI zoom while retaining the recipe and item slid
   assert.match(appSource, /accessibilityLabel="Increase interface zoom"/u);
   assert.doesNotMatch(appSource, /testID="interface-zoom-slider"/u);
   assert.match(appSource, /testID="content-zoom-slider"/u);
+});
+
+test('every recipe browsing surface exposes the shared recipe and item zoom control', () => {
+  assert.match(appSource, /<ContentZoomControl[\s\S]*?appearance="toolbar"/u);
+  assert.match(
+    appSource,
+    /<ItemDetailModal[\s\S]*?onContentZoomChange=\{previewContentZoom\}[\s\S]*?onContentZoomComplete=\{saveContentZoom\}/u,
+  );
+  assert.match(
+    itemDetailSource,
+    /<ContentZoomControl[\s\S]*?testID="item-detail-content-zoom-slider"/u,
+  );
+  assert.match(
+    pickerSource,
+    /<ContentZoomControl[\s\S]*?testID="picker-content-zoom-slider"/u,
+  );
 });
 
 test('picker applies one uniform recipe scale before proportional fit constraints', () => {

@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import {SafeAreaProvider, SafeAreaView, initialWindowMetrics} from './src/ui/safeArea';
 import {ItemDetailModal} from './src/components/ItemDetailModal';
-import {InterfaceZoomSlider} from './src/components/InterfaceZoomSlider';
+import {ContentZoomControl} from './src/components/ContentZoomControl';
 import {DatasetPicker} from './src/components/DatasetPicker';
 import {DatasetSwitcher} from './src/components/DatasetSwitcher';
 import {GraphGuideModal} from './src/components/GraphGuideModal';
@@ -47,9 +47,6 @@ import {
   stepInterfaceZoom,
 } from './src/ui/interfaceZoom';
 import {
-  CONTENT_ZOOM_STEP,
-  MAXIMUM_CONTENT_ZOOM,
-  MINIMUM_CONTENT_ZOOM,
   loadContentZoom,
   normalizeContentZoom,
   persistContentZoom,
@@ -502,25 +499,13 @@ function Shell({
           <Text style={styles.interfaceZoomStepButtonText}>+</Text>
         </TouchableOpacity>
       </View>
-      <View
-        style={styles.interfaceZoomControls}
-        accessibilityLabel="Recipe and item size controls">
-        <Text
-          style={[styles.interfaceZoomValue, styles.contentZoomValue]}
-          accessibilityLabel={`Recipe and item size ${Math.round(contentZoom * 100)} percent`}>
-          Recipe/items {Math.round(contentZoom * 100)}%
-        </Text>
-        <InterfaceZoomSlider
-          accessibilityLabel="Recipe and item size"
-          testID="content-zoom-slider"
-          minimumValue={MINIMUM_CONTENT_ZOOM}
-          maximumValue={MAXIMUM_CONTENT_ZOOM}
-          step={CONTENT_ZOOM_STEP}
-          value={contentZoom}
-          onValueChange={previewContentZoom}
-          onSlidingComplete={saveContentZoom}
-        />
-      </View>
+      <ContentZoomControl
+        appearance="toolbar"
+        testID="content-zoom-slider"
+        value={contentZoom}
+        onValueChange={previewContentZoom}
+        onSlidingComplete={saveContentZoom}
+      />
     </View>
   ) : null;
   const headerDetails = compactHeader ? (
@@ -770,7 +755,12 @@ function Shell({
       {Platform.OS !== 'web' && (
         <MobileBottomNavigation hasMobs={data.capabilities.mobs} />
       )}
-      <ItemDetailModal interfaceZoom={interfaceZoom} contentZoom={contentZoom} />
+      <ItemDetailModal
+        interfaceZoom={interfaceZoom}
+        contentZoom={contentZoom}
+        onContentZoomChange={previewContentZoom}
+        onContentZoomComplete={saveContentZoom}
+      />
       {showRecipeStages && (
         <RecipeStageModal
           visible
@@ -1078,7 +1068,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   interfaceZoomStepValue: {minWidth: 54, marginRight: 0},
-  contentZoomValue: {minWidth: 112},
   workspaceViewport: {flex: 1, minHeight: 0, overflow: 'hidden'},
   workspace: {flex: 1, minHeight: 0, position: 'relative'},
   body: {flex: 1, minHeight: 0},
