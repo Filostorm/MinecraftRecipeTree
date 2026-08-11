@@ -9,8 +9,76 @@ import {
   ROOT_ATTACHED_ACTIONS_HEIGHT,
   ROOT_ATTACHED_ACTIONS_WIDTH,
   attachedRootVisualX,
+  byproductSupplyEdges,
   layoutTree,
+  shouldShowCompactQuantity,
 } from './layout.ts';
+
+test('connects byproduct ingredients to their exact producing recipe once', () => {
+  const producer = {
+    id: 'producer.source',
+    kind: 'source',
+    x: 0,
+    y: 0,
+    w: 100,
+    h: 40,
+    item: {id: 'producer', key: 'item|test:producer'},
+    source: {id: 'producer.source', kind: 'recipe', inputs: []},
+  };
+  const supplied = {
+    id: 'supplied',
+    kind: 'item',
+    x: 220,
+    y: 100,
+    w: 52,
+    h: 52,
+    item: {id: 'supplied', key: 'item|test:supplied'},
+  };
+  const [edge] = byproductSupplyEdges(
+    [producer, supplied],
+    [{
+      nodeId: 'supplied',
+      key: 'item|test:supplied',
+      requiredAmount: 3,
+      creditedAmount: 3,
+      remainingAmount: 0,
+      allocations: [
+        {producerSourceId: 'producer.source', amount: 2},
+        {producerSourceId: 'producer.source', amount: 1},
+      ],
+    }],
+  );
+
+  assert.ok(edge);
+  assert.equal(edge.targetNodeId, 'supplied');
+  assert.equal(edge.producerSourceId, 'producer.source');
+  assert.ok(edge.w > 0);
+  assert.ok(edge.w < Math.hypot(246 - 50, 126 - 20));
+  assert.ok(edge.angle > 0);
+  assert.equal(
+    byproductSupplyEdges([producer, supplied], [{
+      nodeId: 'missing',
+      key: 'item|test:missing',
+      requiredAmount: 1,
+      creditedAmount: 1,
+      remainingAmount: 0,
+      allocations: [{producerSourceId: 'producer.source', amount: 1}],
+    }]).length,
+    0,
+  );
+});
+
+test('hides compact quantities wider than half of the item icon', () => {
+  assert.equal(shouldShowCompactQuantity('×1'), true);
+  assert.equal(shouldShowCompactQuantity('×12'), true);
+  assert.equal(shouldShowCompactQuantity('×123'), false);
+  assert.equal(shouldShowCompactQuantity('1 mB'), false);
+  assert.equal(shouldShowCompactQuantity('×123', 48), true);
+  assert.throws(
+    () => shouldShowCompactQuantity('×1', 0),
+    /positive finite number/,
+  );
+});
 
 function deepChain(nodeCount) {
   let root = {

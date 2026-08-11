@@ -36,13 +36,14 @@ import type {GraphDirection} from '../graph/direction';
 import {theme} from '../theme';
 import {Recipe, RecipeRef} from '../types';
 import {useUi} from '../ui/UiContext';
-import {disclosureChevron} from '../ui/disclosureChevron';
 import {signalTarget, useSignalSurface} from '../analytics/signal';
 import {DropList, DropRow, formatDropStat} from './DropList';
 import {ItemIcon} from './ItemIcon';
 import {MobSprite} from './MobSprite';
 import {ItemChip, RecipeCard} from './RecipeCard';
 import {VisibilityIcon} from './VisibilityIcon';
+import {DisclosureChevron} from './DisclosureChevron';
+import {ContentZoomControl} from './ContentZoomControl';
 
 const PAGE = 15;
 const MAX_DEFAULT_FILTER_SCAN = 400;
@@ -56,12 +57,32 @@ function toolLabel(tool: string): string {
   return tool === 'hand' ? 'bare hand' : tool.split(':').pop()!.replace(/_/g, ' ');
 }
 
-export function ItemDetailModal({interfaceZoom = 1}: {interfaceZoom?: number}) {
+export function ItemDetailModal({
+  interfaceZoom = 1,
+  contentZoom = 1,
+  onContentZoomChange,
+  onContentZoomComplete,
+}: {
+  interfaceZoom?: number;
+  contentZoom?: number;
+  onContentZoomChange?: (value: number) => void;
+  onContentZoomComplete?: (value: number) => void;
+}) {
   const data = useData();
   const {itemStack, popItem, closeItems, tab} = useUi();
   const safeAreaInsets = useSafeAreaInsets();
+  const scaledCardStyle =
+    Platform.OS === 'web'
+      ? ({
+          zoom: interfaceZoom,
+          width: `${100 / interfaceZoom}%`,
+          maxWidth: 760 / interfaceZoom,
+          maxHeight: `${88 / interfaceZoom}%`,
+        } as unknown as object)
+      : null;
   const key = itemStack[itemStack.length - 1];
   const itemDetailVisible = Boolean(key) && (Platform.OS === 'web' || tab === 'items');
+  const canGoBack = itemStack.length > 1 || tab === 'graph';
   /** 'p' | 'u' | 'i' | 'd' | a secondary category index */
   const [side, setSide] = useState<'p' | 'u' | 'i' | 'd' | number>('p');
   const sideName =
@@ -101,6 +122,7 @@ export function ItemDetailModal({interfaceZoom = 1}: {interfaceZoom?: number}) {
           <Pressable
             style={[
               styles.card,
+              scaledCardStyle,
               Platform.OS !== 'web' && styles.cardNative,
               Platform.OS !== 'web' && {paddingBottom: Math.max(14, safeAreaInsets.bottom)},
               {alignItems: 'center', justifyContent: 'center'},
@@ -195,17 +217,20 @@ export function ItemDetailModal({interfaceZoom = 1}: {interfaceZoom?: number}) {
         <Pressable
           style={[
             styles.card,
+            scaledCardStyle,
             Platform.OS !== 'web' && styles.cardNative,
             Platform.OS !== 'web' && {paddingBottom: Math.max(14, safeAreaInsets.bottom)},
           ]}
           onPress={() => {}}>
           <View style={styles.header}>
-            {itemStack.length > 1 && (
+            {canGoBack && (
               <TouchableOpacity
                 {...signalTarget('item-detail.back')}
+                accessibilityRole="button"
+                accessibilityLabel="Back to recipe viewer"
                 onPress={popItem}
                 style={styles.headerBtn}>
-                <Text style={styles.headerBtnText}>‹ back</Text>
+                <Text style={styles.headerBtnText}>‹ Back</Text>
               </TouchableOpacity>
             )}
             <View style={{flex: 1}} />
@@ -227,6 +252,16 @@ export function ItemDetailModal({interfaceZoom = 1}: {interfaceZoom?: number}) {
               </Text>
             </View>
           </View>
+
+          {onContentZoomChange ? (
+            <ContentZoomControl
+              value={contentZoom}
+              onValueChange={onContentZoomChange}
+              onSlidingComplete={onContentZoomComplete}
+              testID="item-detail-content-zoom-slider"
+              style={styles.contentZoomControl}
+            />
+          ) : null}
 
           <View style={styles.tabsRow}>
             <SideTab metricsId="item-detail.tab.recipes" label={`Recipes (${produced.length})`} active={side === 'p'} onPress={() => setSide('p')} />
@@ -303,6 +338,7 @@ export function ItemDetailModal({interfaceZoom = 1}: {interfaceZoom?: number}) {
                 informational={side === 'i'}
                 graphDirection={side === 'u' ? 'outputs' : 'inputs'}
                 interfaceZoom={interfaceZoom}
+                contentZoom={contentZoom}
               />
             )}
           </ScrollView>
@@ -340,12 +376,14 @@ function RefsList({
   informational = false,
   graphDirection,
   interfaceZoom,
+  contentZoom,
 }: {
   itemKey: string;
   refs: RecipeRef[];
   informational?: boolean;
   graphDirection: GraphDirection;
   interfaceZoom: number;
+  contentZoom: number;
 }) {
   const data = useData();
   const {
@@ -363,6 +401,10 @@ function RefsList({
   );
   const [recipesByRef, setRecipesByRef] = useState<Map<string, Recipe>>(() => new Map());
   const [availableCardWidth, setAvailableCardWidth] = useState<number | null>(null);
+  const isolatedRecipeStyle =
+    Platform.OS === 'web'
+      ? ({zoom: 1 / interfaceZoom} as unknown as object)
+      : null;
   const recipeForRef = useCallback(
     (ref: RecipeRef) =>
       recipesByRef.get(recipeRefKey(ref)) ?? data.getCachedRecipe(ref),
@@ -459,7 +501,11 @@ function RefsList({
           isRecipeVisibleForStages(recipe, hiddenRecipeStages) &&
           (informational ||
             showFluidTransfers ||
-            !isFluidContainerTransferRecipe(recipe, data.itemsByKey))
+            !isFluidContainerTransferRecipe(
+              recipe,
+              data.itemsByKey,
+              data.categories[ref[0]],
+            ))
         );
       }),
     [
@@ -469,6 +515,7 @@ function RefsList({
       informational,
       showFluidTransfers,
       data.itemsByKey,
+      data.categories,
     ],
   );
   const shown = visibleCandidates.slice(0, visibleTarget);
@@ -484,7 +531,11 @@ function RefsList({
   const hiddenFluidTransferCount = refsToLoad.reduce((count, ref) => {
     const recipe = recipeForRef(ref);
     return count +
-      (!informational && recipe && isFluidContainerTransferRecipe(recipe, data.itemsByKey) ? 1 : 0);
+      (!informational &&
+        recipe &&
+        isFluidContainerTransferRecipe(recipe, data.itemsByKey, data.categories[ref[0]])
+        ? 1
+        : 0);
   }, 0);
   const hiddenRecipeStageCount = refsToLoad.reduce((count, ref) => {
     const stage = recipeForRef(ref)?.stage;
@@ -630,9 +681,12 @@ function RefsList({
                   hitSlop={{top: 7, right: 7, bottom: 7, left: 7}}
                   onPress={() => setShowAllCollapsedCategoryTypes(show => !show)}
                   style={styles.showMoreTypesButton}>
-                  <Text accessibilityElementsHidden style={styles.showMoreTypesChevron}>
-                    {disclosureChevron(showAllCollapsedCategoryTypes)}
-                  </Text>
+                  <DisclosureChevron
+                    expanded={showAllCollapsedCategoryTypes}
+                    color={theme.accent}
+                    size={18}
+                    strokeWidth={2.3}
+                  />
                 </TouchableOpacity>
               )}
             </View>
@@ -761,6 +815,10 @@ function RefsList({
       {sectionGroups.map(group => {
         const category = group.category!;
         const categoryRefs = shownByCategory.get(group.catIdx) ?? [];
+        const machineKey = category.catalysts[0];
+        const machineLabel = machineKey
+          ? data.itemsByKey.get(machineKey)?.n ?? machineKey
+          : undefined;
         return (
           <View
             key={category.id}
@@ -804,6 +862,7 @@ function RefsList({
                       key={`${catIdx}-${recipeIdx}`}
                       style={[
                         styles.categoryRecipe,
+                        isolatedRecipeStyle,
                         recipePosition > 0 && styles.categoryRecipeSeparated,
                       ]}>
                       {recipe && availableCardWidth !== null ? (
@@ -812,7 +871,9 @@ function RefsList({
                           dir={category.dir}
                           catTitle={category.title}
                           availableCardWidth={availableCardWidth}
-                          interfaceZoom={interfaceZoom}
+                          contentZoom={contentZoom}
+                          machineKey={machineKey}
+                          machineLabel={machineLabel}
                           graphDirection={graphDirection}
                           actionSubject={actionSubject}
                           usageOutputSubject={usageOutputSubject}
@@ -920,6 +981,7 @@ const styles = StyleSheet.create({
   titleRow: {flexDirection: 'row', alignItems: 'center', marginTop: 2},
   title: {color: theme.text, fontSize: 18, fontWeight: '700'},
   subtitle: {color: theme.textDim, fontSize: 12, marginTop: 2},
+  contentZoomControl: {marginTop: 12},
   tabsRow: {flexDirection: 'row', flexWrap: 'wrap', marginTop: 12, gap: 8},
   sideTab: {
     borderColor: theme.border,
@@ -998,12 +1060,6 @@ const styles = StyleSheet.create({
     borderRadius: 7,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  showMoreTypesChevron: {
-    color: theme.accent,
-    fontSize: 20,
-    fontWeight: '700',
-    lineHeight: 20,
   },
   disabledTypeRow: {
     flexDirection: 'row',

@@ -1,6 +1,7 @@
 import React, {useEffect, useState} from 'react';
 import {
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,10 +16,27 @@ import {useUi} from '../ui/UiContext';
 import {ItemIcon} from './ItemIcon';
 import {RECIPE_HISTORY_ITEM_ICON_SIZE} from './itemIconSizing';
 
-export function RecipeHistoryModal({visible, onClose}: {visible: boolean; onClose: () => void}) {
+export function RecipeHistoryModal({
+  visible,
+  onClose,
+  interfaceZoom = 1,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  interfaceZoom?: number;
+}) {
   const data = useData();
   const {openRecipeInGraph} = useUi();
   const [entries, setEntries] = useState<RecipeHistoryEntry[]>([]);
+  const scaledCardStyle =
+    Platform.OS === 'web'
+      ? ({
+          zoom: interfaceZoom,
+          width: `${100 / interfaceZoom}%`,
+          maxWidth: 680 / interfaceZoom,
+          maxHeight: `${82 / interfaceZoom}%`,
+        } as unknown as object)
+      : null;
 
   useEffect(() => {
     if (!visible) return;
@@ -39,7 +57,7 @@ export function RecipeHistoryModal({visible, onClose}: {visible: boolean; onClos
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.card} onPress={() => {}}>
+        <Pressable style={[styles.card, scaledCardStyle]} onPress={() => {}}>
           <View style={styles.header}>
             <View style={styles.headerCopy}>
               <Text style={styles.title}>Recipe history</Text>

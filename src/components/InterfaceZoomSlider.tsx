@@ -15,6 +15,8 @@ export interface InterfaceZoomSliderProps {
   step: number;
   onValueChange: (value: number) => void;
   onSlidingComplete: (value: number) => void;
+  accessibilityLabel?: string;
+  testID?: string;
 }
 
 function WebInterfaceZoomSlider({
@@ -24,6 +26,8 @@ function WebInterfaceZoomSlider({
   step,
   onValueChange,
   onSlidingComplete,
+  accessibilityLabel = 'Interface zoom',
+  testID = 'interface-zoom-slider',
 }: InterfaceZoomSliderProps) {
   const handleInput = useCallback(
     (event: React.FormEvent<HTMLInputElement>) => {
@@ -41,9 +45,9 @@ function WebInterfaceZoomSlider({
   );
 
   return React.createElement('input', {
-    'aria-label': 'Interface zoom',
+    'aria-label': accessibilityLabel,
     'aria-valuetext': `${String(Math.round(value * 100))} percent`,
-    'data-testid': 'interface-zoom-slider',
+    'data-testid': testID,
     max: maximumValue,
     min: minimumValue,
     onInput: handleInput,
@@ -67,6 +71,7 @@ function NativeInterfaceZoomSlider({
   step,
   onValueChange,
   onSlidingComplete,
+  accessibilityLabel = 'Interface zoom',
 }: InterfaceZoomSliderProps) {
   const [trackWidth, setTrackWidth] = useState(0);
   const currentValue = useRef(value);
@@ -157,7 +162,7 @@ function NativeInterfaceZoomSlider({
       {...panResponder.panHandlers}
       {...keyboardProps}
       accessibilityRole="adjustable"
-      accessibilityLabel="Interface zoom"
+      accessibilityLabel={accessibilityLabel}
       accessibilityValue={{
         min: Math.round(minimumValue * 100),
         max: Math.round(maximumValue * 100),
@@ -165,8 +170,8 @@ function NativeInterfaceZoomSlider({
         text: `${String(Math.round(value * 100))} percent`,
       }}
       accessibilityActions={[
-        {name: 'increment', label: 'Increase interface zoom'},
-        {name: 'decrement', label: 'Decrease interface zoom'},
+        {name: 'increment', label: `Increase ${accessibilityLabel.toLowerCase()}`},
+        {name: 'decrement', label: `Decrease ${accessibilityLabel.toLowerCase()}`},
       ]}
       onAccessibilityAction={event => {
         if (event.nativeEvent.actionName === 'increment') {

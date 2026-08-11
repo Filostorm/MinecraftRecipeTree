@@ -12,11 +12,12 @@ import {
 } from 'react-native';
 import {SafeAreaProvider, SafeAreaView, initialWindowMetrics} from './src/ui/safeArea';
 import {ItemDetailModal} from './src/components/ItemDetailModal';
-import {InterfaceZoomSlider} from './src/components/InterfaceZoomSlider';
+import {ContentZoomControl} from './src/components/ContentZoomControl';
 import {DatasetPicker} from './src/components/DatasetPicker';
 import {DatasetSwitcher} from './src/components/DatasetSwitcher';
 import {GraphGuideModal} from './src/components/GraphGuideModal';
 import {BugIcon} from './src/components/BugIcon';
+import {DisclosureChevron} from './src/components/DisclosureChevron';
 import {IssueReportModal} from './src/components/IssueReportModal';
 import type {GitHubIssueKind, IssueReportContext} from './src/components/githubIssues';
 import {ItemsScreen} from './src/components/ItemsScreen';
@@ -34,19 +35,23 @@ import {
   useRecipeStages,
 } from './src/data/RecipeStageContext';
 import {datasetMountKey} from './src/data/datasetCatalog';
+import {isLocalPackExportUrl} from './src/data/runtimeDocumentLimits';
 import {theme} from './src/theme';
 import type {Manifest} from './src/types';
 import {Tab, UiProvider, useUi} from './src/ui/UiContext';
 import {lightImpactFeedback, selectionFeedback} from './src/ui/haptics';
-import {disclosureChevron} from './src/ui/disclosureChevron';
 import {
-  INTERFACE_ZOOM_STEP,
   MAXIMUM_INTERFACE_ZOOM,
   MINIMUM_INTERFACE_ZOOM,
   loadInterfaceZoom,
-  normalizeInterfaceZoom,
   persistInterfaceZoom,
+  stepInterfaceZoom,
 } from './src/ui/interfaceZoom';
+import {
+  loadContentZoom,
+  normalizeContentZoom,
+  persistContentZoom,
+} from './src/ui/contentZoom';
 import {signalTarget, useSignalSurface} from './src/analytics/signal';
 import {
   graphRenderRecovery,
@@ -135,6 +140,7 @@ function DatasetRoot() {
         selectedSlug={selectedSlug}
         loadedManifest={loadedManifest}
         onOpenPicker={() => setShowDatasetPicker(true)}
+        onLocalPackInstalled={slug => catalog.refreshLocal(slug)}
         leadingAction={leadingAction}
         trailingAction={trailingAction}
         fullWidthControls={fullWidthControls}
@@ -149,6 +155,7 @@ function DatasetRoot() {
             catalog.select(slug);
             setShowDatasetPicker(false);
           }}
+          onDeleteLocal={catalog.removeLocal}
           onClose={() => setShowDatasetPicker(false)}
         />
       )}
@@ -253,7 +260,7 @@ function Root({
   }
   if (state.status === 'error') {
     const stale = state.kind === 'stale';
-    const localPack = state.base.startsWith('/__local-packs/');
+    const localPack = isLocalPackExportUrl(`${state.base}/manifest.json`);
     return (
       <View style={styles.datasetRoot}>
         {renderControls(null)}
@@ -325,10 +332,12 @@ function Shell({
   const [showRecipeStages, setShowRecipeStages] = useState(false);
   const [showGraphGuide, setShowGraphGuide] = useState(false);
   const [showIssueReport, setShowIssueReport] = useState(false);
+  const [showInfoMenu, setShowInfoMenu] = useState(false);
   const [issueReportKind, setIssueReportKind] = useState<GitHubIssueKind>('bug');
   const [showGraphControls, setShowGraphControls] = useState(false);
   const [showDatasetDetails, setShowDatasetDetails] = useState(false);
   const [interfaceZoom, setInterfaceZoom] = useState(1);
+  const [contentZoom, setContentZoom] = useState(1);
   const shellSurface = showRecipeStages
       ? 'recipe-stages'
       : showGraphGuide
@@ -362,7 +371,8 @@ function Shell({
     graphRootKey: ui.graphRootKey ?? '',
     graphDirection: ui.graphDirection,
     interfaceZoomPercent: Math.round(interfaceZoom * 100),
-  }), [data, interfaceZoom, tab, ui.graphDirection, ui.graphRootKey, ui.itemStack]);
+    contentZoomPercent: Math.round(contentZoom * 100),
+  }), [contentZoom, data, interfaceZoom, tab, ui.graphDirection, ui.graphRootKey, ui.itemStack]);
   useEffect(() => {
     if (Platform.OS === 'web') setHasHydrated(true);
   }, []);
@@ -373,22 +383,40 @@ function Shell({
     });
   }, [data, tab]);
   useEffect(() => {
-    if (Platform.OS === 'web') setInterfaceZoom(loadInterfaceZoom());
+    if (Platform.OS !== 'web') return;
+    const storedInterfaceZoom = loadInterfaceZoom();
+    setInterfaceZoom(storedInterfaceZoom);
+    setContentZoom(loadContentZoom(storedInterfaceZoom));
   }, []);
-  const previewInterfaceZoom = (value: number) => {
+  const adjustInterfaceZoom = (direction: -1 | 1) => {
     try {
-      setInterfaceZoom(normalizeInterfaceZoom(value));
+      const nextZoom = stepInterfaceZoom(interfaceZoom, direction);
+      if (nextZoom === interfaceZoom) return;
+      setInterfaceZoom(nextZoom);
+      persistInterfaceZoom(nextZoom);
+      lightImpactFeedback();
     } catch (error) {
-      console.error('Interface zoom slider produced an invalid value.', error);
+      console.error('Interface zoom could not be changed.', error);
     }
   };
-  const saveInterfaceZoom = (value: number) => {
+  const previewContentZoom = (value: number) => {
     try {
-      persistInterfaceZoom(normalizeInterfaceZoom(value));
+      setContentZoom(normalizeContentZoom(value));
     } catch (error) {
-      console.error('Interface zoom could not be saved.', error);
+      console.error('Recipe and item zoom slider produced an invalid value.', error);
     }
   };
+  const saveContentZoom = (value: number) => {
+    try {
+      persistContentZoom(normalizeContentZoom(value));
+    } catch (error) {
+      console.error('Recipe and item zoom could not be saved.', error);
+    }
+  };
+  const scaledHeaderStyle =
+    Platform.OS === 'web'
+      ? ({zoom: interfaceZoom} as unknown as object)
+      : null;
   const scaledMobsWorkspaceStyle =
     Platform.OS === 'web'
       ? ({
@@ -402,30 +430,9 @@ function Shell({
         {data.capabilities.mobs && <TabBtn tab="mobs" label="Mobs" />}
       </View>
     ) : null;
-  const datasetDetailsButton = (
-    <TouchableOpacity
-      {...signalTarget('header.dataset-details')}
-      style={[
-        styles.headerDetailBtn,
-        Platform.OS !== 'web' && styles.nativeHeaderDetailBtn,
-        showDatasetDetails && styles.headerDetailBtnActive,
-      ]}
-      onPress={() => {
-        lightImpactFeedback();
-        setShowDatasetDetails(value => !value);
-      }}
-      accessibilityRole="button"
-      accessibilityState={{expanded: showDatasetDetails}}
-      accessibilityLabel="Dataset details">
-      <Text
-        style={[
-          styles.headerDetailBtnText,
-          showDatasetDetails && styles.headerDetailBtnTextActive,
-        ]}>
-        {Platform.OS === 'web' ? 'ⓘ Details' : 'ⓘ  Dataset details'}
-      </Text>
-    </TouchableOpacity>
-  );
+  const compactHeaderNavigation = compactHeader && headerTabs ? (
+    <View style={styles.compactHeaderNavigation}>{headerTabs}</View>
+  ) : null;
   const datasetMetadata = (
     <Text style={styles.subtitle}>
       Minecraft {data.descriptor.minecraftVersion} · pack {data.descriptor.packVersion} ·{' '}
@@ -439,30 +446,53 @@ function Shell({
     </Text>
   );
   const interfaceZoomControls = Platform.OS === 'web' ? (
-    <View
-      style={styles.interfaceZoomControls}
-      accessibilityLabel="Interface zoom controls">
-      <Text
-        style={styles.interfaceZoomValue}
-        accessibilityLabel={`Interface zoom ${Math.round(interfaceZoom * 100)} percent`}>
-        UI {Math.round(interfaceZoom * 100)}%
-      </Text>
-      <InterfaceZoomSlider
-        minimumValue={MINIMUM_INTERFACE_ZOOM}
-        maximumValue={MAXIMUM_INTERFACE_ZOOM}
-        step={INTERFACE_ZOOM_STEP}
-        value={interfaceZoom}
-        onValueChange={previewInterfaceZoom}
-        onSlidingComplete={saveInterfaceZoom}
+    <View style={styles.zoomControlGroup}>
+      <View
+        style={[styles.interfaceZoomControls, styles.interfaceZoomStepper]}
+        accessibilityLabel="Interface zoom controls">
+        <TouchableOpacity
+          {...signalTarget('header.interface-zoom.decrease')}
+          style={[
+            styles.interfaceZoomStepButton,
+            interfaceZoom <= MINIMUM_INTERFACE_ZOOM && styles.interfaceZoomStepButtonDisabled,
+          ]}
+          disabled={interfaceZoom <= MINIMUM_INTERFACE_ZOOM}
+          onPress={() => adjustInterfaceZoom(-1)}
+          accessibilityRole="button"
+          accessibilityLabel="Decrease interface zoom"
+          accessibilityState={{disabled: interfaceZoom <= MINIMUM_INTERFACE_ZOOM}}>
+          <Text style={styles.interfaceZoomStepButtonText}>−</Text>
+        </TouchableOpacity>
+        <Text
+          style={[styles.interfaceZoomValue, styles.interfaceZoomStepValue]}
+          accessibilityLabel={`Interface zoom ${Math.round(interfaceZoom * 100)} percent`}>
+          UI {Math.round(interfaceZoom * 100)}%
+        </Text>
+        <TouchableOpacity
+          {...signalTarget('header.interface-zoom.increase')}
+          style={[
+            styles.interfaceZoomStepButton,
+            interfaceZoom >= MAXIMUM_INTERFACE_ZOOM && styles.interfaceZoomStepButtonDisabled,
+          ]}
+          disabled={interfaceZoom >= MAXIMUM_INTERFACE_ZOOM}
+          onPress={() => adjustInterfaceZoom(1)}
+          accessibilityRole="button"
+          accessibilityLabel="Increase interface zoom"
+          accessibilityState={{disabled: interfaceZoom >= MAXIMUM_INTERFACE_ZOOM}}>
+          <Text style={styles.interfaceZoomStepButtonText}>+</Text>
+        </TouchableOpacity>
+      </View>
+      <ContentZoomControl
+        appearance="toolbar"
+        testID="content-zoom-slider"
+        value={contentZoom}
+        onValueChange={previewContentZoom}
+        onSlidingComplete={saveContentZoom}
       />
     </View>
   ) : null;
   const headerDetails = compactHeader ? (
     <View style={styles.headerDetails}>
-      <View style={styles.compactHeaderNavigation}>
-        {headerTabs}
-        {datasetDetailsButton}
-      </View>
       {showDatasetDetails && datasetMetadata}
       {interfaceZoomControls}
     </View>
@@ -472,53 +502,120 @@ function Shell({
   const fullWidthHeaderControls = !compactHeader ? (
     <View style={styles.fullWidthHeaderControls}>
       {headerTabs}
-      {datasetDetailsButton}
       {interfaceZoomControls}
     </View>
   ) : null;
+  const closeInfoMenu = () => setShowInfoMenu(false);
+  const infoMenu = (
+    <View style={styles.infoMenuAnchor}>
+      <TouchableOpacity
+        {...signalTarget('header.info-menu')}
+        style={[
+          styles.headerUtilityButton,
+          Platform.OS !== 'web' && styles.nativeHeaderUtilityButton,
+          showInfoMenu && styles.headerUtilityButtonActive,
+        ]}
+        onPress={() => {
+          lightImpactFeedback();
+          setShowInfoMenu(value => !value);
+        }}
+        accessibilityRole="button"
+        accessibilityLabel={showInfoMenu ? 'Close information menu' : 'Open information menu'}
+        accessibilityState={{expanded: showInfoMenu}}>
+        <Text
+          style={[
+            styles.infoMenuButtonText,
+            Platform.OS !== 'web' && styles.nativeHeaderMenuText,
+            showInfoMenu && styles.infoMenuButtonTextActive,
+          ]}>
+          {Platform.OS === 'web' ? '•••' : '•••  Information'}
+        </Text>
+      </TouchableOpacity>
+      {showInfoMenu && (
+        <View
+          style={[styles.infoMenu, Platform.OS !== 'web' && styles.nativeInfoMenu]}
+          accessibilityRole="menu">
+          <TouchableOpacity
+            {...signalTarget('header.dataset-details')}
+            style={[styles.infoMenuItem, showDatasetDetails && styles.infoMenuItemActive]}
+            onPress={() => {
+              lightImpactFeedback();
+              setShowDatasetDetails(value => !value);
+              closeInfoMenu();
+            }}
+            accessibilityRole="button"
+            accessibilityState={{expanded: showDatasetDetails}}
+            accessibilityLabel="Dataset details">
+            <Text
+              style={[
+                styles.infoMenuItemIcon,
+                showDatasetDetails && styles.infoMenuItemTextActive,
+              ]}>
+              ⓘ
+            </Text>
+            <Text
+              style={[
+                styles.infoMenuItemText,
+                showDatasetDetails && styles.infoMenuItemTextActive,
+              ]}>
+              Details
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            {...signalTarget('header.graph-guide')}
+            style={styles.infoMenuItem}
+            onPress={() => {
+              lightImpactFeedback();
+              closeInfoMenu();
+              setShowGraphGuide(true);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Open graph info and guide">
+            <Text style={styles.infoMenuItemIcon}>?</Text>
+            <Text style={styles.infoMenuItemText}>Info</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            {...signalTarget('header.issue-report')}
+            style={styles.infoMenuItem}
+            onPress={() => {
+              lightImpactFeedback();
+              closeInfoMenu();
+              setIssueReportKind('bug');
+              setShowIssueReport(true);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Report a bug or send feedback">
+            <View style={styles.infoMenuItemIcon}>
+              <BugIcon active={showIssueReport} size={17} />
+            </View>
+            <Text style={styles.infoMenuItemText}>Bug report</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            {...signalTarget('header.recipe-history')}
+            style={styles.infoMenuItem}
+            onPress={() => {
+              lightImpactFeedback();
+              closeInfoMenu();
+              setShowRecipeHistory(true);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel={`Open recipe history for ${data.descriptor.displayName}`}>
+            <Text style={styles.infoMenuItemIcon}>◷</Text>
+            <Text style={styles.infoMenuItemText}>History</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </View>
+  );
   const headerActions = (
     <View
       style={[
         styles.headerUtilityRow,
+        compactHeader && Platform.OS === 'web' && styles.compactHeaderUtilityRow,
         Platform.OS !== 'web' && styles.nativeHeaderUtilityRow,
       ]}>
-      <TouchableOpacity
-        {...signalTarget('header.recipe-history')}
-        style={[
-          styles.headerUtilityButton,
-          Platform.OS !== 'web' && styles.nativeHeaderUtilityButton,
-        ]}
-        onPress={() => {
-          lightImpactFeedback();
-          setShowRecipeHistory(true);
-        }}
-        accessibilityRole="button"
-        accessibilityLabel={`Open recipe history for ${data.descriptor.displayName}`}>
-        <Text
-          style={[
-            styles.historyHeaderIcon,
-            Platform.OS !== 'web' && styles.nativeHeaderMenuText,
-          ]}>
-          {Platform.OS === 'web' ? '◷' : '◷  Recipe history'}
-        </Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        {...signalTarget('header.issue-report')}
-        style={[
-          styles.headerUtilityButton,
-          styles.issueReportHeaderButton,
-          Platform.OS !== 'web' && styles.nativeHeaderUtilityButton,
-          showIssueReport && styles.headerUtilityButtonActive,
-        ]}
-        onPress={() => {
-          lightImpactFeedback();
-          setIssueReportKind('bug');
-          setShowIssueReport(true);
-        }}
-        accessibilityRole="button"
-        accessibilityLabel="Report a bug or send feedback">
-        <BugIcon active={showIssueReport} />
-      </TouchableOpacity>
+      {compactHeaderNavigation}
+      {infoMenu}
       {recipeStages.catalog.stages.length > 0 && (
         <TouchableOpacity
           {...signalTarget('header.recipe-stages')}
@@ -543,28 +640,6 @@ function Shell({
           </Text>
         </TouchableOpacity>
       )}
-      <TouchableOpacity
-        {...signalTarget('header.graph-guide')}
-        style={[
-          styles.headerUtilityButton,
-          Platform.OS !== 'web' && styles.nativeHeaderUtilityButton,
-          showGraphGuide && styles.headerUtilityButtonActive,
-        ]}
-        onPress={() => {
-          lightImpactFeedback();
-          setShowGraphGuide(true);
-        }}
-        accessibilityRole="button"
-        accessibilityLabel="Open graph guide">
-        <Text
-          style={[
-            styles.guideHeaderIcon,
-            Platform.OS !== 'web' && styles.nativeHeaderMenuText,
-            showGraphGuide && styles.guideHeaderIconActive,
-          ]}>
-          {Platform.OS === 'web' ? '?' : '?  Graph guide'}
-        </Text>
-      </TouchableOpacity>
     </View>
   );
   const graphControlsHeaderAction =
@@ -584,24 +659,25 @@ function Shell({
           lightImpactFeedback();
           setShowGraphControls(value => !value);
         }}>
-        <Text
-          style={[
-            styles.graphControlsHeaderButtonText,
-            showGraphControls && styles.graphControlsHeaderButtonTextActive,
-          ]}>
-          {disclosureChevron(showGraphControls)}
-        </Text>
+        <DisclosureChevron
+          expanded={showGraphControls}
+          color={showGraphControls ? theme.accent : theme.textDim}
+          size={20}
+          strokeWidth={2.4}
+        />
       </TouchableOpacity>
     ) : null;
   return (
     <View style={styles.shell}>
-      {renderControls(
-        data.manifest,
-        headerDetails,
-        headerActions,
-        fullWidthHeaderControls,
-        graphControlsHeaderAction,
-      )}
+      <View style={[styles.headerSurface, scaledHeaderStyle]}>
+        {renderControls(
+          data.manifest,
+          headerDetails,
+          headerActions,
+          fullWidthHeaderControls,
+          graphControlsHeaderAction,
+        )}
+      </View>
       <View style={styles.workspaceViewport}>
         <View style={styles.workspace}>
           {/* All tabs stay mounted so graph expansion state survives tab switches. */}
@@ -618,7 +694,7 @@ function Shell({
             importantForAccessibility={
               Platform.OS !== 'web' && tab !== 'items' ? 'no-hide-descendants' : 'auto'
             }>
-            <ItemsScreen interfaceZoom={interfaceZoom} />
+            <ItemsScreen interfaceZoom={interfaceZoom} contentZoom={contentZoom} />
           </View>
           <View
             style={[
@@ -646,6 +722,9 @@ function Shell({
                   }>
                   <LazyGraphScreen
                     interfaceZoom={interfaceZoom}
+                    contentZoom={contentZoom}
+                    onContentZoomChange={previewContentZoom}
+                    onContentZoomComplete={saveContentZoom}
                     showGraphControls={showGraphControls}
                     onToggleGraphControls={() =>
                       setShowGraphControls(value => !value)
@@ -700,22 +779,30 @@ function Shell({
       {Platform.OS !== 'web' && (
         <MobileBottomNavigation hasMobs={data.capabilities.mobs} />
       )}
-      <ItemDetailModal interfaceZoom={interfaceZoom} />
+      <ItemDetailModal
+        interfaceZoom={interfaceZoom}
+        contentZoom={contentZoom}
+        onContentZoomChange={previewContentZoom}
+        onContentZoomComplete={saveContentZoom}
+      />
       {showRecipeStages && (
         <RecipeStageModal
           visible
+          interfaceZoom={interfaceZoom}
           onClose={() => setShowRecipeStages(false)}
         />
       )}
       {showRecipeHistory && (
         <RecipeHistoryModal
           visible
+          interfaceZoom={interfaceZoom}
           onClose={() => setShowRecipeHistory(false)}
         />
       )}
       {showGraphGuide && (
         <GraphGuideModal
           visible
+          interfaceZoom={interfaceZoom}
           onClose={() => setShowGraphGuide(false)}
           onOpenIssueReport={kind => {
             setShowGraphGuide(false);
@@ -727,6 +814,7 @@ function Shell({
       {showIssueReport && (
         <IssueReportModal
           visible
+          interfaceZoom={interfaceZoom}
           initialKind={issueReportKind}
           context={issueReportContext}
           onClose={() => setShowIssueReport(false)}
@@ -867,6 +955,7 @@ const styles = StyleSheet.create({
   },
   graphRecoveryButton: {marginTop: 0},
   shell: {flex: 1, minHeight: 0},
+  headerSurface: {position: 'relative', zIndex: 200},
   headerDetails: {gap: 7},
   compactHeaderNavigation: {
     flexDirection: 'row',
@@ -897,30 +986,16 @@ const styles = StyleSheet.create({
   tabBtnActive: {backgroundColor: theme.panelAlt, borderColor: theme.border},
   tabBtnText: {color: theme.textDim, fontSize: 13},
   tabBtnTextActive: {color: theme.accent, fontWeight: '700'},
-  headerDetailBtn: {
-    minHeight: 34,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: theme.borderLight,
-    justifyContent: 'center',
-  },
-  headerDetailBtnActive: {borderColor: theme.accent, backgroundColor: theme.panelAlt},
-  headerDetailBtnText: {color: theme.text, fontSize: 11, fontWeight: '700'},
-  headerDetailBtnTextActive: {color: theme.accent},
-  nativeHeaderDetailBtn: {
-    width: '100%',
-    minHeight: 44,
-    alignItems: 'flex-start',
-    paddingHorizontal: 12,
-    backgroundColor: theme.panelAlt,
-  },
   headerUtilityRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     flexShrink: 0,
+  },
+  compactHeaderUtilityRow: {
+    flex: 1,
+    minWidth: 0,
+    flexWrap: 'wrap',
   },
   nativeHeaderUtilityRow: {
     width: '100%',
@@ -958,20 +1033,50 @@ const styles = StyleSheet.create({
     borderColor: theme.borderLight,
     backgroundColor: theme.panelAlt,
   },
-  graphControlsHeaderButtonText: {
-    color: theme.textDim,
-    fontSize: 20,
-    lineHeight: 22,
-    fontWeight: '800',
-  },
-  graphControlsHeaderButtonTextActive: {color: theme.accent},
-  historyHeaderIcon: {color: theme.text, fontSize: 17, fontWeight: '700'},
   recipeStagesHeaderButton: {width: 'auto', minWidth: 72, paddingHorizontal: 8},
   recipeStagesHeaderText: {color: theme.text, fontSize: 11, fontWeight: '800'},
   recipeStagesHeaderTextActive: {color: theme.accent},
-  issueReportHeaderButton: {width: 34, minWidth: 34, paddingHorizontal: 0},
-  guideHeaderIcon: {color: theme.text, fontSize: 16, fontWeight: '800'},
-  guideHeaderIconActive: {color: theme.accent},
+  infoMenuAnchor: {position: 'relative', zIndex: 120},
+  infoMenuButtonText: {color: theme.text, fontSize: 13, fontWeight: '900', letterSpacing: 1},
+  infoMenuButtonTextActive: {color: theme.accent},
+  infoMenu: {
+    position: 'absolute',
+    top: 40,
+    left: 0,
+    zIndex: 121,
+    elevation: 20,
+    width: 178,
+    padding: 6,
+    gap: 3,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: theme.borderLight,
+    backgroundColor: theme.panelAlt,
+    shadowColor: '#000',
+    shadowOpacity: 0.36,
+    shadowRadius: 18,
+    shadowOffset: {width: 0, height: 10},
+  },
+  nativeInfoMenu: {position: 'relative', top: 0, left: 0, width: '100%', elevation: 0},
+  infoMenuItem: {
+    minHeight: 38,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    paddingHorizontal: 10,
+    borderRadius: 7,
+  },
+  infoMenuItemActive: {backgroundColor: theme.panel},
+  infoMenuItemIcon: {
+    width: 20,
+    alignItems: 'center',
+    color: theme.textDim,
+    fontSize: 15,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  infoMenuItemText: {color: theme.text, fontSize: 12, fontWeight: '700'},
+  infoMenuItemTextActive: {color: theme.accent},
   nativeHeaderMenuText: {color: theme.text, fontSize: 12, fontWeight: '700'},
   interfaceZoomControls: {
     flexDirection: 'row',
@@ -983,6 +1088,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: 9,
     backgroundColor: theme.panelAlt,
   },
+  zoomControlGroup: {flexDirection: 'row', alignItems: 'center', gap: 6},
+  interfaceZoomStepper: {paddingHorizontal: 4, gap: 2},
+  interfaceZoomStepButton: {
+    width: 26,
+    height: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: theme.borderLight,
+    backgroundColor: theme.panel,
+  },
+  interfaceZoomStepButtonDisabled: {opacity: 0.35},
+  interfaceZoomStepButtonText: {
+    color: theme.text,
+    fontSize: 16,
+    fontWeight: '800',
+    lineHeight: 18,
+  },
   interfaceZoomValue: {
     minWidth: 60,
     marginRight: 5,
@@ -991,6 +1115,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
   },
+  interfaceZoomStepValue: {minWidth: 54, marginRight: 0},
   workspaceViewport: {flex: 1, minHeight: 0, overflow: 'hidden'},
   workspace: {flex: 1, minHeight: 0, position: 'relative'},
   body: {flex: 1, minHeight: 0},

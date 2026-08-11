@@ -57,11 +57,13 @@ export function IssueReportModal({
   initialKind,
   context,
   onClose,
+  interfaceZoom = 1,
 }: {
   visible: boolean;
   initialKind: GitHubIssueKind;
   context: IssueReportContext;
   onClose(): void;
+  interfaceZoom?: number;
 }) {
   const [kind, setKind] = useState<GitHubIssueKind>(initialKind);
   const [title, setTitle] = useState('');
@@ -72,6 +74,15 @@ export function IssueReportModal({
     title.trim().length >= 3 &&
     message.trim().length >= 10 &&
     submission.status !== 'submitting';
+  const scaledCardStyle =
+    Platform.OS === 'web'
+      ? ({
+          zoom: interfaceZoom,
+          width: `${100 / interfaceZoom}%`,
+          maxWidth: 560 / interfaceZoom,
+          maxHeight: `${90 / interfaceZoom}%`,
+        } as unknown as object)
+      : null;
 
   useEffect(() => {
     if (!visible) return;
@@ -124,7 +135,7 @@ export function IssueReportModal({
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.card} onPress={() => {}}>
+        <Pressable style={[styles.card, scaledCardStyle]} onPress={() => {}}>
           <View style={styles.header}>
             <View style={styles.headerCopy}>
               <Text style={styles.title}>Report an issue</Text>
@@ -231,7 +242,8 @@ export function IssueReportModal({
                   {context.packName} {context.packVersion} · Minecraft {context.minecraftVersion}
                 </Text>
                 <Text style={styles.diagnosticsText}>
-                  {context.activeTab} screen · UI {context.interfaceZoomPercent}% · {runtime.viewport}
+                  {context.activeTab} screen · UI {context.interfaceZoomPercent}% · Recipe/items{' '}
+                  {context.contentZoomPercent}% · {runtime.viewport}
                 </Text>
                 <Text style={styles.diagnosticsNote}>
                   Includes dataset IDs, exporter time, item and recipe counts, browser, platform,

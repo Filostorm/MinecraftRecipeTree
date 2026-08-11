@@ -31,7 +31,13 @@ import {ModFilter, SearchBar} from './SearchBar';
 const MAX_RESULTS = 800;
 const CELL_W = 104;
 
-export function ItemsScreen({interfaceZoom}: {interfaceZoom: number}) {
+export function ItemsScreen({
+  interfaceZoom,
+  contentZoom,
+}: {
+  interfaceZoom: number;
+  contentZoom: number;
+}) {
   const data = useData();
   const recipeStages = useRecipeStages();
   const {openItem} = useUi();
@@ -171,17 +177,24 @@ export function ItemsScreen({interfaceZoom}: {interfaceZoom: number}) {
 
   const truncated = filtered.length > MAX_RESULTS;
   const shown = truncated ? filtered.slice(0, MAX_RESULTS) : filtered;
-  const columns = Math.max(3, Math.min(12, Math.floor(width / CELL_W)));
+  const columns = Math.max(
+    1,
+    Math.min(12, Math.floor(width / (CELL_W * contentZoom))),
+  );
   const compactControls = width < 640;
+  const scaledInterfaceStyle =
+    Platform.OS === 'web'
+      ? ({zoom: interfaceZoom} as unknown as object)
+      : null;
   const scaledGridStyle =
     Platform.OS === 'web'
       ? ({
-          zoom: interfaceZoom,
+          zoom: contentZoom / interfaceZoom,
         } as unknown as object)
       : null;
 
   return (
-    <View style={styles.root}>
+    <View style={[styles.root, scaledInterfaceStyle]}>
       <View style={styles.stickyControls}>
         <View style={styles.controlsRow}>
           <SearchBar
@@ -220,7 +233,7 @@ export function ItemsScreen({interfaceZoom}: {interfaceZoom: number}) {
       </View>
       <FlatList
         style={[styles.grid, scaledGridStyle]}
-        key={`grid-${columns}`}
+        key={`grid-${columns}-${contentZoom}`}
         data={shown}
         numColumns={columns}
         keyExtractor={i => i.k}

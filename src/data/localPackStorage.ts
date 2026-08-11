@@ -9,6 +9,7 @@ import {
   type LocalPackManifestSummary,
 } from './localPackArchive.ts';
 import type {LocalPackDelta, LocalPackDeltaFile} from './localPackDelta.ts';
+import type {LocalPackArchiveFile} from './localPackInspection.ts';
 
 const LOCAL_PACK_CACHE = 'minecraft-recipe-tree-local-packs-v1';
 const LOCAL_PACK_CATALOG_PATH = '/__local-packs/catalog.json';
@@ -336,6 +337,37 @@ export async function listLocalPackDescriptors(): Promise<readonly DatasetDescri
     .map(({storedAt: _storedAt, ...descriptor}) => descriptor);
 }
 
+export async function removeLocalPack(slug: string): Promise<boolean> {
+  if (typeof window === 'undefined' || typeof caches === 'undefined') {
+    throw new Error('Saved packs can only be deleted in a web browser.');
+  }
+  if (!/^local-[a-f0-9]{16}$/u.test(slug)) {
+    throw new Error('Only a saved local pack can be deleted.');
+  }
+
+  const cache = await cacheApi().open(LOCAL_PACK_CACHE);
+  const catalog = await readCatalog(cache);
+  const record = catalog.packs.find(pack => pack.slug === slug);
+  if (!record) return false;
+
+  await writeCatalog(cache, {
+    format: LOCAL_CATALOG_FORMAT,
+    packs: catalog.packs.filter(pack => pack.slug !== slug),
+  });
+  try {
+    await deletePublication(cache, record.publicationId);
+  } catch (error) {
+    // The catalog is the source of truth. Keep the removed pack hidden even if the browser
+    // refuses a best-effort cleanup of one of its now-unreferenced cached files.
+    console.error('Some cached files for the deleted local pack could not be removed.', {
+      slug,
+      publicationId: record.publicationId,
+      error,
+    });
+  }
+  return true;
+}
+
 export function localDatasetSource(descriptor: DatasetDescriptor): DatasetSource {
   return {
     descriptor,
@@ -345,7 +377,7 @@ export function localDatasetSource(descriptor: DatasetDescriptor): DatasetSource
 }
 
 export async function installLocalPackArchive(
-  file: File,
+  file: LocalPackArchiveFile,
   manifestPath: string,
   manifestBytes: Uint8Array,
   manifest: unknown,
@@ -699,27 +731,21 @@ export async function installLocalPackArchive(
     }
 
     const current = await readCatalog(cache);
-    const superseded = current.packs.filter(
-      pack =>
-        pack.publicationId !== publicationId &&
-        pack.displayName === descriptor.displayName &&
-        pack.minecraftVersion === descriptor.minecraftVersion,
-    );
     const nextRecord: LocalPackRecord = {...descriptor, storedAt: Date.now()};
     const retained = current.packs.filter(
-      pack =>
-        pack.publicationId !== publicationId &&
-        !superseded.some(oldPack => oldPack.publicationId === pack.publicationId),
+      pack => pack.publicationId !== publicationId,
     );
-    const nextPacks = [nextRecord, ...retained]
-      .sort((left, right) => right.storedAt - left.storedAt)
-      .slice(0, MAX_LOCAL_PACKS);
+    const orderedPacks = [nextRecord, ...retained].sort(
+      (left, right) => right.storedAt - left.storedAt,
+    );
+    const nextPacks = orderedPacks.slice(0, MAX_LOCAL_PACKS);
     await writeCatalog(cache, {format: LOCAL_CATALOG_FORMAT, packs: nextPacks});
 
     const retainedIds = new Set(nextPacks.map(pack => pack.publicationId));
     const publicationsToDelete = [
       ...new Set(
-        [...superseded, ...retained.slice(MAX_LOCAL_PACKS - 1)]
+        orderedPacks
+          .slice(MAX_LOCAL_PACKS)
           .filter(pack => !retainedIds.has(pack.publicationId))
           .map(pack => pack.publicationId),
       ),

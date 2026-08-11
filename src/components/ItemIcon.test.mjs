@@ -6,6 +6,7 @@ import {
   RECIPE_HISTORY_ITEM_ICON_SIZE,
   ROOT_QUICK_ACTION_ITEM_ICON_SIZE,
   isPixelGridAlignedItemIconSize,
+  itemIconSizeForContentScale,
 } from './itemIconSizing.ts';
 
 test('accepts only positive integer multiples of the logical JEI icon grid', () => {
@@ -17,6 +18,15 @@ test('accepts only positive integer multiples of the logical JEI icon grid', () 
   assert.equal(isPixelGridAlignedItemIconSize(18), false);
   assert.equal(isPixelGridAlignedItemIconSize(0), false);
   assert.equal(isPixelGridAlignedItemIconSize(16.5), false);
+});
+
+test('content scaling keeps item icons on the logical pixel grid', () => {
+  assert.equal(itemIconSizeForContentScale(0.75), 16);
+  assert.equal(itemIconSizeForContentScale(1), 16);
+  assert.equal(itemIconSizeForContentScale(1.5), 32);
+  assert.equal(itemIconSizeForContentScale(2), 32);
+  assert.equal(itemIconSizeForContentScale(3), 48);
+  assert.equal(itemIconSizeForContentScale(Number.NaN), 16);
 });
 
 test('keeps recipe-history icons aligned to the logical pixel grid', () => {

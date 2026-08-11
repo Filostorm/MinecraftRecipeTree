@@ -15,3 +15,13 @@ export function isPixelGridAlignedItemIconSize(size: number): boolean {
     size % LOGICAL_ITEM_ICON_GRID_SIZE === 0
   );
 }
+
+/**
+ * Scale an item icon without ever asking the pixel renderer for a fractional
+ * logical texel grid. Surrounding text and spacing can scale continuously,
+ * while the icon advances through crisp 16 px steps.
+ */
+export function itemIconSizeForContentScale(scale: number): number {
+  const finiteScale = Number.isFinite(scale) ? scale : 1;
+  return Math.max(1, Math.min(3, Math.round(finiteScale))) * LOGICAL_ITEM_ICON_GRID_SIZE;
+}

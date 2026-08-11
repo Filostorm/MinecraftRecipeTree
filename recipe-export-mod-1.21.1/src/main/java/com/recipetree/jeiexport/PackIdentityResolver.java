@@ -149,7 +149,9 @@ public final class PackIdentityResolver {
         List<FieldValue> names = jsonValues(root, path, diagnostics, false,
                 field("name"), field("installedModpack", "name"), field("installedModpack", "displayName"));
         List<FieldValue> versions = jsonValues(root, path, diagnostics, true,
-                field("version"), field("profileVersion"), field("installedModpack", "version"),
+                field("manifest", "version"), field("version"), field("profileVersion"),
+                field("installedModpackVersion"), field("modpackVersion"),
+                field("installedModpack", "version"),
                 field("installedModpack", "versionName"));
         return identityFromFields(path, names, versions, "curseforge", diagnostics);
     }

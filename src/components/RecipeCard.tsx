@@ -1,7 +1,10 @@
 import React from 'react';
 import {StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import {recipeImagePath, useData} from '../data/DataContext';
-import {recipePresentationKind} from '../data/recipePresentation';
+import {
+  recipeHasStructurePreview,
+  recipePresentationKind,
+} from '../data/recipePresentation';
 import {displayIngredientName} from '../data/ingredientTags';
 import {
   formatIngredientQuantityPrefix,
@@ -13,11 +16,13 @@ import {slotSummary} from '../data/slotSummary';
 import {Recipe} from '../types';
 import {useUi} from '../ui/UiContext';
 import {signalTarget} from '../analytics/signal';
+import {contentTextScale} from '../ui/contentZoom';
 import {
   materialInputSummary,
   type GraphDirection,
 } from '../graph/direction';
 import {ItemIcon, pixelated} from './ItemIcon';
+import {itemIconSizeForContentScale} from './itemIconSizing';
 import {RecipePreviewImage} from './RecipePreviewImage';
 import {
   RECIPE_CARD_BORDER_WIDTH,
@@ -35,8 +40,10 @@ export function RecipeCard({
   actionSubject,
   usageOutputSubject,
   availableCardWidth,
-  interfaceZoom = 1,
+  contentZoom = 1,
   grouped = false,
+  machineKey,
+  machineLabel,
 }: {
   recipe: Recipe;
   dir: string;
@@ -49,12 +56,16 @@ export function RecipeCard({
   usageOutputSubject?: string;
   /** Measured width of the full-width recipe-list container in CSS/layout pixels. */
   availableCardWidth: number;
-  /** User-selected UI zoom applied to the JEI recipe preview within the modal. */
-  interfaceZoom?: number;
+  /** User-selected recipe and item scale within recipe surfaces. */
+  contentZoom?: number;
   /** Render inside a category frame that supplies the outer border and corner radius. */
   grouped?: boolean;
+  /** First JEI catalyst for the recipe category, used to open the machine's own recipes. */
+  machineKey?: string;
+  machineLabel?: string;
 }) {
   const data = useData();
+  const {openItem} = useUi();
   const presentation = recipePresentationKind(recipe);
   if (presentation === 'failure') {
     return (
@@ -68,7 +79,7 @@ export function RecipeCard({
     recipe.h ?? 60,
     data.manifest.settings.recipeScale,
     availableCardWidth,
-    interfaceZoom,
+    contentZoom,
   );
   const inputs = materialInputSummary(recipe);
   const outputs = slotSummary(recipe.out);
@@ -85,7 +96,7 @@ export function RecipeCard({
           : undefined
       }
       activeOpacity={onPress ? 0.72 : 1}
-      disabled={!onPress}
+      disabled={!onPress && !machineKey}
       onPress={onPress}
       style={[
         styles.card,
@@ -122,11 +133,13 @@ export function RecipeCard({
           structure={recipe.structure}
           availableWidth={Math.max(
             180,
-            availableCardWidth - (RECIPE_CARD_BORDER_WIDTH + RECIPE_CARD_PADDING) * 2,
+            (availableCardWidth - (RECIPE_CARD_BORDER_WIDTH + RECIPE_CARD_PADDING) * 2) *
+              contentZoom,
           )}
+          contentScale={contentZoom}
         />
       ) : null}
-      {(inputs.length > 0 || outputs.length > 0) && (
+      {!recipeHasStructurePreview(recipe) && (inputs.length > 0 || outputs.length > 0) && (
         <View style={styles.recipeItems}>
           {inputs.map(item => (
             <ItemChip
@@ -138,6 +151,7 @@ export function RecipeCard({
               tag={item.tag}
               probability={item.probability}
               probabilityRole="consume"
+              contentScale={contentZoom}
               interactive={!onPress}
             />
           ))}
@@ -152,6 +166,7 @@ export function RecipeCard({
               tag={item.tag}
               probability={item.probability}
               probabilityRole="produce"
+              contentScale={contentZoom}
               highlight
               interactive={!onPress}
             />
@@ -162,6 +177,27 @@ export function RecipeCard({
         <Text style={styles.recipeId} numberOfLines={1}>
           {recipe.id}
         </Text>
+      ) : null}
+      {machineKey ? (
+        <View style={styles.machineRow}>
+          <View style={styles.machineCopy}>
+            <Text style={styles.machineLabel}>CRAFTING MACHINE</Text>
+            <Text style={styles.machineName} numberOfLines={1}>
+              {machineLabel ?? data.itemsByKey.get(machineKey)?.n ?? machineKey}
+            </Text>
+          </View>
+          <TouchableOpacity
+            {...signalTarget('item-detail.machine.open')}
+            accessibilityRole="button"
+            accessibilityLabel={`View recipe for ${machineLabel ?? data.itemsByKey.get(machineKey)?.n ?? machineKey}`}
+            style={styles.machineButton}
+            onPress={event => {
+              event.stopPropagation();
+              openItem(machineKey);
+            }}>
+            <Text style={styles.machineButtonText}>View machine recipe</Text>
+          </TouchableOpacity>
+        </View>
       ) : null}
       {onPress ? (
         <Text style={styles.cardActionHint}>
@@ -186,6 +222,7 @@ export function ItemChip({
   interactive = true,
   onPress,
   accessibilityLabel,
+  contentScale = 1,
 }: {
   itemKey: string;
   amount?: number | null;
@@ -201,6 +238,8 @@ export function ItemChip({
   /** Overrides the normal item-detail action, for contextual ingredient selection. */
   onPress?: () => void;
   accessibilityLabel?: string;
+  /** Independent item/icon scale used by recipe and ingredient surfaces. */
+  contentScale?: number;
 }) {
   const data = useData();
   const {openItem} = useUi();
@@ -211,10 +250,17 @@ export function ItemChip({
     tag,
     data.descriptor.minecraftVersion,
   );
+  const textScale = contentTextScale(contentScale);
   const content = (
     <>
-      <ItemIcon item={item} itemKey={itemKey} size={16} />
-      <Text style={styles.chipText} numberOfLines={1}>
+      <ItemIcon
+        item={item}
+        itemKey={itemKey}
+        size={itemIconSizeForContentScale(contentScale)}
+      />
+      <Text
+        style={[styles.chipText, {fontSize: Math.max(9, 11 * textScale)}]}
+        numberOfLines={1}>
         {amount !== undefined && shouldShowIngredientQuantity(itemKey, amount)
           ? `${formatIngredientQuantityPrefix(itemKey, amount)} `
           : ''}
@@ -233,14 +279,37 @@ export function ItemChip({
     </>
   );
   if (!interactive) {
-    return <View style={[styles.chip, highlight && styles.chipHighlight]}>{content}</View>;
+    return (
+      <View
+        style={[
+          styles.chip,
+          {
+            gap: Math.max(4, 5 * contentScale),
+            maxWidth: 240 * contentScale,
+            paddingHorizontal: Math.max(5, 6 * contentScale),
+            paddingVertical: Math.max(3, 3 * contentScale),
+          },
+          highlight && styles.chipHighlight,
+        ]}>
+        {content}
+      </View>
+    );
   }
   return (
     <TouchableOpacity
       {...signalTarget(onPress ? 'graph.source-picker.alternative.open' : 'item-detail.item.open')}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel ?? `Open ${displayName}`}
-      style={[styles.chip, highlight && styles.chipHighlight]}
+      style={[
+        styles.chip,
+        {
+          gap: Math.max(4, 5 * contentScale),
+          maxWidth: 240 * contentScale,
+          paddingHorizontal: Math.max(5, 6 * contentScale),
+          paddingVertical: Math.max(3, 3 * contentScale),
+        },
+        highlight && styles.chipHighlight,
+      ]}
       onPress={event => {
         event.stopPropagation();
         if (onPress) onPress();
@@ -319,4 +388,25 @@ const styles = StyleSheet.create({
   chipText: {color: theme.text, fontSize: 11},
   errText: {color: theme.danger, fontSize: 12},
   recipeId: {color: theme.textDim, fontSize: 10, marginTop: 6},
+  machineRow: {
+    marginTop: 9,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: theme.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  machineCopy: {flex: 1, minWidth: 0},
+  machineLabel: {color: theme.textDim, fontSize: 8, fontWeight: '800'},
+  machineName: {color: theme.text, fontSize: 10, fontWeight: '700', marginTop: 2},
+  machineButton: {
+    minHeight: 30,
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: theme.accent,
+  },
+  machineButtonText: {color: theme.accent, fontSize: 9, fontWeight: '800'},
 });

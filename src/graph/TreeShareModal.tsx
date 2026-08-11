@@ -13,6 +13,7 @@ import {PortableTreeDropZone} from './PortableTreeDropZone';
 
 export function TreeShareModal({
   visible,
+  interfaceZoom = 1,
   onClose,
   onShare,
   onImport,
@@ -20,6 +21,7 @@ export function TreeShareModal({
   onSaveToInstance,
 }: {
   visible: boolean;
+  interfaceZoom?: number;
   onClose: () => void;
   onShare: () => Promise<string>;
   onImport: (raw: string) => Promise<void>;
@@ -60,7 +62,18 @@ export function TreeShareModal({
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.backdrop}>
-        <View style={styles.card}>
+        <View
+          style={[
+            styles.card,
+            Platform.OS === 'web'
+              ? ({
+                  zoom: interfaceZoom,
+                  width: `${100 / interfaceZoom}%`,
+                  maxWidth: 520 / interfaceZoom,
+                  maxHeight: `${88 / interfaceZoom}%`,
+                } as unknown as object)
+              : null,
+          ]}>
           <View style={styles.header}>
             <View style={{flex: 1}}>
               <Text style={styles.title}>Share or import tree</Text>

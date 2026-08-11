@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -93,15 +94,26 @@ export function GraphGuideModal({
   visible,
   onClose,
   onOpenIssueReport,
+  interfaceZoom = 1,
 }: {
   visible: boolean;
   onClose: () => void;
   onOpenIssueReport(kind: GitHubIssueKind): void;
+  interfaceZoom?: number;
 }) {
+  const scaledCardStyle =
+    Platform.OS === 'web'
+      ? ({
+          zoom: interfaceZoom,
+          width: `${100 / interfaceZoom}%`,
+          maxWidth: 620 / interfaceZoom,
+          maxHeight: `${86 / interfaceZoom}%`,
+        } as unknown as object)
+      : null;
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.card} onPress={() => {}}>
+        <Pressable style={[styles.card, scaledCardStyle]} onPress={() => {}}>
           <View style={styles.header}>
             <View style={styles.headerCopy}>
               <Text style={styles.title}>Graph guide</Text>

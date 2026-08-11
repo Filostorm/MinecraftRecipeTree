@@ -3,7 +3,9 @@ import {StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import {signalTarget} from '../analytics/signal';
 import {theme} from '../theme';
 import type {RecipeStructure} from '../types';
+import {contentTextScale} from '../ui/contentZoom';
 import {ItemIcon} from './ItemIcon';
+import {itemIconSizeForContentScale} from './itemIconSizing';
 import {useData} from '../data/DataContext';
 import {useUi} from '../ui/UiContext';
 import {
@@ -17,26 +19,42 @@ const PREVIEW_HEIGHT = 220;
 export function MultiblockPreview({
   structure,
   availableWidth,
+  contentScale = 1,
 }: {
   structure: RecipeStructure;
   availableWidth: number;
+  contentScale?: number;
 }) {
   const data = useData();
   const {openItem} = useUi();
   const [rotation, setRotation] = useState(0);
-  const width = Math.max(180, Math.min(430, availableWidth));
+  const targetWidth = Math.max(180, Math.min(860, availableWidth));
+  const previewHeight = Math.max(
+    PREVIEW_HEIGHT,
+    Math.min(PREVIEW_HEIGHT * 3, PREVIEW_HEIGHT * contentScale),
+  );
+  const textScale = contentTextScale(contentScale);
+  const [measuredWidth, setMeasuredWidth] = useState<number | null>(null);
+  const width = Math.max(180, Math.min(targetWidth, measuredWidth ?? targetWidth));
   const visibleCells = useMemo(
     () => previewStructureCells(structure.cells),
     [structure.cells],
   );
   const projected = useMemo(
-    () => projectStructureCells(visibleCells, width, PREVIEW_HEIGHT, rotation),
-    [rotation, visibleCells, width],
+    () => projectStructureCells(visibleCells, width, previewHeight, rotation),
+    [previewHeight, rotation, visibleCells, width],
   );
   const clipped = visibleCells.length < structure.cells.length;
 
   return (
-    <View style={[styles.wrapper, {width}]}>
+    <View
+      style={[styles.wrapper, {width: targetWidth}]}
+      onLayout={event => {
+        const nextWidth = event.nativeEvent.layout.width;
+        if (Math.abs(nextWidth - (measuredWidth ?? targetWidth)) > 0.5) {
+          setMeasuredWidth(nextWidth);
+        }
+      }}>
       <View style={styles.headingRow}>
         <View>
           <Text style={styles.heading}>MULTIBLOCK PREVIEW</Text>
@@ -74,7 +92,7 @@ export function MultiblockPreview({
         accessible
         accessibilityRole="image"
         accessibilityLabel={`${structure.size.join(' by ')} multiblock containing ${structure.total} blocks`}
-        style={[styles.canvas, {width, height: PREVIEW_HEIGHT}]}>
+        style={[styles.canvas, {width, height: previewHeight}]}>
         <View pointerEvents="none" style={styles.groundShadow} />
         {projected.map((cell, index) => {
           const [x, y, z, itemKey] = cell.source;
@@ -122,14 +140,29 @@ export function MultiblockPreview({
               accessibilityLabel={`Open ${name}, ${count} blocks required`}
               style={[
                 styles.partChip,
+                {
+                  gap: Math.max(4, 5 * contentScale),
+                  maxWidth: 240 * contentScale,
+                  paddingHorizontal: Math.max(5, 6 * contentScale),
+                  paddingVertical: Math.max(3, 3 * contentScale),
+                },
                 itemKey === structure.controller && styles.partChipController,
               ]}
               onPress={event => {
                 event.stopPropagation();
                 openItem(itemKey);
               }}>
-              <ItemIcon item={item} itemKey={itemKey} size={16} />
-              <Text style={styles.partText} numberOfLines={1}>
+              <ItemIcon
+                item={item}
+                itemKey={itemKey}
+                size={itemIconSizeForContentScale(contentScale)}
+              />
+              <Text
+                style={[
+                  styles.partText,
+                  {fontSize: Math.max(9, 11 * textScale)},
+                ]}
+                numberOfLines={1}>
                 {count.toLocaleString()}× {name}
               </Text>
             </TouchableOpacity>

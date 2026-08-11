@@ -25,6 +25,9 @@ import {ItemChip} from './RecipeCard';
 import {RecipePreviewImage} from './RecipePreviewImage';
 import {VisibilityIcon} from './VisibilityIcon';
 import {groupPickerOptions} from './pickerGroups';
+import {MultiblockPreview} from './MultiblockPreview';
+import type {RecipeStructure} from '../types';
+import {ContentZoomControl} from './ContentZoomControl';
 
 export interface PickerOption {
   label: string;
@@ -37,6 +40,8 @@ export interface PickerOption {
   imageBackgroundUri?: string;
   imageW?: number;
   imageH?: number;
+  /** Exported placed-block geometry for structure-preview recipes. */
+  structure?: RecipeStructure;
   inputs?: SlotSummary[];
   outputs?: SlotSummary[];
   /** Exact JEI/export duration when known. */
@@ -85,6 +90,9 @@ export function PickerModal({
   onSelect,
   onClose,
   interfaceZoom = 1,
+  contentZoom = 1,
+  onContentZoomChange,
+  onContentZoomComplete,
 }: {
   visible: boolean;
   title: string;
@@ -113,8 +121,12 @@ export function PickerModal({
   onOpenMachine?: (itemKey: string) => void;
   onSelect: (index: number) => void;
   onClose: () => void;
-  /** The web UI scale applied to recipe imagery without shrinking the modal viewport. */
+  /** Scale for picker controls and surrounding interface chrome. */
   interfaceZoom?: number;
+  /** Independent scale for recipe previews and item ingredients. */
+  contentZoom?: number;
+  onContentZoomChange?: (value: number) => void;
+  onContentZoomComplete?: (value: number) => void;
 }) {
   const safeAreaInsets = useSafeAreaInsets();
   const [alternativePicker, setAlternativePicker] = useState<{
@@ -135,6 +147,20 @@ export function PickerModal({
   const totalOptionCount =
     stagedProgress.reduce((sum, progress) => sum + progress.total, 0) +
     immediateGroups.reduce((sum, group) => sum + group.entries.length, 0);
+  const scaledCardStyle =
+    Platform.OS === 'web'
+      ? ({
+          zoom: interfaceZoom,
+          width: `${100 / interfaceZoom}%`,
+          maxWidth: 920 / interfaceZoom,
+          height: `${92 / interfaceZoom}%`,
+          maxHeight: `${92 / interfaceZoom}%`,
+        } as unknown as object)
+      : null;
+  const isolatedContentStyle =
+    Platform.OS === 'web'
+      ? ({zoom: 1 / interfaceZoom} as unknown as object)
+      : null;
 
   return (
     <Modal
@@ -148,11 +174,20 @@ export function PickerModal({
         <Pressable
           style={[
             styles.card,
+            scaledCardStyle,
             Platform.OS !== 'web' && styles.cardNative,
             Platform.OS !== 'web' && {paddingBottom: Math.max(14, safeAreaInsets.bottom)},
           ]}
           onPress={() => {}}>
           <Text style={styles.title}>{title}</Text>
+          {onContentZoomChange ? (
+            <ContentZoomControl
+              value={contentZoom}
+              onValueChange={onContentZoomChange}
+              onSlidingComplete={onContentZoomComplete}
+              testID="picker-content-zoom-slider"
+            />
+          ) : null}
           {direction && onDirectionChange ? (
             <View
               accessibilityLabel="Tree direction"
@@ -336,7 +371,7 @@ export function PickerModal({
                         ? uniformPickerRecipePreviewSize(
                             opt.imageW ?? 160,
                             opt.imageH ?? 60,
-                            interfaceZoom,
+                            contentZoom,
                           )
                         : null;
                       const cycleSeconds = opt.cycleSeconds;
@@ -351,7 +386,7 @@ export function PickerModal({
                         <TouchableOpacity
                           {...signalTarget('graph.source-picker.source.select')}
                           key={i}
-                          style={styles.option}
+                          style={[styles.option, isolatedContentStyle]}
                           onPress={() => onSelect(i)}>
                           <Text style={styles.optionLabel}>{opt.label}</Text>
                           {opt.sublabel ? <Text style={styles.optionSub}>{opt.sublabel}</Text> : null}
@@ -391,7 +426,13 @@ export function PickerModal({
                               ) : null}
                             </View>
                           )}
-                          {opt.imageUri && imageSize ? (
+                          {opt.structure ? (
+                            <MultiblockPreview
+                              structure={opt.structure}
+                              availableWidth={Math.min(860, 398 * contentZoom)}
+                              contentScale={contentZoom}
+                            />
+                          ) : opt.imageUri && imageSize ? (
                             <RecipePreviewImage
                               uri={opt.imageUri}
                               backgroundUri={opt.imageBackgroundUri}
@@ -400,7 +441,7 @@ export function PickerModal({
                               resizeMode="contain"
                             />
                           ) : null}
-                          {opt.inputs && opt.inputs.length > 0 ? (
+                          {!opt.structure && opt.inputs && opt.inputs.length > 0 ? (
                             <View style={styles.ingredientGroup}>
                               <Text style={styles.ingredientLabel}>Inputs</Text>
                               <View style={styles.ingredientChips}>
@@ -414,6 +455,7 @@ export function PickerModal({
                                     tag={input.tag}
                                     probability={input.probability}
                                     probabilityRole="consume"
+                                    contentScale={contentZoom}
                                     interactive={
                                       Boolean(onSelectAlternative) &&
                                       input.alternatives.length > 1
@@ -437,7 +479,7 @@ export function PickerModal({
                               </View>
                             </View>
                           ) : null}
-                          {opt.outputs && opt.outputs.length > 0 ? (
+                          {!opt.structure && opt.outputs && opt.outputs.length > 0 ? (
                             <View style={styles.ingredientGroup}>
                               <Text style={styles.ingredientLabel}>Outputs</Text>
                               <View style={styles.ingredientChips}>
@@ -451,6 +493,7 @@ export function PickerModal({
                                     tag={output.tag}
                                     probability={output.probability}
                                     probabilityRole="produce"
+                                    contentScale={contentZoom}
                                     interactive={false}
                                   />
                                 ))}
@@ -546,6 +589,7 @@ export function PickerModal({
                       );
                       setAlternativePicker(null);
                     }}
+                    contentScale={contentZoom}
                   />
                 ))}
               </ScrollView>
@@ -746,9 +790,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: theme.panel,
     padding: 10,
-    flexBasis: 280,
+    flexBasis: 420,
     flexGrow: 1,
-    maxWidth: 420,
+    maxWidth: 820,
   },
   optionLabel: {color: theme.text, fontSize: 13, fontWeight: '600'},
   optionSub: {color: theme.textDim, fontSize: 11, marginTop: 2},

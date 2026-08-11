@@ -46,6 +46,22 @@ public class PackIdentityResolverTest {
     }
 
     @Test
+    public void resolvesCurrentCurseForgeManifestVersionBeforeLegacyFields() throws Exception {
+        Path gameDirectory = temporary.newFolder("current-curse-instance").toPath();
+        write(gameDirectory.resolve("minecraftinstance.json"),
+                "{\"name\":\"MeatballCraft Dimensional Ascension\","
+                        + "\"manifest\":{\"name\":\"Meatballcraft\","
+                        + "\"version\":\"prerelease-0.18.5-hotfix2\"},"
+                        + "\"installedModpackVersion\":\"stale-version\"}");
+
+        PackIdentity identity = PackIdentityResolver.resolve(gameDirectory, null, null);
+
+        assertEquals("MeatballCraft Dimensional Ascension", identity.name);
+        assertEquals("prerelease-0.18.5-hotfix2", identity.version);
+        assertEquals("curseforge", identity.source);
+    }
+
+    @Test
     public void resolvesPrismParentInstanceConfiguration() throws Exception {
         Path instance = temporary.newFolder("prism-instance").toPath();
         Path gameDirectory = Files.createDirectory(instance.resolve(".minecraft"));

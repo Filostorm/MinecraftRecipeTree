@@ -20,9 +20,11 @@ import {
 } from './datasetCatalog';
 import {
   LOCAL_PACK_CATALOG_CHANGED_EVENT,
+  isLocalPackDescriptor,
   listLocalPackDescriptors,
   localDatasetSource,
   registerLocalPackServiceWorker,
+  removeLocalPack as removeStoredLocalPack,
 } from './localPackStorage';
 
 const PRODUCTION_ORIGIN = 'https://minecraftrecipetree.craftsmannsoftware.com';
@@ -45,6 +47,8 @@ export type DatasetCatalogState =
 interface DatasetCatalogContextValue {
   state: DatasetCatalogState;
   select(slug: string): void;
+  refreshLocal(preferredSlug?: string): void;
+  removeLocal(slug: string): Promise<void>;
 }
 
 function absoluteHttpUrl(value: string, label: string): URL {
@@ -135,6 +139,7 @@ export function DatasetCatalogProvider({children}: {children: React.ReactNode}) 
   const [localCatalogRevision, setLocalCatalogRevision] = useState(0);
   const selectedSlugRef = useRef<string | null>(null);
   const localPublicationIdsRef = useRef(new Set<string>());
+  const preferredLocalSlugRef = useRef<string | null>(null);
 
   const sourceFor = useCallback(
     (descriptor: DatasetDescriptor, origin: string): DatasetSource =>
@@ -168,7 +173,7 @@ export function DatasetCatalogProvider({children}: {children: React.ReactNode}) 
         const publishedDatasets = requireDatasetCatalog(value);
         const defaultDataset = selectDataset(publishedDatasets, null);
         sourceFor(defaultDataset, configuration.assetOrigin);
-        const requestedSlug = currentWebRequestSlug();
+        const requestedSlug = preferredLocalSlugRef.current ?? currentWebRequestSlug();
         let publishedSelection = defaultDataset;
         try {
           publishedSelection = selectDataset(publishedDatasets, requestedSlug);
@@ -188,17 +193,15 @@ export function DatasetCatalogProvider({children}: {children: React.ReactNode}) 
         }
 
         let localDatasets: readonly DatasetDescriptor[] = [];
-        if (Platform.OS === 'web') {
-          try {
-            await registerLocalPackServiceWorker();
-          } catch (localError) {
-            console.warn('Saved pack file loading is unavailable in this browser.', localError);
-          }
-          try {
-            localDatasets = await listLocalPackDescriptors();
-          } catch (localError) {
-            console.warn('The saved pack list is unavailable in this browser.', localError);
-          }
+        try {
+          await registerLocalPackServiceWorker();
+        } catch (localError) {
+          console.warn('Saved pack file loading is unavailable on this device.', localError);
+        }
+        try {
+          localDatasets = await listLocalPackDescriptors();
+        } catch (localError) {
+          console.warn('The saved pack list is unavailable on this device.', localError);
         }
         const publishedSlugs = new Set(publishedDatasets.map(dataset => dataset.slug));
         localDatasets = localDatasets.filter(dataset => !publishedSlugs.has(dataset.slug));
@@ -209,10 +212,14 @@ export function DatasetCatalogProvider({children}: {children: React.ReactNode}) 
         if (!alive) return;
         setDatasets(nextDatasets);
         setAssetOrigin(configuration.assetOrigin);
-        const nextSelected = selectDataset(nextDatasets, currentWebRequestSlug());
+        const nextSelected = selectDataset(
+          nextDatasets,
+          preferredLocalSlugRef.current ?? currentWebRequestSlug(),
+        );
         sourceFor(nextSelected, configuration.assetOrigin);
         if (!alive) return;
         selectedSlugRef.current = nextSelected.slug;
+        preferredLocalSlugRef.current = null;
         setSelected(current => preserveDatasetMount(current, nextSelected));
         setError(null);
         setLoading(false);
@@ -245,6 +252,11 @@ export function DatasetCatalogProvider({children}: {children: React.ReactNode}) 
     };
   }, []);
 
+  const refreshLocal = useCallback((preferredSlug?: string) => {
+    preferredLocalSlugRef.current = preferredSlug ?? null;
+    setLocalCatalogRevision(revision => revision + 1);
+  }, []);
+
   const select = useCallback(
     (slug: string) => {
       try {
@@ -268,6 +280,35 @@ export function DatasetCatalogProvider({children}: {children: React.ReactNode}) 
         setSelected(null);
         setError(message);
       }
+    },
+    [assetOrigin, datasets, sourceFor],
+  );
+
+  const removeLocal = useCallback(
+    async (slug: string) => {
+      const descriptor = datasets.find(dataset => dataset.slug === slug);
+      if (!descriptor || !isLocalPackDescriptor(descriptor)) {
+        throw new Error('Only a saved local pack can be deleted.');
+      }
+
+      const remaining = datasets.filter(dataset => dataset.slug !== slug);
+      const deletingSelection = selectedSlugRef.current === slug;
+      const fallback = deletingSelection ? selectDataset(remaining, null) : null;
+      if (fallback) writeWebRequestSlug(fallback.slug);
+
+      const removed = await removeStoredLocalPack(slug);
+      if (!removed) {
+        throw new Error(`${descriptor.displayName} is no longer saved on this device.`);
+      }
+
+      localPublicationIdsRef.current.delete(descriptor.publicationId);
+      setDatasets(remaining);
+      if (fallback) {
+        sourceFor(fallback, assetOrigin);
+        selectedSlugRef.current = fallback.slug;
+        setSelected(fallback);
+      }
+      setError(null);
     },
     [assetOrigin, datasets, sourceFor],
   );
@@ -310,7 +351,10 @@ export function DatasetCatalogProvider({children}: {children: React.ReactNode}) 
     };
   }, [assetOrigin, datasets, error, loading, selected, sourceFor]);
 
-  const value = useMemo<DatasetCatalogContextValue>(() => ({state, select}), [select, state]);
+  const value = useMemo<DatasetCatalogContextValue>(
+    () => ({state, select, refreshLocal, removeLocal}),
+    [refreshLocal, removeLocal, select, state],
+  );
   return <DatasetCatalogContext.Provider value={value}>{children}</DatasetCatalogContext.Provider>;
 }
 

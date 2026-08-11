@@ -8,6 +8,7 @@ const {
   installLocalPackArchive,
   listLocalPackDescriptors,
   registerLocalPackServiceWorker,
+  removeLocalPack,
 } = await import('./localPackStorage.ts');
 
 test('service worker preparation has a bounded failure instead of blocking catalog loading', async () => {
@@ -211,19 +212,39 @@ test('reports file-saving and finalization after archive reading reaches 100%', 
       .get('https://viewer.example/__local-packs/catalog.json')
       ?.clone()
       .json();
-    assert.deepEqual(catalog.packs.map(pack => pack.packVersion), ['1.0.1']);
+    assert.deepEqual(catalog.packs.map(pack => pack.packVersion), ['1.0.1', '1.0.0']);
     assert.deepEqual(
       (await listLocalPackDescriptors()).map(pack => ({
         slug: pack.slug,
         displayName: pack.displayName,
         packVersion: pack.packVersion,
       })),
-      [{
-        slug: installed.descriptor.slug,
-        displayName: 'Progress Pack',
-        packVersion: '1.0.1',
-      }],
+      [
+        {
+          slug: installed.descriptor.slug,
+          displayName: 'Progress Pack',
+          packVersion: '1.0.1',
+        },
+        {
+          slug: catalog.packs[1].slug,
+          displayName: 'Progress Pack',
+          packVersion: '1.0.0',
+        },
+      ],
     );
+
+    assert.equal(await removeLocalPack(installed.descriptor.slug), true);
+    assert.deepEqual(
+      (await listLocalPackDescriptors()).map(pack => pack.packVersion),
+      ['1.0.0'],
+    );
+    assert.equal(await removeLocalPack(installed.descriptor.slug), false);
+    assert.equal(
+      [...responses.keys()].some(url => url.includes(installed.descriptor.publicationId)),
+      false,
+    );
+    assert.equal(await removeLocalPack(catalog.packs[1].slug), true);
+    assert.deepEqual(await listLocalPackDescriptors(), []);
   } finally {
     if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
     else delete globalThis.window;

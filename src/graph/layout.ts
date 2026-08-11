@@ -1,6 +1,7 @@
 import type {Recipe} from '../types.ts';
 import {pixelArtDisplaySize} from '../data/pixelArtSizing.ts';
 import type {ItemTreeNode, SourceTreeNode} from './model.ts';
+import type {NodeByproductCoverage} from './treeTotals.ts';
 
 export const ITEM_W = 172;
 export const ITEM_H = 58;
@@ -24,6 +25,36 @@ const LEVEL_GAP = 48;
 /** Horizontal gap between siblings. */
 const SIBLING_GAP = 18;
 const EDGE_T = 2;
+
+function compactQuantityGlyphWidth(glyph: string): number {
+  if (glyph === '1') return 4;
+  if (/\d/u.test(glyph)) return 5.5;
+  if (glyph === '.') return 3;
+  if (glyph === ' ') return 2.5;
+  if (glyph === 'm') return 7.5;
+  if (glyph === 'M') return 7;
+  if (glyph === '×' || glyph === '<' || glyph === 'B') return 6;
+  return 5.5;
+}
+
+/**
+ * Compact quantities are overlaid on a 32 px item icon. Avoid drawing a label
+ * once its text would cover more than half of that icon; the full amount stays
+ * available through the node's accessibility label and totals panel.
+ */
+export function shouldShowCompactQuantity(
+  formattedAmount: string,
+  itemIconSize = 32,
+): boolean {
+  if (!Number.isFinite(itemIconSize) || itemIconSize <= 0) {
+    throw new Error('Compact quantity item size must be a positive finite number.');
+  }
+  const estimatedTextWidth = [...formattedAmount].reduce(
+    (width, glyph) => width + compactQuantityGlyphWidth(glyph),
+    0,
+  );
+  return estimatedTextWidth <= itemIconSize / 2;
+}
 
 /**
  * Keep the starting item's visual center independent from the extra collision
@@ -75,6 +106,84 @@ export interface GraphLayout {
   minY: number;
   maxX: number;
   maxY: number;
+}
+
+export interface ByproductSupplyEdge extends EdgeRect {
+  targetNodeId: string;
+  producerSourceId: string;
+}
+
+function distanceToNodeEdge(node: LaidNode, ux: number, uy: number): number {
+  const horizontal = Math.abs(ux) > Number.EPSILON
+    ? node.w / 2 / Math.abs(ux)
+    : Number.POSITIVE_INFINITY;
+  const vertical = Math.abs(uy) > Number.EPSILON
+    ? node.h / 2 / Math.abs(uy)
+    : Number.POSITIVE_INFINITY;
+  return Math.min(horizontal, vertical);
+}
+
+/**
+ * Connect every ingredient receiving byproduct credit to the exact recipe
+ * source whose extra output supplied it. The line stops at each node's edge so
+ * its dotted treatment never obscures the item or recipe preview.
+ */
+export function byproductSupplyEdges(
+  nodes: LaidNode[],
+  coverages: Iterable<NodeByproductCoverage>,
+): ByproductSupplyEdge[] {
+  const producerNodes = new Map(
+    nodes
+      .filter(node => node.kind === 'source')
+      .map(node => [node.id, node] as const),
+  );
+  const itemNodes = new Map(nodes.map(node => [node.item.id, node] as const));
+  const seen = new Set<string>();
+  const edges: ByproductSupplyEdge[] = [];
+
+  for (const coverage of coverages) {
+    const target = itemNodes.get(coverage.nodeId);
+    if (!target || coverage.creditedAmount <= 0) continue;
+    for (const allocation of coverage.allocations) {
+      if (allocation.amount <= 0) continue;
+      const producer = producerNodes.get(allocation.producerSourceId);
+      const identity = `${coverage.nodeId}\u0000${allocation.producerSourceId}`;
+      if (!producer || seen.has(identity)) continue;
+      seen.add(identity);
+
+      const producerCenterX = producer.x + producer.w / 2;
+      const producerCenterY = producer.y + producer.h / 2;
+      const targetCenterX = target.x + target.w / 2;
+      const targetCenterY = target.y + target.h / 2;
+      const dx = targetCenterX - producerCenterX;
+      const dy = targetCenterY - producerCenterY;
+      const centerDistance = Math.hypot(dx, dy);
+      if (centerDistance <= Number.EPSILON) continue;
+      const ux = dx / centerDistance;
+      const uy = dy / centerDistance;
+      const startInset = distanceToNodeEdge(producer, ux, uy) + 2;
+      const endInset = distanceToNodeEdge(target, ux, uy) + 2;
+      const length = centerDistance - startInset - endInset;
+      if (length <= 0) continue;
+      const startX = producerCenterX + ux * startInset;
+      const startY = producerCenterY + uy * startInset;
+      const endX = targetCenterX - ux * endInset;
+      const endY = targetCenterY - uy * endInset;
+      const midpointX = (startX + endX) / 2;
+      const midpointY = (startY + endY) / 2;
+
+      edges.push({
+        targetNodeId: coverage.nodeId,
+        producerSourceId: allocation.producerSourceId,
+        x: midpointX - length / 2,
+        y: midpointY - 1,
+        w: length,
+        h: 2,
+        angle: Math.atan2(dy, dx),
+      });
+    }
+  }
+  return edges;
 }
 
 export function recipeImageDisplay(recipe: Recipe): {w: number; h: number} {

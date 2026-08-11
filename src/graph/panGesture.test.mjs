@@ -41,6 +41,47 @@ test('web graph zoom uses layout scaling instead of a composited scale transform
   assert.match(anchorMarkup, /Platform\.OS !== 'web'[\s\S]*?translateX:\s*displayTransform\.x/u);
 });
 
+test('interface zoom scales graph menu chrome without scaling the graph canvas', () => {
+  assert.match(
+    graphScreenSource,
+    /const graphMenuScaleStyle[\s\S]*?zoom:\s*interfaceZoom/u,
+  );
+  assert.match(graphScreenSource, /style=\{\[styles\.controls, graphMenuScaleStyle\]\}/u);
+  assert.match(
+    graphScreenSource,
+    /style=\{\[styles\.ctrlBtn, styles\.fitControl, graphMenuScaleStyle\]\}/u,
+  );
+  assert.match(graphScreenSource, /interfaceZoom=\{interfaceZoom\}[\s\S]*?totals=\{treeTotals\}/u);
+  assert.match(
+    graphScreenSource,
+    /style=\{\[styles\.recipeLookupCard, graphMenuScaleStyle\]\}/u,
+  );
+  const graphCanvasMarkup = graphScreenSource.slice(
+    graphScreenSource.indexOf('<View\n        ref={setCanvasRef}'),
+    graphScreenSource.indexOf('{graphLayout.fallback'),
+  );
+  assert.doesNotMatch(graphCanvasMarkup, /graphMenuScaleStyle|zoom:\s*interfaceZoom/u);
+});
+
+test('compact byproduct nodes support alternate recipe gestures', () => {
+  assert.match(
+    graphScreenSource,
+    /double tap or right click to change recipe/u,
+  );
+  assert.match(
+    graphScreenSource,
+    /onContextMenu:[\s\S]*?preventDefault[\s\S]*?onChangeRecipe\(\)/u,
+  );
+  assert.match(
+    graphScreenSource,
+    /pendingTapRef\.current = setTimeout\([\s\S]*?onTap\(\)[\s\S]*?280/u,
+  );
+  assert.match(
+    graphScreenSource,
+    /treeTotals\.byproductCoverageByNode\.has\(n\.item\.id\)[\s\S]*?openPickerWithErrorHandling/u,
+  );
+});
+
 test('wheel coordinates map displayed bounds into the logical graph viewport', () => {
   assert.deepEqual(
     graphViewportPointFromClient(

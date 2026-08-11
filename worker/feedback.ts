@@ -43,12 +43,14 @@ const DIAGNOSTIC_KEYS = [
   'language',
   'online',
 ] as const;
+const OPTIONAL_DIAGNOSTIC_KEYS = ['contentZoom'] as const;
 
 type FeedbackKind = 'bug' | 'feedback' | 'feature';
 type SubmittedFeedbackKind = 'bug' | 'feedback';
 type GitHubFetch = typeof fetch;
 
-type FeedbackDiagnostics = Record<(typeof DIAGNOSTIC_KEYS)[number], string>;
+type FeedbackDiagnostics = Record<(typeof DIAGNOSTIC_KEYS)[number], string> &
+  Partial<Record<(typeof OPTIONAL_DIAGNOSTIC_KEYS)[number], string>>;
 
 interface FeedbackPayload {
   kind?: unknown;
@@ -69,14 +71,28 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function parseDiagnostics(value: unknown): FeedbackDiagnostics | null {
   if (!isRecord(value)) return null;
   const keys = Object.keys(value).sort();
-  const expected = [...DIAGNOSTIC_KEYS].sort();
-  if (keys.length !== expected.length || keys.some((key, index) => key !== expected[index])) {
+  const required = new Set<string>(DIAGNOSTIC_KEYS);
+  const allowed = new Set<string>([
+    ...DIAGNOSTIC_KEYS,
+    ...OPTIONAL_DIAGNOSTIC_KEYS,
+  ]);
+  if (
+    DIAGNOSTIC_KEYS.some(key => !Object.hasOwn(value, key)) ||
+    keys.some(key => !allowed.has(key)) ||
+    keys.length < required.size
+  ) {
     return null;
   }
   const diagnostics = {} as FeedbackDiagnostics;
   for (const key of DIAGNOSTIC_KEYS) {
     const maximum = key === 'userAgent' ? 512 : key.endsWith('Id') ? 128 : 200;
     const parsed = textField(value[key], maximum);
+    if (parsed === null) return null;
+    diagnostics[key] = parsed;
+  }
+  for (const key of OPTIONAL_DIAGNOSTIC_KEYS) {
+    if (!Object.hasOwn(value, key)) continue;
+    const parsed = textField(value[key], 200);
     if (parsed === null) return null;
     diagnostics[key] = parsed;
   }
@@ -116,6 +132,7 @@ function issueBody(
     `- Graph root: ${inlineCode(diagnostics.graphRootKey || 'None')}`,
     `- Page: ${inlineCode(page || 'Unavailable')}`,
     `- Interface zoom: ${inlineCode(diagnostics.interfaceZoom || 'Unavailable')}`,
+    `- Recipe/items zoom: ${inlineCode(diagnostics.contentZoom || 'Unavailable')}`,
     `- Platform: ${inlineCode(diagnostics.platform || 'Unavailable')}`,
     `- Viewport: ${inlineCode(diagnostics.viewport || 'Unavailable')}`,
     `- Language: ${inlineCode(diagnostics.language || 'Unavailable')}`,

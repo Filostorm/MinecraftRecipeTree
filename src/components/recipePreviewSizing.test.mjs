@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
 import test from 'node:test';
 import {
   RECIPE_CARD_HORIZONTAL_CHROME,
@@ -10,6 +11,22 @@ import {
 // padding on each side. These are the actual list widths reported by onLayout.
 const measuredListWidth = viewportWidth =>
   Math.min(760, viewportWidth - 2 * 16) - 2 * (1 + 14);
+
+const itemDetailSource = await readFile(
+  new URL('./ItemDetailModal.tsx', import.meta.url),
+  'utf8',
+);
+const recipeCardSource = await readFile(new URL('./RecipeCard.tsx', import.meta.url), 'utf8');
+
+test('item-detail recipe cards open the first exported JEI machine catalyst', () => {
+  assert.match(itemDetailSource, /const machineKey = category\.catalysts\[0\]/u);
+  assert.match(
+    itemDetailSource,
+    /<RecipeCard[\s\S]*?machineKey=\{machineKey\}[\s\S]*?machineLabel=\{machineLabel\}/u,
+  );
+  assert.match(recipeCardSource, />View machine recipe<\/Text>/u);
+  assert.match(recipeCardSource, /openItem\(machineKey\)/u);
+});
 
 test('390px mobile keeps the Machine Frame preview physical-size and contains wider layouts', () => {
   const availableCardWidth = measuredListWidth(390);
@@ -66,7 +83,7 @@ test('desktop uses natural physical pixels without the previous 360px ceiling', 
   });
 });
 
-test('applies interface zoom to recipe previews without overflowing the card', () => {
+test('applies recipe and item zoom to previews without overflowing the card', () => {
   const mobileWidth = measuredListWidth(390);
   assert.deepEqual(responsiveRecipePreviewSize(124, 62, 2, mobileWidth, 0.75), {
     width: 186,

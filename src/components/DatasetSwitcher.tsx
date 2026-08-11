@@ -12,7 +12,7 @@ import type {DatasetDescriptor} from '../data/datasetCatalog';
 import {loadedDatasetAttribution} from '../data/datasetAttribution';
 import {theme} from '../theme';
 import type {Manifest} from '../types';
-import {COLLAPSED_DISCLOSURE_CHEVRON} from '../ui/disclosureChevron';
+import {DisclosureChevron} from './DisclosureChevron';
 import {DatasetDisclaimer} from './DatasetDisclaimer';
 import {MobileUploadGuide} from './MobileUploadGuide';
 
@@ -33,6 +33,7 @@ export function DatasetSwitcher({
   selectedSlug,
   loadedManifest,
   onOpenPicker,
+  onLocalPackInstalled,
   leadingAction,
   trailingAction,
   fullWidthControls,
@@ -43,6 +44,7 @@ export function DatasetSwitcher({
   selectedSlug: string | null;
   loadedManifest: Manifest | null;
   onOpenPicker(): void;
+  onLocalPackInstalled(slug: string): void;
   leadingAction?: React.ReactNode;
   trailingAction?: React.ReactNode;
   fullWidthControls?: React.ReactNode;
@@ -91,13 +93,22 @@ export function DatasetSwitcher({
       accessibilityRole="button"
       accessibilityLabel={
         selected
-          ? `Change modpack. Current pack is ${selected.displayName}`
+          ? `Change modpack. Current pack is ${selected.displayName}, version ${selected.packVersion}`
           : 'Choose a modpack'
       }>
-      <Text style={styles.compactDatasetText} numberOfLines={1}>
-        {selectedLabel}
-      </Text>
-      <Text style={styles.compactDatasetChevron}>{COLLAPSED_DISCLOSURE_CHEVRON}</Text>
+      <View style={styles.compactDatasetLabel}>
+        <Text style={styles.compactDatasetText} numberOfLines={1}>
+          {selectedLabel}
+        </Text>
+        {selected && (
+          <Text style={styles.compactDatasetVersion} numberOfLines={1}>
+            {selected.packVersion}
+          </Text>
+        )}
+      </View>
+      <View style={styles.compactDatasetChevron}>
+        <DisclosureChevron expanded={false} color={theme.accent} size={14} />
+      </View>
     </TouchableOpacity>
   );
   const expandButton = compact || nativeHeader ? (
@@ -118,7 +129,11 @@ export function DatasetSwitcher({
   ) : null;
   const uploadButton = (
     <TouchableOpacity
-      style={[styles.uploadButton, nativeHeader && styles.nativeUploadButton]}
+      style={[
+        styles.uploadButton,
+        compact && !nativeHeader && styles.compactUploadButton,
+        nativeHeader && styles.nativeUploadButton,
+      ]}
       onPress={
         nativeHeader
           ? () => {
@@ -128,15 +143,15 @@ export function DatasetSwitcher({
           : openPackUpload
       }
       accessibilityRole={nativeHeader ? 'button' : 'link'}
-      accessibilityLabel={nativeHeader ? 'How to import a local modpack on desktop' : 'Import a local modpack exporter ZIP'}
+      accessibilityLabel={nativeHeader ? 'Import a local modpack exporter ZIP' : 'Import a local modpack exporter ZIP'}
       accessibilityHint={
         nativeHeader
-          ? 'Opens desktop local import instructions'
+          ? 'Opens the on-device local pack importer'
           : 'Opens the local pack import page'
       }
       focusable>
       <Text style={[styles.uploadButtonText, nativeHeader && styles.nativeUploadButtonText]}>
-        {nativeHeader ? '⇧  Desktop import' : 'Import local pack'}
+        {nativeHeader ? '⇧  Import local pack' : compact ? 'Import pack' : 'Import local pack'}
       </Text>
     </TouchableOpacity>
   );
@@ -169,6 +184,7 @@ export function DatasetSwitcher({
             <View style={styles.compactTitleRow}>
               {brand}
               {datasetButton}
+              {uploadButton}
             </View>
             <View style={styles.compactControlRow}>
               {leadingAction}
@@ -178,11 +194,13 @@ export function DatasetSwitcher({
           </View>
         ) : (
           <View style={styles.fullRows}>
-            <View style={styles.fullTitleRow}>{brand}</View>
-            <View style={styles.fullControlRow}>
-              {uploadButton}
-              {leadingAction}
+            <View style={styles.fullTitleRow}>
+              {brand}
               {datasetButton}
+              {uploadButton}
+            </View>
+            <View style={styles.fullControlRow}>
+              {leadingAction}
               {fullWidthControls}
             </View>
           </View>
@@ -198,6 +216,10 @@ export function DatasetSwitcher({
         <MobileUploadGuide
           visible={showMobileUploadGuide}
           onClose={() => setShowMobileUploadGuide(false)}
+          onInstalled={slug => {
+            setShowMobileUploadGuide(false);
+            onLocalPackInstalled(slug);
+          }}
         />
       )}
     </>
@@ -206,6 +228,9 @@ export function DatasetSwitcher({
 
 const styles = StyleSheet.create({
   bar: {
+    position: 'relative',
+    zIndex: 100,
+    overflow: 'visible',
     paddingHorizontal: 14,
     paddingVertical: 9,
     borderBottomWidth: 1,
@@ -218,6 +243,7 @@ const styles = StyleSheet.create({
   fullTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 8,
     minHeight: 26,
   },
   fullControlRow: {
@@ -288,6 +314,7 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     fontWeight: '900',
   },
+  compactUploadButton: {paddingHorizontal: 10},
   nativeUploadButton: {
     width: '100%',
     minHeight: 44,
@@ -301,7 +328,7 @@ const styles = StyleSheet.create({
     minWidth: 0,
     maxWidth: 220,
     flexShrink: 1,
-    minHeight: 34,
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -323,21 +350,32 @@ const styles = StyleSheet.create({
     minWidth: 140,
     maxWidth: 360,
   },
-  compactDatasetText: {
+  compactDatasetLabel: {
     minWidth: 0,
     flex: 1,
     flexShrink: 1,
+    alignItems: 'center',
+  },
+  compactDatasetText: {
+    minWidth: 0,
+    maxWidth: '100%',
     textAlign: 'center',
     color: theme.accent,
-    fontSize: 15,
-    lineHeight: 19,
+    fontSize: 14,
+    lineHeight: 17,
     fontWeight: '800',
+  },
+  compactDatasetVersion: {
+    maxWidth: '100%',
+    textAlign: 'center',
+    color: theme.textDim,
+    fontSize: 10,
+    lineHeight: 12,
+    fontWeight: '700',
   },
   compactDatasetChevron: {
     position: 'absolute',
     right: 10,
-    color: theme.accent,
-    fontSize: 13,
   },
   expandButton: {
     width: 36,

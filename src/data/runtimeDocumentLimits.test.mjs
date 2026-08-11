@@ -17,6 +17,14 @@ test('allows bounded legacy inline documents from an installed local pack', () =
   assert.equal(MAX_LEGACY_LOCAL_DOCUMENT_BYTES, 32 * 1024 * 1024);
 });
 
+test('recognizes durable native local-pack files', () => {
+  const url =
+    `file:///mobile/Documents/minecraft-recipe-tree/local-packs/${publicationId}` +
+    `/exports/index.json?dataset=${publicationId}`;
+  assert.equal(isLocalPackExportUrl(url), true);
+  assert.equal(runtimeDocumentByteLimit(url), MAX_LEGACY_LOCAL_DOCUMENT_BYTES);
+});
+
 test('keeps published documents and malformed local paths on the strict network limit', () => {
   assert.equal(
     runtimeDocumentByteLimit(`/api/publications/${publicationId}/exports/index.json`),

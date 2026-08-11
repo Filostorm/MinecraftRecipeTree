@@ -14,7 +14,7 @@ import {
 import {ModInfo} from '../data/DataContext';
 import {signalTarget} from '../analytics/signal';
 import {theme} from '../theme';
-import {COLLAPSED_DISCLOSURE_CHEVRON} from '../ui/disclosureChevron';
+import {DisclosureChevron} from './DisclosureChevron';
 import {fuzzySearchScore, normalizeSearchText} from '../data/fuzzySearch';
 
 export function SearchBar({
@@ -122,7 +122,9 @@ export function ModFilter({
             {triggerLabel}
           </Text>
         </View>
-        <Text style={styles.filterChevron}>{COLLAPSED_DISCLOSURE_CHEVRON}</Text>
+        <View style={styles.filterChevron}>
+          <DisclosureChevron expanded={false} color={theme.textDim} size={16} />
+        </View>
       </TouchableOpacity>
 
       <Modal visible={open} transparent animationType="fade" onRequestClose={close}>
@@ -288,7 +290,7 @@ const styles = StyleSheet.create({
   filterButtonLabel: {color: theme.textDim, fontSize: 8, fontWeight: '700', letterSpacing: 0.6},
   filterButtonText: {color: theme.text, fontSize: 12, marginTop: 1},
   filterButtonTextActive: {color: theme.accent, fontWeight: '700'},
-  filterChevron: {color: theme.textDim, fontSize: 18, marginLeft: 8, marginTop: -3},
+  filterChevron: {marginLeft: 8},
   backdrop: {
     flex: 1,
     alignItems: 'center',

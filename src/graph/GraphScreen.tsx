@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import {formatDropStat} from '../components/DropList';
+import {DisclosureChevron} from '../components/DisclosureChevron';
 import {ItemIcon, pixelated} from '../components/ItemIcon';
 import {
   RADIAL_ROOT_ITEM_ICON_SIZE,
@@ -46,13 +47,10 @@ import {useRecipeStages} from '../data/RecipeStageContext';
 import {isRecipeVisibleForStages} from '../data/recipeStages';
 import {isFluidContainerTransferRecipe} from '../data/recipeVisibility';
 import {recipeDisplayTitle} from '../data/recipeTitles';
+import {recipeNeedsLayoutPreviewUnavailableNotice} from '../data/recipePresentation';
 import {theme} from '../theme';
 import {DropStat, Mob, Recipe, RecipeRef} from '../types';
 import {useUi} from '../ui/UiContext';
-import {
-  EXPANDED_DISCLOSURE_CHEVRON,
-  disclosureChevron,
-} from '../ui/disclosureChevron';
 import {
   COMPACT_LABEL_WIDTH,
   COMPACT_ITEM_SIZE,
@@ -64,9 +62,12 @@ import {
   ROOT_ATTACHED_ACTIONS_WIDTH,
   ROOT_SOURCE_ACTIONS_WIDTH,
   SOURCE_HEADER,
+  type ByproductSupplyEdge,
   attachedRootVisualX,
+  byproductSupplyEdges,
   layoutTree,
   recipeImageDisplay,
+  shouldShowCompactQuantity,
 } from './layout';
 import {
   RADIAL_ITEM_SIZE,
@@ -93,6 +94,10 @@ import {
 import type {GraphTransform, PanGestureOrigin} from './panGesture';
 import {recordRecipeHistory} from './recipeHistory';
 import {planRecipePickerChoices} from './recipePickerPlan';
+import {
+  DEFAULT_USE_BYPRODUCTS,
+  useByproductsFromStoredValue,
+} from './byproductPreference';
 import {
   materialInputSummary,
   recipeChildrenForDirection,
@@ -399,10 +404,12 @@ function loadRadialLayout(): boolean {
 
 function loadUseByproducts(): boolean {
   try {
-    return globalThis.localStorage?.getItem(USE_BYPRODUCTS_KEY) === '1';
+    return useByproductsFromStoredValue(
+      globalThis.localStorage?.getItem(USE_BYPRODUCTS_KEY),
+    );
   } catch (error) {
     console.error('Byproduct-credit preference could not be loaded from localStorage.', error);
-    return false;
+    return DEFAULT_USE_BYPRODUCTS;
   }
 }
 
@@ -426,11 +433,17 @@ function nodeDepthBucket(
 
 export function GraphScreen({
   interfaceZoom = 1,
+  contentZoom = 1,
+  onContentZoomChange,
+  onContentZoomComplete,
   showGraphControls,
   onToggleGraphControls,
   controlsToggleInHeader = false,
 }: {
   interfaceZoom?: number;
+  contentZoom?: number;
+  onContentZoomChange?: (value: number) => void;
+  onContentZoomComplete?: (value: number) => void;
   showGraphControls: boolean;
   onToggleGraphControls(): void;
   controlsToggleInHeader?: boolean;
@@ -667,7 +680,7 @@ export function GraphScreen({
         const selectedRecipe = applyIngredientSelections(recipe, ingredientSelections);
         if (
           !allowFluidTransfer &&
-          isFluidContainerTransferRecipe(selectedRecipe, data.itemsByKey)
+          isFluidContainerTransferRecipe(selectedRecipe, data.itemsByKey, cat)
         ) {
           console.info('A fluid container-transfer recipe was suppressed by the default filter.', {
             itemKey: node.key,
@@ -989,7 +1002,7 @@ export function GraphScreen({
                 presentedRecipe?.stage
                   ? `Requires stage ${presentedRecipe.stage}`
                   : undefined,
-                presentedRecipe && !presentedRecipe.img
+                presentedRecipe && recipeNeedsLayoutPreviewUnavailableNotice(presentedRecipe)
                   ? 'JEI layout preview unavailable'
                   : undefined,
               ]
@@ -1005,6 +1018,7 @@ export function GraphScreen({
                 : undefined,
             imageW: presentedRecipe?.w,
             imageH: presentedRecipe?.h,
+            structure: presentedRecipe?.structure,
             inputs:
               recipe && direction === 'inputs'
                 ? materialInputSummary(recipe).map(input => {
@@ -1104,7 +1118,13 @@ export function GraphScreen({
         const refKey = recipeRefKey(choice.ref);
         recipesByRef.set(refKey, recipe);
         loadedRefKeys.add(refKey);
-        if (isFluidContainerTransferRecipe(recipe, data.itemsByKey)) {
+        if (
+          isFluidContainerTransferRecipe(
+            recipe,
+            data.itemsByKey,
+            data.categories[choice.ref[0]],
+          )
+        ) {
           identifiedFluidTransferCount += 1;
           fluidTransferChoices.push({...choice, allowFluidTransfer: true});
         } else {
@@ -1122,7 +1142,13 @@ export function GraphScreen({
           const preferredRefKey = recipeRefKey(preferredChoice.ref);
           recipesByRef.set(preferredRefKey, recipe);
           loadedRefKeys.add(preferredRefKey);
-          if (isFluidContainerTransferRecipe(recipe, data.itemsByKey)) {
+          if (
+            isFluidContainerTransferRecipe(
+              recipe,
+              data.itemsByKey,
+              data.categories[preferredChoice.ref[0]],
+            )
+          ) {
             identifiedFluidTransferCount += 1;
             const explicitChoice = {...preferredChoice, allowFluidTransfer: true as const};
             fluidTransferChoices.push(explicitChoice);
@@ -1251,7 +1277,13 @@ export function GraphScreen({
         let identifiedFluidTransferCount = 0;
         batch.forEach((choice, index) => {
           const recipe = recipes[index];
-          if (isFluidContainerTransferRecipe(recipe, data.itemsByKey)) {
+          if (
+            isFluidContainerTransferRecipe(
+              recipe,
+              data.itemsByKey,
+              data.categories[choice.ref[0]],
+            )
+          ) {
             identifiedFluidTransferCount += 1;
             const explicitChoice = {...choice, allowFluidTransfer: true as const};
             fluidTransferEntries.push(
@@ -1408,7 +1440,11 @@ export function GraphScreen({
       if (choice.t === 'recipe') {
         const [recipe] = await data.getRecipes([choice.ref]);
         if (
-          isFluidContainerTransferRecipe(recipe, data.itemsByKey) ||
+          isFluidContainerTransferRecipe(
+            recipe,
+            data.itemsByKey,
+            data.categories[choice.ref[0]],
+          ) ||
           (recipe.stage && hiddenRecipeStages.has(recipe.stage))
         ) {
           await openPicker(node);
@@ -1702,15 +1738,6 @@ export function GraphScreen({
     ],
   );
   const graph = graphLayout.graph;
-  const renderedGraph = useMemo(
-    () =>
-      graph
-        ? exportingTree
-          ? {nodes: graph.nodes, edges: graph.edges, culled: false}
-          : visibleGraphElements(graph, transform, viewportSize)
-        : null,
-    [exportingTree, graph, transform, viewportSize],
-  );
   const graphRef = useRef(graph);
   graphRef.current = graph;
   const treeTotals = useMemo(() => {
@@ -1744,6 +1771,34 @@ export function GraphScreen({
     useByproducts,
     expandRecipesOnce,
   ]);
+  const supplyEdges = useMemo(
+    () =>
+      graph
+        ? byproductSupplyEdges(
+            graph.nodes,
+            treeTotals.byproductCoverageByNode.values(),
+          )
+        : [],
+    [graph, treeTotals],
+  );
+  const renderedGraph = useMemo(() => {
+    if (!graph) return null;
+    if (exportingTree) {
+      return {
+        nodes: graph.nodes,
+        edges: graph.edges,
+        supplyEdges,
+        culled: false,
+      };
+    }
+    const visible = visibleGraphElements(graph, transform, viewportSize);
+    const visibleSupplyEdges = visibleGraphElements(
+      {...graph, edges: supplyEdges},
+      transform,
+      viewportSize,
+    ).edges as ByproductSupplyEdge[];
+    return {...visible, supplyEdges: visibleSupplyEdges};
+  }, [exportingTree, graph, supplyEdges, transform, viewportSize]);
   const displayedAmountFor = useCallback(
     (node: ItemTreeNode) =>
       graphDirection === 'outputs'
@@ -2320,8 +2375,12 @@ export function GraphScreen({
         onAmountChange: updateRootRequestedAmount,
         onChangeRecipe: () => openRootPicker('inputs'),
         onAddUsedBy: () => openRootPicker('outputs'),
-      }
+    }
     : undefined;
+  const graphMenuScaleStyle =
+    Platform.OS === 'web'
+      ? ({zoom: interfaceZoom} as unknown as object)
+      : null;
 
   return (
     <View style={styles.root}>
@@ -2395,6 +2454,22 @@ export function GraphScreen({
               ]}
             />
           ))}
+          {renderedGraph?.supplyEdges.map(edge => (
+            <View
+              key={`byproduct:${edge.targetNodeId}:${edge.producerSourceId}`}
+              pointerEvents="none"
+              style={[
+                styles.byproductSupplyEdge,
+                {
+                  left: edge.x,
+                  top: edge.y,
+                  width: edge.w,
+                  height: edge.h,
+                  transform: [{rotate: `${String(edge.angle ?? 0)}rad`}],
+                },
+              ]}
+            />
+          ))}
           {renderedGraph?.nodes.map(n =>
             compactMode || n.radial ? (
               <CompactItemNodeView
@@ -2439,6 +2514,17 @@ export function GraphScreen({
                 showLabel
                 deferredDuplicate={!!n.item.deferredRecipeExpansion}
                 rootActions={n.item.id === 'root' ? rootNodeActions : undefined}
+                onChangeRecipe={
+                  n.item.id !== 'root' &&
+                  treeTotals.byproductCoverageByNode.has(n.item.id) &&
+                  choicesFor(n.item.key).length > 0
+                    ? () =>
+                        openPickerWithErrorHandling(
+                          n.item,
+                          treeTotals.byproductCoverageByNode.get(n.item.id),
+                        )
+                    : undefined
+                }
                 onTap={() =>
                   n.item.id === 'root'
                     ? setShowRootActions(value => !value)
@@ -2515,17 +2601,20 @@ export function GraphScreen({
       </View>
 
       {graphLayout.fallback && (
-        <View style={styles.layoutFallbackNotice} accessibilityRole="alert">
+        <View
+          style={[styles.layoutFallbackNotice, graphMenuScaleStyle]}
+          accessibilityRole="alert">
           <Text style={[styles.layoutFallbackText, noSelect]}>{graphLayout.fallback}</Text>
         </View>
       )}
 
-      <View style={styles.controls}>
+      <View style={[styles.controls, graphMenuScaleStyle]}>
         {showGraphControls && (
           <View style={styles.controlOptions}>
             {graphDirection === 'inputs' && (
               <CtrlBtn
-                label={`Totals ${disclosureChevron(showTreeTotals)}`}
+                label="Totals"
+                expanded={showTreeTotals}
                 accessibilityLabel={showTreeTotals ? 'Collapse tree totals' : 'Expand tree totals'}
                 metricsId="graph.control.totals"
                 active={showTreeTotals}
@@ -2566,14 +2655,12 @@ export function GraphScreen({
             accessibilityState={{expanded: showGraphControls}}
             style={[styles.ctrlBtn, styles.controlMenuBtn, showGraphControls && styles.ctrlBtnActive]}
             onPress={onToggleGraphControls}>
-            <Text
-              style={[
-                styles.ctrlBtnText,
-                styles.controlMenuBtnText,
-                showGraphControls && styles.ctrlBtnTextActive,
-              ]}>
-              {disclosureChevron(showGraphControls)}
-            </Text>
+            <DisclosureChevron
+              expanded={showGraphControls}
+              color={showGraphControls ? theme.accent : theme.text}
+              size={18}
+              strokeWidth={2.4}
+            />
           </TouchableOpacity>
         )}
       </View>
@@ -2581,12 +2668,13 @@ export function GraphScreen({
         {...signalTarget('graph.control.fit')}
         accessibilityRole="button"
         accessibilityLabel="Fit graph to view"
-        style={[styles.ctrlBtn, styles.fitControl]}
+        style={[styles.ctrlBtn, styles.fitControl, graphMenuScaleStyle]}
         onPress={fitView}>
         <Text style={[styles.ctrlBtnText, styles.fitControlIcon]}>⛶</Text>
       </TouchableOpacity>
       {showGraphControls && graphDirection === 'inputs' && showTreeTotals && (
         <TreeTotalsPanel
+          interfaceZoom={interfaceZoom}
           totals={treeTotals}
           useByproducts={useByproducts}
           exportingTree={exportingTree}
@@ -2603,7 +2691,7 @@ export function GraphScreen({
           style={styles.recipeLookupBackdrop}
           accessibilityViewIsModal
           accessibilityLabel={pickerLookup.title}>
-          <View style={styles.recipeLookupCard}>
+          <View style={[styles.recipeLookupCard, graphMenuScaleStyle]}>
             <ActivityIndicator color={theme.accent} size="large" />
             <Text style={styles.recipeLookupTitle}>{pickerLookup.title}</Text>
             <Text style={styles.recipeLookupHint}>Loading recipe options…</Text>
@@ -2622,6 +2710,9 @@ export function GraphScreen({
         <PickerModal
           visible
           interfaceZoom={interfaceZoom}
+          contentZoom={contentZoom}
+          onContentZoomChange={onContentZoomChange}
+          onContentZoomComplete={onContentZoomComplete}
           title={picker.title}
           direction={picker.target.id === 'root' ? picker.direction : undefined}
           onDirectionChange={
@@ -2751,7 +2842,6 @@ export function GraphScreen({
           }}
           productionPlan={picker.productionPlan}
           onOpenMachine={machineKey => {
-            setPicker(null);
             openItem(machineKey);
           }}
           onSelect={i => {
@@ -2835,6 +2925,7 @@ export function GraphScreen({
       )}
       <TreeShareModal
         visible={showTreeShare}
+        interfaceZoom={interfaceZoom}
         onClose={() => setShowTreeShare(false)}
         onShare={shareCurrentTree}
         onImport={importPortableTree}
@@ -2976,6 +3067,7 @@ function AttachedRootActions({
 }
 
 function TreeTotalsPanel({
+  interfaceZoom,
   totals,
   useByproducts,
   exportingTree,
@@ -2986,6 +3078,7 @@ function TreeTotalsPanel({
   onIngredientTap,
   onOpenItem,
 }: {
+  interfaceZoom: number;
   totals: TreeTotals;
   useByproducts: boolean;
   exportingTree: boolean;
@@ -2997,7 +3090,13 @@ function TreeTotalsPanel({
   onOpenItem: (key: string) => void;
 }) {
   return (
-    <View style={styles.totalsPanel}>
+    <View
+      style={[
+        styles.totalsPanel,
+        Platform.OS === 'web'
+          ? ({zoom: interfaceZoom} as unknown as object)
+          : null,
+      ]}>
       <View style={styles.totalsHeader}>
         <Text style={[styles.totalsTitle, noSelect]}>Tree totals</Text>
         <TouchableOpacity
@@ -3110,6 +3209,7 @@ function CompactItemNodeView({
   showLabel,
   deferredDuplicate,
   rootActions,
+  onChangeRecipe,
   onTap,
 }: {
   x: number;
@@ -3127,6 +3227,7 @@ function CompactItemNodeView({
   showLabel: boolean;
   deferredDuplicate: boolean;
   rootActions?: RootNodeActionProps;
+  onChangeRecipe?: () => void;
   onTap: () => void;
 }) {
   const data = useData();
@@ -3140,19 +3241,68 @@ function CompactItemNodeView({
     node.key,
     byproductCoverage?.remainingAmount ?? requiredAmount,
   );
+  const countBadgeText = byproductCoverage?.remainingAmount === 0 ? '✓' : amount;
+  const showCountBadge =
+    countBadgeText === '✓' ||
+    shouldShowCompactQuantity(
+      countBadgeText,
+      radialRoot ? RADIAL_ROOT_ITEM_ICON_SIZE : 32,
+    );
   const byproductLabel = byproductCoverage
     ? byproductCoverage.remainingAmount === 0
       ? `completed by byproduct ${formatIngredientQuantity(node.key, byproductCoverage.creditedAmount)}`
       : `${formatIngredientQuantity(node.key, byproductCoverage.creditedAmount)} supplied by byproduct, ${formatIngredientQuantity(node.key, byproductCoverage.remainingAmount)} still needed`
     : null;
+  const pendingTapRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (pendingTapRef.current) clearTimeout(pendingTapRef.current);
+    },
+    [],
+  );
+  const clearPendingTap = () => {
+    if (!pendingTapRef.current) return;
+    clearTimeout(pendingTapRef.current);
+    pendingTapRef.current = null;
+  };
+  const handleTap = () => {
+    if (!onChangeRecipe) {
+      onTap();
+      return;
+    }
+    if (pendingTapRef.current) {
+      clearPendingTap();
+      onChangeRecipe();
+      return;
+    }
+    pendingTapRef.current = setTimeout(() => {
+      pendingTapRef.current = null;
+      onTap();
+    }, 280);
+  };
+  const webContextMenuProps =
+    Platform.OS === 'web' && onChangeRecipe
+      ? ({
+          onContextMenu: (event: {
+            preventDefault?: () => void;
+            stopPropagation?: () => void;
+          }) => {
+            event.preventDefault?.();
+            event.stopPropagation?.();
+            clearPendingTap();
+            onChangeRecipe();
+          },
+        } as object)
+      : {};
   return (
     <>
       <Pressable
       {...signalTarget(`graph.node.expand.${nodeDepthBucket(node)}`)}
+      {...webContextMenuProps}
       accessibilityRole={selectable ? 'button' : undefined}
-      accessibilityLabel={`${name}, quantity ${formatIngredientQuantity(node.key, requiredAmount)}${terminal ? `, ${terminalLabel}` : ''}${deferredDuplicate ? ', recipe expanded elsewhere, tap to move expansion here' : ''}${byproductLabel ? `, ${byproductLabel}` : ''}${node.nonConsumed ? ', not consumed' : ''}${node.consumptionProbability !== undefined ? `, ${node.consumptionProbability == null ? 'unknown' : `${String(Math.round(node.consumptionProbability * 10_000) / 100)} percent`} consume chance` : ''}${node.productionProbability !== undefined ? `, ${node.productionProbability == null ? 'unknown' : `${String(Math.round(node.productionProbability * 10_000) / 100)} percent`} produce chance` : ''}${isRoot ? ', open amount and recipe controls' : selectable && !deferredDuplicate ? byproductCoverage?.remainingAmount === 0 ? ', navigate to producing recipe' : ', choose source' : ''}`}
+      accessibilityLabel={`${name}, quantity ${formatIngredientQuantity(node.key, requiredAmount)}${terminal ? `, ${terminalLabel}` : ''}${deferredDuplicate ? ', recipe expanded elsewhere, tap to move expansion here' : ''}${byproductLabel ? `, ${byproductLabel}` : ''}${node.nonConsumed ? ', not consumed' : ''}${node.consumptionProbability !== undefined ? `, ${node.consumptionProbability == null ? 'unknown' : `${String(Math.round(node.consumptionProbability * 10_000) / 100)} percent`} consume chance` : ''}${node.productionProbability !== undefined ? `, ${node.productionProbability == null ? 'unknown' : `${String(Math.round(node.productionProbability * 10_000) / 100)} percent`} produce chance` : ''}${isRoot ? ', open amount and recipe controls' : selectable && !deferredDuplicate ? byproductCoverage?.remainingAmount === 0 ? ', navigate to producing recipe' : ', choose source' : ''}${onChangeRecipe ? ', double tap or right click to change recipe' : ''}`}
       disabled={!selectable || node.loading}
-      onPress={onTap}
+      onPress={handleTap}
       style={[
         radial ? styles.radialItemNode : styles.compactItemNode,
         branchLabel && styles.compactBranchNode,
@@ -3183,22 +3333,24 @@ function CompactItemNodeView({
         itemKey={node.key}
         size={radialRoot ? RADIAL_ROOT_ITEM_ICON_SIZE : 32}
       />
-      <View
-        style={[
-          styles.compactCountBadge,
-          isRoot && !radialRoot && styles.compactRootCountBadge,
-          radialRoot && styles.radialRootCountBadge,
-          byproductCoverage && styles.compactByproductCountBadge,
-        ]}>
-        <Text
+      {showCountBadge && (
+        <View
           style={[
-            styles.compactCountText,
-            byproductCoverage && styles.compactByproductCountText,
-            noSelect,
+            styles.compactCountBadge,
+            isRoot && !radialRoot && styles.compactRootCountBadge,
+            radialRoot && styles.radialRootCountBadge,
+            byproductCoverage && styles.compactByproductCountBadge,
           ]}>
-          {byproductCoverage?.remainingAmount === 0 ? '✓' : amount}
-        </Text>
-      </View>
+          <Text
+            style={[
+              styles.compactCountText,
+              byproductCoverage && styles.compactByproductCountText,
+              noSelect,
+            ]}>
+            {countBadgeText}
+          </Text>
+        </View>
+      )}
       {showLabel && (
         <View
           pointerEvents="none"
@@ -3499,7 +3651,7 @@ function SourceNodeView({
           style={styles.headerBtn}>
           <Text style={[styles.smallBtnText, noSelect]}>ⓘ</Text>
         </TouchableOpacity>
-        <Text style={[styles.smallBtnText, noSelect]}>{EXPANDED_DISCLOSURE_CHEVRON}</Text>
+        <DisclosureChevron expanded color={theme.textDim} size={14} />
       </Pressable>
 
       {source.kind === 'recipe' && source.recipe?.img && source.dir && (
@@ -3574,12 +3726,14 @@ function CtrlBtn({
   accessibilityLabel,
   metricsId,
   active = false,
+  expanded,
   onPress,
 }: {
   label: string;
   accessibilityLabel?: string;
   metricsId: string;
   active?: boolean;
+  expanded?: boolean;
   onPress: () => void;
 }) {
   return (
@@ -3590,7 +3744,16 @@ function CtrlBtn({
       accessibilityState={{selected: active}}
       style={[styles.ctrlBtn, active && styles.ctrlBtnActive]}
       onPress={onPress}>
-      <Text style={[styles.ctrlBtnText, active && styles.ctrlBtnTextActive]}>{label}</Text>
+      <View style={styles.ctrlBtnContent}>
+        <Text style={[styles.ctrlBtnText, active && styles.ctrlBtnTextActive]}>{label}</Text>
+        {expanded !== undefined && (
+          <DisclosureChevron
+            expanded={expanded}
+            color={active ? theme.accent : theme.text}
+            size={13}
+          />
+        )}
+      </View>
     </TouchableOpacity>
   );
 }
@@ -3601,6 +3764,13 @@ const styles = StyleSheet.create({
   anchor: {position: 'absolute', left: 0, top: 0, width: 0, height: 0},
   nativeAnchor: {width: 1, height: 1},
   edge: {position: 'absolute', backgroundColor: theme.borderLight},
+  byproductSupplyEdge: {
+    position: 'absolute',
+    borderTopWidth: 2,
+    borderTopColor: theme.accentAlt,
+    borderStyle: 'dotted',
+    opacity: 0.9,
+  },
   itemNode: {
     position: 'absolute',
     flexDirection: 'row',
@@ -4021,16 +4191,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   ctrlBtnActive: {borderColor: theme.accent, backgroundColor: '#173724'},
+  ctrlBtnContent: {flexDirection: 'row', alignItems: 'center', gap: 4},
   ctrlBtnText: {color: theme.text, fontSize: 13},
   ctrlBtnTextActive: {color: theme.accent, fontWeight: '700'},
   controlMenuBtn: {
     width: 38,
     paddingHorizontal: 0,
-  },
-  controlMenuBtnText: {
-    fontSize: 18,
-    lineHeight: 18,
-    fontWeight: '800',
   },
   fitControl: {
     position: 'absolute',

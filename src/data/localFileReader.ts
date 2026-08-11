@@ -2,6 +2,11 @@ const LOCAL_FILE_READ_TIMEOUT_MS = 30_000;
 
 export type LocalFileReadProgress = (loadedBytes: number) => void;
 
+export interface LocalFileSliceSource {
+  readonly name: string;
+  slice(start: number, end: number): Blob;
+}
+
 function readTimeoutMessage(filename: string): string {
   return `The browser could not read ${filename} from this device. Move the ZIP to a local folder and try again.`;
 }
@@ -12,7 +17,7 @@ function readTimeoutMessage(filename: string): string {
  * and an abortable timeout when a browser file source does not settle promptly.
  */
 export async function readLocalFileSlice(
-  file: File,
+  file: LocalFileSliceSource,
   start: number,
   end: number,
   onProgress?: LocalFileReadProgress,

@@ -22,6 +22,7 @@ const DIAGNOSTICS = {
   graphRootKey: 'item|thaumcraft:cluster',
   graphDirection: 'inputs',
   interfaceZoom: '125%',
+  contentZoom: '175%',
   platform: 'web',
   userAgent: 'Recipe Tree feedback test',
   viewport: '1280×720 @2x',
@@ -185,6 +186,30 @@ test('feedback submissions store validated context without a raw client address'
   assert.match(issue.body, /## Diagnostics/);
   assert.match(issue.body, /0\.18\.6/);
   assert.match(issue.body, /item\|thaumcraft:cluster/);
+});
+
+test('feedback keeps accepting reports from clients without the new content zoom diagnostic', async () => {
+  const DB = database();
+  const GitHub = github();
+  const {contentZoom: _contentZoom, ...legacyDiagnostics} = DIAGNOSTICS;
+  const response = await handleFeedback(
+    request({
+      kind: 'bug',
+      title: 'Cached client report',
+      message: 'This report came from the prior application bundle.',
+      contact: '',
+      packSlug: 'meatballcraft',
+      packName: 'MeatballCraft',
+      page: '/?pack=meatballcraft',
+      website: '',
+      diagnostics: legacyDiagnostics,
+    }),
+    {DB, GITHUB_ISSUES_TOKEN: GITHUB_TOKEN},
+    new URL(`${ORIGIN}${FEEDBACK_ROUTE}`),
+    GitHub.fetch,
+  );
+
+  assert.equal(response.status, 201);
 });
 
 test('feedback endpoint rejects cross-origin writes before accessing storage', async () => {
