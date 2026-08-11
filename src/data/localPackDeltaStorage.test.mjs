@@ -5,7 +5,11 @@ import test from 'node:test';
 import {strToU8, zipSync} from 'fflate';
 
 import {requireLocalPackDelta} from './localPackDelta.ts';
-import {installLocalPackArchive} from './localPackStorage.ts';
+import {
+  installLocalPackArchive,
+  listLocalPackDescriptors,
+  removeLocalPack,
+} from './localPackStorage.ts';
 
 function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
@@ -22,7 +26,7 @@ function summary(version) {
   };
 }
 
-test('transactionally reconstructs a full local pack from a single-base delta', async () => {
+test('retains independently usable local versions across chained delta updates', async () => {
   const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
   const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
   const originalCaches = Object.getOwnPropertyDescriptor(globalThis, 'caches');
@@ -79,7 +83,7 @@ test('transactionally reconstructs a full local pack from a single-base delta', 
       'removed.txt': strToU8('remove this'),
     };
     const fullArchive = zipSync(baseFiles);
-    await installLocalPackArchive(
+    const baseInstalled = await installLocalPackArchive(
       new File([fullArchive], 'delta-pack-full.zip', {type: 'application/zip'}),
       'manifest.json',
       baseFiles['manifest.json'],
@@ -146,7 +150,7 @@ test('transactionally reconstructs a full local pack from a single-base delta', 
     assert.equal(responses.has(`${resultPrefix}removed.txt`), false);
     assert.equal(
       [...responses.keys()].some(url => url.includes(`/__local-packs/${basePublicationId}/`)),
-      false,
+      true,
     );
     const saving = progress.filter(update => update.phase === 'saving');
     assert.deepEqual(saving.at(-1), {
@@ -159,7 +163,85 @@ test('transactionally reconstructs a full local pack from a single-base delta', 
       .get('https://viewer.example/__local-packs/catalog.json')
       ?.clone()
       .json();
-    assert.deepEqual(catalog.packs.map(pack => pack.packVersion), ['1.0.1']);
+    assert.deepEqual(catalog.packs.map(pack => pack.packVersion), ['1.0.1', '1.0.0']);
+    assert.deepEqual(
+      (await listLocalPackDescriptors()).map(pack => pack.packVersion),
+      ['1.0.1', '1.0.0'],
+    );
+
+    const chainedManifest = {
+      ...resultManifest,
+      generatedAt: '2026-08-03T00:00:00Z',
+      pack: {name: 'Delta Pack', version: '1.0.2'},
+    };
+    const chainedManifestBytes = strToU8(JSON.stringify(chainedManifest));
+    const chainedPublicationId = sha256(chainedManifestBytes);
+    const chainedDeltaDocument = {
+      format: 'mrt-export-delta-v1',
+      createdAt: '2026-08-03T00:00:01Z',
+      basePublicationId: resultPublicationId,
+      resultPublicationId: chainedPublicationId,
+      minecraft: '1.20.1',
+      pack: {name: 'Delta Pack', baseVersion: '1.0.1', resultVersion: '1.0.2'},
+      files: [{
+        path: 'manifest.json',
+        size: chainedManifestBytes.byteLength,
+        sha256: sha256(chainedManifestBytes),
+      }],
+      deletedPaths: [],
+      counts: {
+        changedFiles: 1,
+        deletedFiles: 0,
+        unchangedFiles: 5,
+        resultFiles: 6,
+        changedBytes: chainedManifestBytes.byteLength,
+        resultBytes:
+          chainedManifestBytes.byteLength +
+          Object.entries(resultFiles)
+            .filter(([path]) => path !== 'manifest.json')
+            .reduce((sum, [, bytes]) => sum + bytes.byteLength, 0),
+      },
+    };
+    const chainedArchive = zipSync({
+      'delta.json': strToU8(JSON.stringify(chainedDeltaDocument)),
+      'manifest.json': chainedManifestBytes,
+    });
+    const chainedInstalled = await installLocalPackArchive(
+      new File([chainedArchive], 'delta-pack-update-2.zip', {type: 'application/zip'}),
+      'manifest.json',
+      chainedManifestBytes,
+      chainedManifest,
+      summary('1.0.2'),
+      () => {},
+      requireLocalPackDelta(chainedDeltaDocument),
+    );
+    assert.deepEqual(
+      (await listLocalPackDescriptors()).map(pack => pack.packVersion),
+      ['1.0.2', '1.0.1', '1.0.0'],
+    );
+    const chainedPrefix =
+      `https://viewer.example/__local-packs/${chainedPublicationId}/exports/`;
+    assert.equal(await responses.get(`${chainedPrefix}unchanged.txt`)?.clone().text(), 'keep this');
+
+    assert.equal(await removeLocalPack(installed.descriptor.slug), true);
+    assert.deepEqual(
+      (await listLocalPackDescriptors()).map(pack => pack.packVersion),
+      ['1.0.2', '1.0.0'],
+    );
+    assert.equal(
+      [...responses.keys()].some(url => url.includes(`/__local-packs/${resultPublicationId}/`)),
+      false,
+    );
+    assert.equal(
+      [...responses.keys()].some(url => url.includes(`/__local-packs/${basePublicationId}/`)),
+      true,
+    );
+    assert.equal(
+      [...responses.keys()].some(url => url.includes(`/__local-packs/${chainedPublicationId}/`)),
+      true,
+    );
+    assert.equal(await removeLocalPack(chainedInstalled.descriptor.slug), true);
+    assert.equal(await removeLocalPack(baseInstalled.descriptor.slug), true);
   } finally {
     if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
     else delete globalThis.window;
