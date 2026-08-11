@@ -2,6 +2,8 @@ export const MAX_NETWORK_DOCUMENT_BYTES = 8 * 1024 * 1024;
 export const MAX_LEGACY_LOCAL_DOCUMENT_BYTES = 32 * 1024 * 1024;
 
 const LOCAL_PACK_EXPORT_PATH = /^\/__local-packs\/[a-f0-9]{64}\/exports(?:\/|$)/u;
+const NATIVE_LOCAL_PACK_EXPORT_PATH =
+  /\/minecraft-recipe-tree\/local-packs\/[a-f0-9]{64}\/exports(?:\/|$)/u;
 
 /**
  * Published documents and modern shards retain the strict network budget. Older
@@ -15,7 +17,7 @@ export function runtimeDocumentByteLimit(url: string): number {
   } catch {
     return MAX_NETWORK_DOCUMENT_BYTES;
   }
-  return LOCAL_PACK_EXPORT_PATH.test(pathname)
+  return LOCAL_PACK_EXPORT_PATH.test(pathname) || NATIVE_LOCAL_PACK_EXPORT_PATH.test(pathname)
     ? MAX_LEGACY_LOCAL_DOCUMENT_BYTES
     : MAX_NETWORK_DOCUMENT_BYTES;
 }

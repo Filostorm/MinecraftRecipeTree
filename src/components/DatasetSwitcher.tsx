@@ -33,6 +33,7 @@ export function DatasetSwitcher({
   selectedSlug,
   loadedManifest,
   onOpenPicker,
+  onLocalPackInstalled,
   leadingAction,
   trailingAction,
   fullWidthControls,
@@ -43,6 +44,7 @@ export function DatasetSwitcher({
   selectedSlug: string | null;
   loadedManifest: Manifest | null;
   onOpenPicker(): void;
+  onLocalPackInstalled(slug: string): void;
   leadingAction?: React.ReactNode;
   trailingAction?: React.ReactNode;
   fullWidthControls?: React.ReactNode;
@@ -134,15 +136,15 @@ export function DatasetSwitcher({
           : openPackUpload
       }
       accessibilityRole={nativeHeader ? 'button' : 'link'}
-      accessibilityLabel={nativeHeader ? 'How to import a local modpack on desktop' : 'Import a local modpack exporter ZIP'}
+      accessibilityLabel={nativeHeader ? 'Import a local modpack exporter ZIP' : 'Import a local modpack exporter ZIP'}
       accessibilityHint={
         nativeHeader
-          ? 'Opens desktop local import instructions'
+          ? 'Opens the on-device local pack importer'
           : 'Opens the local pack import page'
       }
       focusable>
       <Text style={[styles.uploadButtonText, nativeHeader && styles.nativeUploadButtonText]}>
-        {nativeHeader ? '⇧  Desktop import' : compact ? 'Import pack' : 'Import local pack'}
+        {nativeHeader ? '⇧  Import local pack' : compact ? 'Import pack' : 'Import local pack'}
       </Text>
     </TouchableOpacity>
   );
@@ -207,6 +209,10 @@ export function DatasetSwitcher({
         <MobileUploadGuide
           visible={showMobileUploadGuide}
           onClose={() => setShowMobileUploadGuide(false)}
+          onInstalled={slug => {
+            setShowMobileUploadGuide(false);
+            onLocalPackInstalled(slug);
+          }}
         />
       )}
     </>

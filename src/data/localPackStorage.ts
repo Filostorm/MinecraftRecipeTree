@@ -9,6 +9,7 @@ import {
   type LocalPackManifestSummary,
 } from './localPackArchive.ts';
 import type {LocalPackDelta, LocalPackDeltaFile} from './localPackDelta.ts';
+import type {LocalPackArchiveFile} from './localPackInspection.ts';
 
 const LOCAL_PACK_CACHE = 'minecraft-recipe-tree-local-packs-v1';
 const LOCAL_PACK_CATALOG_PATH = '/__local-packs/catalog.json';
@@ -376,7 +377,7 @@ export function localDatasetSource(descriptor: DatasetDescriptor): DatasetSource
 }
 
 export async function installLocalPackArchive(
-  file: File,
+  file: LocalPackArchiveFile,
   manifestPath: string,
   manifestBytes: Uint8Array,
   manifest: unknown,

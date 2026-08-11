@@ -35,6 +35,7 @@ import {
   useRecipeStages,
 } from './src/data/RecipeStageContext';
 import {datasetMountKey} from './src/data/datasetCatalog';
+import {isLocalPackExportUrl} from './src/data/runtimeDocumentLimits';
 import {theme} from './src/theme';
 import type {Manifest} from './src/types';
 import {Tab, UiProvider, useUi} from './src/ui/UiContext';
@@ -139,6 +140,7 @@ function DatasetRoot() {
         selectedSlug={selectedSlug}
         loadedManifest={loadedManifest}
         onOpenPicker={() => setShowDatasetPicker(true)}
+        onLocalPackInstalled={slug => catalog.refreshLocal(slug)}
         leadingAction={leadingAction}
         trailingAction={trailingAction}
         fullWidthControls={fullWidthControls}
@@ -258,7 +260,7 @@ function Root({
   }
   if (state.status === 'error') {
     const stale = state.kind === 'stale';
-    const localPack = state.base.startsWith('/__local-packs/');
+    const localPack = isLocalPackExportUrl(`${state.base}/manifest.json`);
     return (
       <View style={styles.datasetRoot}>
         {renderControls(null)}

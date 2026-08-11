@@ -68,6 +68,8 @@ import {
   isLocalPackExportUrl,
   runtimeDocumentByteLimit,
 } from './runtimeDocumentLimits';
+import {readLocalDatasetDocument} from './localDatasetDocument';
+import {localDatasetVisualUri} from './localDatasetVisual';
 
 const SHARDED_JSON_FORMAT = 'mrt-sharded-json-v1';
 const MAX_SHARD_BYTES = MAX_NETWORK_DOCUMENT_BYTES;
@@ -235,6 +237,15 @@ class ExportHttpError extends Error {
 }
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const local = await readLocalDatasetDocument(url);
+  if (local !== null) {
+    try {
+      return JSON.parse(local.text) as T;
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(`Invalid JSON from ${url}: ${detail}`);
+    }
+  }
   const res = await fetch(url, init);
   if (!res.ok) throw new ExportHttpError(res.status, url);
   try {
@@ -249,10 +260,18 @@ async function fetchBoundedJson(
   url: string,
   expectedBytes?: number,
 ): Promise<BoundedJsonDocument> {
-  const res = await fetch(url);
-  if (!res.ok) throw new ExportHttpError(res.status, url);
-  const source = await res.text();
-  const bytes = UTF8_ENCODER.encode(source).byteLength;
+  const local = await readLocalDatasetDocument(url);
+  let source: string;
+  let bytes: number;
+  if (local !== null) {
+    source = local.text;
+    bytes = local.bytes;
+  } else {
+    const res = await fetch(url);
+    if (!res.ok) throw new ExportHttpError(res.status, url);
+    source = await res.text();
+    bytes = UTF8_ENCODER.encode(source).byteLength;
+  }
   const maximumBytes = runtimeDocumentByteLimit(url);
   if (bytes > maximumBytes) {
     const compatibilityHint = isLocalPackExportUrl(url)
@@ -1764,7 +1783,9 @@ export function DataProvider({
               console.error(error.message);
               throw error;
             }
-            return versionExportUrl(`${base}/${rel}`, datasetIdentity);
+            return localDatasetVisualUri(
+              versionExportUrl(`${base}/${rel}`, datasetIdentity),
+            );
           },
           reportItemIconFailure: failure => itemIconFailureReporter.report(failure),
           getCachedRecipe: ref => recipeSessionCache.current.peek(ref),
