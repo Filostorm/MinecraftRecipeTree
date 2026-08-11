@@ -52,6 +52,15 @@ test('desktop and compact web title rows own the pack picker and local import ac
   );
 });
 
+test('current pack label shows its version as subtext in every header layout', () => {
+  assert.match(switcherSource, /style=\{styles\.compactDatasetVersion\}/u);
+  assert.match(switcherSource, /\{selected\.packVersion\}/u);
+  assert.match(
+    switcherSource,
+    /Current pack is \$\{selected\.displayName\}, version \$\{selected\.packVersion\}/u,
+  );
+});
+
 test('compact web keeps the Items and Graph picker outside the collapsible details area', () => {
   assert.match(
     appSource,

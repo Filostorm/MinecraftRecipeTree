@@ -731,27 +731,21 @@ export async function installLocalPackArchive(
     }
 
     const current = await readCatalog(cache);
-    const superseded = current.packs.filter(
-      pack =>
-        pack.publicationId !== publicationId &&
-        pack.displayName === descriptor.displayName &&
-        pack.minecraftVersion === descriptor.minecraftVersion,
-    );
     const nextRecord: LocalPackRecord = {...descriptor, storedAt: Date.now()};
     const retained = current.packs.filter(
-      pack =>
-        pack.publicationId !== publicationId &&
-        !superseded.some(oldPack => oldPack.publicationId === pack.publicationId),
+      pack => pack.publicationId !== publicationId,
     );
-    const nextPacks = [nextRecord, ...retained]
-      .sort((left, right) => right.storedAt - left.storedAt)
-      .slice(0, MAX_LOCAL_PACKS);
+    const orderedPacks = [nextRecord, ...retained].sort(
+      (left, right) => right.storedAt - left.storedAt,
+    );
+    const nextPacks = orderedPacks.slice(0, MAX_LOCAL_PACKS);
     await writeCatalog(cache, {format: LOCAL_CATALOG_FORMAT, packs: nextPacks});
 
     const retainedIds = new Set(nextPacks.map(pack => pack.publicationId));
     const publicationsToDelete = [
       ...new Set(
-        [...superseded, ...retained.slice(MAX_LOCAL_PACKS - 1)]
+        orderedPacks
+          .slice(MAX_LOCAL_PACKS)
           .filter(pack => !retainedIds.has(pack.publicationId))
           .map(pack => pack.publicationId),
       ),

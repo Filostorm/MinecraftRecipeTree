@@ -55,6 +55,24 @@ final class PackIdentityResolverTest {
     }
 
     @Test
+    void currentCurseForgeManifestVersionWinsOverLegacyFields() throws Exception {
+        Path gameDirectory = Files.createDirectory(temporaryDirectory.resolve("current-curseforge-pack"));
+        Files.writeString(gameDirectory.resolve("minecraftinstance.json"), """
+                {
+                  "name":"MeatballCraft Dimensional Ascension",
+                  "manifest":{"name":"Meatballcraft","version":"prerelease-0.18.5-hotfix2"},
+                  "profileVersion":"stale-version"
+                }
+                """);
+
+        PackIdentity identity = resolveWithoutProperties(gameDirectory, new TestDiagnostics());
+
+        assertEquals("MeatballCraft Dimensional Ascension", identity.name());
+        assertEquals("prerelease-0.18.5-hotfix2", identity.version());
+        assertEquals("curseforge", identity.identitySource());
+    }
+
+    @Test
     void resolvesContemporaryMultiMegabyteCurseForgeMetadata() throws Exception {
         Path gameDirectory = Files.createDirectory(temporaryDirectory.resolve("large-curseforge-pack"));
         Files.writeString(gameDirectory.resolve("minecraftinstance.json"),

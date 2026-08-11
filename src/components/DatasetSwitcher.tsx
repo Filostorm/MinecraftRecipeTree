@@ -93,12 +93,19 @@ export function DatasetSwitcher({
       accessibilityRole="button"
       accessibilityLabel={
         selected
-          ? `Change modpack. Current pack is ${selected.displayName}`
+          ? `Change modpack. Current pack is ${selected.displayName}, version ${selected.packVersion}`
           : 'Choose a modpack'
       }>
-      <Text style={styles.compactDatasetText} numberOfLines={1}>
-        {selectedLabel}
-      </Text>
+      <View style={styles.compactDatasetLabel}>
+        <Text style={styles.compactDatasetText} numberOfLines={1}>
+          {selectedLabel}
+        </Text>
+        {selected && (
+          <Text style={styles.compactDatasetVersion} numberOfLines={1}>
+            {selected.packVersion}
+          </Text>
+        )}
+      </View>
       <View style={styles.compactDatasetChevron}>
         <DisclosureChevron expanded={false} color={theme.accent} size={14} />
       </View>
@@ -321,7 +328,7 @@ const styles = StyleSheet.create({
     minWidth: 0,
     maxWidth: 220,
     flexShrink: 1,
-    minHeight: 34,
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -343,15 +350,28 @@ const styles = StyleSheet.create({
     minWidth: 140,
     maxWidth: 360,
   },
-  compactDatasetText: {
+  compactDatasetLabel: {
     minWidth: 0,
     flex: 1,
     flexShrink: 1,
+    alignItems: 'center',
+  },
+  compactDatasetText: {
+    minWidth: 0,
+    maxWidth: '100%',
     textAlign: 'center',
     color: theme.accent,
-    fontSize: 15,
-    lineHeight: 19,
+    fontSize: 14,
+    lineHeight: 17,
     fontWeight: '800',
+  },
+  compactDatasetVersion: {
+    maxWidth: '100%',
+    textAlign: 'center',
+    color: theme.textDim,
+    fontSize: 10,
+    lineHeight: 12,
+    fontWeight: '700',
   },
   compactDatasetChevron: {
     position: 'absolute',
