@@ -10,6 +10,7 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
+import net.minecraft.client.renderer.entity.NoopRenderer;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.util.Mth;
@@ -29,9 +30,10 @@ import java.util.Iterator;
 import java.util.List;
 
 /**
- * Mob phase: instantiates every living entity type (from every mod) in the client level
- * and renders it with the real entity renderer into a fixed-size transparent canvas,
- * scaled to fit its bounding box — same technique as the inventory player preview.
+ * Mob phase: instantiates every living entity type (from every mod) in the client level and
+ * renders visible mobs with the real entity renderer into a fixed-size transparent canvas,
+ * scaled to fit its bounding box — same technique as the inventory player preview. Internal
+ * helper entities explicitly registered with Minecraft's NoopRenderer are not mob catalog rows.
  */
 final class MobExporter implements ExportJob.PhaseRunner {
     private static final float YAW_DEGREES = 35f;
@@ -130,6 +132,13 @@ final class MobExporter implements ExportJob.PhaseRunner {
     }
 
     private boolean exportMob(EntityType<?> type, ResourceLocation id, LivingEntity entity) {
+        EntityRenderDispatcher dispatcher = Minecraft.getInstance().getEntityRenderDispatcher();
+        if (isNoopRendererType(dispatcher.getRenderer(entity).getClass())) {
+            JeiExportMod.LOGGER.info(
+                    "[jeiexport] Skipping internal entity {} because it is registered with NoopRenderer",
+                    id);
+            return false;
+        }
         int canvas = ctx.mobCanvas;
         float bbWidth = Math.max(entity.getBbWidth(), 0.05f);
         float bbHeight = Math.max(entity.getBbHeight(), 0.05f);
@@ -157,7 +166,7 @@ final class MobExporter implements ExportJob.PhaseRunner {
         });
         if (!hasVisiblePixel(sheet)) {
             sheet.close();
-            ctx.failure("mob " + id + " rendered fully transparent and was omitted");
+            ctx.warning("mob " + id + " rendered fully transparent and was omitted");
             return false;
         }
         String rel = ctx.uniquePath("mobs/" + Naming.sanitize(id.getNamespace()), id.getPath(), ".png");
@@ -202,6 +211,10 @@ final class MobExporter implements ExportJob.PhaseRunner {
         }
         mobsJson.add(mj);
         return true;
+    }
+
+    static boolean isNoopRendererType(Class<?> rendererType) {
+        return NoopRenderer.class.isAssignableFrom(rendererType);
     }
 
     private static boolean hasVisiblePixel(NativeImage image) {

@@ -150,7 +150,7 @@ final class BlockDropsExporter implements ExportJob.PhaseRunner {
             }
         }
         LootTable table = server.getLootData().getLootTable(block.getLootTable());
-        if (table == LootTable.EMPTY) {
+        if (LootSampler.isStructurallyEmpty(table)) {
             return;
         }
         Vec3 origin = Vec3.atCenterOf(level.getSharedSpawnPos());
@@ -176,7 +176,7 @@ final class BlockDropsExporter implements ExportJob.PhaseRunner {
         }
         if (bestScore < 0) {
             // Needs a tool none of our candidates qualify as (modded tiers); sample with a pickaxe.
-            ctx.failure("blockdrops " + ForgeRegistries.ITEMS.getKey(item)
+            ctx.warning("blockdrops " + ForgeRegistries.ITEMS.getKey(item)
                     + ": no standard candidate tool satisfies requiresCorrectToolForDrops; "
                     + "probing with a netherite pickaxe");
             bestTool = new ItemStack(Items.NETHERITE_PICKAXE);

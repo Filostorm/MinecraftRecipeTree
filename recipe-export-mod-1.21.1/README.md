@@ -19,7 +19,7 @@ requires one preview PNG for every declared recipe.
 
 ```bash
 JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home ./gradlew test build
-# -> build/libs/jeiexport-1.0.0.jar
+# -> build/libs/jeiexport-1.0.1.jar
 ```
 
 ## Use
