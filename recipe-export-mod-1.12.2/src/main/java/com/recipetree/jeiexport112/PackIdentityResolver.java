@@ -70,7 +70,10 @@ final class PackIdentityResolver {
             }
             JsonObject root = readJsonObject(candidate, JSON_METADATA_LIMIT, "CurseForge metadata");
             String name = requiredMetadataString(root, "name", candidate);
-            String version = optionalCurseForgeVersion(root, candidate);
+            String version = optionalNestedMetadataString(root, "manifest", "version", candidate);
+            if (version == null) {
+                version = optionalCurseForgeVersion(root, candidate);
+            }
             if (version == null) {
                 version = optionalMetadataString(root, "modpackVersion", candidate);
             }
@@ -82,6 +85,18 @@ final class PackIdentityResolver {
             return new PackIdentity(name, version, "curseforge");
         }
         return null;
+    }
+
+    private static String optionalNestedMetadataString(
+            JsonObject root, String objectField, String field, Path path) throws IOException {
+        if (!root.has(objectField) || root.get(objectField).isJsonNull()) {
+            return null;
+        }
+        if (!root.get(objectField).isJsonObject()) {
+            throw new IOException("Launcher metadata field " + objectField
+                    + " must be an object: " + path);
+        }
+        return optionalMetadataString(root.getAsJsonObject(objectField), field, path);
     }
 
     private static String optionalCurseForgeVersion(JsonObject root, Path path) throws IOException {
