@@ -18,7 +18,7 @@ const descriptor = {
   isDefault: true,
 };
 
-test('pins every verified MeatballCraft 0.18.6 RecipeStages assignment', () => {
+test('pins every verified MeatballCraft prerelease-0.18.6.4 RecipeStages assignment', () => {
   assert.equal(Object.keys(MEATBALLCRAFT_RECIPE_STAGES).length, 119);
   assert.equal(new Set(Object.values(MEATBALLCRAFT_RECIPE_STAGES)).size, 102);
   assert.equal(MEATBALLCRAFT_RECIPE_STAGES['crafttweaker:modular_controller'], 'modularstage');
@@ -81,7 +81,7 @@ test('exposes a complete publication-locked high-level stage catalog', () => {
     {
       id: 'crafttweaker:modular_controller',
       stage: 'modularstage',
-      ref: [0, 20049],
+      ref: [0, 21629],
       outputKeys: ['item|modularmachinery:blockcontroller'],
     },
   );

@@ -30,6 +30,12 @@ test('secondary information actions share one anchored header menu', () => {
     /accessibilityLabel=\{showInfoMenu \? 'Close information menu' : 'Open information menu'\}/u,
   );
   assert.match(appSource, /accessibilityRole="menu"/u);
+  assert.match(appSource, /onPointerDown=\{showInfoMenu \? closeInfoMenu : undefined\}/u);
+  assert.match(appSource, /onTouchStart=\{showInfoMenu \? closeInfoMenu : undefined\}/u);
+  assert.match(
+    appSource,
+    /style=\{styles\.infoMenuAnchor\}[\s\S]*?onPointerDown=\{event => event\.stopPropagation\(\)\}/u,
+  );
   assert.match(appSource, />\s*Details\s*</u);
   assert.match(appSource, />\s*Info\s*</u);
   assert.match(appSource, />\s*Bug report\s*</u);
@@ -75,6 +81,15 @@ test('compact web keeps the Items and Graph picker outside the collapsible detai
     appSource.indexOf('const fullWidthHeaderControls ='),
   );
   assert.doesNotMatch(compactDetails, /headerTabs|compactHeaderNavigation/u);
+});
+
+test('compact graph header labels the collapsed chevron button', () => {
+  assert.match(
+    appSource,
+    /!showGraphControls && \([\s\S]*?<Text style=\{styles\.graphControlsHeaderText\}>Graph controls<\/Text>[\s\S]*?<DisclosureChevron/u,
+  );
+  assert.match(appSource, /graphControlsHeaderButtonCollapsed:/u);
+  assert.match(appSource, /graphControlsHeaderText: \{color: theme\.text, fontSize: 13\}/u);
 });
 
 test('interface zoom accepts every bounded twenty-five-percent step', () => {

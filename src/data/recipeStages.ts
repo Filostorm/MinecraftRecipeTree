@@ -3,10 +3,10 @@ import type {Recipe} from '../types';
 import {MEATBALLCRAFT_RECIPE_STAGE_INDEX} from './meatballcraftRecipeStageIndex.generated.ts';
 
 export const MEATBALLCRAFT_STAGE_COMPATIBILITY_PUBLICATION_ID =
-  '04c674ab74eeeaea151c9b985191f09e2be42156a879bb0493e2e29f94f3d46a';
+  '18ca32e0cc84d739136a7f88fe2545504feab41c1a84f5a88ebe6189b9b8a4a1';
 
 /**
- * RecipeStages assignments from MeatballCraft 0.18.6's authoritative
+ * RecipeStages assignments from MeatballCraft prerelease-0.18.6.4's authoritative
  * CraftTweaker scripts, checked against every corresponding recipe ID in the
  * immutable publication above.
  */
@@ -270,7 +270,7 @@ export function applyRecipeStageMetadata(
   if (!loggedCompatibilityPublication) {
     loggedCompatibilityPublication = true;
     console.info(
-      'Applying the verified MeatballCraft 0.18.6 RecipeStages compatibility manifest.',
+      'Applying the verified MeatballCraft prerelease-0.18.6.4 RecipeStages compatibility manifest.',
       {
         publicationId: descriptor.publicationId,
         recipeAssignments: Object.keys(MEATBALLCRAFT_RECIPE_STAGES).length,

@@ -30,7 +30,7 @@ test('Cloudflare routes catalog, immutable datasets, and administration through 
   );
   assert.match(
     viteConfig,
-    /name:\s*['"]minecraft-recipe-tree-beta['"][\s\S]*?vars:\s*\{BETA_DATA_ORIGIN\}/,
+    /name:\s*['"]minecraft-recipe-tree-beta['"][\s\S]*?vars:\s*\{[\s\S]*?BETA_DATA_ORIGIN[\s\S]*?\}/,
     'the standalone beta Worker must have an isolated name and read-only production data origin',
   );
   assert.match(

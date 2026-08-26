@@ -10,6 +10,7 @@ import {
   ROOT_ATTACHED_ACTIONS_WIDTH,
   attachedRootVisualX,
   byproductSupplyEdges,
+  compactQuantityPlacement,
   layoutTree,
   shouldShowCompactQuantity,
 } from './layout.ts';
@@ -78,6 +79,14 @@ test('hides compact quantities wider than half of the item icon', () => {
     () => shouldShowCompactQuantity('×1', 0),
     /positive finite number/,
   );
+});
+
+test('moves every wide compact quantity into a tooltip', () => {
+  assert.equal(compactQuantityPlacement('×12'), 'badge');
+  assert.equal(compactQuantityPlacement('×123'), 'tooltip');
+  assert.equal(compactQuantityPlacement('1 mB'), 'tooltip');
+  assert.equal(compactQuantityPlacement('20k mB'), 'tooltip');
+  assert.equal(compactQuantityPlacement('8192 EMC'), 'tooltip');
 });
 
 function deepChain(nodeCount) {

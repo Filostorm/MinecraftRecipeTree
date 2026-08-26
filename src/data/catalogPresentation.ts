@@ -68,13 +68,22 @@ export function normalizeCatalogItemNames(
  */
 export function isItemCatalogEligible(item: CatalogItem): boolean {
   const normalizedType = normalizedCustomType(item.t ?? '');
+  const normalizedMod = item.m.toLocaleLowerCase();
+  const normalizedId = item.id.toLocaleLowerCase();
+  const isAppliedEnergisticsFacade =
+    (normalizedMod === 'appliedenergistics2' ||
+      normalizedMod === 'ae2' ||
+      normalizedId.startsWith('appliedenergistics2:') ||
+      normalizedId.startsWith('ae2:')) &&
+    (normalizedId.endsWith(':facade') || normalizedId.includes(':facade_'));
   const isSyntheticEnderIoEnergy =
     item.m === 'enderio' &&
     item.id === 'enderio:energy' &&
     normalizedType.includes(SYNTHETIC_ENDER_IO_ENERGY_TYPE);
   return (
     !normalizedType.includes(SYNTHETIC_MULTIBLOCK_TYPE) &&
-    !isSyntheticEnderIoEnergy
+    !isSyntheticEnderIoEnergy &&
+    !isAppliedEnergisticsFacade
   );
 }
 

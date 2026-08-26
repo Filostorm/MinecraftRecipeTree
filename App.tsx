@@ -507,7 +507,10 @@ function Shell({
   ) : null;
   const closeInfoMenu = () => setShowInfoMenu(false);
   const infoMenu = (
-    <View style={styles.infoMenuAnchor}>
+    <View
+      style={styles.infoMenuAnchor}
+      onPointerDown={event => event.stopPropagation()}
+      onTouchStart={event => event.stopPropagation()}>
       <TouchableOpacity
         {...signalTarget('header.info-menu')}
         style={[
@@ -653,12 +656,16 @@ function Shell({
         accessibilityState={{expanded: showGraphControls}}
         style={[
           styles.graphControlsHeaderButton,
+          !showGraphControls && styles.graphControlsHeaderButtonCollapsed,
           showGraphControls && styles.headerUtilityButtonActive,
         ]}
         onPress={() => {
           lightImpactFeedback();
           setShowGraphControls(value => !value);
         }}>
+        {!showGraphControls && (
+          <Text style={styles.graphControlsHeaderText}>Graph controls</Text>
+        )}
         <DisclosureChevron
           expanded={showGraphControls}
           color={showGraphControls ? theme.accent : theme.textDim}
@@ -668,7 +675,10 @@ function Shell({
       </TouchableOpacity>
     ) : null;
   return (
-    <View style={styles.shell}>
+    <View
+      style={styles.shell}
+      onPointerDown={showInfoMenu ? closeInfoMenu : undefined}
+      onTouchStart={showInfoMenu ? closeInfoMenu : undefined}>
       <View style={[styles.headerSurface, scaledHeaderStyle]}>
         {renderControls(
           data.manifest,
@@ -1033,6 +1043,14 @@ const styles = StyleSheet.create({
     borderColor: theme.borderLight,
     backgroundColor: theme.panelAlt,
   },
+  graphControlsHeaderButtonCollapsed: {
+    width: 'auto',
+    minWidth: 118,
+    paddingHorizontal: 10,
+    flexDirection: 'row',
+    gap: 6,
+  },
+  graphControlsHeaderText: {color: theme.text, fontSize: 13},
   recipeStagesHeaderButton: {width: 'auto', minWidth: 72, paddingHorizontal: 8},
   recipeStagesHeaderText: {color: theme.text, fontSize: 11, fontWeight: '800'},
   recipeStagesHeaderTextActive: {color: theme.accent},

@@ -19,6 +19,65 @@ const FORWARDED_REQUEST_HEADERS = [
 
 type UpstreamFetch = (request: Request) => Promise<Response>;
 
+const CONTENT_ID_PATTERN = /^[a-f0-9]{64}$/;
+const DATASET_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+interface BetaCandidateOverride {
+  slug: string;
+  publicationId: string;
+  previewAssetSetId: string;
+  packVersion: string;
+}
+
+function betaCandidateOverride(runtime: DatasetRuntime): BetaCandidateOverride | null {
+  const values = [
+    runtime.BETA_CANDIDATE_DATASET_SLUG,
+    runtime.BETA_CANDIDATE_PUBLICATION_ID,
+    runtime.BETA_CANDIDATE_PREVIEW_ASSET_SET_ID,
+    runtime.BETA_CANDIDATE_PACK_VERSION,
+  ];
+  if (values.every(value => value === undefined)) return null;
+  if (values.some(value => value === undefined)) {
+    throw new Error('Every BETA_CANDIDATE_* catalog override value must be configured together.');
+  }
+  const [slug, publicationId, previewAssetSetId, packVersion] = values as string[];
+  if (
+    !DATASET_SLUG_PATTERN.test(slug) ||
+    !CONTENT_ID_PATTERN.test(publicationId) ||
+    !CONTENT_ID_PATTERN.test(previewAssetSetId) ||
+    packVersion.length === 0 ||
+    packVersion.length > 80 ||
+    packVersion.trim() !== packVersion
+  ) {
+    throw new Error('The BETA_CANDIDATE_* catalog override is invalid.');
+  }
+  return {slug, publicationId, previewAssetSetId, packVersion};
+}
+
+function candidateCatalogBody(body: ArrayBuffer, candidate: BetaCandidateOverride): string {
+  const value = JSON.parse(new TextDecoder().decode(body)) as {
+    datasets?: Array<Record<string, unknown>>;
+  };
+  if (!Array.isArray(value.datasets)) {
+    throw new Error('The production dataset catalog is not an object with a datasets array.');
+  }
+  const matches = value.datasets.filter(dataset => dataset.slug === candidate.slug);
+  if (matches.length !== 1) {
+    throw new Error(`The production dataset catalog must contain beta candidate slug ${candidate.slug} exactly once.`);
+  }
+  value.datasets = value.datasets.map(dataset =>
+    dataset.slug === candidate.slug
+      ? {
+          ...dataset,
+          packVersion: candidate.packVersion,
+          publicationId: candidate.publicationId,
+          previewAssetSetId: candidate.previewAssetSetId,
+        }
+      : dataset,
+  );
+  return `${JSON.stringify(value)}\n`;
+}
+
 function betaDataOrigin(value: string): URL {
   let origin: URL;
   try {
@@ -108,9 +167,16 @@ export async function proxyBetaDatasetRequest(
   if (request.method === 'GET' && BETA_DATA_PROXY_PATHS.some(path => url.pathname === path)) {
     // Catalog responses are small. Reframe them at the beta edge so an upstream Worker's
     // compression/framing headers cannot leave a browser fetch waiting on a transformed stream.
-    const body = await upstreamResponse.arrayBuffer();
+    const upstreamBody = await upstreamResponse.arrayBuffer();
+    const candidate = url.pathname === '/api/datasets' && upstreamResponse.ok
+      ? betaCandidateOverride(runtime)
+      : null;
+    const body = candidate ? candidateCatalogBody(upstreamBody, candidate) : upstreamBody;
+    const bodyLength = typeof body === 'string'
+      ? new TextEncoder().encode(body).byteLength
+      : body.byteLength;
     responseHeaders.delete('content-encoding');
-    responseHeaders.set('content-length', String(body.byteLength));
+    responseHeaders.set('content-length', String(bodyLength));
     return new Response(body, {
       status: upstreamResponse.status,
       statusText: upstreamResponse.statusText,
