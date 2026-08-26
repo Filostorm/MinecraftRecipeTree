@@ -3,6 +3,18 @@
 This file contains release-ready notes for the Minecraft exporter builds. The generated exporter
 manifest remains the source of truth for downloadable filenames, checksums, and compatibility.
 
+## 2026-08-26 — GTNH Avaritia cosmic icons
+
+- GTNH NEI 1.7.10: **1.0.151**
+
+### Fixed
+
+- Validate and, when necessary, initialize Avaritia 1.77's native cosmic shader before capturing
+  Infinity equipment, Matter Clusters, and other cosmic inventory icons.
+- Recover a stale Minecraft shader-support flag only when the active OpenGL context exposes the
+  required shader objects, and fail the export explicitly instead of publishing an unshaded mask.
+- Restore Avaritia's transient shader state after every adapted inventory draw.
+
 ## 2026-08-26
 
 ### Fluid and oversized AvaritiaItem catalog icons
@@ -116,7 +128,7 @@ These builds are unchanged by the 2026-08-08 release:
 | 1.21.1 | JEI 19 | NeoForge 21.1 | 1.0.0 | Current |
 | 1.20.1 | JEI 15 | Forge 47 | 1.1.0 | Current public release; 1.2.0 beta remains in testing |
 | 1.18.2 | REI 8 | Forge 40 | 1.0.52 | Current |
-| 1.7.10 | NEI 2.8.44-GTNH | Forge 10.13.4 | 1.0.150 | Current |
+| 1.7.10 | NEI 2.8.44-GTNH | Forge 10.13.4 | 1.0.151 | Current |
 
 ## Copy-ready release summary
 

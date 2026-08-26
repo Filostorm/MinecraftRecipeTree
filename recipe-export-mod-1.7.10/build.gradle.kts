@@ -8,7 +8,7 @@ plugins {
 apply(from = "gradle/exporter-provenance.gradle")
 
 group = "com.recipetree"
-version = "1.0.150"
+version = "1.0.151"
 
 val minecraftPin = "1.7.10"
 val forgePin = "10.13.4.1614"
