@@ -1406,6 +1406,7 @@ function allowedApplicationUpstreamMediaTypes(pathname) {
   if (pathname === '/favicon.ico') return APPLICATION_UPSTREAM_MEDIA_TYPES['.ico'];
   if (pathname === '/favicon.svg') return APPLICATION_UPSTREAM_MEDIA_TYPES['.svg'];
   if (pathname === '/apple-touch-icon.png') return APPLICATION_UPSTREAM_MEDIA_TYPES['.png'];
+  if (pathname === '/local-pack-sw.js') return APPLICATION_UPSTREAM_MEDIA_TYPES['.js'];
   if (typeof pathname !== 'string' || !pathname.startsWith('/assets/')) {
     throw new Error(
       `Benchmark proxy refuses non-allowlisted application resource ${JSON.stringify(pathname)}.`,

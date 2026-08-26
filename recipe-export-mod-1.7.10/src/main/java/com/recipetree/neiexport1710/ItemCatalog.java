@@ -193,7 +193,7 @@ final class ItemCatalog {
                 + Naming.sha256(identity.key) + ".png";
         final IconRenderResult rendered;
         try {
-            rendered = renderIcon(stack);
+            rendered = renderIcon(stack, identity.key);
         } catch (Throwable error) {
             FatalErrors.rethrowIfFatal(error);
             throw new ExportFailure("ITEM_ICON_RENDER", identity.key, error);
@@ -291,9 +291,11 @@ final class ItemCatalog {
         return known;
     }
 
-    private IconRenderResult renderIcon(ItemStack source) throws Exception {
+    private IconRenderResult renderIcon(ItemStack source, final String canonicalKey) throws Exception {
         final ItemStack stack = source.copy();
         stack.stackSize = 1;
+        final AvaritiaCosmicIconRenderer avaritiaCosmicRenderer =
+                AvaritiaCosmicIconRenderer.createIfTarget(stack);
         final boolean adaptedBotaniaCocoon =
                 StackIdentity.isPinnedBotaniaCocoonIconTarget(stack);
         final boolean adaptedBotaniaPrism =
@@ -438,6 +440,18 @@ final class ItemCatalog {
                             }
                         };
                     }
+                    final OffscreenRenderer.DrawCall avaritiaCompatibleDraw;
+                    if (avaritiaCosmicRenderer == null) {
+                        avaritiaCompatibleDraw = projectBlueCompatibleDraw;
+                    } else {
+                        avaritiaCompatibleDraw = new OffscreenRenderer.DrawCall() {
+                            @Override
+                            public void draw() throws Exception {
+                                avaritiaCosmicRenderer.drawExactlyOnce(
+                                        projectBlueCompatibleDraw, canonicalKey);
+                            }
+                        };
+                    }
                     if (adaptedDraconicMobSoul) {
                         DraconicMobSoulIconRenderer.draw(renderIdentity);
                     } else if (buildCraftFacadeRenderer != null) {
@@ -447,9 +461,9 @@ final class ItemCatalog {
                     } else if (crossingRenderer != null) {
                         crossingRenderer.draw(stack);
                     } else if (flagRenderer == null) {
-                        projectBlueCompatibleDraw.draw();
+                        avaritiaCompatibleDraw.draw();
                     } else {
-                        flagRenderer.drawExactlyOnce(projectBlueCompatibleDraw);
+                        flagRenderer.drawExactlyOnce(avaritiaCompatibleDraw);
                     }
                 } finally {
                     GL11.glPopMatrix();

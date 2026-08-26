@@ -8,17 +8,27 @@ import mezz.jei.api.ingredients.VanillaTypes;
 import mezz.jei.api.recipe.IIngredientType;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.GlStateManager;
+import net.minecraft.client.renderer.OpenGlHelper;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.client.renderer.texture.TextureMap;
 import net.minecraft.enchantment.EnchantmentData;
 import net.minecraft.init.Items;
 import net.minecraft.item.ItemStack;
+import net.minecraftforge.fluids.Fluid;
+import net.minecraftforge.fluids.FluidStack;
 
+import java.awt.AlphaComposite;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.HashSet;
 import java.util.Locale;
 import java.util.Set;
+import org.lwjgl.opengl.ContextCapabilities;
+import org.lwjgl.opengl.GLContext;
 
 final class ItemCatalog {
     private final ExportContext context;
@@ -244,18 +254,36 @@ final class ItemCatalog {
             path += "__" + Naming.hash8(uid);
         }
         final int scale = context.request.iconScale;
-        BufferedImage image = renderIngredient(renderer, catalogIngredient, scale);
-        String unusableReason = RenderedIconValidation.unusableReason(image);
-        if (RenderedIconValidation.FULLY_TRANSPARENT.equals(unusableReason)) {
-            BufferedImage overscan = renderIngredientWithOverscan(renderer, catalogIngredient, scale);
-            if (RenderedIconValidation.unusableReason(overscan) == null) {
-                image = overscan;
-                unusableReason = null;
-                context.warning("NATIVE_ICON_OVERSCAN_RECOVERY_APPLIED ingredient " + key +
-                        ": the exact 16x16 HEI draw was fully transparent; a second native HEI draw " +
-                        "on a 32x32 logical framebuffer produced visible pixels in the exact 16x16 " +
-                        "center crop; no interpolation or synthetic pixels were used");
+        AvaritiaShaderScope shaderScope = prepareAvaritiaShader(catalogIngredient, key);
+        BufferedImage image;
+        String unusableReason;
+        try {
+            boolean fitOversizedItem = requiresOversizedItemFit(catalogIngredient);
+            image = fitOversizedItem
+                    ? renderIngredientWithVisibleBoundsFit(renderer, catalogIngredient, scale)
+                    : renderIngredient(renderer, catalogIngredient, scale);
+            if (fitOversizedItem) {
+                JeiExportMod.LOGGER.info(
+                        "[jeiexport] AVARITIA_ITEM_ICON_FIT_APPLIED ingredient={}; rendered the " +
+                                "native oversized item on a bounded canvas and fit its visible pixels " +
+                                "into the 16x16 catalog icon",
+                        key);
             }
+            unusableReason = RenderedIconValidation.unusableReason(image);
+            if (RenderedIconValidation.FULLY_TRANSPARENT.equals(unusableReason)) {
+                BufferedImage overscan = renderIngredientWithOverscan(
+                        renderer, catalogIngredient, scale);
+                if (RenderedIconValidation.unusableReason(overscan) == null) {
+                    image = overscan;
+                    unusableReason = null;
+                    context.warning("NATIVE_ICON_OVERSCAN_RECOVERY_APPLIED ingredient " + key +
+                            ": the exact 16x16 HEI draw was fully transparent; a second native HEI draw " +
+                            "on a 32x32 logical framebuffer produced visible pixels in the exact 16x16 " +
+                            "center crop; no interpolation or synthetic pixels were used");
+                }
+            }
+        } finally {
+            shaderScope.close();
         }
         if (unusableReason != null) {
             context.warning("UPSTREAM_NATIVE_ICON_UNAVAILABLE ingredient " + key + ": " +
@@ -279,16 +307,25 @@ final class ItemCatalog {
      */
     @SuppressWarnings("unchecked")
     static <T> T catalogRenderIngredient(IIngredientType<T> type, T ingredient) {
-        if (type != VanillaTypes.ITEM) {
-            return ingredient;
+        if (type == VanillaTypes.ITEM) {
+            if (!(ingredient instanceof ItemStack)) {
+                throw new IllegalArgumentException("HEI ITEM ingredient was not an ItemStack: " +
+                        (ingredient == null ? "null" : ingredient.getClass().getName()));
+            }
+            ItemStack renderStack = ((ItemStack) ingredient).copy();
+            renderStack.setCount(1);
+            return (T) renderStack;
         }
-        if (!(ingredient instanceof ItemStack)) {
-            throw new IllegalArgumentException("HEI ITEM ingredient was not an ItemStack: " +
-                    (ingredient == null ? "null" : ingredient.getClass().getName()));
+        if (type == VanillaTypes.FLUID) {
+            if (!(ingredient instanceof FluidStack)) {
+                throw new IllegalArgumentException("HEI FLUID ingredient was not a FluidStack: " +
+                        (ingredient == null ? "null" : ingredient.getClass().getName()));
+            }
+            FluidStack renderStack = ((FluidStack) ingredient).copy();
+            renderStack.amount = Fluid.BUCKET_VOLUME;
+            return (T) renderStack;
         }
-        ItemStack renderStack = ((ItemStack) ingredient).copy();
-        renderStack.setCount(1);
-        return (T) renderStack;
+        return ingredient;
     }
 
     private <T> BufferedImage renderIngredient(final IIngredientRenderer<T> renderer,
@@ -323,6 +360,225 @@ final class ItemCatalog {
             }
         });
         return exactCrop(overscan, physicalMargin, physicalMargin, iconSize, iconSize);
+    }
+
+    /**
+     * AvaritiaItem's native GUI renderer deliberately draws halos beyond the normal item quad.
+     * A 16x16 framebuffer clips that halo before readback, leaving only the center glyph. Render
+     * the same native model with the largest supported halo margin and fit its actual alpha bounds
+     * into the catalog raster. The adaptation is class-based so scripted AvaritiaItem entries keep
+     * their configured texture, mask, color, and opacity without item-id substitutions.
+     */
+    private <T> BufferedImage renderIngredientWithVisibleBoundsFit(
+            final IIngredientRenderer<T> renderer, final T ingredient, final int scale)
+            throws Exception {
+        final int logicalCanvasSize = 64;
+        final int logicalItemOrigin = 24;
+        BufferedImage overscan = context.renderer.render(
+                logicalCanvasSize * scale, logicalCanvasSize * scale, minecraft -> {
+                    GlStateManager.pushMatrix();
+                    try {
+                        GlStateManager.scale(scale, scale, 1.0F);
+                        GlStateManager.color(1.0F, 1.0F, 1.0F, 1.0F);
+                        renderer.render(
+                                minecraft, logicalItemOrigin, logicalItemOrigin, ingredient);
+                    } finally {
+                        GlStateManager.popMatrix();
+                    }
+                });
+        return fitVisiblePixels(overscan, 16 * scale, scale);
+    }
+
+    static boolean requiresOversizedItemFit(Object ingredient) throws Exception {
+        if (!(ingredient instanceof ItemStack)) {
+            return false;
+        }
+        ItemStack stack = (ItemStack) ingredient;
+        Class<?> haloInterface = findNamedInterface(
+                stack.getItem().getClass(), "morph.avaritia.api.IHaloRenderItem");
+        if (haloInterface == null) {
+            return false;
+        }
+        Method shouldDrawHalo = haloInterface.getMethod("shouldDrawHalo", ItemStack.class);
+        return Boolean.TRUE.equals(shouldDrawHalo.invoke(stack.getItem(), stack));
+    }
+
+    private AvaritiaShaderScope prepareAvaritiaShader(Object ingredient, String key)
+            throws Exception {
+        if (!(ingredient instanceof ItemStack)) {
+            return AvaritiaShaderScope.NOOP;
+        }
+        ItemStack stack = (ItemStack) ingredient;
+        Class<?> itemClass = stack.getItem().getClass();
+        if (!isAvaritiaItemClass(itemClass) || findNamedInterface(
+                itemClass, "morph.avaritia.api.ICosmicRenderItem") == null) {
+            return AvaritiaShaderScope.NOOP;
+        }
+
+        boolean previousShaderSupport = OpenGlHelper.shadersSupported;
+        if (!previousShaderSupport) {
+            ContextCapabilities capabilities = GLContext.getCapabilities();
+            boolean shaderObjectsAvailable = capabilities.OpenGL20 ||
+                    (capabilities.GL_ARB_shader_objects &&
+                            capabilities.GL_ARB_vertex_shader &&
+                            capabilities.GL_ARB_fragment_shader);
+            if (!shaderObjectsAvailable) {
+                throw new IllegalStateException(
+                        "AvaritiaItem cosmic icon " + key + " requires GLSL shader objects, but " +
+                                "the active Minecraft OpenGL context does not provide them");
+            }
+            OpenGlHelper.shadersSupported = true;
+            JeiExportMod.LOGGER.info(
+                    "[jeiexport] AVARITIA_ITEM_SHADER_SUPPORT_RECOVERED ingredient={}; the active " +
+                            "OpenGL context exposes shader objects even though Minecraft's cached " +
+                            "shader-support flag was false",
+                    key);
+        }
+
+        boolean initialized = false;
+        try {
+            Class<?> shaderHelper = Class.forName(
+                    "morph.avaritia.client.render.shader.ShaderHelper");
+            Field cosmicShader = shaderHelper.getField("cosmicShader");
+            int program = cosmicShader.getInt(null);
+            if (program <= 0) {
+                shaderHelper.getMethod("initShaders").invoke(null);
+                program = cosmicShader.getInt(null);
+                initialized = true;
+            }
+            if (program <= 0) {
+                throw new IllegalStateException(
+                        "AvaritiaItem cosmic shader initialization returned program " + program);
+            }
+            if (initialized) {
+                JeiExportMod.LOGGER.info(
+                        "[jeiexport] AVARITIA_ITEM_COSMIC_SHADER_INITIALIZED ingredient={} program={}",
+                        key, program);
+            }
+            return new AvaritiaShaderScope(previousShaderSupport);
+        } catch (Throwable throwable) {
+            OpenGlHelper.shadersSupported = previousShaderSupport;
+            FatalErrors.rethrowIfFatal(throwable);
+            if (throwable instanceof Exception) {
+                throw (Exception) throwable;
+            }
+            throw new IllegalStateException("AvaritiaItem cosmic shader preparation failed", throwable);
+        }
+    }
+
+    private static boolean isAvaritiaItemClass(Class<?> itemClass) {
+        while (itemClass != null) {
+            if (isAvaritiaItemClassName(itemClass.getName())) {
+                return true;
+            }
+            itemClass = itemClass.getSuperclass();
+        }
+        return false;
+    }
+
+    private static Class<?> findNamedInterface(Class<?> type, String interfaceName) {
+        if (type == null) {
+            return null;
+        }
+        for (Class<?> candidate : type.getInterfaces()) {
+            if (interfaceName.equals(candidate.getName())) {
+                return candidate;
+            }
+            Class<?> nested = findNamedInterface(candidate, interfaceName);
+            if (nested != null) {
+                return nested;
+            }
+        }
+        return findNamedInterface(type.getSuperclass(), interfaceName);
+    }
+
+    static boolean isAvaritiaItemClassName(String className) {
+        return className != null && className.startsWith("top.suyarong.items.Avaritia");
+    }
+
+    private static final class AvaritiaShaderScope {
+        static final AvaritiaShaderScope NOOP = new AvaritiaShaderScope(null);
+        private final Boolean previousShaderSupport;
+
+        AvaritiaShaderScope(Boolean previousShaderSupport) {
+            this.previousShaderSupport = previousShaderSupport;
+        }
+
+        void close() {
+            if (previousShaderSupport != null) {
+                OpenGlHelper.shadersSupported = previousShaderSupport.booleanValue();
+            }
+        }
+    }
+
+    static BufferedImage fitVisiblePixels(BufferedImage source, int targetSize, int padding) {
+        if (source == null) {
+            throw new IllegalArgumentException("cannot fit a null native render");
+        }
+        if (targetSize <= 0 || padding < 0) {
+            throw new IllegalArgumentException(
+                    "invalid visible-pixel fit target=" + targetSize + " padding=" + padding);
+        }
+        int minX = source.getWidth();
+        int minY = source.getHeight();
+        int maxX = -1;
+        int maxY = -1;
+        for (int y = 0; y < source.getHeight(); y++) {
+            for (int x = 0; x < source.getWidth(); x++) {
+                if ((source.getRGB(x, y) >>> 24) != 0) {
+                    minX = Math.min(minX, x);
+                    minY = Math.min(minY, y);
+                    maxX = Math.max(maxX, x);
+                    maxY = Math.max(maxY, y);
+                }
+            }
+        }
+        if (maxX < minX || maxY < minY) {
+            throw new IllegalArgumentException("native oversized item render was fully transparent");
+        }
+
+        int visibleWidth = maxX - minX + 1;
+        int visibleHeight = maxY - minY + 1;
+        int cropSize = Math.max(visibleWidth, visibleHeight) + padding * 2;
+        int centerX = (minX + maxX + 1) / 2;
+        int centerY = (minY + maxY + 1) / 2;
+        int cropX = centerX - cropSize / 2;
+        int cropY = centerY - cropSize / 2;
+        if (cropX < 0 || cropY < 0 ||
+                cropX + cropSize > source.getWidth() ||
+                cropY + cropSize > source.getHeight()) {
+            throw new IllegalArgumentException(
+                    "native oversized item exceeded the bounded " + source.getWidth() + "x" +
+                            source.getHeight() + " canvas; visible bounds=" + minX + "," + minY +
+                            ".." + maxX + "," + maxY + " padding=" + padding);
+        }
+
+        BufferedImage fitted = new BufferedImage(targetSize, targetSize, BufferedImage.TYPE_INT_ARGB);
+        int destinationSize = Math.min(targetSize, cropSize);
+        int destinationOffset = (targetSize - destinationSize) / 2;
+        Graphics2D graphics = fitted.createGraphics();
+        try {
+            graphics.setComposite(AlphaComposite.Src);
+            graphics.setRenderingHint(
+                    RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            graphics.setRenderingHint(
+                    RenderingHints.KEY_ALPHA_INTERPOLATION,
+                    RenderingHints.VALUE_ALPHA_INTERPOLATION_QUALITY);
+            graphics.drawImage(
+                    source,
+                    destinationOffset,
+                    destinationOffset,
+                    destinationOffset + destinationSize,
+                    destinationOffset + destinationSize,
+                    cropX,
+                    cropY,
+                    cropX + cropSize,
+                    cropY + cropSize,
+                    null);
+        } finally {
+            graphics.dispose();
+        }
+        return fitted;
     }
 
     static BufferedImage exactCrop(BufferedImage source, int x, int y, int width, int height) {

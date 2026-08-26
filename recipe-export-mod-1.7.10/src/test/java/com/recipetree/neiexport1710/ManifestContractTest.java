@@ -890,7 +890,8 @@ public class ManifestContractTest {
         nei.addProperty("adaptedIc2FluidCannerRecipeWidgetRenderInvocations", 5);
         nei.addProperty("adaptedBuildCraftPhasedFacadeItemIcons", 4);
         nei.addProperty("adaptedMobsInfoInfernalPreviewOutputIcons", 58);
-        nei.addProperty("adaptedMobsInfoPreviewSlotIcons", 6093);
+        nei.addProperty("adaptedMobsInfoPreviewSlotIcons",
+                MobsInfoSemanticAdapter.EXPECTED_PREVIEW_SLOT_ICONS);
         nei.addProperty("adaptedDraconicMobSoulItemIcons", 399);
         nei.addProperty("normalizedTcnaAspectCostInputOccurrences", 7);
         nei.addProperty("normalizedTcnaAspectCostDistinctKeys", 3);

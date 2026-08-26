@@ -1614,7 +1614,8 @@ final class ExportJob {
                 || context.adaptedBuildCraftPhasedFacadeItemIcons
                 != BuildCraftPhasedFacadeIconRenderer.EXPECTED_ITEM_ICONS
                 || context.adaptedMobsInfoInfernalPreviewOutputIcons != 58
-                || context.adaptedMobsInfoPreviewSlotIcons != 6093
+                || context.adaptedMobsInfoPreviewSlotIcons
+                != MobsInfoSemanticAdapter.EXPECTED_PREVIEW_SLOT_ICONS
                 || !GalacticraftCircuitFabricatorSemanticAdapter.completedContract()
                 || context.normalizedTcnaAspectCostInputOccurrences <= 0
                 || context.normalizedTcnaAspectCostDistinctKeys <= 0

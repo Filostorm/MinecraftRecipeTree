@@ -7,12 +7,12 @@ const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === 'seatbelt';
 const isCloudflareBeta = process.env.MRT_DEPLOY_TARGET === 'cloudflare-beta';
 const isCloudflareProduction = process.env.MRT_DEPLOY_TARGET === 'cloudflare-production';
 const BETA_DATA_ORIGIN = 'https://minecraftrecipetree.craftsmannsoftware.com';
-const BETA_CANDIDATE_DATASET_SLUG = 'meatballcraft';
+const BETA_CANDIDATE_DATASET_SLUG = 'gt-new-horizons';
 const BETA_CANDIDATE_PUBLICATION_ID =
-  '18ca32e0cc84d739136a7f88fe2545504feab41c1a84f5a88ebe6189b9b8a4a1';
+  '645b42d21ecb44a6e844cdbd02a88266b6123039557cf7aa49321c06d35c0b0f';
 const BETA_CANDIDATE_PREVIEW_ASSET_SET_ID =
-  '2a96514f1d9ebb416deb5db862c17fffd5e9ebafb172541e8be7023bb1b83d28';
-const BETA_CANDIDATE_PACK_VERSION = 'prerelease-0.18.6.4';
+  '75a9410ccc9c90813140ce8d22b6380a4f441e2a23f989182de92e31dc13487d';
+const BETA_CANDIDATE_PACK_VERSION = '2.8.4';
 const SITE_CREATOR_PLACEHOLDER_DATABASE_ID = '00000000-0000-4000-8000-000000000000';
 const CLOUDFLARE_BETA_DATABASE_ID = '8e0218ae-8adc-4a3b-a381-c11020757009';
 const CLOUDFLARE_BETA_DATABASE_NAME = 'minecraft-recipe-tree-beta';

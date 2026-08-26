@@ -6,6 +6,12 @@ const SYNTHETIC_MULTIBLOCK_TYPE = 'genericmultiblockingredient';
 const SYNTHETIC_ENDER_IO_ENERGY_TYPE =
   'crazypants.enderio.base.integration.jei.energy.energyingredient';
 const MINECRAFT_FORMATTING_CODE = /\u00a7[0-9a-fk-orx]/gi;
+const COVER_CARRIER_ITEM_IDS = new Set([
+  'cb_microblock:microblock',
+  'forgemicroblock:microblock',
+  'microblockcbe:microblock',
+  'thermaldynamics:cover',
+]);
 
 const CUSTOM_TYPE_LABELS: ReadonlyArray<readonly [needle: string, label: string]> = [
   ['energyingredient', 'Energy'],
@@ -76,6 +82,7 @@ export function isItemCatalogEligible(item: CatalogItem): boolean {
       normalizedId.startsWith('appliedenergistics2:') ||
       normalizedId.startsWith('ae2:')) &&
     (normalizedId.endsWith(':facade') || normalizedId.includes(':facade_'));
+  const isCoverCarrier = COVER_CARRIER_ITEM_IDS.has(normalizedId);
   const isSyntheticEnderIoEnergy =
     item.m === 'enderio' &&
     item.id === 'enderio:energy' &&
@@ -83,7 +90,8 @@ export function isItemCatalogEligible(item: CatalogItem): boolean {
   return (
     !normalizedType.includes(SYNTHETIC_MULTIBLOCK_TYPE) &&
     !isSyntheticEnderIoEnergy &&
-    !isAppliedEnergisticsFacade
+    !isAppliedEnergisticsFacade &&
+    !isCoverCarrier
   );
 }
 

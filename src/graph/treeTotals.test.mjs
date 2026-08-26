@@ -223,6 +223,68 @@ test('byproduct coverage marks an ingredient complete and preserves excess outpu
   });
 });
 
+test('selected recipe output beyond the requested amount remains as a byproduct', () => {
+  const root = item('root', 'item|test:plate', 3, {
+    source: {
+      id: 'root.s',
+      kind: 'recipe',
+      recipe: {out: [[['item|test:plate', 4]]]},
+      inputs: [item('root.s.0', 'item|test:ingot', 2)],
+    },
+  });
+
+  const totals = calculateTreeTotals(root, true);
+  assert.deepEqual(totals.byproducts, [
+    {
+      key: 'item|test:plate',
+      amount: 1,
+      variants: 1,
+      tag: undefined,
+    },
+  ]);
+});
+
+test('selected recipe overproduction can supply another matching input', () => {
+  const suppliedPlate = item('root.s.1', 'item|test:plate', 1);
+  const root = item('root', 'item|test:machine', 1, {
+    source: {
+      id: 'root.s',
+      kind: 'recipe',
+      recipe: {out: [[['item|test:machine', 1]]]},
+      inputs: [
+        item('root.s.0', 'item|test:plate', 3, {
+          source: {
+            id: 'root.s.0.s',
+            kind: 'recipe',
+            recipe: {out: [[['item|test:plate', 4]]]},
+            inputs: [item('root.s.0.s.0', 'item|test:ingot', 2)],
+          },
+        }),
+        suppliedPlate,
+      ],
+    },
+  });
+
+  const totals = calculateTreeTotals(root, true);
+  assert.deepEqual(totals.inputs, [
+    {
+      key: 'item|test:ingot',
+      amount: 2,
+      variants: 1,
+      tag: undefined,
+    },
+  ]);
+  assert.deepEqual(totals.byproducts, []);
+  assert.deepEqual(totals.byproductCoverageByNode.get(suppliedPlate.id), {
+    nodeId: suppliedPlate.id,
+    key: suppliedPlate.key,
+    requiredAmount: 1,
+    creditedAmount: 1,
+    remainingAmount: 0,
+    allocations: [{producerSourceId: 'root.s.0.s', amount: 1}],
+  });
+});
+
 test('a partially credited ingredient only crafts its remaining material balance', () => {
   const dust = item('root.s.0', 'item|test:dust', 5);
   const root = item('root', 'item|test:machine', 1, {

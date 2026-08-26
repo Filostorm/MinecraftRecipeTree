@@ -28,6 +28,11 @@ import {useRecipeStages} from '../data/RecipeStageContext';
 import {isRecipeVisibleForStages, recipeStageLabel} from '../data/recipeStages';
 import {isFluidContainerTransferRecipe} from '../data/recipeVisibility';
 import {
+  PROJECTE_EMC_CATEGORY_ID,
+  projecteEmcValue,
+} from '../data/projecteEmc';
+import {formatIngredientQuantity} from '../data/ingredientQuantities';
+import {
   recipeProducesItem,
   recipeUsesItem,
   usageGraphStart,
@@ -253,6 +258,8 @@ export function ItemDetailModal({
             </View>
           </View>
 
+          <ItemEmcValue itemKey={key} producedRefs={entry?.p ?? []} />
+
           {onContentZoomChange ? (
             <ContentZoomControl
               value={contentZoom}
@@ -345,6 +352,63 @@ export function ItemDetailModal({
         </Pressable>
       </Pressable>
     </Modal>
+  );
+}
+
+function ItemEmcValue({
+  itemKey,
+  producedRefs,
+}: {
+  itemKey: string;
+  producedRefs: RecipeRef[];
+}) {
+  const data = useData();
+  const emcRef = producedRefs.find(
+    ([categoryIndex]) =>
+      data.categories[categoryIndex]?.id === PROJECTE_EMC_CATEGORY_ID,
+  );
+  const cachedRecipe = emcRef ? data.getCachedRecipe(emcRef) : undefined;
+  const [emcValue, setEmcValue] = useState<number | null>(() =>
+    cachedRecipe ? projecteEmcValue(cachedRecipe, itemKey) : null,
+  );
+
+  useEffect(() => {
+    let alive = true;
+    setEmcValue(cachedRecipe ? projecteEmcValue(cachedRecipe, itemKey) : null);
+    if (!emcRef || cachedRecipe) return () => { alive = false; };
+    void data.getRecipes([emcRef]).then(
+      ([recipe]) => {
+        if (!alive) return;
+        const value = projecteEmcValue(recipe, itemKey);
+        if (value == null) {
+          console.error('The ProjectE EMC recipe does not contain its expected value.', {
+            itemKey,
+            recipeRef: emcRef,
+            recipeId: recipe.id,
+          });
+          return;
+        }
+        setEmcValue(value);
+      },
+      error => {
+        console.error('The ProjectE EMC value could not be loaded for the item header.', {
+          itemKey,
+          recipeRef: emcRef,
+          error,
+        });
+      },
+    );
+    return () => { alive = false; };
+  }, [cachedRecipe, data, itemKey, emcRef?.[0], emcRef?.[1]]);
+
+  if (emcValue == null) return null;
+  return (
+    <View style={styles.emcRow} accessibilityLabel={`EMC value ${emcValue}`}>
+      <Text style={styles.emcLabel}>EMC VALUE</Text>
+      <Text style={styles.emcValue}>
+        {formatIngredientQuantity('emc|projecte:emc', emcValue)}
+      </Text>
+    </View>
   );
 }
 
@@ -981,6 +1045,21 @@ const styles = StyleSheet.create({
   titleRow: {flexDirection: 'row', alignItems: 'center', marginTop: 2},
   title: {color: theme.text, fontSize: 18, fontWeight: '700'},
   subtitle: {color: theme.textDim, fontSize: 12, marginTop: 2},
+  emcRow: {
+    alignSelf: 'flex-start',
+    marginTop: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    borderColor: theme.borderLight,
+    borderWidth: 1,
+    borderRadius: 7,
+    backgroundColor: theme.panelAlt,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+  },
+  emcLabel: {color: theme.textDim, fontSize: 9, fontWeight: '800'},
+  emcValue: {color: theme.accent, fontSize: 12, fontWeight: '800'},
   contentZoomControl: {marginTop: 12},
   tabsRow: {flexDirection: 'row', flexWrap: 'wrap', marginTop: 12, gap: 8},
   sideTab: {

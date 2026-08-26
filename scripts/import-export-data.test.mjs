@@ -268,7 +268,7 @@ async function configureGtnhFixture(source) {
     adaptedIc2FluidCannerRecipeWidgetRenderInvocations: 5,
     adaptedBuildCraftPhasedFacadeItemIcons: 4,
     adaptedMobsInfoInfernalPreviewOutputIcons: 58,
-    adaptedMobsInfoPreviewSlotIcons: 6093,
+    adaptedMobsInfoPreviewSlotIcons: 6092,
     adaptedDraconicMobSoulItemIcons: 363,
     adaptedGendustryLiquifierRecipes: 40,
     adaptedGendustryMutagenProducerRecipes: 15,
