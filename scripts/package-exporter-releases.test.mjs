@@ -83,9 +83,9 @@ test('Multiblock Madness exporter releases remain isolated across independent ve
     {
       id: 'forge-hei-1.12.2',
       minecraftVersion: '1.12.2',
-      version: '1.1.6',
-      source: 'recipe-export-mod-1.12.2/build/libs/recipe-export-mod-1.12.2-1.1.6.jar',
-      filename: 'recipe-tree-exporter-forge-1.12.2-1.1.6.jar',
+      version: '1.1.7',
+      source: 'recipe-export-mod-1.12.2/build/libs/recipe-export-mod-1.12.2-1.1.7.jar',
+      filename: 'recipe-tree-exporter-forge-1.12.2-1.1.7.jar',
       qualityProfiles: ['meatballcraft-1.12.2', 'multiblock-madness-1.12.2'],
     },
   );

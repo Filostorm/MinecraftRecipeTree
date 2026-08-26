@@ -3,6 +3,25 @@
 This file contains release-ready notes for the Minecraft exporter builds. The generated exporter
 manifest remains the source of truth for downloadable filenames, checksums, and compatibility.
 
+## 2026-08-26
+
+### Fluid and oversized AvaritiaItem catalog icons
+
+- Forge HEI/JEI 1.12.2: **1.1.7**
+
+#### Fixed
+
+- Render fluid catalog identities at one full bucket so low-volume recipe ingredients no longer
+  export as a one-pixel fill line.
+- Preserve AvaritiaItem halo artwork by rendering its native oversized GUI model on a bounded
+  canvas and fitting the complete visible result into the 16x16 catalog icon.
+- Initialize AvaritiaItem's native cosmic shader before capture, including recovery when the
+  active OpenGL context supports shader objects but Minecraft's cached support flag is stale.
+
+#### Viewer behavior
+
+- Show an item's exact ProjectE EMC value directly below the item heading, above its recipe tabs.
+
 ## 2026-08-22
 
 ### Retained crafting ingredients, durability tools, and EMC sources
