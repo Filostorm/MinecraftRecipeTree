@@ -13,6 +13,21 @@ final class RecipeQuantityMath {
         return 1 + (requested - 1) / yield;
     }
 
+    static long remainingAfterSupply(long requested, long supplied) {
+        long demand = Math.max(1, requested);
+        long available = Math.max(0, supplied);
+        return Math.max(0, demand - Math.min(demand, available));
+    }
+
+    static long craftsForRemaining(long remainingDemand, long outputPerCraft) {
+        return remainingDemand <= 0 ? 0 : craftsFor(remainingDemand, outputPerCraft);
+    }
+
+    static long surplusAfterCrafts(long consumed, long outputPerCraft, long crafts) {
+        if (crafts <= 0) return 0;
+        return Math.max(0, producedTotal(outputPerCraft, crafts) - Math.max(0, consumed));
+    }
+
     static long adjustRequestedAmount(long currentAmount, double scrollDelta) {
         if (currentAmount < 1 || currentAmount > MAX_REQUESTED_AMOUNT) {
             throw new IllegalArgumentException("Current requested amount is outside the editable range.");

@@ -13,6 +13,7 @@ import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
 import net.minecraftforge.client.event.ScreenEvent;
+import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import org.lwjgl.glfw.GLFW;
@@ -33,6 +34,7 @@ public final class RecipeTreeClient {
     private static Screen aeDiscoveryScreen;
     private static int aeDiscoveryDelay;
     private static int aeDiscoveryPasses;
+    private static RecipeTreeScreen lastViewedTree;
 
     private RecipeTreeClient() {
     }
@@ -49,8 +51,32 @@ public final class RecipeTreeClient {
         trackDiscoveredItems(minecraft);
 
         while (OPEN_PLANNER.consumeClick()) {
-            if (!isTyping(minecraft.screen)) openForCurrentItem(minecraft);
+            if (isTyping(minecraft.screen)) continue;
+            if (minecraft.screen == null && reopenLastViewedTree(minecraft)) return;
+            openForCurrentItem(minecraft);
         }
+    }
+
+    static void rememberTree(RecipeTreeScreen tree) {
+        lastViewedTree = tree;
+    }
+
+    private static boolean reopenLastViewedTree(Minecraft minecraft) {
+        if (lastViewedTree == null) {
+            IJeiRuntime runtime = JeiExportPlugin.runtime();
+            if (runtime == null) return false;
+            lastViewedTree = RecipeTreeScreen.restoreLastViewed(runtime);
+        }
+        if (lastViewedTree == null) return false;
+        minecraft.setScreen(lastViewedTree);
+        return true;
+    }
+
+    @SubscribeEvent
+    public static void onPlayerLogout(ClientPlayerNetworkEvent.LoggingOut event) {
+        // Recipe layouts belong to the current viewer runtime. Recreate the persisted tree after
+        // the next world finishes loading instead of carrying cached layouts between worlds.
+        lastViewedTree = null;
     }
 
     private static void trackDiscoveredItems(Minecraft minecraft) {
@@ -156,7 +182,15 @@ public final class RecipeTreeClient {
                     Component.literal("Hover a JEI or inventory item, or hold an item, then press G."), true);
             return;
         }
-        RecipeTreeScreen tree = new RecipeTreeScreen(target.get().copyWithCount(1), runtime);
+        ItemStack openedItem = target.get().copyWithCount(1);
+        if (lastViewedTree == null) {
+            lastViewedTree = RecipeTreeScreen.restoreLastViewed(runtime);
+        }
+        if (lastViewedTree != null) {
+            minecraft.setScreen(lastViewedTree.screenForOpenedItem(openedItem));
+            return;
+        }
+        RecipeTreeScreen tree = new RecipeTreeScreen(openedItem, runtime);
         minecraft.setScreen(tree.initialInputRecipeScreen());
     }
 }

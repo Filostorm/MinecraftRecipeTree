@@ -17,6 +17,7 @@ const TABLES = [
   ['modpacks', ['id', 'name', 'minecraft_version', 'snapshot_json', 'revision', 'created_at', 'updated_at']],
   ['feedback_reports', ['id', 'kind', 'title', 'message', 'contact', 'pack_slug', 'pack_name', 'page_url', 'user_agent', 'fingerprint_hash', 'created_at']],
   ['export_failure_reports', ['fingerprint', 'issue_number', 'issue_url', 'status', 'client_hash', 'created_at', 'updated_at']],
+  ['recipe_favorites', ['pack_slug', 'publication_id', 'item_key', 'client_hash', 'recipe_category', 'recipe_index', 'updated_at']],
 ];
 const METADATA_HEADERS = [
   'x-mrt-migration-bytes',

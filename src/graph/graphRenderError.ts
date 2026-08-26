@@ -1,4 +1,5 @@
 export type GraphRenderErrorKind =
+  | 'bundle'
   | 'assets'
   | 'data'
   | 'layout'
@@ -9,6 +10,8 @@ export interface GraphRenderRecovery {
   kind: GraphRenderErrorKind;
   title: string;
   message: string;
+  detail?: string;
+  reloadPage?: boolean;
 }
 
 function searchableError(error: unknown): string {
@@ -16,8 +19,27 @@ function searchableError(error: unknown): string {
   return String(error).toLowerCase();
 }
 
+function diagnosticDetail(error: unknown): string {
+  const raw = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  return raw.replace(/\s+/gu, ' ').trim().slice(0, 240) || 'Unknown rendering error';
+}
+
 export function graphRenderRecovery(error: unknown): GraphRenderRecovery {
   const detail = searchableError(error);
+  if (
+    /dynamically imported module|failed to fetch.*module|chunkloaderror|loading chunk|importing a module script failed/u.test(
+      detail,
+    )
+  ) {
+    return {
+      kind: 'bundle',
+      title: 'Recipe Tree was updated',
+      message:
+        'This tab still has an older part of the site open. Reload to use the current Recipe Tree version; your saved trees will stay available.',
+      detail: diagnosticDetail(error),
+      reloadPage: true,
+    };
+  }
   if (
     error instanceof RangeError ||
     /out of memory|allocation|maximum call stack|too many|exceeds .*limit|safe integer|canvas.*(?:size|dimension|context)/u.test(
@@ -70,5 +92,6 @@ export function graphRenderRecovery(error: unknown): GraphRenderRecovery {
     title: 'Recipe tree couldn’t open',
     message:
       'Something went wrong while drawing this tree. Your modpack and saved trees are still available.',
+    detail: diagnosticDetail(error),
   };
 }

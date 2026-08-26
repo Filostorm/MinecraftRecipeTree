@@ -31,6 +31,10 @@ import {
   GTNH_STRUCTURED_DATA_ONLY_POLICY_ID,
   usesStructuredDataOnlyPublication,
 } from './visual-assets-rights-policy.mjs';
+import {
+  expectedIntentionalPreviewlessRecipes,
+  isIntentionalProjecteEmcRecipe,
+} from './intentional-previewless-recipes.mjs';
 
 const scriptRoot = dirname(fileURLToPath(import.meta.url));
 const defaultDestination = join(process.cwd(), 'public', 'exports');
@@ -203,25 +207,28 @@ async function assertPackedRecipePreviewCompleteness(exportRoot, profile) {
   }
 
   const recipeImages = manifest?.web?.recipeImages;
+  const intentionalMissing = expectedIntentionalPreviewlessRecipes(profile, manifest);
+  const expectedPreviews = expectedRecipes - intentionalMissing;
   if (recipeImages?.mode === 'omitted') {
     const previews = recipeImages.inventory?.previews;
     const missing = recipeImages.inventory?.missing;
     if (
-      previews !== expectedRecipes ||
-      missing !== 0 ||
-      recipeImages.references !== expectedRecipes ||
-      recipeImages.files !== expectedRecipes
+      previews !== expectedPreviews ||
+      missing !== intentionalMissing ||
+      recipeImages.references !== expectedPreviews ||
+      recipeImages.files !== expectedPreviews
     ) {
       throw new Error(
-        `${requirements.label} requires one recipe preview per recipe; packed omission ` +
+        `${requirements.label} requires one recipe preview per recipe except intentional ` +
+          `synthetic EMC recipes; packed omission ` +
           `accounting reports recipes/previews/missing/references/files=${expectedRecipes}/` +
           `${String(previews)}/${String(missing)}/${String(recipeImages.references)}/` +
           `${String(recipeImages.files)}.`,
       );
     }
     console.log(
-      `[import-data] ${requirements.label} zero-missing preview gate accepted ` +
-        `${previews} omission-inventoried recipe preview(s).`,
+      `[import-data] ${requirements.label} preview gate accepted ${previews} rendered preview(s)` +
+        `${intentionalMissing === 0 ? '.' : ` and ${intentionalMissing} intentional synthetic-EMC preview omission(s).`}`,
     );
     return;
   }
@@ -243,6 +250,7 @@ async function assertPackedRecipePreviewCompleteness(exportRoot, profile) {
   }
   let recipes = 0;
   let missing = 0;
+  let acceptedIntentionalMissing = 0;
   let firstMissing = null;
   for (const [categoryIndex, category] of categoriesDocument.categories.entries()) {
     if (!isRecord(category) || typeof category.dir !== 'string') {
@@ -263,21 +271,31 @@ async function assertPackedRecipePreviewCompleteness(exportRoot, profile) {
     recipes += categoryRecipes.length;
     for (const [recipeIndex, recipe] of categoryRecipes.entries()) {
       if (!isRecord(recipe) || recipe.img === undefined) {
-        missing += 1;
-        firstMissing ??= `${category.id ?? categoryIndex} recipe ${recipeIndex}`;
+        if (isIntentionalProjecteEmcRecipe(recipe, category.id)) {
+          acceptedIntentionalMissing += 1;
+        } else {
+          missing += 1;
+          firstMissing ??= `${category.id ?? categoryIndex} recipe ${recipeIndex}`;
+        }
       }
     }
   }
-  if (recipes !== expectedRecipes || missing !== 0) {
+  if (
+    recipes !== expectedRecipes ||
+    missing !== 0 ||
+    acceptedIntentionalMissing !== intentionalMissing
+  ) {
     throw new Error(
       `${requirements.label} requires one recipe preview per recipe; packed included-image ` +
-        `scan reports recipes/expected/missing=${recipes}/${expectedRecipes}/${missing}` +
+        `scan reports recipes/expected/missing/intentional=${recipes}/${expectedRecipes}/` +
+        `${missing}/${acceptedIntentionalMissing}; expected intentional=${intentionalMissing}` +
         `${firstMissing ? `; first missing: ${firstMissing}` : ''}.`,
     );
   }
   console.log(
-    `[import-data] ${requirements.label} zero-missing preview gate accepted ` +
-      `${recipes} included recipe preview(s).`,
+    `[import-data] ${requirements.label} preview gate accepted ` +
+      `${recipes - acceptedIntentionalMissing} included preview(s)` +
+      `${acceptedIntentionalMissing === 0 ? '.' : ` and ${acceptedIntentionalMissing} intentional synthetic-EMC preview omission(s).`}`,
   );
 }
 

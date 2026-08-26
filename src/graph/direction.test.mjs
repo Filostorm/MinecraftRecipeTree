@@ -51,6 +51,31 @@ test('input traversal includes consumed materials and retained prerequisites', (
   );
 });
 
+test('retained metadata distinguishes reusable catalysts from durability tools', () => {
+  const retainedRecipe = {
+    cat: [
+      [['item|test:stone', 1]],
+      [['item|test:hammer', 1]],
+    ],
+    retained: {
+      'item|test:stone': {mode: 'reusable'},
+      'item|test:hammer': {mode: 'durability', uses: 64},
+    },
+  };
+
+  assert.deepEqual(
+    recipeChildrenForDirection(retainedRecipe, 'inputs').map(child => ({
+      key: child.key,
+      mode: child.retentionMode,
+      uses: child.retentionUses,
+    })),
+    [
+      {key: 'item|test:stone', mode: 'reusable', uses: undefined},
+      {key: 'item|test:hammer', mode: 'durability', uses: 64},
+    ],
+  );
+});
+
 test('output traversal expands every recipe output with production probability', () => {
   const children = recipeChildrenForDirection(recipe, 'outputs');
   assert.deepEqual(

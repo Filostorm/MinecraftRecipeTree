@@ -27,6 +27,10 @@ final class PrimitiveRefs {
         }
     }
 
+    boolean hasProduced() {
+        return producedSize > 0;
+    }
+
     void write(JsonWriter writer) throws IOException {
         writeArray(writer, "p", produced, producedSize);
         writeArray(writer, "u", used, usedSize);

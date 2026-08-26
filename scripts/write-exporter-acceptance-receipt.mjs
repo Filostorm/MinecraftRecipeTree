@@ -34,6 +34,10 @@ import {requireRecipeImageInventory} from './recipe-image-inventory.mjs';
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 
+const INTENTIONAL_PREVIEWLESS_RECIPE_COUNTS = Object.freeze({
+  'forge-hei-1.12.2/meatballcraft-1.12.2': 11106,
+});
+
 function usage() {
   return [
     'Validate one completed full export and write a SHA-256-bound exporter acceptance receipt:',
@@ -102,6 +106,39 @@ function parseManifest(bytes, label) {
     throw new Error(`${label} must contain an object.`);
   }
   return value;
+}
+
+export function intentionalPreviewlessRecipeCount(releaseId, qualityProfile) {
+  return INTENTIONAL_PREVIEWLESS_RECIPE_COUNTS[`${releaseId}/${qualityProfile}`] ?? 0;
+}
+
+export function requireAcceptedRecipeImageInventory(
+  recipeImageInventory,
+  recipeCount,
+  intentionalPreviewlessRecipes,
+) {
+  if (
+    !Number.isSafeInteger(recipeCount) ||
+    recipeCount < 0 ||
+    !Number.isSafeInteger(intentionalPreviewlessRecipes) ||
+    intentionalPreviewlessRecipes < 0 ||
+    intentionalPreviewlessRecipes > recipeCount
+  ) {
+    throw new Error('Acceptance recipe-preview accounting inputs are invalid.');
+  }
+  const expectedPreviews = recipeCount - intentionalPreviewlessRecipes;
+  if (
+    recipeImageInventory.previews !== expectedPreviews ||
+    recipeImageInventory.missing !== intentionalPreviewlessRecipes
+  ) {
+    throw new Error(
+      `Acceptance export requires one decoded recipe preview per renderable recipe; ` +
+        `recipes/previews/missing/intentional=${recipeCount}/` +
+        `${recipeImageInventory.previews}/${recipeImageInventory.missing}/` +
+        `${intentionalPreviewlessRecipes}.`,
+    );
+  }
+  return recipeImageInventory;
 }
 
 export async function acceptExporterRelease({
@@ -239,16 +276,11 @@ export async function acceptExporterRelease({
     'Acceptance raw recipe-image inventory',
     manifest.counts?.recipes,
   );
-  if (
-    recipeImageInventory.previews !== manifest.counts.recipes ||
-    recipeImageInventory.missing !== 0
-  ) {
-    throw new Error(
-      `Acceptance export requires one decoded recipe preview per recipe; ` +
-        `recipes/previews/missing=${String(manifest.counts?.recipes)}/` +
-        `${recipeImageInventory.previews}/${recipeImageInventory.missing}.`,
-    );
-  }
+  requireAcceptedRecipeImageInventory(
+    recipeImageInventory,
+    manifest.counts.recipes,
+    intentionalPreviewlessRecipeCount(definition.id, qualityProfile),
+  );
 
   const manifestAfter = await readVerifiedRegularFile(
     manifestPath,

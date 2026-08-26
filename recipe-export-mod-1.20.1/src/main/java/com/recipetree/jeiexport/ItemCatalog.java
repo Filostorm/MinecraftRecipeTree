@@ -61,6 +61,23 @@ final class ItemCatalog {
         return ensureTyped(typed);
     }
 
+    String ensureSynthetic(String key, String resourceId, String name, String modId, String type) {
+        if (!known.add(key)) {
+            return key;
+        }
+        JsonObject entry = new JsonObject();
+        entry.addProperty("k", key);
+        entry.addProperty("id", resourceId);
+        entry.addProperty("n", name);
+        entry.addProperty("m", modId);
+        if (type != null && !type.isBlank() && !"item".equals(type)) {
+            entry.addProperty("t", type);
+        }
+        GSON.toJson(entry, writer);
+        count++;
+        return key;
+    }
+
     /**
      * Restores an ingredient referenced by a reused synthetic recipe. Synthetic trade outputs are
      * not guaranteed to occur in JEI's ordinary ingredient list, so copying the recipe alone can

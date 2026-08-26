@@ -18,7 +18,7 @@ import org.apache.logging.log4j.Logger;
 )
 public final class JeiExportMod {
     static final String MOD_ID = "jeiexport";
-    static final String VERSION = "1.1.5";
+    static final String VERSION = "1.1.6";
     static final String JEI_DEPENDENCY = "required-after:jei@[4.12.0.214,5.0.0)";
     static final Logger LOGGER = LogManager.getLogger("jeiexport");
     static final ExportCoordinator COORDINATOR = new ExportCoordinator();

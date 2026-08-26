@@ -9,6 +9,8 @@ import java.util.Optional;
 
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraft.block.Block;
+import net.minecraft.block.material.Material;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -48,6 +50,26 @@ public final class ModularMachineryStructureTest {
 
         public Iterable<ItemStack> getIngredientList() {
             return Arrays.asList(ItemStack.EMPTY, fallback);
+        }
+    }
+
+    private static final class TestMachine {}
+
+    private static final class TestControllerBlock extends Block {
+        TestControllerBlock() {
+            super(Material.ROCK);
+        }
+    }
+
+    public static final class MmceControllerOwner {
+        private static final Block CONTROLLER = new TestControllerBlock();
+
+        public static Block getMocControllerWithMachine(TestMachine machine) {
+            return null;
+        }
+
+        public static Block getControllerWithMachine(TestMachine machine) {
+            return CONTROLLER;
         }
     }
 
@@ -119,5 +141,13 @@ public final class ModularMachineryStructureTest {
 
         assertFalse(selected.isEmpty());
         assertEquals(information.fallback.getItem(), selected.getItem());
+    }
+
+    @Test
+    public void skipsNullMmceControllerRegistryBeforeUsingOrdinaryController() throws Exception {
+        Block selected = ModularMachineryStructure.resolveControllerFromOwners(
+                new TestMachine(), new Class<?>[] {MmceControllerOwner.class});
+
+        assertEquals(MmceControllerOwner.CONTROLLER, selected);
     }
 }

@@ -89,15 +89,29 @@ const TABLES = Object.freeze({
       'updated_at',
     ]),
   }),
+  recipe_favorites: Object.freeze({
+    key: 'client_hash',
+    cursor:
+      "pack_slug || X'1F' || publication_id || X'1F' || item_key || X'1F' || client_hash",
+    columns: Object.freeze([
+      'pack_slug',
+      'publication_id',
+      'item_key',
+      'client_hash',
+      'recipe_category',
+      'recipe_index',
+      'updated_at',
+    ]),
+  }),
 });
 
 type MigrationTable = keyof typeof TABLES;
 
 function missingOptionalTable(error: unknown, table: MigrationTable): boolean {
   return (
-    table === 'export_failure_reports' &&
+    (table === 'export_failure_reports' || table === 'recipe_favorites') &&
     error instanceof Error &&
-    /no such table:\s*export_failure_reports/iu.test(error.message)
+    new RegExp(`no such table:\\s*${table}`, 'iu').test(error.message)
   );
 }
 
@@ -261,16 +275,18 @@ async function exportDatabasePage(
   if (!runtime.DB) return noStoreJson({error: 'Database binding is unavailable.'}, 503);
   const spec = TABLES[table];
   try {
+    const cursorExpression = 'cursor' in spec ? spec.cursor : spec.key;
+    const cursorProjection = 'cursor' in spec ? ', ' + cursorExpression + ' AS migration_cursor' : '';
     const result = await runtime.DB
       .prepare(
-        `SELECT ${spec.columns.join(', ')} FROM ${table} ` +
-          `WHERE ${spec.key} > ? ORDER BY ${spec.key} LIMIT ?`,
+        `SELECT ${spec.columns.join(', ')}${cursorProjection} FROM ${table} ` +
+          `WHERE ${cursorExpression} > ? ORDER BY ${cursorExpression} LIMIT ?`,
       )
       .bind(after, PAGE_LIMIT)
       .all<Record<string, unknown>>();
     if (!result.success) throw new Error('D1 returned an unsuccessful export query.');
     const rows = result.results ?? [];
-    const last = rows.at(-1)?.[spec.key];
+    const last = rows.at(-1)?.['cursor' in spec ? 'migration_cursor' : spec.key];
     if (last !== undefined && typeof last !== 'string') {
       throw new Error(`D1 returned an invalid ${table} primary key.`);
     }
@@ -278,7 +294,9 @@ async function exportDatabasePage(
       format: 'mrt-storage-migration-database-v1',
       table,
       columns: spec.columns,
-      rows,
+      rows: 'cursor' in spec
+        ? rows.map(({migration_cursor: _migrationCursor, ...row}) => row)
+        : rows,
       nextAfter: rows.length === PAGE_LIMIT ? last : null,
     });
   } catch (error) {

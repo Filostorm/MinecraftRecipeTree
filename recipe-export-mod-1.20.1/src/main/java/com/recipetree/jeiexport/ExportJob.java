@@ -22,7 +22,7 @@ import java.util.Locale;
  * modpack has six figures of recipes. PNG encoding happens on the IO pool.
  */
 public final class ExportJob {
-    public enum Phase {ITEMS, RECIPES, MOBS, BLOCK_DROPS, TRADES}
+    public enum Phase {ITEMS, RECIPES, EMC, MOBS, BLOCK_DROPS, TRADES}
 
     /**
      * Cooperative render-thread budget. Volatile so /jeiexport speed takes effect
@@ -222,6 +222,7 @@ public final class ExportJob {
         return switch (phase) {
             case ITEMS -> new ItemExporter(ctx, requireRuntime());
             case RECIPES -> new RecipeExporter(ctx, requireRuntime());
+            case EMC -> new ProjectEEmcExporter(ctx, requireRuntime());
             case MOBS -> new MobExporter(ctx);
             case BLOCK_DROPS -> new BlockDropsExporter(ctx);
             case TRADES -> new TradeExporter(ctx, requireRuntime());
@@ -320,6 +321,7 @@ public final class ExportJob {
         return switch (label) {
             case "items" -> "Checking items";
             case "recipes" -> "Checking recipes";
+            case "EMC sources" -> "Checking EMC sources";
             case "mobs" -> "Checking creatures";
             case "block drops" -> "Checking block drops";
             case "trades" -> "Checking trades";
@@ -331,6 +333,7 @@ public final class ExportJob {
         return switch (label) {
             case "items" -> "Items";
             case "recipes" -> "Recipes";
+            case "EMC sources" -> "EMC sources";
             case "mobs" -> "Creatures";
             case "block drops" -> "Block drops";
             case "trades" -> "Trades";

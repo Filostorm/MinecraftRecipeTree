@@ -20,6 +20,7 @@ const d1Migrations = await Promise.all([
   readFile(new URL('../drizzle/0002_shiny_sunfire.sql', import.meta.url), 'utf8'),
   readFile(new URL('../drizzle/0003_tidy_ogun.sql', import.meta.url), 'utf8'),
   readFile(new URL('../drizzle/0004_rainy_maverick.sql', import.meta.url), 'utf8'),
+  readFile(new URL('../drizzle/0005_harsh_stick.sql', import.meta.url), 'utf8'),
 ]);
 
 test('Cloudflare routes catalog, immutable datasets, and administration through the Worker', () => {
@@ -35,13 +36,18 @@ test('Cloudflare routes catalog, immutable datasets, and administration through 
   );
   assert.match(
     viteConfig,
-    /d1_databases:\s*isCloudflareProduction[\s\S]*?:\s*!isCloudflareBeta\s*&&\s*hostingConfig\.d1/,
-    'the standalone beta Worker must not inherit the Sites-managed D1 binding',
+    /d1_databases:\s*isCloudflareBeta[\s\S]*?:\s*isCloudflareProduction[\s\S]*?:\s*!isCloudflareBeta\s*&&\s*hostingConfig\.d1/,
+    'the standalone beta Worker must use its isolated D1 before the production and Sites bindings',
   );
   assert.match(
     viteConfig,
     /r2_buckets:\s*isCloudflareProduction[\s\S]*?:\s*!isCloudflareBeta\s*&&\s*hostingConfig\.r2/,
     'the standalone beta Worker must not inherit the Sites-managed R2 binding',
+  );
+  assert.match(
+    viteConfig,
+    /isCloudflareBeta[\s\S]*?binding:\s*['"]DB['"][\s\S]*?database_name:\s*CLOUDFLARE_BETA_DATABASE_NAME[\s\S]*?database_id:\s*CLOUDFLARE_BETA_DATABASE_ID/,
+    'beta must bind its own D1 database rather than production storage',
   );
   assert.match(
     viteConfig,
@@ -86,6 +92,7 @@ test('Cloudflare routes catalog, immutable datasets, and administration through 
     '/api/datasets',
     '/api/export-failures',
     '/api/feedback',
+    '/api/recipe-favorites',
     '/api/modpacks*',
     '/dataset/publications/*',
     '/dataset/preview-sets/*',

@@ -49,6 +49,21 @@ class MemoryStatement {
   }
 
   async all() {
+    if (this.sql.includes('FROM recipe_favorites')) {
+      if (!Object.hasOwn(this.database.tables, 'recipe_favorites')) {
+        throw new Error('D1_ERROR: no such table: recipe_favorites');
+      }
+      const [after, limit] = this.values;
+      const results = this.database.tables.recipe_favorites
+        .map(row => ({
+          ...row,
+          migration_cursor: [row.pack_slug, row.publication_id, row.item_key, row.client_hash].join('\u001f'),
+        }))
+        .filter(row => row.migration_cursor > after)
+        .sort((left, right) => left.migration_cursor.localeCompare(right.migration_cursor))
+        .slice(0, limit);
+      return {success: true, results: structuredClone(results)};
+    }
     const match = /^SELECT .+ FROM ([a-z_]+) WHERE ([a-z_]+) > \? ORDER BY \2 LIMIT \?$/u.exec(this.sql);
     if (!match) throw new Error(`Unexpected all SQL: ${this.sql}`);
     if (!Object.hasOwn(this.database.tables, match[1])) throw new Error(`D1_ERROR: no such table: ${match[1]}`);
@@ -65,7 +80,7 @@ class MemoryD1 {
   tables = {
     dataset_publications: [{publication_id: 'publication-a', manifest_sha256: 'a'.repeat(64), object_count: 2, stored_bytes: 12, committed_at: '2026-08-04T00:00:00.000Z'}],
     dataset_channels: [{slug: 'pack', display_name: 'Pack', minecraft_version: '1.20.1', pack_version: '1.0.0', publication_id: 'publication-a', preview_asset_set_id: null, is_default: 1, revision: 1, activated_at: '2026-08-04T00:00:00.000Z'}],
-    modpacks: [], feedback_reports: [], export_failure_reports: [],
+    modpacks: [], feedback_reports: [], export_failure_reports: [], recipe_favorites: [],
   };
 
   prepare(sql) {
@@ -165,7 +180,7 @@ test('database summary and allowlisted keyset pages export deterministic rows', 
   assert.equal(summary.status, 200);
   assert.deepEqual((await summary.json()).counts, {
     dataset_publications: 1, dataset_channels: 1, modpacks: 0,
-    feedback_reports: 0, export_failure_reports: 0,
+    feedback_reports: 0, export_failure_reports: 0, recipe_favorites: 0,
   });
   const page = await request('database?table=dataset_publications', env, {
     headers: authorized(EXPORT_TOKEN),
@@ -180,7 +195,28 @@ test('database summary and allowlisted keyset pages export deterministic rows', 
   assert.equal(rejected.status, 400);
 });
 
-test('an older source may omit only the lazily created failure-report table', async () => {
+test('favorite migration pages use a stable composite cursor without leaking it into rows', async () => {
+  const env = runtime();
+  env.DB.tables.recipe_favorites.push({
+    pack_slug: 'pack',
+    publication_id: 'publication-a',
+    item_key: 'item|minecraft:iron_ingot',
+    client_hash: 'b'.repeat(64),
+    recipe_category: 2,
+    recipe_index: 9,
+    updated_at: 1234,
+  });
+  const response = await request('database?table=recipe_favorites', env, {
+    headers: authorized(EXPORT_TOKEN),
+  });
+  assert.equal(response.status, 200);
+  const page = await response.json();
+  assert.equal(page.rows.length, 1);
+  assert.equal(page.rows[0].item_key, 'item|minecraft:iron_ingot');
+  assert.equal(Object.hasOwn(page.rows[0], 'migration_cursor'), false);
+});
+
+test('an older source may omit lazily created report and favorite tables', async () => {
   const env = runtime();
   delete env.DB.tables.export_failure_reports;
   const summary = await request('database-summary', env, {headers: authorized(EXPORT_TOKEN)});
@@ -191,6 +227,11 @@ test('an older source may omit only the lazily created failure-report table', as
   });
   assert.equal(page.status, 200);
   assert.deepEqual((await page.json()).rows, []);
+
+  delete env.DB.tables.recipe_favorites;
+  const favoritesSummary = await request('database-summary', env, {headers: authorized(EXPORT_TOKEN)});
+  assert.equal(favoritesSummary.status, 200);
+  assert.equal((await favoritesSummary.json()).counts.recipe_favorites, 0);
 
   delete env.DB.tables.feedback_reports;
   const required = await request('database-summary', env, {headers: authorized(EXPORT_TOKEN)});

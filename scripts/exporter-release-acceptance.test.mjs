@@ -18,7 +18,9 @@ import {
 } from './exporter-release-acceptance.mjs';
 import {
   acceptExporterRelease,
+  intentionalPreviewlessRecipeCount,
   parseExporterAcceptanceArguments,
+  requireAcceptedRecipeImageInventory,
 } from './write-exporter-acceptance-receipt.mjs';
 import {withExporterReleaseManifestLock} from './exporter-release-lock.mjs';
 import {
@@ -331,7 +333,7 @@ test('acceptance action rejects an incomplete decoded recipe-preview inventory',
         };
       },
     }),
-    /requires one decoded recipe preview per recipe; recipes\/previews\/missing=20\/19\/1/,
+    /requires one decoded recipe preview per renderable recipe; recipes\/previews\/missing\/intentional=20\/19\/1\/0/,
   );
   await assert.rejects(
     readFile(
@@ -342,6 +344,34 @@ test('acceptance action rejects an incomplete decoded recipe-preview inventory',
       ),
     ),
     error => error?.code === 'ENOENT',
+  );
+});
+
+test('acceptance permits only the exact configured synthetic EMC preview omission count', () => {
+  const intentional = intentionalPreviewlessRecipeCount(
+    'forge-hei-1.12.2',
+    'meatballcraft-1.12.2',
+  );
+  assert.equal(intentional, 11106);
+  assert.equal(
+    intentionalPreviewlessRecipeCount('forge-hei-1.12.2', 'multiblock-madness-1.12.2'),
+    0,
+  );
+  assert.doesNotThrow(() =>
+    requireAcceptedRecipeImageInventory(
+      {previews: 365193, missing: 11106},
+      376299,
+      intentional,
+    ),
+  );
+  assert.throws(
+    () =>
+      requireAcceptedRecipeImageInventory(
+        {previews: 365192, missing: 11107},
+        376299,
+        intentional,
+      ),
+    /365192\/11107\/11106/,
   );
 });
 

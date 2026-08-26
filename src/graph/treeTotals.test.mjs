@@ -40,6 +40,23 @@ test('a root production target scales every downstream ingredient by recipe yiel
   assert.equal(totals.inputs[0].amount, 39);
 });
 
+test('fluid output requirements pay for complete recipe cycles', () => {
+  const root = item('root', 'fluid|contenttweaker:protodermis', 10_000, {
+    productionPlan: {amount: 1, windowSeconds: 1},
+    source: {
+      id: 'root.s',
+      kind: 'recipe',
+      recipe: {out: [[['fluid|contenttweaker:protodermis', 10_000]]]},
+      inputs: [item('root.s.0', 'custom|mana', 20_000)],
+    },
+  });
+
+  const totals = calculateTreeTotals(root);
+  assert.equal(totals.requiredByNode.get('root'), 1);
+  assert.equal(totals.requiredByNode.get('root.s.0'), 20_000);
+  assert.equal(totals.inputs[0].amount, 20_000);
+});
+
 test('retained items normalize to one in both the tree and prerequisite totals', () => {
   const catalystA = item('root.s.0', 'item|test:catalyst', 2, {
     nonConsumed: true,
@@ -73,6 +90,34 @@ test('retained items normalize to one in both the tree and prerequisite totals',
   assert.equal(totals.prerequisites[0].amount, 1);
   assert.equal(totals.requiredByNode.get(catalystA.id), 1);
   assert.equal(totals.requiredByNode.get(catalystB.id), 1);
+});
+
+test('durability tools scale by usable crafts instead of by ingredient consumption', () => {
+  const tool = item('root.s.0', 'item|test:hammer', 1, {
+    nonConsumed: true,
+    retentionMode: 'durability',
+    retentionUses: 100,
+  });
+  const root = item('root', 'item|test:plate', 1, {
+    productionPlan: {amount: 250, windowSeconds: 60},
+    source: {
+      id: 'root.s',
+      kind: 'recipe',
+      recipe: {out: [[['item|test:plate', 1]]]},
+      inputs: [tool],
+    },
+  });
+
+  const totals = calculateTreeTotals(root);
+  assert.equal(totals.requiredByNode.get(tool.id), 3);
+  assert.deepEqual(totals.prerequisites, [
+    {
+      key: 'item|test:hammer',
+      amount: 3,
+      variants: 1,
+      tag: undefined,
+    },
+  ]);
 });
 
 test('expand-once totals virtually traverse every deferred recipe occurrence', () => {

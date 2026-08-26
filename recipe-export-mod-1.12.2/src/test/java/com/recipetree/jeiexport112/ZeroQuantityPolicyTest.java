@@ -39,6 +39,11 @@ public class ZeroQuantityPolicyTest {
                 ZeroQuantityPolicy.Kind.DYNAMIC_FLOW, "0", "ZERO_UNKNOWN_FLOW");
         assertDecision("thermalexpansion.centrifuge_mobs", "output", FLUID,
                 ZeroQuantityPolicy.Kind.ABSENT_OUTPUT, null, "ZERO_ABSENT_OUTPUT");
+        ZeroQuantityPolicy.Decision stirlingTierAbsence = assertDecision(
+                "StirlingGenerator", "output", ENERGY,
+                ZeroQuantityPolicy.Kind.ABSENT_OUTPUT, null, "ZERO_ABSENT_OUTPUT");
+        assertTrue(stirlingTierAbsence.explanation.contains("generator-tier"));
+        assertTrue(stirlingTierAbsence.explanation.contains("positive tier outputs"));
         ZeroQuantityPolicy.Decision nuclearChanceAbsence = assertDecision(
                 "nuclearcraft_centrifuge", "output", FLUID,
                 true, ZeroQuantityPolicy.Kind.ABSENT_ALTERNATIVE, null,

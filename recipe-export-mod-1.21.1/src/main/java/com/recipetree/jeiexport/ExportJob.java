@@ -18,7 +18,7 @@ import java.util.Locale;
  * modpack has six figures of recipes. PNG encoding happens on the IO pool.
  */
 public final class ExportJob {
-    public enum Phase {ITEMS, RECIPES, MOBS, BLOCK_DROPS, TRADES}
+    public enum Phase {ITEMS, RECIPES, EMC, MOBS, BLOCK_DROPS, TRADES}
 
     /** Max time spent exporting per client tick (~3 frames at 60fps feels fine). */
     private static final long TICK_BUDGET_NANOS = 45_000_000L;
@@ -169,6 +169,7 @@ public final class ExportJob {
         return switch (phase) {
             case ITEMS -> new ItemExporter(ctx, requireRuntime());
             case RECIPES -> new RecipeExporter(ctx, requireRuntime());
+            case EMC -> new ProjectEEmcExporter(ctx, requireRuntime());
             case MOBS -> new MobExporter(ctx);
             case BLOCK_DROPS -> new BlockDropsExporter(ctx);
             case TRADES -> new TradeExporter(ctx, requireRuntime());

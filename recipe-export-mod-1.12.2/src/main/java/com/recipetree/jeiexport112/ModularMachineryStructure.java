@@ -222,15 +222,23 @@ final class ModularMachineryStructure {
                 "hellfirepvp.modularmachinery.common.block.BlockController",
                 "hellfirepvp.modularmachinery.common.block.BlockFactoryController"
         };
-        String[] methodNames = {"getControllerWithMachine", "getMocControllerWithMachine"};
         ClassLoader loader = machine.getClass().getClassLoader();
+        List<Class<?>> owners = new ArrayList<Class<?>>();
         for (String ownerName : ownerNames) {
-            Class<?> owner;
             try {
-                owner = Class.forName(ownerName, false, loader);
+                owners.add(Class.forName(ownerName, false, loader));
             } catch (ClassNotFoundException ignored) {
                 continue;
             }
+        }
+        Block resolved = resolveControllerFromOwners(
+                machine, owners.toArray(new Class<?>[owners.size()]));
+        return resolved != null ? resolved : ForgeRegistries.BLOCKS.getValue(CONTROLLER_ID);
+    }
+
+    static Block resolveControllerFromOwners(Object machine, Class<?>[] owners) throws Exception {
+        String[] methodNames = {"getControllerWithMachine", "getMocControllerWithMachine"};
+        for (Class<?> owner : owners) {
             for (Method method : owner.getMethods()) {
                 if (!Modifier.isStatic(method.getModifiers()) || method.getParameterTypes().length != 1) {
                     continue;
@@ -249,11 +257,18 @@ final class ModularMachineryStructure {
                 if (resolved instanceof Block) {
                     return (Block) resolved;
                 }
-                throw new IOException(ownerName + "." + method.getName() +
+                if (resolved == null) {
+                    // MMCE 2.3 exposes both the ordinary- and MOC-controller lookup helpers.
+                    // A machine belongs to only one registry, so the nonmatching helper returns
+                    // null. Keep checking the sibling helper/owner before falling back to the
+                    // original Modular Machinery registry block.
+                    continue;
+                }
+                throw new IOException(owner.getName() + "." + method.getName() +
                         " did not return a controller block");
             }
         }
-        return ForgeRegistries.BLOCKS.getValue(CONTROLLER_ID);
+        return null;
     }
 
     private static Object invokeNoArgs(Object target, String name) throws Exception {

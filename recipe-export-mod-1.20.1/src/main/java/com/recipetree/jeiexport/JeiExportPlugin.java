@@ -25,7 +25,7 @@ public class JeiExportPlugin implements IModPlugin {
 
     @Override
     public void onRuntimeAvailable(IJeiRuntime jeiRuntime) {
-        runtime = jeiRuntime;
+        runtime = RecipeViewerCompat.wrap(jeiRuntime);
     }
 
     @Override

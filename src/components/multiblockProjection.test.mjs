@@ -1,10 +1,29 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  cellsForStructureLayer,
   MAX_MULTIBLOCK_PREVIEW_CELLS,
   previewStructureCells,
   projectStructureCells,
+  screenPanOffset,
+  structureLayerLevels,
 } from './multiblockProjection.ts';
+
+test('enumerates vertical structure layers and filters one complete layer', () => {
+  const cells = [
+    [0, 2, 0, 'item|top'],
+    [0, 0, 0, 'item|bottom'],
+    [1, 2, 0, 'item|top-edge'],
+    [0, 1, 0, 'item|middle'],
+  ];
+  assert.deepEqual(structureLayerLevels(cells), [0, 1, 2]);
+  assert.deepEqual(cellsForStructureLayer(cells, 2), [cells[0], cells[2]]);
+  assert.equal(cellsForStructureLayer(cells, null), cells);
+});
+
+test('applies preview panning in raw screen axes', () => {
+  assert.deepEqual(screenPanOffset({x: 18, y: -7}, 42, 15), {x: 60, y: 8});
+});
 
 test('projects every small structure cell as overlapping pixel-aligned blocks', () => {
   const cells = [

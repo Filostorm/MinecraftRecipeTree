@@ -10,7 +10,10 @@ test('totals CSV preserves all material-balance sections and unknown quantities'
       byproductCredits: [
         {key: 'fluid|test:water', amount: 250, variants: 1, tag: 'forge:water'},
       ],
-      byproducts: [{key: 'gasstack|test:steam', amount: null, variants: 1}],
+      byproducts: [
+        {key: 'gasstack|test:steam', amount: null, variants: 1},
+        {key: 'emc|projecte:emc', amount: 8192, variants: 1},
+      ],
     },
     (key, tag) => (tag ? `#${tag}` : key === 'item|test:iron' ? 'Iron, Refined' : key),
   );
@@ -19,6 +22,7 @@ test('totals CSV preserves all material-balance sections and unknown quantities'
   assert.match(csv, /required_not_consumed,item\|test:mold,item\|test:mold,1,items,1/);
   assert.match(csv, /byproduct_used,#forge:water,#forge:water,250,mB,1/);
   assert.match(csv, /byproduct_remaining,gasstack\|test:steam,gasstack\|test:steam,unknown,mB,1/);
+  assert.match(csv, /byproduct_remaining,emc\|projecte:emc,emc\|projecte:emc,8192,EMC,1/);
 });
 
 test('export filenames are portable and never empty', () => {

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  assertPortableTreePackMatches,
   buildPortableTree,
   parsePortableTree,
   portableSelectionAsStored,
@@ -65,5 +66,39 @@ test('accepts the ref-free payload emitted by the in-game JEI viewer', () => {
   assert.deepEqual(
     portableSelectionAsStored(parsed.selections[0], [3, 7]).source,
     {kind: 'recipe', ref: [3, 7]},
+  );
+});
+
+test('requires a shared history to match the selected pack publication and version', () => {
+  const history = parsePortableTree(JSON.stringify({
+    format: 'minecraft-recipe-tree',
+    version: 1,
+    createdAt: '2026-08-20T00:00:00Z',
+    pack: {
+      minecraftVersion: '1.20.1',
+      name: 'Test Pack',
+      version: '1.0.0',
+      slug: 'test-pack',
+      publicationId: descriptor.publicationId,
+    },
+    rootKey: 'item|minecraft:stone',
+    direction: 'inputs',
+    selections: [],
+  }));
+  assert.doesNotThrow(() => assertPortableTreePackMatches(history, descriptor));
+  assert.throws(
+    () => assertPortableTreePackMatches(history, {...descriptor, packVersion: '2.0.0'}),
+    /pack version 1\.0\.0/,
+  );
+  assert.throws(
+    () => assertPortableTreePackMatches(history, {...descriptor, displayName: 'A Different Pack'}),
+    /selected pack is A Different Pack/,
+  );
+  assert.throws(
+    () => assertPortableTreePackMatches(history, {
+      ...descriptor,
+      publicationId: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+    }),
+    /different publication/,
   );
 });

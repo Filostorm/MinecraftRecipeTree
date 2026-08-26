@@ -43,7 +43,7 @@ test('secondary information actions share one anchored header menu', () => {
   assert.match(appSource, /headerSurface: \{position: 'relative', zIndex: 200\}/u);
 });
 
-test('desktop and compact web title rows own the pack picker and local import action', () => {
+test('desktop keeps local import on the title row while mobile omits it from the app menu', () => {
   assert.match(
     switcherSource,
     /<View style=\{styles\.fullTitleRow\}>\s*\{brand\}\s*\{datasetButton\}\s*\{uploadButton\}\s*<\/View>/u,
@@ -54,8 +54,44 @@ test('desktop and compact web title rows own the pack picker and local import ac
   );
   assert.match(
     switcherSource,
-    /<View style=\{styles\.compactTitleRow\}>\s*\{brand\}\s*\{datasetButton\}\s*\{uploadButton\}\s*<\/View>/u,
+    /<View style=\{styles\.compactTitleRow\}>\s*\{brand\}\s*\{datasetButton\}\s*<\/View>/u,
   );
+  const compactBranch = switcherSource.slice(
+    switcherSource.indexOf(') : compact ? ('),
+    switcherSource.indexOf(') : (', switcherSource.indexOf(') : compact ? (')),
+  );
+  assert.doesNotMatch(compactBranch, /\{uploadButton\}/u);
+  const nativeBranch = switcherSource.slice(
+    switcherSource.indexOf('{nativeHeader ? ('),
+    switcherSource.indexOf(') : compact ? ('),
+  );
+  assert.doesNotMatch(nativeBranch, /\{uploadButton\}/u);
+  assert.match(appSource, />\s*Import pack\s*</u);
+  assert.match(appSource, /\(compactHeader \|\| Platform\.OS !== 'web'\)/u);
+});
+
+test('mobile information and app menus are mutually exclusive', () => {
+  assert.match(
+    appSource,
+    /setShowInfoMenu\(value => \{[\s\S]*?if \(next\) setShowAppMenu\(false\);/u,
+  );
+  assert.match(
+    appSource,
+    /setShowAppMenu\(next\);\s*if \(next\) setShowInfoMenu\(false\);/u,
+  );
+  assert.match(switcherSource, /const expanded = compactMenuExpanded \?\? internalExpanded/u);
+});
+
+test('graph retry discards only the broken active snapshot and rebuilds the same output', () => {
+  assert.match(
+    appSource,
+    /onRetry=\{recovery => \{[\s\S]*?clearGraphSession\(data\.descriptor\);[\s\S]*?ui\.restoreGraph\(ui\.graphRootKey, ui\.graphDirection\);/u,
+  );
+  assert.match(
+    appSource,
+    /this\.props\.onRetry\(recovery\);\s*this\.setState\(\{recovery: null\}\);/u,
+  );
+  assert.match(appSource, /recovery\.reloadPage[\s\S]*?globalThis\.location\?\.reload\(\)/u);
 });
 
 test('current pack label shows its version as subtext in every header layout', () => {
@@ -74,7 +110,7 @@ test('compact web keeps the Items and Graph picker outside the collapsible detai
   );
   assert.match(
     appSource,
-    /styles\.compactHeaderUtilityRow[\s\S]*?\{compactHeaderNavigation\}[\s\S]*?\{infoMenu\}/u,
+    /styles\.compactHeaderUtilityRow[\s\S]*?\{compactHeaderNavigation\}[\s\S]*?\{Platform\.OS === 'web' && infoMenu\}/u,
   );
   const compactDetails = appSource.slice(
     appSource.indexOf('const headerDetails = compactHeader ?'),

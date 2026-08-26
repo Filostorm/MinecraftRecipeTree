@@ -70,6 +70,10 @@ export interface ItemTreeNode {
   tag?: string;
   /** Required by the parent source but retained after the recipe runs. */
   nonConsumed?: boolean;
+  /** The retained item is either indefinitely reusable or eventually replaced after wear. */
+  retentionMode?: 'reusable' | 'durability';
+  /** Recipe runs available from one fresh durability-bearing item. */
+  retentionUses?: number;
   /** Exact per-run chance that this consumed input is used; null means conflicting chances. */
   consumptionProbability?: number | null;
   /** Exact per-run chance that this output is produced; null means conflicting chances. */

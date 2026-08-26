@@ -80,3 +80,31 @@ export const exportFailureReports = sqliteTable(
     index('export_failure_reports_created_at_idx').on(table.createdAt),
   ],
 );
+
+export const recipeFavorites = sqliteTable(
+  'recipe_favorites',
+  {
+    packSlug: text('pack_slug').notNull(),
+    publicationId: text('publication_id').notNull(),
+    itemKey: text('item_key').notNull(),
+    clientHash: text('client_hash').notNull(),
+    recipeCategory: integer('recipe_category').notNull(),
+    recipeIndex: integer('recipe_index').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  table => [
+    uniqueIndex('recipe_favorites_user_item_idx').on(
+      table.packSlug,
+      table.publicationId,
+      table.itemKey,
+      table.clientHash,
+    ),
+    index('recipe_favorites_ranking_idx').on(
+      table.packSlug,
+      table.publicationId,
+      table.itemKey,
+      table.recipeCategory,
+      table.recipeIndex,
+    ),
+  ],
+);

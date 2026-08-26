@@ -51,6 +51,7 @@ public class RecipePhaseIngredientSemanticsTest {
         assertEquals("item|test:plate", data.outputs.get(0).pairs.get(0).key);
         assertEquals(1, data.catalysts.size());
         assertEquals("item|test:mold", data.catalysts.get(0).pairs.get(0).key);
+        assertEquals("reusable", data.retained.get("item|test:mold").mode);
     }
 
     @Test

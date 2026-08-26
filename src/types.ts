@@ -178,6 +178,19 @@ export interface RecipeStructure {
   cells: [x: number, y: number, z: number, catalogKey: string][];
 }
 
+/** How a crafting ingredient survives a recipe run. */
+export type RetainedIngredient =
+  | {
+      /** The same item is returned unchanged and can be reused indefinitely. */
+      mode: 'reusable';
+    }
+  | {
+      /** The item is returned with durability consumed. */
+      mode: 'durability';
+      /** Conservative number of recipe runs a fresh item can perform before replacement. */
+      uses: number;
+    };
+
 export interface Recipe {
   /** Present when the export of this recipe failed; image/slots missing. */
   err?: boolean;
@@ -201,6 +214,11 @@ export interface Recipe {
   out?: SlotEntry[][];
   /** Catalyst slots (shown but not consumed) */
   cat?: SlotEntry[][];
+  /**
+   * Optional per-catalog-key details for retained item inputs. Catalyst entries without
+   * metadata remain backward-compatible reusable prerequisites.
+   */
+  retained?: Record<string, RetainedIngredient>;
 }
 
 /** [category index into categories.json, recipe index into that recipes.json] */

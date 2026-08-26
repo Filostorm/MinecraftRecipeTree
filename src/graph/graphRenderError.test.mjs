@@ -8,6 +8,15 @@ test('classifies browser resource exhaustion separately from graph data failures
   assert.match(recovery.title, /drawing limit/u);
 });
 
+test('recovers a stale lazy graph bundle by reloading the current site', () => {
+  const recovery = graphRenderRecovery(
+    new TypeError('Failed to fetch dynamically imported module: https://example.test/Graph.js'),
+  );
+  assert.equal(recovery.kind, 'bundle');
+  assert.equal(recovery.reloadPage, true);
+  assert.match(recovery.title, /updated/u);
+});
+
 test('classifies invalid item imagery separately from layout failures', () => {
   const recovery = graphRenderRecovery(
     new Error('ItemIcon size 44px is not aligned to the logical 16px pixel grid.'),
@@ -36,4 +45,11 @@ test('keeps unexpected rendering exceptions generic and recovery-safe', () => {
   const recovery = graphRenderRecovery(new TypeError('Unexpected component failure'));
   assert.equal(recovery.kind, 'unknown');
   assert.match(recovery.message, /saved trees are still available/u);
+  assert.equal(recovery.detail, 'TypeError: Unexpected component failure');
+});
+
+test('bounds unexpected rendering diagnostics to a single safe line', () => {
+  const recovery = graphRenderRecovery(new Error(`first line\n${'x'.repeat(400)}`));
+  assert.equal(recovery.detail?.includes('\n'), false);
+  assert.equal(recovery.detail?.length, 240);
 });

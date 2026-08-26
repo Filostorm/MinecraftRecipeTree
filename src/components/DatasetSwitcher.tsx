@@ -1,6 +1,5 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {
-  Linking,
   Platform,
   StyleSheet,
   Text,
@@ -14,18 +13,8 @@ import {theme} from '../theme';
 import type {Manifest} from '../types';
 import {DisclosureChevron} from './DisclosureChevron';
 import {DatasetDisclaimer} from './DatasetDisclaimer';
-import {MobileUploadGuide} from './MobileUploadGuide';
 
 type CatalogStatus = 'loading' | 'ready' | 'error';
-
-function openPackUpload() {
-  const url = Platform.OS === 'web'
-    ? '/publish#upload'
-    : 'https://minecraftrecipetree.craftsmannsoftware.com/publish#upload';
-  void Linking.openURL(url).catch(error => {
-    console.error('Could not open the modpack upload page.', {url, error});
-  });
-}
 
 export function DatasetSwitcher({
   status,
@@ -33,29 +22,39 @@ export function DatasetSwitcher({
   selectedSlug,
   loadedManifest,
   onOpenPicker,
-  onLocalPackInstalled,
+  onImportPack,
   leadingAction,
+  menuAction,
   trailingAction,
   fullWidthControls,
   details,
+  compactMenuExpanded,
+  onCompactMenuExpandedChange,
 }: {
   status: CatalogStatus;
   datasets: readonly DatasetDescriptor[];
   selectedSlug: string | null;
   loadedManifest: Manifest | null;
   onOpenPicker(): void;
-  onLocalPackInstalled(slug: string): void;
+  onImportPack(): void;
   leadingAction?: React.ReactNode;
+  menuAction?: React.ReactNode;
   trailingAction?: React.ReactNode;
   fullWidthControls?: React.ReactNode;
   details?: React.ReactNode;
+  compactMenuExpanded?: boolean;
+  onCompactMenuExpandedChange?(expanded: boolean): void;
 }) {
   const {width} = useWindowDimensions();
   const nativeHeader = Platform.OS !== 'web';
   const [hasHydrated, setHasHydrated] = useState(nativeHeader);
   const compact = hasHydrated && width < 720;
-  const [expanded, setExpanded] = useState(!compact);
-  const [showMobileUploadGuide, setShowMobileUploadGuide] = useState(false);
+  const [internalExpanded, setInternalExpanded] = useState(!compact);
+  const expanded = compactMenuExpanded ?? internalExpanded;
+  const setExpanded = (next: boolean) => {
+    if (compactMenuExpanded === undefined) setInternalExpanded(next);
+    onCompactMenuExpandedChange?.(next);
+  };
   const priorCompact = useRef(compact);
   useEffect(() => {
     setHasHydrated(true);
@@ -118,7 +117,7 @@ export function DatasetSwitcher({
         Platform.OS !== 'web' && styles.nativeSquareTouchTarget,
         expanded && styles.expandButtonActive,
       ]}
-      onPress={() => setExpanded(value => !value)}
+      onPress={() => setExpanded(!expanded)}
       accessibilityRole="button"
       accessibilityLabel={expanded ? 'Close app menu' : 'Open app menu'}
       accessibilityState={{expanded}}>
@@ -135,12 +134,10 @@ export function DatasetSwitcher({
         nativeHeader && styles.nativeUploadButton,
       ]}
       onPress={
-        nativeHeader
-          ? () => {
-              setExpanded(false);
-              setShowMobileUploadGuide(true);
-            }
-          : openPackUpload
+        () => {
+          if (compact || nativeHeader) setExpanded(false);
+          onImportPack();
+        }
       }
       accessibilityRole={nativeHeader ? 'button' : 'link'}
       accessibilityLabel={nativeHeader ? 'Import a local modpack exporter ZIP' : 'Import a local modpack exporter ZIP'}
@@ -163,6 +160,7 @@ export function DatasetSwitcher({
           <View style={styles.nativeRows}>
             <View style={styles.nativePickerRow}>
               {datasetButton}
+              {menuAction}
               {expandButton}
               {trailingAction}
             </View>
@@ -174,7 +172,6 @@ export function DatasetSwitcher({
                   {loadedAttribution && (
                     <DatasetDisclaimer attribution={loadedAttribution} variant="menu" />
                   )}
-                  {uploadButton}
                 </View>
               </View>
             )}
@@ -184,13 +181,17 @@ export function DatasetSwitcher({
             <View style={styles.compactTitleRow}>
               {brand}
               {datasetButton}
-              {uploadButton}
             </View>
             <View style={styles.compactControlRow}>
               {leadingAction}
               {expandButton}
               {trailingAction}
             </View>
+            {expanded && (
+              <View style={styles.compactWebMenu} accessibilityRole="menu">
+                {details && <View style={styles.compactMenuDetails}>{details}</View>}
+              </View>
+            )}
           </View>
         ) : (
           <View style={styles.fullRows}>
@@ -206,22 +207,12 @@ export function DatasetSwitcher({
           </View>
         )}
 
-        {!nativeHeader && details && (!compact || expanded) && (
+        {!nativeHeader && !compact && details && (
           <View style={styles.expandedContent}>
             {details}
           </View>
         )}
       </View>
-      {nativeHeader && (
-        <MobileUploadGuide
-          visible={showMobileUploadGuide}
-          onClose={() => setShowMobileUploadGuide(false)}
-          onInstalled={slug => {
-            setShowMobileUploadGuide(false);
-            onLocalPackInstalled(slug);
-          }}
-        />
-      )}
     </>
   );
 }
@@ -254,7 +245,7 @@ const styles = StyleSheet.create({
   brand: {flexGrow: 1, flexShrink: 1, minWidth: 140},
   brandCompact: {flexGrow: 0, flexShrink: 0, minWidth: 0},
   title: {color: theme.text, fontSize: 17, fontWeight: '800'},
-  compactRows: {gap: 7},
+  compactRows: {position: 'relative', zIndex: 100, gap: 7},
   nativeRows: {position: 'relative', zIndex: 100},
   nativePickerRow: {
     flexDirection: 'row',
@@ -296,6 +287,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
   },
+  compactWebMenu: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    zIndex: 101,
+    elevation: 16,
+    marginTop: 7,
+    gap: 8,
+    padding: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.panelAlt,
+    shadowColor: '#000',
+    shadowOpacity: 0.34,
+    shadowRadius: 18,
+    shadowOffset: {width: 0, height: 10},
+  },
+  compactMenuDetails: {width: '100%', gap: 8},
   expandedContent: {gap: 8, paddingTop: 8},
   uploadButton: {
     minHeight: 34,
@@ -314,7 +325,7 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     fontWeight: '900',
   },
-  compactUploadButton: {paddingHorizontal: 10},
+  compactUploadButton: {width: '100%', alignItems: 'flex-start', paddingHorizontal: 12},
   nativeUploadButton: {
     width: '100%',
     minHeight: 44,

@@ -298,7 +298,13 @@ function effectiveNodeRequirement(
   node: ItemTreeNode,
   required: number | null,
 ): number | null {
-  if (!node.nonConsumed || !node.key.startsWith('item|')) return required;
+  if (
+    !node.nonConsumed ||
+    node.retentionMode === 'durability' ||
+    !node.key.startsWith('item|')
+  ) {
+    return required;
+  }
   return required === 0 ? 0 : 1;
 }
 
@@ -422,7 +428,7 @@ export function calculateTreeTotals(
         required,
         node.variantCount ?? 1,
         node.tag,
-        'max',
+        node.retentionMode === 'durability' ? 'sum' : 'max',
       );
     }
 
@@ -481,12 +487,13 @@ export function calculateTreeTotals(
       outputYield = selectedOutput.amount;
     }
 
+    // Every exported recipe represents a complete machine/crafting cycle.
+    // Fluids and custom resources can have continuous quantities, but the
+    // recipe that produces them cannot be run fractionally.
     const runs =
       required == null || outputYield == null
         ? null
-        : node.key.startsWith('item|')
-          ? Math.ceil(required / outputYield)
-          : required / outputYield;
+        : Math.ceil(required / outputYield);
 
     const virtualChildren = frame.virtual || deferredSource !== undefined;
     stack.push({
@@ -520,7 +527,10 @@ export function calculateTreeTotals(
         stochasticConsumption || child.amount == null || runs == null
           ? null
           : child.nonConsumed
-            ? child.amount
+            ? child.retentionMode === 'durability'
+              ? child.amount *
+                Math.ceil(runs / Math.max(1, child.retentionUses ?? 1))
+              : child.amount
             : child.amount * runs;
       const committedAmount =
         useByproducts &&
