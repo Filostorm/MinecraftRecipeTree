@@ -77,3 +77,59 @@ test('auto expand does not report recipes that failed to attach a source', async
 
   assert.deepEqual(expanded, []);
 });
+
+test('paces an unlimited traversal in batches without dropping newly revealed nodes', async () => {
+  const root = item('root', 'item|test:0');
+  const batches = [];
+
+  const expanded = await autoExpandPreferredNodes(
+    root,
+    node => Number(node.key.split(':').at(-1)) < 5 ? 'recipe' : null,
+    async node => {
+      const index = Number(node.key.split(':').at(-1));
+      node.source = {
+        id: `${node.id}.s`,
+        kind: 'recipe',
+        inputs: [item(`${node.id}.s.0`, `item|test:${index + 1}`)],
+      };
+    },
+    {
+      batchSize: 2,
+      onBatch: progress => batches.push({...progress}),
+    },
+  );
+
+  assert.equal(expanded.length, 5);
+  assert.deepEqual(batches, [
+    {appliedSourceCount: 2, expandedRecipeCount: 2},
+    {appliedSourceCount: 4, expandedRecipeCount: 4},
+    {appliedSourceCount: 5, expandedRecipeCount: 5},
+  ]);
+});
+
+test('stops between paced batches when the active run is cancelled', async () => {
+  const root = item('root', 'item|test:0');
+  let running = true;
+
+  const expanded = await autoExpandPreferredNodes(
+    root,
+    node => Number(node.key.split(':').at(-1)) < 5 ? 'recipe' : null,
+    async node => {
+      const index = Number(node.key.split(':').at(-1));
+      node.source = {
+        id: `${node.id}.s`,
+        kind: 'recipe',
+        inputs: [item(`${node.id}.s.0`, `item|test:${index + 1}`)],
+      };
+    },
+    {
+      batchSize: 2,
+      shouldContinue: () => running,
+      onBatch: () => {
+        running = false;
+      },
+    },
+  );
+
+  assert.equal(expanded.length, 2);
+});

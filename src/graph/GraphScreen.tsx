@@ -166,6 +166,7 @@ import type {
 import {visibleGraphElements} from './viewportCulling';
 import {indexedRecipeRefs} from './indexedRecipeRefs';
 import {
+  lowDetailRecipeHoverMagnification,
   shouldShowNodeAmounts,
   shouldUseLowDetailGraph,
 } from './renderDetail';
@@ -379,6 +380,15 @@ const MAX_RECIPE_PICKER_CHOICES = 40;
 const RECIPE_PICKER_GROUP_PAGE = 40;
 const GRAPH_EXPORT_PADDING = 48;
 const GRAPH_EXPORT_PIXEL_RATIO = 3;
+const AUTO_EXPAND_BATCH_SIZE = 12;
+const AUTO_EXPAND_BATCH_DELAY_MS = 100;
+const LOW_DETAIL_RECIPE_HOVER_DELAY_MS = 120;
+
+function waitForAutoExpandBatch(): Promise<void> {
+  return new Promise(resolve => globalThis.setTimeout(resolve, AUTO_EXPAND_BATCH_DELAY_MS));
+}
+
+function ignoreLowDetailRecipeInteraction(): void {}
 
 function blockRecursiveExpansion(node: ItemTreeNode, interaction: string): boolean {
   if (!isRecursiveItemNode(node)) return false;
@@ -768,15 +778,17 @@ export function GraphScreen({
         expandPreferredChildren = true,
         recordHistory = true,
         ingredientSelections,
+        renderUpdates = true,
       }: {
         allowFluidTransfer?: boolean;
         expandPreferredChildren?: boolean;
         recordHistory?: boolean;
         ingredientSelections?: IngredientSelections;
+        renderUpdates?: boolean;
       } = {},
     ): Promise<boolean> => {
       node.loading = true;
-      bump();
+      if (renderUpdates) bump();
       try {
         const [recipe] = await data.getRecipes([ref]);
         const cat = data.categories[ref[0]];
@@ -906,7 +918,7 @@ export function GraphScreen({
         return false;
       } finally {
         node.loading = false;
-        bump();
+        if (renderUpdates) bump();
       }
     },
     [data, bump, graphDirection, preferredSourceFor, setPreferredSource],
@@ -932,7 +944,15 @@ export function GraphScreen({
     async (
       node: ItemTreeNode,
       choice: RecipeSourceChoice,
-      {expandPreferredChildren = true}: {expandPreferredChildren?: boolean} = {},
+      {
+        expandPreferredChildren = true,
+        renderUpdates = true,
+        recordHistory = true,
+      }: {
+        expandPreferredChildren?: boolean;
+        renderUpdates?: boolean;
+        recordHistory?: boolean;
+      } = {},
     ): Promise<boolean> => {
       const identity = recipeExpansionIdentity(node.key, graphDirection, choice);
       if (expandRecipesOnceRef.current) {
@@ -955,7 +975,7 @@ export function GraphScreen({
           };
           // Deferring a duplicate changes expansion ownership, not the user's
           // viewport intent. Preserve the current pan and zoom transform.
-          bump();
+          if (renderUpdates) bump();
           return true;
         }
       }
@@ -967,6 +987,8 @@ export function GraphScreen({
           allowFluidTransfer: choice.allowFluidTransfer === true,
           ingredientSelections: choice.ingredientSelections,
           expandPreferredChildren,
+          renderUpdates,
+          recordHistory,
         });
         if (!expanded) {
           console.error('The requested recipe expansion could not claim its graph position.', {
@@ -986,10 +1008,14 @@ export function GraphScreen({
   );
 
   const applyChoice = useCallback(
-    (node: ItemTreeNode, choice: SourceChoice) => {
+    (
+      node: ItemTreeNode,
+      choice: SourceChoice,
+      {renderUpdates = true}: {renderUpdates?: boolean} = {},
+    ) => {
       if (blockRecursiveExpansion(node, 'apply source choice')) return;
       if (choice.t === 'recipe') {
-        void applyRecipeChoice(node, choice);
+        void applyRecipeChoice(node, choice, {renderUpdates});
         return;
       }
       node.deferredRecipeExpansion = undefined;
@@ -998,7 +1024,7 @@ export function GraphScreen({
         choice.t === 'mob'
           ? {id: sourceId, kind: 'mob', mob: choice.mob, stat: choice.stat, inputs: []}
           : {id: sourceId, kind: 'block', blockKey: choice.blockKey, stat: choice.stat, inputs: []};
-      bump();
+      if (renderUpdates) bump();
     },
     [applyRecipeChoice, bump],
   );
@@ -2010,6 +2036,42 @@ export function GraphScreen({
   const lowDetailGraph =
     !exportingTree && shouldUseLowDetailGraph(transform.scale, graph?.nodes.length ?? 0);
   const showNodeAmounts = shouldShowNodeAmounts(transform.scale, exportingTree);
+  const [hoveredLowDetailRecipeId, setHoveredLowDetailRecipeId] = useState<string | null>(null);
+  const lowDetailRecipeHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleLowDetailRecipeHover = useCallback((nodeId: string | null) => {
+    if (lowDetailRecipeHoverTimerRef.current) {
+      clearTimeout(lowDetailRecipeHoverTimerRef.current);
+      lowDetailRecipeHoverTimerRef.current = null;
+    }
+    if (!nodeId) {
+      setHoveredLowDetailRecipeId(current => (current === null ? current : null));
+      return;
+    }
+    lowDetailRecipeHoverTimerRef.current = setTimeout(() => {
+      lowDetailRecipeHoverTimerRef.current = null;
+      setHoveredLowDetailRecipeId(nodeId);
+    }, LOW_DETAIL_RECIPE_HOVER_DELAY_MS);
+  }, []);
+  useEffect(
+    () => () => {
+      if (lowDetailRecipeHoverTimerRef.current) {
+        clearTimeout(lowDetailRecipeHoverTimerRef.current);
+      }
+    },
+    [],
+  );
+  useEffect(() => {
+    if (!lowDetailGraph) scheduleLowDetailRecipeHover(null);
+  }, [lowDetailGraph, scheduleLowDetailRecipeHover]);
+  const hoveredLowDetailRecipe =
+    lowDetailGraph && hoveredLowDetailRecipeId
+      ? renderedGraph?.nodes.find(
+          node =>
+            node.id === hoveredLowDetailRecipeId &&
+            node.kind === 'source' &&
+            node.source?.kind === 'recipe',
+        )
+      : undefined;
   const displayedAmountFor = useCallback(
     (node: ItemTreeNode) =>
       graphDirection === 'outputs'
@@ -2400,7 +2462,18 @@ export function GraphScreen({
   );
 
   const toggleCommunityAutoExpand = useCallback(async () => {
-    if (communityAutoExpandLoading || graphDirection !== 'inputs') return;
+    if (graphDirection !== 'inputs') return;
+    if (communityAutoExpandLoading) {
+      if (communityAutoExpandRef.current) {
+        communityFavoriteRequestRef.current += 1;
+        communityAutoExpandRef.current = false;
+        communityPreferredSourcesRef.current = {};
+        setCommunityAutoExpand(false);
+        setCommunityAutoExpandLoading(false);
+        bump();
+      }
+      return;
+    }
     if (communityAutoExpandRef.current) {
       communityFavoriteRequestRef.current += 1;
       communityAutoExpandRef.current = false;
@@ -2446,10 +2519,25 @@ export function GraphScreen({
           node => preferredSourceFor(node.key),
           async (node, preferred) => {
             if (preferred.t === 'recipe') {
-              await applyRecipeChoice(node, preferred, {expandPreferredChildren: false});
+              await applyRecipeChoice(node, preferred, {
+                expandPreferredChildren: false,
+                renderUpdates: false,
+                recordHistory: false,
+              });
               return;
             }
-            applyChoice(node, preferred);
+            applyChoice(node, preferred, {renderUpdates: false});
+          },
+          {
+            batchSize: AUTO_EXPAND_BATCH_SIZE,
+            shouldContinue: () =>
+              communityFavoriteRequestRef.current === requestId &&
+              communityAutoExpandRef.current,
+            onBatch: async () => {
+              if (communityFavoriteRequestRef.current !== requestId) return;
+              bump();
+              await waitForAutoExpandBatch();
+            },
           },
         );
       }
@@ -2801,6 +2889,11 @@ export function GraphScreen({
                 h={n.h}
                 node={n.item}
                 expanded={n.kind === 'source'}
+                onHoverChange={
+                  n.source?.kind === 'recipe'
+                    ? hovered => scheduleLowDetailRecipeHover(hovered ? n.id : null)
+                    : undefined
+                }
                 onActions={pointer => openNodeMenu(n.item, pointer)}
                 onTap={() =>
                   n.item.id === 'root'
@@ -2959,6 +3052,32 @@ export function GraphScreen({
               />
             ),
           )}
+          {hoveredLowDetailRecipe?.source && (
+            <SourceNodeView
+              key={`hover:${hoveredLowDetailRecipe.id}`}
+              x={hoveredLowDetailRecipe.x}
+              y={hoveredLowDetailRecipe.y}
+              w={hoveredLowDetailRecipe.w}
+              h={hoveredLowDetailRecipe.h}
+              item={hoveredLowDetailRecipe.item}
+              requiredAmount={displayedAmountFor(hoveredLowDetailRecipe.item)}
+              byproductCoverage={treeTotals.byproductCoverageByNode.get(
+                hoveredLowDetailRecipe.item.id,
+              )}
+              source={hoveredLowDetailRecipe.source}
+              isRoot={hoveredLowDetailRecipe.item.id === 'root'}
+              radialRoot={radialLayout && hoveredLowDetailRecipe.item.id === 'root'}
+              focused={false}
+              animateMobs={false}
+              showAmounts={false}
+              canSwap={false}
+              previewMagnification={lowDetailRecipeHoverMagnification(transform.scale)}
+              onCollapse={ignoreLowDetailRecipeInteraction}
+              onSwap={ignoreLowDetailRecipeInteraction}
+              onInfo={ignoreLowDetailRecipeInteraction}
+              onActions={ignoreLowDetailRecipeInteraction}
+            />
+          )}
           </View>
         </View>
       </View>
@@ -3005,7 +3124,13 @@ export function GraphScreen({
             />
             {graphDirection === 'inputs' && !/^local-[a-f0-9]{16}$/u.test(data.descriptor.slug) && (
               <CtrlBtn
-                label={communityAutoExpandLoading ? 'Loading…' : 'Auto expand'}
+                label={
+                  communityAutoExpandLoading
+                    ? communityAutoExpand
+                      ? 'Expanding…'
+                      : 'Loading…'
+                    : 'Auto expand'
+                }
                 accessibilityLabel={
                   communityAutoExpand
                     ? 'Stop automatically expanding community favorite recipes'
@@ -3652,6 +3777,10 @@ function useNodeActionHandlers(
   return {press, longPress, contextMenuProps};
 }
 
+const LowDetailItemIcon = React.memo(function LowDetailItemIcon({itemKey}: {itemKey: string}) {
+  return <ItemIcon itemKey={itemKey} size={32} />;
+});
+
 function LowDetailNodeView({
   x,
   y,
@@ -3659,6 +3788,7 @@ function LowDetailNodeView({
   h,
   node,
   expanded,
+  onHoverChange,
   onTap,
   onActions,
 }: {
@@ -3668,6 +3798,7 @@ function LowDetailNodeView({
   h: number;
   node: ItemTreeNode;
   expanded: boolean;
+  onHoverChange?: (hovered: boolean) => void;
   onTap: () => void;
   onActions: (pointer?: NodeActionPointer) => void;
 }) {
@@ -3679,6 +3810,8 @@ function LowDetailNodeView({
       accessibilityLabel="Recipe graph node; zoom in for details"
       onPress={handlers.press}
       onLongPress={handlers.longPress}
+      onHoverIn={onHoverChange ? () => onHoverChange(true) : undefined}
+      onHoverOut={onHoverChange ? () => onHoverChange(false) : undefined}
       delayLongPress={450}
       style={[
         styles.lowDetailNode,
@@ -3686,7 +3819,9 @@ function LowDetailNodeView({
         node.id === 'root' && styles.lowDetailRootNode,
         {left: x, top: y, width: Math.max(16, w), height: Math.max(16, h)},
       ]}
-    />
+    >
+      <LowDetailItemIcon itemKey={node.key} />
+    </Pressable>
   );
 }
 
@@ -4256,6 +4391,7 @@ function SourceNodeView({
   focused,
   animateMobs,
   showAmounts,
+  previewMagnification,
   rootActions,
   canSwap,
   onCollapse,
@@ -4276,6 +4412,7 @@ function SourceNodeView({
   focused: boolean;
   animateMobs: boolean;
   showAmounts: boolean;
+  previewMagnification?: number;
   rootActions?: RootNodeActionProps;
   canSwap: boolean;
   onCollapse: () => void;
@@ -4353,6 +4490,7 @@ function SourceNodeView({
 
   return (
     <Pressable
+      pointerEvents={previewMagnification ? 'none' : undefined}
       {...(isRoot ? signalTarget('graph.root-actions.toggle-expanded') : {})}
       {...handlers.contextMenuProps}
       accessibilityRole={isRoot ? 'button' : undefined}
@@ -4379,6 +4517,12 @@ function SourceNodeView({
         focused && styles.nodeByproductTarget,
         isRoot && !radialRoot && styles.nodeRoot,
         radialRoot && styles.radialExpandedRootNode,
+        previewMagnification
+          ? [
+              styles.lowDetailRecipePreview,
+              {transform: [{scale: previewMagnification}]},
+            ]
+          : null,
         isRoot && rootActions &&
           (radialRoot ? styles.radialRootSelected : styles.rootNodeSelected),
       ]}>
@@ -4545,6 +4689,8 @@ const styles = StyleSheet.create({
     position: 'absolute',
     minWidth: 16,
     minHeight: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 2,
     borderColor: theme.borderLight,
     borderRadius: 8,
@@ -4559,6 +4705,14 @@ const styles = StyleSheet.create({
     borderColor: theme.radialRoot,
     borderWidth: 4,
     opacity: 1,
+  },
+  lowDetailRecipePreview: {
+    zIndex: 40,
+    shadowColor: '#000',
+    shadowOpacity: 0.55,
+    shadowRadius: 18,
+    shadowOffset: {width: 0, height: 8},
+    elevation: 24,
   },
   nodeActionLayer: {
     position: 'absolute',
