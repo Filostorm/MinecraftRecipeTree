@@ -19,6 +19,7 @@ import {
   RADIAL_ROOT_ITEM_ICON_SIZE,
 } from '../components/itemIconSizing';
 import {MobSprite} from '../components/MobSprite';
+import {MultiblockPreview} from '../components/MultiblockPreview';
 import {
   PickerGroupProgress,
   PickerModal,
@@ -49,6 +50,10 @@ import {isRecipeVisibleForStages} from '../data/recipeStages';
 import {isFluidContainerTransferRecipe} from '../data/recipeVisibility';
 import {recipeDisplayTitle} from '../data/recipeTitles';
 import {recipeNeedsLayoutPreviewUnavailableNotice} from '../data/recipePresentation';
+import {
+  loadCommunityRecipeFavorites,
+  updateCommunityRecipeFavorite,
+} from '../data/recipeFavorites';
 import {theme} from '../theme';
 import {DropStat, Mob, Recipe, RecipeRef} from '../types';
 import {useUi} from '../ui/UiContext';
@@ -63,6 +68,7 @@ import {
   ROOT_ATTACHED_ACTIONS_WIDTH,
   ROOT_SOURCE_ACTIONS_WIDTH,
   SOURCE_HEADER,
+  SOURCE_STRUCTURE_PREVIEW_WIDTH,
   type ByproductSupplyEdge,
   attachedRootVisualX,
   byproductSupplyEdges,
@@ -115,6 +121,7 @@ import {
   type StoredGraphSelection,
 } from './graphSession';
 import {
+  assertPortableTreePackMatches,
   buildPortableTree,
   parsePortableTree,
   portableSelectionAsStored,
@@ -122,10 +129,14 @@ import {
 } from './portableTree';
 import {
   pickPortableTreeFile,
-  savePortableTreeToInstance,
   sharePortableTree,
 } from './portableTreeTransfer';
 import {TreeShareModal} from './TreeShareModal';
+import {
+  AutoExpandSummaryModal,
+  type AutoExpandSummaryEntry,
+} from './AutoExpandSummaryModal';
+import {autoExpandPreferredNodes} from './autoExpandTree';
 import {
   createDeferredRecipeSourceResolver,
   deferredRecipeExpansionNodes,
@@ -169,8 +180,6 @@ import {
 } from './treeTotalTargets';
 import {
   estimateParallelMachines,
-  recipeCycleSeconds,
-  selectedRecipeOutput,
   type ProductionPlan,
 } from './machineParallels';
 
@@ -539,6 +548,8 @@ export function GraphScreen({
   const [showRootActions, setShowRootActions] = useState(false);
   const [showTreeShare, setShowTreeShare] = useState(false);
   const [nodeMenu, setNodeMenu] = useState<NodeMenuState | null>(null);
+  const [autoExpandSummary, setAutoExpandSummary] =
+    useState<AutoExpandSummaryEntry[] | null>(null);
   useEffect(() => setShowRootActions(false), [graphRequestId]);
   useEffect(() => {
     if (tab !== 'graph') setShowRootActions(false);
@@ -577,6 +588,19 @@ export function GraphScreen({
     useState<PreferredSources>(loadPreferredSources);
   const preferredSourcesRef = useRef(preferredSources);
   preferredSourcesRef.current = preferredSources;
+  const communityPreferredSourcesRef = useRef<PreferredSources>({});
+  const communityAutoExpandRef = useRef(false);
+  const communityFavoriteRequestRef = useRef(0);
+  const [communityAutoExpand, setCommunityAutoExpand] = useState(false);
+  const [communityAutoExpandLoading, setCommunityAutoExpandLoading] = useState(false);
+  useEffect(() => {
+    communityFavoriteRequestRef.current += 1;
+    communityPreferredSourcesRef.current = {};
+    communityAutoExpandRef.current = false;
+    setCommunityAutoExpand(false);
+    setCommunityAutoExpandLoading(false);
+    setAutoExpandSummary(null);
+  }, [data.descriptor.slug, data.descriptor.publicationId]);
 
   const [transform, setTransform] = useState<GraphTransform>({x: 60, y: 60, scale: 1});
   const transformRef = useRef(transform);
@@ -682,42 +706,56 @@ export function GraphScreen({
   const preferredSourceFor = useCallback(
     (key: string, equivalentKeys?: readonly string[]): SourceChoice | null => {
       if (graphDirection === 'outputs') return null;
-      const preferred = preferredSourcesRef.current[key];
-      if (!preferred) return null;
-      if (preferred.t === 'recipe') {
-        const exists = indexedRecipeRefs(data.index, key, equivalentKeys, 'p').some(
-          ref =>
-            !data.metaCategories.has(ref[0]) &&
-            !isDefaultDisabledRecipeCategory(data.categories[ref[0]]) &&
-            ref[0] === preferred.ref[0] &&
-            ref[1] === preferred.ref[1],
-        );
-        return exists
-          ? {
-              t: 'recipe',
-              ref: preferred.ref,
-              ...(preferred.allowFluidTransfer ? {allowFluidTransfer: true as const} : {}),
-              ...(preferred.ingredientSelections
-                ? {ingredientSelections: {...preferred.ingredientSelections}}
-                : {}),
-            }
-          : null;
-      }
-      return choicesFor(key, graphDirection, equivalentKeys).find(choice =>
-        choiceMatchesPreference(choice, preferred),
-      ) ?? null;
+      const choiceForPreference = (preferred: PreferredSource | undefined): SourceChoice | null => {
+        if (!preferred) return null;
+        if (preferred.t === 'recipe') {
+          const exists = indexedRecipeRefs(data.index, key, equivalentKeys, 'p').some(
+            ref =>
+              !data.metaCategories.has(ref[0]) &&
+              !isDefaultDisabledRecipeCategory(data.categories[ref[0]]) &&
+              ref[0] === preferred.ref[0] &&
+              ref[1] === preferred.ref[1],
+          );
+          return exists
+            ? {
+                t: 'recipe',
+                ref: preferred.ref,
+                ...(preferred.allowFluidTransfer ? {allowFluidTransfer: true as const} : {}),
+                ...(preferred.ingredientSelections
+                  ? {ingredientSelections: {...preferred.ingredientSelections}}
+                  : {}),
+              }
+            : null;
+        }
+        return choicesFor(key, graphDirection, equivalentKeys).find(choice =>
+          choiceMatchesPreference(choice, preferred),
+        ) ?? null;
+      };
+
+      const personalChoice = choiceForPreference(preferredSourcesRef.current[key]);
+      if (personalChoice) return personalChoice;
+      return communityAutoExpandRef.current
+        ? choiceForPreference(communityPreferredSourcesRef.current[key])
+        : null;
     },
     [graphDirection, choicesFor, data.index, data.categories, data.metaCategories],
   );
 
-  const setPreferredSource = useCallback((key: string, choice: SourceChoice | null) => {
-    const next = {...preferredSourcesRef.current};
-    if (choice) next[key] = preferredSourceFromChoice(choice);
-    else delete next[key];
-    preferredSourcesRef.current = next;
-    persistPreferredSources(next);
-    setPreferredSources(next);
-  }, []);
+  const setPreferredSource = useCallback(
+    (key: string, choice: SourceChoice | null) => {
+      const next = {...preferredSourcesRef.current};
+      if (choice) next[key] = preferredSourceFromChoice(choice);
+      else delete next[key];
+      preferredSourcesRef.current = next;
+      persistPreferredSources(next);
+      setPreferredSources(next);
+      const recipeRef = choice?.t === 'recipe' ? choice.ref : null;
+      void updateCommunityRecipeFavorite(data.descriptor, key, recipeRef).catch(error => {
+        console.error('The shared recipe favorite could not be updated.', error);
+      });
+    },
+    [data.descriptor],
+  );
 
   const applyChoiceRef = useRef<((node: ItemTreeNode, choice: SourceChoice) => void) | null>(null);
 
@@ -767,11 +805,7 @@ export function GraphScreen({
             stored.ref[0] === ref[0] &&
             stored.ref[1] === ref[1]
           ) {
-            const next = {...preferredSourcesRef.current};
-            delete next[node.key];
-            preferredSourcesRef.current = next;
-            persistPreferredSources(next);
-            setPreferredSources(next);
+            setPreferredSource(node.key, null);
           }
           return false;
         }
@@ -818,6 +852,8 @@ export function GraphScreen({
               )?.[0] ?? spec.key,
             tag: spec.tag,
             nonConsumed: spec.nonConsumed,
+            retentionMode: spec.retentionMode,
+            retentionUses: spec.retentionUses,
             consumptionProbability:
               spec.probabilityRole === 'consume' && !spec.nonConsumed
                 ? spec.probability
@@ -873,7 +909,7 @@ export function GraphScreen({
         bump();
       }
     },
-    [data, bump, graphDirection, preferredSourceFor],
+    [data, bump, graphDirection, preferredSourceFor, setPreferredSource],
   );
 
   /** Replace every eligible occurrence with the newly preferred source. */
@@ -893,7 +929,11 @@ export function GraphScreen({
   );
 
   const applyRecipeChoice = useCallback(
-    async (node: ItemTreeNode, choice: RecipeSourceChoice): Promise<boolean> => {
+    async (
+      node: ItemTreeNode,
+      choice: RecipeSourceChoice,
+      {expandPreferredChildren = true}: {expandPreferredChildren?: boolean} = {},
+    ): Promise<boolean> => {
       const identity = recipeExpansionIdentity(node.key, graphDirection, choice);
       if (expandRecipesOnceRef.current) {
         const owner =
@@ -926,6 +966,7 @@ export function GraphScreen({
         const expanded = await expandRecipe(node, choice.ref, {
           allowFluidTransfer: choice.allowFluidTransfer === true,
           ingredientSelections: choice.ingredientSelections,
+          expandPreferredChildren,
         });
         if (!expanded) {
           console.error('The requested recipe expansion could not claim its graph position.', {
@@ -1121,15 +1162,6 @@ export function GraphScreen({
             outputs:
               presentedRecipe && direction === 'outputs'
                 ? slotSummary(presentedRecipe.out)
-                : undefined,
-            durationTicks: presentedRecipe?.durationTicks,
-            cycleSeconds:
-              presentedRecipe && category
-                ? recipeCycleSeconds(presentedRecipe, category.id) ?? undefined
-                : undefined,
-            outputPerCycle:
-              presentedRecipe && direction === 'inputs'
-                ? selectedRecipeOutput(presentedRecipe, targetKey) ?? undefined
                 : undefined,
             machineKey: category?.catalysts[0],
             machineLabel: category?.catalysts[0]
@@ -2106,19 +2138,10 @@ export function GraphScreen({
     return sharePortableTree(`${rootExportName}-tree.mrtree.json`, json);
   }, [portableTreeJson, rootExportName]);
 
-  const saveCurrentTreeToInstance = useCallback(async () => {
-    const json = await portableTreeJson();
-    return savePortableTreeToInstance(`${rootExportName}-tree.mrtree.json`, json);
-  }, [portableTreeJson, rootExportName]);
-
   const importPortableTree = useCallback(
     async (raw: string) => {
       const share = parsePortableTree(raw);
-      if (share.pack.minecraftVersion !== data.descriptor.minecraftVersion) {
-        throw new Error(
-          `This tree is for Minecraft ${share.pack.minecraftVersion}; the selected pack uses ${data.descriptor.minecraftVersion}.`,
-        );
-      }
+      assertPortableTreePackMatches(share, data.descriptor);
       if (!data.itemsByKey.has(share.rootKey)) {
         throw new Error('The shared starting item is not available in the selected modpack.');
       }
@@ -2185,7 +2208,7 @@ export function GraphScreen({
       pendingGraphSessionRef.current = session;
       restoringGraphSessionRef.current = true;
       setShowTreeShare(false);
-      setExportMessage('Shared tree imported.');
+      setExportMessage('Shared tree history opened.');
       restoreGraph(session.rootKey, session.direction);
     },
     [choicesFor, data, restoreGraph],
@@ -2375,6 +2398,106 @@ export function GraphScreen({
     },
     [applyRecipeChoice, bump, graphDirection],
   );
+
+  const toggleCommunityAutoExpand = useCallback(async () => {
+    if (communityAutoExpandLoading || graphDirection !== 'inputs') return;
+    if (communityAutoExpandRef.current) {
+      communityFavoriteRequestRef.current += 1;
+      communityAutoExpandRef.current = false;
+      communityPreferredSourcesRef.current = {};
+      setCommunityAutoExpand(false);
+      bump();
+      return;
+    }
+
+    const requestId = communityFavoriteRequestRef.current + 1;
+    communityFavoriteRequestRef.current = requestId;
+    setCommunityAutoExpandLoading(true);
+    try {
+      const favorites = await loadCommunityRecipeFavorites(data.descriptor);
+      if (communityFavoriteRequestRef.current !== requestId) return;
+      const communitySources: PreferredSources = {};
+      for (const favorite of favorites) {
+        // The API guarantees at least one favorite. Validate again at the point
+        // where aggregate data can affect the graph, and ignore stale recipe refs.
+        if (favorite.count < 1) continue;
+        const exists = (data.index[favorite.itemKey]?.p ?? []).some(
+          ref =>
+            ref[0] === favorite.recipeRef[0] &&
+            ref[1] === favorite.recipeRef[1] &&
+            !data.metaCategories.has(ref[0]) &&
+            !isDefaultDisabledRecipeCategory(data.categories[ref[0]]),
+        );
+        if (exists) communitySources[favorite.itemKey] = {t: 'recipe', ref: favorite.recipeRef};
+      }
+      if (Object.keys(communitySources).length === 0) {
+        setExportMessage('No community recipe favorites are available for this pack version yet.');
+        return;
+      }
+      communityPreferredSourcesRef.current = communitySources;
+      communityAutoExpandRef.current = true;
+      setCommunityAutoExpand(true);
+
+      const currentRoot = rootRef.current;
+      let expandedNodes: ItemTreeNode[] = [];
+      if (currentRoot) {
+        expandedNodes = await autoExpandPreferredNodes(
+          currentRoot,
+          node => preferredSourceFor(node.key),
+          async (node, preferred) => {
+            if (preferred.t === 'recipe') {
+              await applyRecipeChoice(node, preferred, {expandPreferredChildren: false});
+              return;
+            }
+            applyChoice(node, preferred);
+          },
+        );
+      }
+      if (communityFavoriteRequestRef.current !== requestId) return;
+      const groupedEntries = new Map<string, AutoExpandSummaryEntry>();
+      for (const node of expandedNodes) {
+        const source = node.source;
+        if (source?.kind !== 'recipe' || !source.ref) continue;
+        const id = `${node.key}|${source.ref[0]}:${source.ref[1]}`;
+        const existing = groupedEntries.get(id);
+        if (existing) {
+          existing.count += 1;
+          continue;
+        }
+        groupedEntries.set(id, {
+          id,
+          itemName: displayIngredientName(
+            data.itemsByKey.get(node.key)?.n ?? node.key,
+            node.tag,
+            data.descriptor.minecraftVersion,
+          ),
+          recipeTitle: source.catTitle ?? source.recipe?.id ?? `Recipe ${source.ref.join(':')}`,
+          count: 1,
+        });
+      }
+      setAutoExpandSummary([...groupedEntries.values()]);
+      bump();
+    } catch (error) {
+      console.error('Community recipe favorites could not be loaded for auto expand.', error);
+      setExportMessage('Community favorites could not be loaded.');
+    } finally {
+      if (communityFavoriteRequestRef.current === requestId) {
+        setCommunityAutoExpandLoading(false);
+      }
+    }
+  }, [
+    applyChoice,
+    applyRecipeChoice,
+    bump,
+    communityAutoExpandLoading,
+    data.categories,
+    data.descriptor,
+    data.index,
+    data.itemsByKey,
+    data.metaCategories,
+    graphDirection,
+    preferredSourceFor,
+  ]);
 
   const updateUseByproducts = useCallback((value: boolean) => {
     setUseByproducts(value);
@@ -2880,6 +3003,19 @@ export function GraphScreen({
               active={expandRecipesOnce}
               onPress={() => updateExpandRecipesOnce(!expandRecipesOnce)}
             />
+            {graphDirection === 'inputs' && !/^local-[a-f0-9]{16}$/u.test(data.descriptor.slug) && (
+              <CtrlBtn
+                label={communityAutoExpandLoading ? 'Loading…' : 'Auto expand'}
+                accessibilityLabel={
+                  communityAutoExpand
+                    ? 'Stop automatically expanding community favorite recipes'
+                    : 'Automatically expand community favorite recipes'
+                }
+                metricsId="graph.control.community-auto-expand"
+                active={communityAutoExpand}
+                onPress={() => void toggleCommunityAutoExpand()}
+              />
+            )}
             <CtrlBtn
               label="Share"
               metricsId="graph.control.share"
@@ -2900,17 +3036,17 @@ export function GraphScreen({
               showGraphControls && styles.ctrlBtnActive,
             ]}
             onPress={onToggleGraphControls}>
-            {!showGraphControls && (
-              <Text style={[styles.ctrlBtnText, noSelect]}>
-                Graph controls
-              </Text>
-            )}
-            <DisclosureChevron
-              expanded={showGraphControls}
-              color={showGraphControls ? theme.accent : theme.text}
-              size={18}
-              strokeWidth={2.4}
-            />
+            <View style={styles.ctrlBtnContent}>
+              {!showGraphControls && (
+                <Text style={[styles.ctrlBtnText, noSelect]}>Graph controls</Text>
+              )}
+              <DisclosureChevron
+                expanded={showGraphControls}
+                color={showGraphControls ? theme.accent : theme.text}
+                size={18}
+                strokeWidth={2.4}
+              />
+            </View>
           </TouchableOpacity>
         )}
       </View>
@@ -3090,7 +3226,6 @@ export function GraphScreen({
               return {...current, fluidTransferEntries};
             });
           }}
-          productionPlan={picker.productionPlan}
           onOpenMachine={machineKey => {
             openItem(machineKey);
           }}
@@ -3221,7 +3356,11 @@ export function GraphScreen({
         onShare={shareCurrentTree}
         onImport={importPortableTree}
         onChooseFile={pickPortableTreeFile}
-        onSaveToInstance={saveCurrentTreeToInstance}
+      />
+      <AutoExpandSummaryModal
+        entries={autoExpandSummary}
+        interfaceZoom={interfaceZoom}
+        onClose={() => setAutoExpandSummary(null)}
       />
     </View>
   );
@@ -3856,6 +3995,7 @@ function CompactItemNodeView({
     pendingTapRef.current = null;
   };
   const handleTap = () => {
+    if (!selectable || node.loading) return;
     if (!onChangeRecipe) {
       onTap();
       return;
@@ -3890,7 +4030,9 @@ function CompactItemNodeView({
         radial ? styles.radialItemNode : styles.compactItemNode,
         branchLabel && styles.compactBranchNode,
         {left: x, top: y},
-        node.nonConsumed && styles.nodePrerequisite,
+        node.retentionMode === 'durability'
+          ? styles.nodeDurabilityTool
+          : node.nonConsumed && styles.nodeReusableItem,
         isRecursiveItemNode(node) && styles.nodeCyclic,
         terminal && !isRecursiveItemNode(node) && styles.nodeTerminal,
         node.loading && styles.nodeLoading,
@@ -4033,7 +4175,9 @@ function ItemNodeView({
       style={[
         styles.itemNode,
         {left: x, top: y, width: ITEM_W, height: ITEM_H},
-        node.nonConsumed && styles.nodePrerequisite,
+        node.retentionMode === 'durability'
+          ? styles.nodeDurabilityTool
+          : node.nonConsumed && styles.nodeReusableItem,
         isRecursiveItemNode(node) && styles.nodeCyclic,
         !expandable && !isRecursiveItemNode(node) && styles.nodeTerminal,
         byproductCoverage?.remainingAmount === 0 && styles.nodeByproductComplete,
@@ -4061,7 +4205,11 @@ function ItemNodeView({
             ? `  ${formatIngredientQuantity(node.key, requiredAmount)}`
             : ''}
           {isRecursiveItemNode(node) ? '  ↻' : ''}
-          {node.nonConsumed ? '  retained' : ''}
+          {node.retentionMode === 'durability'
+            ? `  tool · ${String(node.retentionUses ?? '?')} uses`
+            : node.nonConsumed
+              ? '  reusable'
+              : ''}
           {node.consumptionProbability !== undefined
             ? `  ${node.consumptionProbability == null ? '?' : `${String(Math.round(node.consumptionProbability * 10_000) / 100)}%`} consume`
             : ''}
@@ -4219,7 +4367,9 @@ function SourceNodeView({
       style={[
         styles.sourceNode,
         {left: x, top: y, width: sourceCardWidth, height: h},
-        item.nonConsumed && styles.nodePrerequisite,
+        item.retentionMode === 'durability'
+          ? styles.nodeDurabilityTool
+          : item.nonConsumed && styles.nodeReusableItem,
         isRecursiveItemNode(item) && styles.nodeCyclic,
         source.inputs.length === 0 && !isRecursiveItemNode(item) && styles.nodeTerminal,
         byproductCoverage?.remainingAmount === 0 && styles.nodeByproductComplete,
@@ -4267,29 +4417,44 @@ function SourceNodeView({
         <DisclosureChevron expanded color={theme.textDim} size={14} />
       </Pressable>
 
-      {source.kind === 'recipe' && source.recipe?.img && source.dir && (
-        <RecipePreviewImage
-          uri={data.imageUrl(recipeImagePath(source.dir, source.recipe.img))!}
-          backgroundUri={
-            source.recipe.bg
-              ? data.imageUrl(recipeImagePath(source.dir, source.recipe.bg))
-              : undefined
-          }
-          context={source.recipe.id ?? `${source.dir} graph recipe`}
-          style={[
-            {
-              width: recipeImageDisplay(source.recipe).w,
-              height: recipeImageDisplay(source.recipe).h,
-              alignSelf: 'center' as const,
-            },
-            pixelated as object,
-          ]}
-          resizeMode="contain"
+      {source.kind === 'recipe' && source.recipe?.structure && (
+        <MultiblockPreview
+          compact
+          structure={source.recipe.structure}
+          availableWidth={SOURCE_STRUCTURE_PREVIEW_WIDTH}
         />
       )}
-      {source.kind === 'recipe' && source.recipe && (!source.recipe.img || !source.dir) && (
-        <Text style={[styles.dropStat, noSelect]}>Structured recipe · layout preview unavailable</Text>
-      )}
+      {source.kind === 'recipe' &&
+        !source.recipe?.structure &&
+        source.recipe?.img &&
+        source.dir && (
+          <RecipePreviewImage
+            uri={data.imageUrl(recipeImagePath(source.dir, source.recipe.img))!}
+            backgroundUri={
+              source.recipe.bg
+                ? data.imageUrl(recipeImagePath(source.dir, source.recipe.bg))
+                : undefined
+            }
+            context={source.recipe.id ?? `${source.dir} graph recipe`}
+            style={[
+              {
+                width: recipeImageDisplay(source.recipe).w,
+                height: recipeImageDisplay(source.recipe).h,
+                alignSelf: 'center' as const,
+              },
+              pixelated as object,
+            ]}
+            resizeMode="contain"
+          />
+        )}
+      {source.kind === 'recipe' &&
+        source.recipe &&
+        !source.recipe.structure &&
+        (!source.recipe.img || !source.dir) && (
+          <Text style={[styles.dropStat, noSelect]}>
+            Structured recipe · layout preview unavailable
+          </Text>
+        )}
       {source.kind === 'mob' && source.mob && (
         <View style={styles.dropRow}>
           <MobSprite mob={source.mob} size={56} animate={animateMobs} />
@@ -4638,7 +4803,16 @@ const styles = StyleSheet.create({
   },
   radialRootSelected: {borderWidth: 3},
   rootDiamondSelected: {borderWidth: 3},
-  nodePrerequisite: {borderColor: theme.borderLight, borderStyle: 'dashed'},
+  nodeReusableItem: {
+    borderColor: theme.transfer,
+    borderStyle: 'dashed',
+    backgroundColor: '#15302f',
+  },
+  nodeDurabilityTool: {
+    borderColor: theme.warn,
+    borderStyle: 'dashed',
+    backgroundColor: '#332b17',
+  },
   nodeCyclic: {borderColor: theme.warn},
   nodeTerminal: {borderColor: theme.textDim, borderWidth: 2},
   nodeByproductComplete: {
@@ -4814,6 +4988,7 @@ const styles = StyleSheet.create({
     right: 10,
     flexDirection: 'row',
     gap: 6,
+    maxWidth: '96%',
   },
   layoutFallbackNotice: {
     position: 'absolute',
@@ -4874,6 +5049,8 @@ const styles = StyleSheet.create({
   controlOptions: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
     gap: 6,
   },
   totalsPanel: {
@@ -4969,8 +5146,6 @@ const styles = StyleSheet.create({
     width: 'auto',
     minWidth: 118,
     paddingHorizontal: 10,
-    flexDirection: 'row',
-    gap: 6,
   },
   fitControl: {
     position: 'absolute',

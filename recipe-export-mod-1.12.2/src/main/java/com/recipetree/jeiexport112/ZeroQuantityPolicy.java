@@ -97,6 +97,13 @@ final class ZeroQuantityPolicy {
             }
         }
 
+        if ("output".equals(role) && ENDER_IO_ENERGY.equals(ingredientClassName)
+                && "StirlingGenerator".equals(categoryUid)) {
+            return new Decision(Kind.ABSENT_OUTPUT, null, "ZERO_ABSENT_OUTPUT",
+                    "Ender IO reports a zero generator-tier energy result when that fuel has no " +
+                            "output for the tier; positive tier outputs remain published");
+        }
+
         if ("input".equals(role) && ENDER_IO_ENERGY.equals(ingredientClassName)
                 && "EIOWC".equals(categoryUid)) {
             return new Decision(Kind.INVALID_RECIPE, null, "ZERO_INVALID_RECIPE",

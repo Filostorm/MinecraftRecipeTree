@@ -84,9 +84,9 @@ export const EXPORTER_RELEASE_DEFINITIONS = Object.freeze([
     minecraftVersion: '1.12.2',
     recipeViewer: 'HEI/JEI 4',
     loader: 'Forge 14.23.5',
-    version: '1.1.4',
-    source: 'recipe-export-mod-1.12.2/build/libs/recipe-export-mod-1.12.2-1.1.4.jar',
-    filename: 'recipe-tree-exporter-forge-1.12.2-1.1.4.jar',
+    version: '1.1.6',
+    source: 'recipe-export-mod-1.12.2/build/libs/recipe-export-mod-1.12.2-1.1.6.jar',
+    filename: 'recipe-tree-exporter-forge-1.12.2-1.1.6.jar',
     qualityProfiles: Object.freeze(['meatballcraft-1.12.2', 'multiblock-madness-1.12.2']),
     artifactProvenance: Object.freeze({
       format: 'mrt-exporter-build-v1',
@@ -95,9 +95,9 @@ export const EXPORTER_RELEASE_DEFINITIONS = Object.freeze([
     }),
     acceptanceCorpora: Object.freeze({
       'meatballcraft-1.12.2': Object.freeze({
-        items: 196127,
-        recipes: 359096,
-        categories: 674,
+        items: 196959,
+        recipes: 376299,
+        categories: 680,
         mobs: 0,
         blockDrops: 0,
       }),

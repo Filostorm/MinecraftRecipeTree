@@ -8,11 +8,15 @@ import {
   ROOT_SOURCE_ACTIONS_WIDTH,
   ROOT_ATTACHED_ACTIONS_HEIGHT,
   ROOT_ATTACHED_ACTIONS_WIDTH,
+  SOURCE_HEADER,
+  SOURCE_STRUCTURE_PREVIEW_HEIGHT,
+  SOURCE_STRUCTURE_PREVIEW_WIDTH,
   attachedRootVisualX,
   byproductSupplyEdges,
   compactQuantityPlacement,
   layoutTree,
   shouldShowCompactQuantity,
+  sourceNodeSize,
 } from './layout.ts';
 
 test('connects byproduct ingredients to their exact producing recipe once', () => {
@@ -164,6 +168,37 @@ test('reserves node space for starting-item controls instead of overlaying the t
   assert.equal(open.nodes[0].w, closed.nodes[0].w + ROOT_SOURCE_ACTIONS_WIDTH);
   assert.equal(open.nodes[0].h, closed.nodes[0].h + ROOT_SOURCE_ACTIONS_HEIGHT);
   assert.ok(open.nodes[1].y >= closed.nodes[1].y + ROOT_SOURCE_ACTIONS_HEIGHT);
+});
+
+test('reserves a placed-block canvas for structure recipes instead of their legacy screenshot', () => {
+  const size = sourceNodeSize({
+    id: 'structure.source',
+    kind: 'recipe',
+    recipe: {
+      w: 180,
+      h: 220,
+      img: 'blank-legacy-preview.png',
+      structure: {
+        size: [9, 11, 9],
+        total: 2,
+        controller: 'item|test:controller',
+        blocks: [
+          ['item|test:controller', 1],
+          ['item|test:casing', 1],
+        ],
+        cells: [
+          [0, 0, 0, 'item|test:controller'],
+          [1, 0, 0, 'item|test:casing'],
+        ],
+      },
+    },
+    inputs: [],
+  });
+
+  assert.deepEqual(size, {
+    w: SOURCE_STRUCTURE_PREVIEW_WIDTH + 12,
+    h: SOURCE_STRUCTURE_PREVIEW_HEIGHT + SOURCE_HEADER + 12,
+  });
 });
 
 test('reserves standalone control space around an open compact starting item', () => {

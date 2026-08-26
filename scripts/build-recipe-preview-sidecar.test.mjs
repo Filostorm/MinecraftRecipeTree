@@ -23,6 +23,7 @@ import {
   MAX_CATEGORY_BYTES,
   MAX_PACK_BYTES,
   MAX_PACK_INDEX_BYTES,
+  MEATBALLCRAFT_01864_CONTRACT,
   MEATBALLCRAFT_CONTRACT,
   recipePreviewContractForProfile,
   RECIPE_PREVIEW_CATEGORY_FORMAT,
@@ -70,6 +71,19 @@ const GTNH_PACK_IDENTITY = Object.freeze({
   name: 'GT New Horizons',
   version: '2.8.4',
   identitySource: 'explicit-request',
+});
+
+test('MeatballCraft 0.18.6.4 contract includes only its intentional EMC omissions', () => {
+  const contract = recipePreviewContractForProfile(MEATBALLCRAFT_112_PROFILE, {
+    pack: {
+      name: 'MeatballCraft',
+      version: 'prerelease-0.18.6.4',
+      identitySource: 'explicit-request',
+    },
+  });
+  assert.equal(contract.counts.recipes, 376299);
+  assert.deepEqual(contract.recipeImages, {previews: 365193, missing: 11106});
+  assert.deepEqual(contract.counts, MEATBALLCRAFT_01864_CONTRACT.counts);
 });
 
 function validMm2Warnings(nativeIconCorrections = 2) {

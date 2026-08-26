@@ -14,6 +14,9 @@ export const COMPACT_ROOT_LABEL_GAP = 8;
 export const COMPACT_ROOT_LABEL_HEIGHT = COMPACT_ROOT_LABEL_GAP + 12;
 /** Header strip on source nodes: icon + "Name ×N · Category". */
 export const SOURCE_HEADER = 22;
+/** Fixed placed-block canvas used for structure recipes inside the graph. */
+export const SOURCE_STRUCTURE_PREVIEW_WIDTH = 280;
+export const SOURCE_STRUCTURE_PREVIEW_HEIGHT = 220;
 /** Extra space inside an expanded root recipe while its inline controls are open. */
 export const ROOT_SOURCE_ACTIONS_WIDTH = 44;
 export const ROOT_SOURCE_ACTIONS_HEIGHT = 46;
@@ -210,6 +213,12 @@ export function sourceNodeSize(
   const actionWidth = showRootActions ? ROOT_SOURCE_ACTIONS_WIDTH : 0;
   const actionHeight = showRootActions ? ROOT_SOURCE_ACTIONS_HEIGHT : 0;
   if (source.kind === 'recipe' && source.recipe) {
+    if (source.recipe.structure) {
+      return {
+        w: SOURCE_STRUCTURE_PREVIEW_WIDTH + 12 + actionWidth,
+        h: SOURCE_STRUCTURE_PREVIEW_HEIGHT + SOURCE_HEADER + 12 + actionHeight,
+      };
+    }
     const img = recipeImageDisplay(source.recipe);
     return {
       w: Math.max(180, img.w + 12) + actionWidth,

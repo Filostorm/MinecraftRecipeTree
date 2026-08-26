@@ -16,10 +16,6 @@ import {signalTarget} from '../analytics/signal';
 import {theme} from '../theme';
 import {uniformPickerRecipePreviewSize} from '../ui/interfaceZoom';
 import type {GraphDirection} from '../graph/direction';
-import {
-  MINECRAFT_TICKS_PER_SECOND,
-  parallelMachinesForOneCycle,
-} from '../graph/machineParallels';
 import {pixelated} from './ItemIcon';
 import {ItemChip} from './RecipeCard';
 import {RecipePreviewImage} from './RecipePreviewImage';
@@ -44,18 +40,8 @@ export interface PickerOption {
   structure?: RecipeStructure;
   inputs?: SlotSummary[];
   outputs?: SlotSummary[];
-  /** Exact JEI/export duration when known. */
-  durationTicks?: number;
-  /** Duration used for planning, including safe vanilla fallbacks. */
-  cycleSeconds?: number;
-  outputPerCycle?: number;
   machineKey?: string;
   machineLabel?: string;
-}
-
-export interface PickerProductionPlan {
-  amount: number;
-  windowSeconds: number;
 }
 
 export interface PickerGroupProgress {
@@ -85,7 +71,6 @@ export function PickerModal({
   groupProgress,
   onLoadGroup,
   onSelectAlternative,
-  productionPlan,
   onOpenMachine,
   onSelect,
   onClose,
@@ -117,7 +102,6 @@ export function PickerModal({
     selectionKey: string,
     selectedKey: string,
   ) => void;
-  productionPlan?: PickerProductionPlan;
   onOpenMachine?: (itemKey: string) => void;
   onSelect: (index: number) => void;
   onClose: () => void;
@@ -374,14 +358,6 @@ export function PickerModal({
                             contentZoom,
                           )
                         : null;
-                      const cycleSeconds = opt.cycleSeconds;
-                      const machineCount =
-                        productionPlan && opt.outputPerCycle
-                          ? parallelMachinesForOneCycle(
-                              productionPlan.amount,
-                              opt.outputPerCycle,
-                            )
-                          : null;
                       return (
                         <TouchableOpacity
                           {...signalTarget('graph.source-picker.source.select')}
@@ -390,42 +366,6 @@ export function PickerModal({
                           onPress={() => onSelect(i)}>
                           <Text style={styles.optionLabel}>{opt.label}</Text>
                           {opt.sublabel ? <Text style={styles.optionSub}>{opt.sublabel}</Text> : null}
-                          {(opt.durationTicks ||
-                            opt.machineLabel ||
-                            (productionPlan && opt.outputPerCycle !== undefined)) && (
-                            <View style={styles.recipeFacts}>
-                              {opt.durationTicks ? (
-                                <View style={styles.recipeFactChip}>
-                                  <Text style={styles.recipeFactText}>
-                                    {opt.durationTicks} ticks · {(opt.durationTicks / MINECRAFT_TICKS_PER_SECOND).toLocaleString()} sec
-                                  </Text>
-                                </View>
-                              ) : cycleSeconds ? (
-                                <View style={styles.recipeFactChip}>
-                                  <Text style={styles.recipeFactText}>
-                                    {(cycleSeconds * MINECRAFT_TICKS_PER_SECOND).toLocaleString()} ticks · {cycleSeconds.toLocaleString()} sec
-                                  </Text>
-                                </View>
-                              ) : null}
-                              {productionPlan && opt.outputPerCycle !== undefined ? (
-                                <View
-                                  style={[
-                                    styles.parallelChip,
-                                    machineCount !== null && styles.parallelChipReady,
-                                  ]}>
-                                  <Text
-                                    style={[
-                                      styles.parallelText,
-                                      machineCount !== null && styles.parallelTextReady,
-                                    ]}>
-                                    {machineCount
-                                      ? `${machineCount} parallel ${machineCount === 1 ? 'machine' : 'machines'}${cycleSeconds ? ` · ${cycleSeconds.toLocaleString()} sec batch` : ' · time unavailable'}`
-                                      : 'Timing unavailable in this export'}
-                                  </Text>
-                                </View>
-                              ) : null}
-                            </View>
-                          )}
                           {opt.structure ? (
                             <MultiblockPreview
                               structure={opt.structure}
@@ -796,27 +736,6 @@ const styles = StyleSheet.create({
   },
   optionLabel: {color: theme.text, fontSize: 13, fontWeight: '600'},
   optionSub: {color: theme.textDim, fontSize: 11, marginTop: 2},
-  recipeFacts: {flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 7},
-  recipeFactChip: {
-    borderRadius: 999,
-    backgroundColor: theme.panelAlt,
-    borderColor: theme.border,
-    borderWidth: 1,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  recipeFactText: {color: theme.text, fontSize: 9, fontWeight: '700'},
-  parallelChip: {
-    borderRadius: 999,
-    backgroundColor: theme.panelAlt,
-    borderColor: theme.border,
-    borderWidth: 1,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  parallelChipReady: {borderColor: theme.accent, backgroundColor: '#1c2b22'},
-  parallelText: {color: theme.textDim, fontSize: 9, fontWeight: '700'},
-  parallelTextReady: {color: theme.accent},
   optionImage: {marginTop: 8, borderRadius: 4},
   ingredientGroup: {marginTop: 9, gap: 5},
   ingredientLabel: {

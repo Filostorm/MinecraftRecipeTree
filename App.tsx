@@ -3,6 +3,7 @@ import React, {Suspense, useEffect, useMemo, useRef, useState} from 'react';
 import {
   ActivityIndicator,
   Animated,
+  Linking,
   Platform,
   StyleSheet,
   Text,
@@ -22,6 +23,7 @@ import {IssueReportModal} from './src/components/IssueReportModal';
 import type {GitHubIssueKind, IssueReportContext} from './src/components/githubIssues';
 import {ItemsScreen} from './src/components/ItemsScreen';
 import {MobsScreen} from './src/components/MobsScreen';
+import {MobileUploadGuide} from './src/components/MobileUploadGuide';
 import {RecipeStageModal} from './src/components/RecipeStageModal';
 import {RecipeHistoryModal} from './src/components/RecipeHistoryModal';
 import {DataProvider, useData, useLoadState} from './src/data/DataContext';
@@ -57,6 +59,7 @@ import {
   graphRenderRecovery,
   type GraphRenderRecovery,
 } from './src/graph/graphRenderError';
+import {clearGraphSession} from './src/graph/graphSession';
 
 const LazyGraphScreen = React.lazy(async () => {
   const module = await import('./src/graph/GraphScreen');
@@ -64,7 +67,7 @@ const LazyGraphScreen = React.lazy(async () => {
 });
 
 class GraphErrorBoundary extends React.Component<
-  {children: React.ReactNode; onReturnToItems(): void},
+  {children: React.ReactNode; onRetry(recovery: GraphRenderRecovery): void; onReturnToItems(): void},
   {recovery: GraphRenderRecovery | null}
 > {
   state: {recovery: GraphRenderRecovery | null} = {recovery: null};
@@ -88,11 +91,19 @@ class GraphErrorBoundary extends React.Component<
       <View style={styles.graphRecovery} accessibilityRole="alert">
         <Text style={styles.errorTitle}>{recovery.title}</Text>
         <Text style={styles.errorText}>{recovery.message}</Text>
+        {recovery.detail && (
+          <Text style={styles.graphRecoveryDetail}>Details: {recovery.detail}</Text>
+        )}
         <View style={styles.graphRecoveryActions}>
           <TouchableOpacity
             style={[styles.reloadBtn, styles.graphRecoveryButton]}
-            onPress={() => this.setState({recovery: null})}>
-            <Text style={styles.reloadBtnText}>Try again</Text>
+            onPress={() => {
+              this.props.onRetry(recovery);
+              this.setState({recovery: null});
+            }}>
+            <Text style={styles.reloadBtnText}>
+              {recovery.reloadPage ? 'Reload site' : 'Try again'}
+            </Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.reloadBtn, styles.graphRecoveryButton]}
@@ -123,15 +134,29 @@ export default function App() {
 function DatasetRoot() {
   const catalog = useDatasetCatalog();
   const [showDatasetPicker, setShowDatasetPicker] = useState(false);
+  const [showMobileUploadGuide, setShowMobileUploadGuide] = useState(false);
   const datasets = catalog.state.status === 'loading' ? [] : catalog.state.datasets;
   const selectedSlug = catalog.state.status === 'ready' ? catalog.state.selected.slug : null;
+  const openLocalPackImport = () => {
+    if (Platform.OS !== 'web') {
+      setShowMobileUploadGuide(true);
+      return;
+    }
+    const url = '/publish#upload';
+    void Linking.openURL(url).catch(error => {
+      console.error('Could not open the modpack upload page.', {url, error});
+    });
+  };
 
   const datasetControls = (
     loadedManifest: Manifest | null,
     details?: React.ReactNode,
     leadingAction?: React.ReactNode,
     fullWidthControls?: React.ReactNode,
+    menuAction?: React.ReactNode,
     trailingAction?: React.ReactNode,
+    compactMenuExpanded?: boolean,
+    onCompactMenuExpandedChange?: (expanded: boolean) => void,
   ) => (
     <>
       <DatasetSwitcher
@@ -140,11 +165,14 @@ function DatasetRoot() {
         selectedSlug={selectedSlug}
         loadedManifest={loadedManifest}
         onOpenPicker={() => setShowDatasetPicker(true)}
-        onLocalPackInstalled={slug => catalog.refreshLocal(slug)}
+        onImportPack={openLocalPackImport}
         leadingAction={leadingAction}
+        menuAction={menuAction}
         trailingAction={trailingAction}
         fullWidthControls={fullWidthControls}
         details={details}
+        compactMenuExpanded={compactMenuExpanded}
+        onCompactMenuExpandedChange={onCompactMenuExpandedChange}
       />
       {showDatasetPicker && (
         <DatasetPicker
@@ -159,6 +187,14 @@ function DatasetRoot() {
           onClose={() => setShowDatasetPicker(false)}
         />
       )}
+      <MobileUploadGuide
+        visible={showMobileUploadGuide}
+        onClose={() => setShowMobileUploadGuide(false)}
+        onInstalled={slug => {
+          setShowMobileUploadGuide(false);
+          catalog.refreshLocal(slug);
+        }}
+      />
     </>
   );
 
@@ -205,6 +241,7 @@ function DatasetRoot() {
       <LoadedDatasetLayout
         expectedPublicationId={source.descriptor.publicationId}
         renderControls={datasetControls}
+        onImportPack={openLocalPackImport}
       />
     </DataProvider>
   );
@@ -213,14 +250,19 @@ function DatasetRoot() {
 function LoadedDatasetLayout({
   expectedPublicationId,
   renderControls,
+  onImportPack,
 }: {
   expectedPublicationId: string;
+  onImportPack(): void;
   renderControls(
     manifest: Manifest | null,
     details?: React.ReactNode,
     leadingAction?: React.ReactNode,
     fullWidthControls?: React.ReactNode,
+    menuAction?: React.ReactNode,
     trailingAction?: React.ReactNode,
+    compactMenuExpanded?: boolean,
+    onCompactMenuExpandedChange?: (expanded: boolean) => void,
   ): React.ReactNode;
 }) {
   return (
@@ -228,7 +270,7 @@ function LoadedDatasetLayout({
       <DatasetReadinessMarker expectedPublicationId={expectedPublicationId} />
       <View style={styles.datasetContent}>
         <UiProvider>
-          <Root renderControls={renderControls} />
+          <Root renderControls={renderControls} onImportPack={onImportPack} />
         </UiProvider>
       </View>
     </View>
@@ -237,13 +279,18 @@ function LoadedDatasetLayout({
 
 function Root({
   renderControls,
+  onImportPack,
 }: {
+  onImportPack(): void;
   renderControls(
     manifest: Manifest | null,
     details?: React.ReactNode,
     leadingAction?: React.ReactNode,
     fullWidthControls?: React.ReactNode,
+    menuAction?: React.ReactNode,
     trailingAction?: React.ReactNode,
+    compactMenuExpanded?: boolean,
+    onCompactMenuExpandedChange?: (expanded: boolean) => void,
   ): React.ReactNode;
 }) {
   const state = useLoadState();
@@ -305,20 +352,25 @@ function Root({
   }
   return (
     <RecipeStageProvider>
-      <Shell renderControls={renderControls} />
+      <Shell renderControls={renderControls} onImportPack={onImportPack} />
     </RecipeStageProvider>
   );
 }
 
 function Shell({
   renderControls,
+  onImportPack,
 }: {
+  onImportPack(): void;
   renderControls(
     manifest: Manifest | null,
     details?: React.ReactNode,
     leadingAction?: React.ReactNode,
     fullWidthControls?: React.ReactNode,
+    menuAction?: React.ReactNode,
     trailingAction?: React.ReactNode,
+    compactMenuExpanded?: boolean,
+    onCompactMenuExpandedChange?: (expanded: boolean) => void,
   ): React.ReactNode;
 }) {
   const data = useData();
@@ -333,6 +385,7 @@ function Shell({
   const [showGraphGuide, setShowGraphGuide] = useState(false);
   const [showIssueReport, setShowIssueReport] = useState(false);
   const [showInfoMenu, setShowInfoMenu] = useState(false);
+  const [showAppMenu, setShowAppMenu] = useState(false);
   const [issueReportKind, setIssueReportKind] = useState<GitHubIssueKind>('bug');
   const [showGraphControls, setShowGraphControls] = useState(false);
   const [showDatasetDetails, setShowDatasetDetails] = useState(false);
@@ -515,12 +568,16 @@ function Shell({
         {...signalTarget('header.info-menu')}
         style={[
           styles.headerUtilityButton,
-          Platform.OS !== 'web' && styles.nativeHeaderUtilityButton,
+          Platform.OS !== 'web' && styles.nativeInfoMenuButton,
           showInfoMenu && styles.headerUtilityButtonActive,
         ]}
         onPress={() => {
           lightImpactFeedback();
-          setShowInfoMenu(value => !value);
+          setShowInfoMenu(value => {
+            const next = !value;
+            if (next) setShowAppMenu(false);
+            return next;
+          });
         }}
         accessibilityRole="button"
         accessibilityLabel={showInfoMenu ? 'Close information menu' : 'Open information menu'}
@@ -528,16 +585,33 @@ function Shell({
         <Text
           style={[
             styles.infoMenuButtonText,
-            Platform.OS !== 'web' && styles.nativeHeaderMenuText,
             showInfoMenu && styles.infoMenuButtonTextActive,
           ]}>
-          {Platform.OS === 'web' ? '•••' : '•••  Information'}
+          •••
         </Text>
       </TouchableOpacity>
       {showInfoMenu && (
         <View
-          style={[styles.infoMenu, Platform.OS !== 'web' && styles.nativeInfoMenu]}
+          style={[
+            styles.infoMenu,
+            Platform.OS === 'web' ? styles.webInfoMenuPosition : styles.nativeInfoMenuPosition,
+          ]}
           accessibilityRole="menu">
+          {(compactHeader || Platform.OS !== 'web') && (
+            <TouchableOpacity
+              {...signalTarget('header.import-pack')}
+              style={styles.infoMenuItem}
+              onPress={() => {
+                lightImpactFeedback();
+                closeInfoMenu();
+                onImportPack();
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Import a local modpack exporter ZIP">
+              <Text style={styles.infoMenuItemIcon}>⇧</Text>
+              <Text style={styles.infoMenuItemText}>Import pack</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity
             {...signalTarget('header.dataset-details')}
             style={[styles.infoMenuItem, showDatasetDetails && styles.infoMenuItemActive]}
@@ -618,7 +692,7 @@ function Shell({
         Platform.OS !== 'web' && styles.nativeHeaderUtilityRow,
       ]}>
       {compactHeaderNavigation}
-      {infoMenu}
+      {Platform.OS === 'web' && infoMenu}
       {recipeStages.catalog.stages.length > 0 && (
         <TouchableOpacity
           {...signalTarget('header.recipe-stages')}
@@ -645,6 +719,7 @@ function Shell({
       )}
     </View>
   );
+  const headerMenuAction = Platform.OS !== 'web' ? infoMenu : null;
   const graphControlsHeaderAction =
     compactHeader && tab === 'graph' && data.indexStatus === 'ready' ? (
       <TouchableOpacity
@@ -663,15 +738,17 @@ function Shell({
           lightImpactFeedback();
           setShowGraphControls(value => !value);
         }}>
-        {!showGraphControls && (
-          <Text style={styles.graphControlsHeaderText}>Graph controls</Text>
-        )}
-        <DisclosureChevron
-          expanded={showGraphControls}
-          color={showGraphControls ? theme.accent : theme.textDim}
-          size={20}
-          strokeWidth={2.4}
-        />
+        <View style={styles.graphControlsHeaderContent}>
+          {!showGraphControls && (
+            <Text style={styles.graphControlsHeaderText}>Graph controls</Text>
+          )}
+          <DisclosureChevron
+            expanded={showGraphControls}
+            color={showGraphControls ? theme.accent : theme.textDim}
+            size={20}
+            strokeWidth={2.4}
+          />
+        </View>
       </TouchableOpacity>
     ) : null;
   return (
@@ -685,7 +762,13 @@ function Shell({
           headerDetails,
           headerActions,
           fullWidthHeaderControls,
+          headerMenuAction,
           graphControlsHeaderAction,
+          showAppMenu,
+          next => {
+            setShowAppMenu(next);
+            if (next) setShowInfoMenu(false);
+          },
         )}
       </View>
       <View style={styles.workspaceViewport}>
@@ -722,6 +805,18 @@ function Shell({
             {data.indexStatus === 'ready' ? (
               <GraphErrorBoundary
                 key={graphRequestId}
+                onRetry={recovery => {
+                  if (recovery.reloadPage && Platform.OS === 'web') {
+                    globalThis.location?.reload();
+                    return;
+                  }
+                  clearGraphSession(data.descriptor);
+                  if (ui.graphRootKey) {
+                    ui.restoreGraph(ui.graphRootKey, ui.graphDirection);
+                  } else {
+                    setTab('items');
+                  }
+                }}
                 onReturnToItems={() => setTab('items')}>
                 <Suspense
                   fallback={
@@ -956,6 +1051,15 @@ const styles = StyleSheet.create({
     padding: 24,
     backgroundColor: theme.bg,
   },
+  graphRecoveryDetail: {
+    marginTop: 10,
+    maxWidth: 640,
+    color: theme.textDim,
+    fontFamily: 'monospace',
+    fontSize: 11,
+    lineHeight: 16,
+    textAlign: 'center',
+  },
   graphRecoveryActions: {
     marginTop: 18,
     flexDirection: 'row',
@@ -1031,6 +1135,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     paddingHorizontal: 12,
   },
+  nativeInfoMenuButton: {width: 44, minHeight: 44},
   headerUtilityButtonActive: {borderColor: theme.accent},
   graphControlsHeaderButton: {
     width: 44,
@@ -1047,9 +1152,8 @@ const styles = StyleSheet.create({
     width: 'auto',
     minWidth: 118,
     paddingHorizontal: 10,
-    flexDirection: 'row',
-    gap: 6,
   },
+  graphControlsHeaderContent: {flexDirection: 'row', alignItems: 'center', gap: 6},
   graphControlsHeaderText: {color: theme.text, fontSize: 13},
   recipeStagesHeaderButton: {width: 'auto', minWidth: 72, paddingHorizontal: 8},
   recipeStagesHeaderText: {color: theme.text, fontSize: 11, fontWeight: '800'},
@@ -1060,7 +1164,6 @@ const styles = StyleSheet.create({
   infoMenu: {
     position: 'absolute',
     top: 40,
-    left: 0,
     zIndex: 121,
     elevation: 20,
     width: 178,
@@ -1075,7 +1178,8 @@ const styles = StyleSheet.create({
     shadowRadius: 18,
     shadowOffset: {width: 0, height: 10},
   },
-  nativeInfoMenu: {position: 'relative', top: 0, left: 0, width: '100%', elevation: 0},
+  webInfoMenuPosition: {left: 0},
+  nativeInfoMenuPosition: {top: 48, right: 0},
   infoMenuItem: {
     minHeight: 38,
     flexDirection: 'row',

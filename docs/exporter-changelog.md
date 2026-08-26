@@ -3,6 +3,52 @@
 This file contains release-ready notes for the Minecraft exporter builds. The generated exporter
 manifest remains the source of truth for downloadable filenames, checksums, and compatibility.
 
+## 2026-08-22
+
+### Retained crafting ingredients, durability tools, and EMC sources
+
+- Forge HEI/JEI 1.12.2: **1.1.6**
+- Forge JEI/REI 1.20.1 beta: **1.2.0-beta.72**
+- NeoForge JEI 1.21.1: **1.0.3**
+
+#### Added
+
+- Add an **EMC Transmutation** source for every unique ProjectE item with a positive EMC value,
+  including items that also have ordinary crafting or machine recipes. EMC is exported as its own
+  resource type and totals remain exact in recipe cards, graph nodes, and CSV exports.
+- Query ProjectE through its optional API so exporter builds remain compatible with packs that do
+  not include ProjectE. The EMC scan is tick-bounded for large catalogs.
+
+#### Fixed
+
+- Detect crafting ingredients returned by Minecraft even when JEI does not repeat them in the
+  recipe outputs. ProjectE's Philosopher's Stone is now one reusable prerequisite instead of being
+  multiplied by every craft.
+- Detect tools returned with durability damage and export their conservative usable-craft count.
+- Preserve alternative-slot semantics: a slot mixing returned and consumed choices remains one OR
+  slot instead of being split into two incorrect AND requirements.
+- Continue through Modular Machinery Community Edition's controller lookup methods when one
+  supported lookup returns no match, instead of dropping an otherwise valid structure preview.
+- Omit Ender IO Stirling Generator tier outputs that its HEI wrapper explicitly reports as zero,
+  while retaining every positive tier output for the fuel.
+
+#### Viewer behavior
+
+- Reusable item nodes use a teal retained-item background and require one item for any craft count.
+- Durability tool nodes use an amber tool background and scale replacements by their exported usable
+  crafts rather than consuming one complete tool per recipe run.
+- Older exports remain readable; catalyst slots without the new metadata continue to behave as
+  indefinitely reusable prerequisites.
+
+#### Verified
+
+- Fresh MeatballCraft `prerelease-0.18.6.4` export: 196,920 items, 367,833 recipes, 680 categories,
+  and zero failures.
+- All 261 Modular Machinery structure previews exported successfully with placed blocks,
+  dimensions, and block counts.
+- Exported 11,106 ProjectE EMC sources, including 8,346 items that also have ordinary recipes, and
+  classified the Philosopher's Stone as reusable in 248 crafting recipes.
+
 ## 2026-08-08
 
 ### Forge HEI/JEI 1.12.2 — 1.1.4

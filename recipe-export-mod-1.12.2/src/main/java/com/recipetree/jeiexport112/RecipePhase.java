@@ -405,6 +405,7 @@ final class RecipePhase implements ExportPhase {
         convertRecorded(recording.allInputs(), data, data.inputs, data.usedKeys, recipeIndex, "input");
         convertRecorded(recording.allOutputs(), data, data.outputs, data.outputKeys, recipeIndex, "output");
         coalesceFlattenedLogicalAlternatives(data.inputs);
+        coalesceFlattenedLogicalAlternatives(data.catalysts);
         promoteReturnedIngredients(data);
         rebuildIndexKeys(data);
     }
@@ -429,6 +430,10 @@ final class RecipePhase implements ExportPhase {
                 LinkedHashMap<String, IngredientPair> unique = new LinkedHashMap<String, IngredientPair>();
                 LinkedHashMap<String, IngredientPair> nonConsumed =
                         new LinkedHashMap<String, IngredientPair>();
+                LinkedHashMap<String, IngredientPair> retained =
+                        new LinkedHashMap<String, IngredientPair>();
+                LinkedHashMap<String, RetentionData> retainedDetails =
+                        new LinkedHashMap<String, RetentionData>();
                 for (Object ingredient : alternatives) {
                     if (ingredient == null) {
                         continue;
@@ -445,7 +450,8 @@ final class RecipePhase implements ExportPhase {
                             if (decision.kind == ZeroQuantityPolicy.Kind.UNSUPPORTED) {
                                 throw new UnclassifiedZeroQuantityException(
                                         decision.diagnosticCode + " " +
-                                        decision.explanation);
+                                        decision.explanation + "; category=" + uid +
+                                        "; role=" + role + "; ingredientClass=" + className);
                             }
                             context.recordZeroQuantityDecision(decision, role, uid, recipeIndex,
                                     type.getIngredientClass());
@@ -470,7 +476,15 @@ final class RecipePhase implements ExportPhase {
                         }
                         String key = ensureRaw(type, ingredient);
                         IngredientPair pair = new IngredientPair(key, amount);
-                        unique.put(pair.identity(), pair);
+                        RetentionData retention = "input".equals(role)
+                                ? craftingRetention(ingredient, key, recipeIndex)
+                                : null;
+                        if (retention == null) {
+                            unique.put(pair.identity(), pair);
+                        } else {
+                            retained.put(pair.identity(), pair);
+                            retainedDetails.put(key, retention);
+                        }
                         indexKeys.add(key);
                     } catch (IOException e) {
                         throw e;
@@ -490,6 +504,14 @@ final class RecipePhase implements ExportPhase {
                     throw new IllegalStateException("HEI mixed consumed and non-consumed alternatives in one " +
                             role + " slot for " + safeCurrentUid() + " #" + recipeIndex);
                 }
+                if (!unique.isEmpty() && !retained.isEmpty()) {
+                    // An alternatives slot is an OR relationship. Splitting it into a consumed
+                    // slot and a retained slot would turn it into an AND, so preserve the whole
+                    // mixed slot as consumed rather than publishing incorrect requirements.
+                    unique.putAll(retained);
+                    retained.clear();
+                    retainedDetails.clear();
+                }
                 if (!unique.isEmpty()) {
                     SlotData slot = new SlotData();
                     slot.logicalIdentity = oreIdentity.identity;
@@ -502,7 +524,42 @@ final class RecipePhase implements ExportPhase {
                     slot.pairs.addAll(nonConsumed.values());
                     data.catalysts.add(slot);
                 }
+                if (!retained.isEmpty()) {
+                    SlotData slot = new SlotData();
+                    slot.logicalIdentity = oreIdentity.identity;
+                    slot.pairs.addAll(retained.values());
+                    data.catalysts.add(slot);
+                    data.retained.putAll(retainedDetails);
+                }
             }
+        }
+    }
+
+    private RetentionData craftingRetention(Object ingredient, String key, int recipeIndex) {
+        if (!(ingredient instanceof ItemStack)) {
+            return null;
+        }
+        ItemStack input = (ItemStack) ingredient;
+        try {
+            if (input.isEmpty() || !input.getItem().hasContainerItem(input)) {
+                return null;
+            }
+            ItemStack returned = input.getItem().getContainerItem(input);
+            if (returned.isEmpty() || returned.getItem() != input.getItem()) {
+                return null;
+            }
+            int damagePerCraft = returned.getItemDamage() - input.getItemDamage();
+            if (damagePerCraft > 0 && input.isItemStackDamageable()) {
+                int remainingDurability = Math.max(1, input.getMaxDamage() - input.getItemDamage());
+                int uses = Math.max(1, remainingDurability / damagePerCraft);
+                return RetentionData.durability(uses);
+            }
+            return RetentionData.reusable();
+        } catch (Throwable throwable) {
+            FatalErrors.rethrowIfFatal(throwable);
+            context.failure("recipe retained ingredient " + safeCurrentUid() + " #" +
+                    recipeIndex + " " + key + ": " + throwable);
+            return null;
         }
     }
 
@@ -626,6 +683,9 @@ final class RecipePhase implements ExportPhase {
             data.outputs.remove(outputIndex);
             if (equivalentSlotIndex(data.catalysts, input) < 0) {
                 data.catalysts.add(copySlot(input));
+            }
+            for (IngredientPair pair : input.pairs) {
+                data.retained.put(pair.key, RetentionData.reusable());
             }
         }
     }
@@ -886,6 +946,18 @@ final class RecipePhase implements ExportPhase {
         if (!data.catalysts.isEmpty()) {
             writeSlots("cat", data.catalysts);
         }
+        if (!data.retained.isEmpty()) {
+            recipesWriter.name("retained").beginObject();
+            for (Map.Entry<String, RetentionData> entry : data.retained.entrySet()) {
+                recipesWriter.name(entry.getKey()).beginObject();
+                recipesWriter.name("mode").value(entry.getValue().mode);
+                if (entry.getValue().uses != null) {
+                    recipesWriter.name("uses").value(entry.getValue().uses.intValue());
+                }
+                recipesWriter.endObject();
+            }
+            recipesWriter.endObject();
+        }
         recipesWriter.endObject();
     }
 
@@ -978,6 +1050,8 @@ final class RecipePhase implements ExportPhase {
         final List<SlotData> inputs = new ArrayList<SlotData>();
         final List<SlotData> outputs = new ArrayList<SlotData>();
         final List<SlotData> catalysts = new ArrayList<SlotData>();
+        final Map<String, RetentionData> retained =
+                new LinkedHashMap<String, RetentionData>();
         final Set<String> usedKeys = new LinkedHashSet<String>();
         final Set<String> outputKeys = new LinkedHashSet<String>();
     }
@@ -998,6 +1072,24 @@ final class RecipePhase implements ExportPhase {
 
         String identity() {
             return key + '\u0000' + amount.toPlainString();
+        }
+    }
+
+    static final class RetentionData {
+        final String mode;
+        final Integer uses;
+
+        private RetentionData(String mode, Integer uses) {
+            this.mode = mode;
+            this.uses = uses;
+        }
+
+        static RetentionData reusable() {
+            return new RetentionData("reusable", null);
+        }
+
+        static RetentionData durability(int uses) {
+            return new RetentionData("durability", Integer.valueOf(Math.max(1, uses)));
         }
     }
 

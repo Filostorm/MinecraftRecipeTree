@@ -132,6 +132,27 @@ final class ItemCatalog {
         return ensureResolvedTyped(resolved);
     }
 
+    String ensureSynthetic(String key, String resourceId, String name, String modId, String type)
+            throws IOException {
+        if (closed) {
+            throw new IOException("cannot add synthetic ingredient after items.json was closed");
+        }
+        if (!known.add(key)) {
+            return key;
+        }
+        writer.beginObject();
+        writer.name("k").value(key);
+        writer.name("id").value(resourceId);
+        writer.name("n").value(name);
+        writer.name("m").value(modId);
+        if (type != null && !type.trim().isEmpty() && !"item".equals(type)) {
+            writer.name("t").value(type);
+        }
+        writer.endObject();
+        count++;
+        return key;
+    }
+
     private <T> String ensureResolvedTyped(ResolvedIngredient<T> resolved) throws IOException {
         String key = resolved.key;
         if (!known.add(key)) {

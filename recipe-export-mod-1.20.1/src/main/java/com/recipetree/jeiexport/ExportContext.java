@@ -306,6 +306,11 @@ final class ExportContext {
         (isOutput ? entry.produced : entry.used).add(new int[]{categoryIndex, recipeIndexInCategory});
     }
 
+    boolean hasProducedRecipe(String key) {
+        IndexEntry entry = recipeIndex.get(key);
+        return entry != null && !entry.produced.isEmpty();
+    }
+
     int catalogCount() {
         return catalog == null ? 0 : catalog.count();
     }

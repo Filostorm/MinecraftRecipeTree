@@ -190,6 +190,44 @@ export function parsePortableTree(raw: string): PortableRecipeTree {
   } as PortableRecipeTree;
 }
 
+/** Refuse to resolve stable recipe IDs against a different selected pack release. */
+export function assertPortableTreePackMatches(
+  share: PortableRecipeTree,
+  descriptor: Pick<
+    DatasetDescriptor,
+    'minecraftVersion' | 'displayName' | 'packVersion' | 'slug' | 'publicationId'
+  >,
+): void {
+  if (share.pack.minecraftVersion !== descriptor.minecraftVersion) {
+    throw new Error(
+      `This history is for Minecraft ${share.pack.minecraftVersion}; the selected pack uses ${descriptor.minecraftVersion}.`,
+    );
+  }
+  if (share.pack.name !== undefined && share.pack.name !== descriptor.displayName) {
+    throw new Error(
+      `This history is for ${share.pack.name}; the selected pack is ${descriptor.displayName}. Select the matching pack before opening it.`,
+    );
+  }
+  if (
+    share.pack.publicationId !== undefined &&
+    share.pack.publicationId !== descriptor.publicationId
+  ) {
+    throw new Error(
+      `This history belongs to a different publication of ${share.pack.name ?? 'the pack'}. Select its matching pack version before opening it.`,
+    );
+  }
+  if (share.pack.slug !== undefined && share.pack.slug !== descriptor.slug) {
+    throw new Error(
+      `This history is for ${share.pack.name ?? share.pack.slug}; select that pack before opening it.`,
+    );
+  }
+  if (share.pack.version !== undefined && share.pack.version !== descriptor.packVersion) {
+    throw new Error(
+      `This history is for pack version ${share.pack.version}; the selected ${descriptor.displayName} publication is ${descriptor.packVersion}.`,
+    );
+  }
+}
+
 function portableSource(
   source: StoredGraphSource,
   recipeKeys: ReadonlyMap<string, string>,

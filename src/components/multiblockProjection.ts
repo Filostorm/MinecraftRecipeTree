@@ -21,6 +21,28 @@ interface RawProjection {
   depth: number;
 }
 
+export function structureLayerLevels(
+  cells: RecipeStructure['cells'],
+): number[] {
+  return [...new Set(cells.map(([, y]) => y))].sort((left, right) => left - right);
+}
+
+export function cellsForStructureLayer(
+  cells: RecipeStructure['cells'],
+  layer: number | null,
+): RecipeStructure['cells'] {
+  return layer === null ? cells : cells.filter(([, y]) => y === layer);
+}
+
+/** Apply a pointer gesture directly in viewport axes, independent of structure rotation. */
+export function screenPanOffset(
+  origin: {x: number; y: number},
+  deltaX: number,
+  deltaY: number,
+): {x: number; y: number} {
+  return {x: origin.x + deltaX, y: origin.y + deltaY};
+}
+
 function rotatedXZ(x: number, z: number, rotation: number): [number, number] {
   switch (((rotation % 4) + 4) % 4) {
     case 1:

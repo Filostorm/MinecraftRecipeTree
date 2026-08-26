@@ -32,6 +32,7 @@ public final class RecipeTreeProgress {
     private Map<String, String> favoriteRecipes = new HashMap<>();
     private Map<String, Boolean> collapsedRecipeTypes = new HashMap<>();
     private List<RecipeHistoryEntry> recipeHistory = new ArrayList<>();
+    private RecipeHistoryEntry lastViewedRecipeTree;
     private Set<String> discoveredItems = new HashSet<>();
     private boolean recipeBookMode;
 
@@ -42,7 +43,47 @@ public final class RecipeTreeProgress {
             String itemKey,
             String recipeKey,
             long amount,
-            boolean compactMode) {
+            boolean compactMode,
+            int treeDepth,
+            List<RecipeHistoryRoot> roots,
+            List<RecipeHistorySelection> selections,
+            boolean snapshot) {
+        public RecipeHistoryEntry(
+                String itemKey,
+                String recipeKey,
+                long amount,
+                boolean compactMode,
+                int treeDepth,
+                List<RecipeHistorySelection> selections,
+                boolean snapshot) {
+            this(itemKey, recipeKey, amount, compactMode, treeDepth, null, selections, snapshot);
+        }
+    }
+
+    /** One independently planned output at the leading edge of a saved graph. */
+    public record RecipeHistoryRoot(
+            String ingredientKey,
+            String ingredientName,
+            String recipeKey,
+            long amount) {
+    }
+
+    /** A complete, path-addressed node choice so history can restore and compare whole trees. */
+    public record RecipeHistorySelection(
+            int rootIndex,
+            List<Integer> path,
+            String ingredientKey,
+            String ingredientName,
+            String recipeKey,
+            String recipeType) {
+        public RecipeHistorySelection(
+                List<Integer> path,
+                String ingredientKey,
+                String ingredientName,
+                String recipeKey,
+                String recipeType) {
+            this(0, path, ingredientKey, ingredientName, recipeKey, recipeType);
+        }
     }
 
     private record StateFile(
@@ -50,6 +91,7 @@ public final class RecipeTreeProgress {
             Map<String, String> favoriteRecipes,
             Map<String, Boolean> collapsedRecipeTypes,
             List<RecipeHistoryEntry> recipeHistory,
+            RecipeHistoryEntry lastViewedRecipeTree,
             boolean recipeBookMode) {
     }
 
@@ -75,15 +117,33 @@ public final class RecipeTreeProgress {
         return output.isEmpty() ? null : favoriteRecipes.get(itemKey(output));
     }
 
+    public String favoriteRecipe(String ingredientKey) {
+        return ingredientKey == null || ingredientKey.isBlank()
+                ? null
+                : favoriteRecipes.get(ingredientKey);
+    }
+
     public void saveFavoriteRecipe(ItemStack output, String recipeKey) {
         if (output.isEmpty() || recipeKey == null || recipeKey.isBlank()) return;
         if (recipeKey.equals(favoriteRecipes.put(itemKey(output), recipeKey))) return;
         save();
     }
 
+    public void saveFavoriteRecipe(String ingredientKey, String recipeKey) {
+        if (ingredientKey == null || ingredientKey.isBlank()
+                || recipeKey == null || recipeKey.isBlank()) return;
+        if (recipeKey.equals(favoriteRecipes.put(ingredientKey, recipeKey))) return;
+        save();
+    }
+
     public void clearFavoriteRecipe(ItemStack output) {
         if (output.isEmpty()) return;
         if (favoriteRecipes.remove(itemKey(output)) != null) save();
+    }
+
+    public void clearFavoriteRecipe(String ingredientKey) {
+        if (ingredientKey == null || ingredientKey.isBlank()) return;
+        if (favoriteRecipes.remove(ingredientKey) != null) save();
     }
 
     public boolean isRecipeTypeCollapsed(String recipeType) {
@@ -105,10 +165,22 @@ public final class RecipeTreeProgress {
     }
 
     public void replaceRecipeHistory(List<RecipeHistoryEntry> history) {
+        replaceRecipeHistory(history, lastViewedRecipeTree);
+    }
+
+    public RecipeHistoryEntry lastViewedRecipeTree() {
+        return lastViewedRecipeTree;
+    }
+
+    public void replaceRecipeHistory(
+            List<RecipeHistoryEntry> history,
+            RecipeHistoryEntry lastViewed) {
         int first = Math.max(0, history.size() - 32);
         List<RecipeHistoryEntry> replacement = new ArrayList<>(history.subList(first, history.size()));
-        if (recipeHistory.equals(replacement)) return;
+        if (recipeHistory.equals(replacement)
+                && java.util.Objects.equals(lastViewedRecipeTree, lastViewed)) return;
         recipeHistory = replacement;
+        lastViewedRecipeTree = lastViewed;
         save();
     }
 
@@ -150,13 +222,30 @@ public final class RecipeTreeProgress {
             ItemStack target,
             String recipeKey,
             long amount,
-            boolean compactMode) {
+            boolean compactMode,
+            int treeDepth,
+            List<RecipeHistorySelection> selections) {
+        return historyEntry(target, recipeKey, amount, compactMode, treeDepth, null, selections);
+    }
+
+    public static RecipeHistoryEntry historyEntry(
+            ItemStack target,
+            String recipeKey,
+            long amount,
+            boolean compactMode,
+            int treeDepth,
+            List<RecipeHistoryRoot> roots,
+            List<RecipeHistorySelection> selections) {
         if (target.isEmpty()) throw new IllegalArgumentException("History target cannot be empty");
         return new RecipeHistoryEntry(
                 itemKey(target),
                 recipeKey,
                 Math.min(RecipeQuantityMath.MAX_REQUESTED_AMOUNT, Math.max(1, amount)),
-                compactMode);
+                compactMode,
+                Math.max(1, treeDepth),
+                roots == null ? null : List.copyOf(roots),
+                selections == null ? List.of() : List.copyOf(selections),
+                false);
     }
 
     private static String itemKey(ItemStack stack) {
@@ -177,6 +266,13 @@ public final class RecipeTreeProgress {
         if (loaded.favoriteRecipes == null) loaded.favoriteRecipes = new HashMap<>();
         if (loaded.collapsedRecipeTypes == null) loaded.collapsedRecipeTypes = new HashMap<>();
         if (loaded.recipeHistory == null) loaded.recipeHistory = new ArrayList<>();
+        loaded.recipeHistory = loaded.recipeHistory.stream()
+                .filter(java.util.Objects::nonNull)
+                .map(RecipeTreeProgress::normalizeHistoryEntry)
+                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+        if (loaded.lastViewedRecipeTree != null) {
+            loaded.lastViewedRecipeTree = normalizeHistoryEntry(loaded.lastViewedRecipeTree);
+        }
         if (loaded.discoveredItems == null) loaded.discoveredItems = new HashSet<>();
         if (loaded.recipeHistory.size() > 32) {
             loaded.recipeHistory = new ArrayList<>(loaded.recipeHistory.subList(
@@ -206,12 +302,27 @@ public final class RecipeTreeProgress {
         return loaded;
     }
 
+    private static RecipeHistoryEntry normalizeHistoryEntry(RecipeHistoryEntry entry) {
+        return entry.selections() == null
+                ? new RecipeHistoryEntry(
+                        entry.itemKey(),
+                        entry.recipeKey(),
+                        entry.amount(),
+                        entry.compactMode(),
+                        entry.treeDepth(),
+                        entry.roots(),
+                        List.of(),
+                        entry.snapshot())
+                : entry;
+    }
+
     private synchronized void save() {
         writeAtomically(FILE, new StateFile(
                 plans,
                 favoriteRecipes,
                 collapsedRecipeTypes,
                 recipeHistory,
+                lastViewedRecipeTree,
                 recipeBookMode), "local recipe-tree plans");
     }
 

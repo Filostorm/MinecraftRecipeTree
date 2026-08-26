@@ -10,7 +10,31 @@ export type GraphDirection = 'inputs' | 'outputs';
 
 export interface DirectedRecipeChild extends SlotSummary {
   nonConsumed: boolean;
+  retentionMode?: 'reusable' | 'durability';
+  retentionUses?: number;
   probabilityRole: 'consume' | 'produce';
+}
+
+function retainedDetails(
+  recipe: Recipe,
+  input: SlotSummary,
+): Pick<DirectedRecipeChild, 'retentionMode' | 'retentionUses'> {
+  const details = [input.key, ...input.alternatives]
+    .map(key => recipe.retained?.[key])
+    .filter(detail => detail !== undefined);
+  const durabilityUses = details
+    .filter(detail => detail.mode === 'durability')
+    .map(detail => detail.uses)
+    .filter(uses => Number.isSafeInteger(uses) && uses > 0);
+  if (durabilityUses.length > 0) {
+    return {
+      retentionMode: 'durability',
+      // Alternative tools can have different durability. Use the least durable member so
+      // an unresolved tag never understates how many tools the plan may require.
+      retentionUses: Math.min(...durabilityUses),
+    };
+  }
+  return {retentionMode: 'reusable'};
 }
 
 function isMekanismChemicalStack(key: string): boolean {
@@ -71,6 +95,7 @@ export function recipeChildrenForDirection(
     ...prerequisiteSummary(recipe.cat).map(input => ({
       ...input,
       nonConsumed: true,
+      ...retainedDetails(recipe, input),
       probabilityRole: 'consume' as const,
     })),
   ];

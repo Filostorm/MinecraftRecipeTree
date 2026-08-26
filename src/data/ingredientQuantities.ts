@@ -20,6 +20,16 @@ export function isBulkIngredient(key: string): boolean {
   return BULK_INGREDIENT_TYPES.has(ingredientType(key));
 }
 
+export function isEmcIngredient(key: string): boolean {
+  return ingredientType(key) === 'emc';
+}
+
+export function ingredientQuantityUnit(key: string): 'mB' | 'EMC' | 'items' {
+  if (isBulkIngredient(key)) return 'mB';
+  if (isEmcIngredient(key)) return 'EMC';
+  return 'items';
+}
+
 /** Convert the export's <= 0 sentinel into an explicit unknown quantity. */
 export function normalizeIngredientAmount(key: string, raw: number): number | null {
   if (Number.isFinite(raw) && raw > 0) return raw;
@@ -43,7 +53,7 @@ export function normalizeIngredientAmount(key: string, raw: number): number | nu
  */
 export function normalizeRecipeInputAmount(key: string, raw: number): number | null {
   const amount = normalizeIngredientAmount(key, raw);
-  if (amount == null || isBulkIngredient(key)) return amount;
+  if (amount == null || isBulkIngredient(key) || isEmcIngredient(key)) return amount;
   return Math.max(1, Math.ceil(amount));
 }
 
@@ -67,6 +77,7 @@ export function formatAmount(n: number): string {
 /** Graph/totals notation: item counts are ×N; bulk quantities are N mB. */
 export function formatIngredientQuantity(key: string, amount: number | null): string {
   if (isBulkIngredient(key)) return `${amount == null ? '?' : formatAmount(amount)} mB`;
+  if (isEmcIngredient(key)) return `${amount == null ? '?' : formatAmount(amount)} EMC`;
   return amount == null
     ? '×?'
     : `×${formatAmount(amount > 0 ? Math.ceil(amount) : amount)}`;
@@ -75,11 +86,12 @@ export function formatIngredientQuantity(key: string, amount: number | null): st
 /** Recipe-chip notation places the item multiplier before the ingredient name. */
 export function formatIngredientQuantityPrefix(key: string, amount: number | null): string {
   if (isBulkIngredient(key)) return `${amount == null ? '?' : formatAmount(amount)} mB`;
+  if (isEmcIngredient(key)) return amount == null ? '?' : formatAmount(amount);
   return amount == null
     ? '?×'
     : `${formatAmount(amount > 0 ? Math.ceil(amount) : amount)}×`;
 }
 
 export function shouldShowIngredientQuantity(key: string, amount: number | null): boolean {
-  return isBulkIngredient(key) || amount == null || amount !== 1;
+  return isBulkIngredient(key) || isEmcIngredient(key) || amount == null || amount !== 1;
 }

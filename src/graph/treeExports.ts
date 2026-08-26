@@ -1,4 +1,4 @@
-import {isBulkIngredient} from '../data/ingredientQuantities.ts';
+import {ingredientQuantityUnit} from '../data/ingredientQuantities.ts';
 import {treeTotalIdentity} from './treeTotals.ts';
 import type {TreeTotal, TreeTotals} from './treeTotals.ts';
 
@@ -21,7 +21,7 @@ export function buildTreeTotalsCsv(
         nameFor(total.key, total.tag),
         treeTotalIdentity(total),
         total.amount ?? 'unknown',
-        isBulkIngredient(total.key) ? 'mB' : 'items',
+        ingredientQuantityUnit(total.key),
         total.variants,
       ]);
     }

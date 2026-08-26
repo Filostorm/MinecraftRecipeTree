@@ -41,6 +41,11 @@ import {
   requireRecipeImageInventory,
 } from './recipe-image-inventory.mjs';
 import {MAX_SHARD_BYTES, SHARDED_JSON_FORMAT} from './sharded-documents.mjs';
+import {
+  MEATBALLCRAFT_01864_EMC_RECIPE_COUNT,
+  MEATBALLCRAFT_01864_PACK_VERSION,
+  isIntentionalProjecteEmcRecipe,
+} from './intentional-previewless-recipes.mjs';
 
 export const RECIPE_PREVIEW_SIDECAR_FORMAT = 'mrt-recipe-preview-sidecar-v1';
 export const RECIPE_PREVIEW_SIDECAR_DATA_ONLY_FORMAT = 'mrt-recipe-preview-sidecar-v2';
@@ -152,6 +157,31 @@ export const MEATBALLCRAFT_CONTRACT = Object.freeze({
   }),
   recipeImages: Object.freeze({previews: 359096, missing: 0}),
   hostedWeb: HOSTED_WEB_CONTRACT,
+});
+
+export const MEATBALLCRAFT_01864_CONTRACT = Object.freeze({
+  ...MEATBALLCRAFT_CONTRACT,
+  counts: Object.freeze({
+    items: 196959,
+    recipes: 376299,
+    categories: 680,
+    mobs: 0,
+    blockDrops: 0,
+    failures: 0,
+  }),
+  diagnostics: Object.freeze({
+    failureEvents: 0,
+    failureEventsOmitted: 0,
+    warningEvents: 124,
+    warningEventsOmitted: 0,
+    modularMachineryStructurePreviews: 261,
+    modularMachineryStructuresExported: 261,
+    modularMachineryStructureFailures: 0,
+  }),
+  recipeImages: Object.freeze({
+    previews: 376299 - MEATBALLCRAFT_01864_EMC_RECIPE_COUNT,
+    missing: MEATBALLCRAFT_01864_EMC_RECIPE_COUNT,
+  }),
 });
 
 function isRecord(value) {
@@ -446,9 +476,13 @@ export function recipePreviewContractForProfile(
     );
   }
   if (resolvedProfile === MEATBALLCRAFT_112_PROFILE) {
-    if (rawManifest?.pack === undefined) return MEATBALLCRAFT_CONTRACT;
+    const baseContract =
+      rawManifest?.pack?.version === MEATBALLCRAFT_01864_PACK_VERSION
+        ? MEATBALLCRAFT_01864_CONTRACT
+        : MEATBALLCRAFT_CONTRACT;
+    if (rawManifest?.pack === undefined) return baseContract;
     return Object.freeze({
-      ...MEATBALLCRAFT_CONTRACT,
+      ...baseContract,
       pack: requirePackIdentity(rawManifest.pack, 'MeatballCraft manifest.pack'),
     });
   }
@@ -2360,6 +2394,15 @@ export async function buildRecipePreviewSidecar({
         for (const [batchIndex, decoded] of decodedBatch.entries()) {
           const recipeIndex = batchStart + batchIndex;
           if (decoded === null) {
+            if (
+              resolvedProfile === MEATBALLCRAFT_112_PROFILE &&
+              !isIntentionalProjecteEmcRecipe(recipes[recipeIndex], category.id)
+            ) {
+              throw new Error(
+                `Category ${JSON.stringify(category.id)} recipe ${recipeIndex} is missing a ` +
+                  'preview but is not an intentional synthetic ProjectE EMC recipe.',
+              );
+            }
             rawRecipeImageInventory.addMissing({
               categoryIndex,
               categoryId: category.id,

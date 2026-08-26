@@ -1,6 +1,6 @@
-# JEI Recipe Exporter (Forge 1.20.1)
+# Recipe Tree for JEI and REI (Forge 1.20.1)
 
-Client-side mod that exports everything JEI knows about to `<gameDir>/jei-exports/`:
+Client-side mod that plans and exports recipes from JEI or REI to `<gameDir>/jei-exports/`:
 
 ## In-game recipe planner
 
@@ -24,14 +24,18 @@ The key is configurable under Minecraft's **Controls → Recipe Tree** category.
   using each type's native JEI renderer, tooltip, identity, and amount;
 - supports background-drag panning and cursor-centered wheel zoom, with the arrow buttons reserved
   for moving backward and forward through recent output targets;
-- shares the current plan with the web/mobile viewers using portable `.mrtree.json` JSON, copied to
-  the clipboard and backed up at `config/recipe-tree-shares/last-tree.mrtree.json`, and imports the
-  newest tree placed in that folder (falling back to the clipboard when the folder is empty);
+- shares the active tree-history snapshot with the web/mobile viewers using portable
+  `.mrtree.json` JSON, copied to the clipboard and backed up at
+  `config/recipe-tree-shares/current-tree-history.mrtree.json`, then explains where the recipient
+  should paste it on the matching pack version of the site;
+- adds up to 16 independent starting outputs to one pannable graph through a searchable item grid,
+  combines their materials, processes, and byproduct allocation, and saves all roots in history;
 - wraps the current tree when a new output is chosen from the root, preserving the existing plan as
   the matching input branch; selected recipes are persisted as per-output favorites and promoted to
   the front of future recipe choosers, and favorited recipes automatically expand whenever their
   output appears as an ingredient; the input picker header can explicitly select **No recipe**,
-  clearing that favorite and leaving the ingredient collapsed;
+  clearing that favorite and leaving the ingredient collapsed; changing or clearing a favorite
+  updates every matching occurrence across every starting branch immediately;
 - keeps the requested amount editable in both display modes and multiplies every expanded input
   branch by the required craft count, including recipes that produce more than one output;
 - packs differently sized recipe choices closely in one vertically scrolling list and only renders
@@ -76,16 +80,24 @@ The portable format and compatibility limits are documented in
 
 ```bash
 JAVA_HOME=$(/usr/libexec/java_home -v 17) ./gradlew build
-# -> build/libs/jeiexport-1.2.0-beta.32.jar
+# -> build/libs/jeiexport-1.2.0-beta.72.jar
 ```
 
-Gradle 8.1.1 / ForgeGradle 6 / Forge 1.20.1. The release accepts Forge 47.1–47.x and
-JEI 15.2–15.x. It compiles against the JEI 15.2.0.21 compatibility baseline while dev runs
-exercise JEI 15.20.0.130, preventing accidental linkage to newer-only JEI methods.
+Gradle 8.1.1 / ForgeGradle 6 / Forge 1.20.1. The release accepts Forge 47.1–47.x and either
+JEI 15.2–15.x, or REI 12.1.785 with REI Plugin Compatibilities 12.0.93. It compiles against
+the JEI 15.2.0.21 compatibility baseline while dev runs exercise JEI 15.20.0.130 and REI
+12.1.785, preventing accidental linkage to newer-only viewer methods.
 
 ## Use
 
-Install the jar + JEI 15.x in the pack, join a world, then `/jeiexport all`.
+Choose one recipe-viewer setup:
+
+- **JEI:** install this jar and JEI 15.x.
+- **REI:** install this jar, REI 12.1.785, REI Plugin Compatibilities 12.0.93,
+  Architectury API 9.2.14, and Cloth Config 11.1.136. Do not also install JEI; the compatibility
+  mod provides the JEI API facade used by Recipe Tree and other JEI plugins.
+
+Join a world, then `/jeiexport all`.
 See the [repo root README](../README.md) for the full command reference, output format, and the viewer.
 
 Completed compatible snapshots are incremental by default. The exporter validates the Minecraft

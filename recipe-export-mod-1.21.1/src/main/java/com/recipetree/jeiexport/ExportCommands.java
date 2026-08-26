@@ -26,7 +26,8 @@ public final class ExportCommands {
         dispatcher.register(Commands.literal("jeiexport")
                 .then(startLiteral("all", EnumSet.allOf(ExportJob.Phase.class)))
                 .then(startLiteral("items", EnumSet.of(ExportJob.Phase.ITEMS)))
-                .then(startLiteral("recipes", EnumSet.of(ExportJob.Phase.ITEMS, ExportJob.Phase.RECIPES)))
+                .then(startLiteral("recipes", EnumSet.of(
+                        ExportJob.Phase.ITEMS, ExportJob.Phase.RECIPES, ExportJob.Phase.EMC)))
                 .then(startLiteral("mobs", EnumSet.of(ExportJob.Phase.MOBS)))
                 .then(startLiteral("blockdrops", EnumSet.of(ExportJob.Phase.BLOCK_DROPS)))
                 .then(startLiteral("trades", EnumSet.of(ExportJob.Phase.ITEMS, ExportJob.Phase.TRADES)))
@@ -63,7 +64,9 @@ public final class ExportCommands {
             return 0;
         }
 
-        boolean needsJei = phases.contains(ExportJob.Phase.ITEMS) || phases.contains(ExportJob.Phase.RECIPES);
+        boolean needsJei = phases.contains(ExportJob.Phase.ITEMS)
+                || phases.contains(ExportJob.Phase.RECIPES)
+                || phases.contains(ExportJob.Phase.EMC);
         IJeiRuntime runtime = JeiExportPlugin.runtime();
         if (needsJei && runtime == null) {
             source.sendFailure(prefixed("JEI runtime is not available. Is JEI installed and has the world finished loading?", ChatFormatting.RED));

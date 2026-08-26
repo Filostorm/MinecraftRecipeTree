@@ -14,6 +14,8 @@ const BETA_CANDIDATE_PREVIEW_ASSET_SET_ID =
   '2a96514f1d9ebb416deb5db862c17fffd5e9ebafb172541e8be7023bb1b83d28';
 const BETA_CANDIDATE_PACK_VERSION = 'prerelease-0.18.6.4';
 const SITE_CREATOR_PLACEHOLDER_DATABASE_ID = '00000000-0000-4000-8000-000000000000';
+const CLOUDFLARE_BETA_DATABASE_ID = '8e0218ae-8adc-4a3b-a381-c11020757009';
+const CLOUDFLARE_BETA_DATABASE_NAME = 'minecraft-recipe-tree-beta';
 const CLOUDFLARE_PRODUCTION_DATABASE_ID = 'e6624ef2-8bd9-49e5-8d32-0671351c61c3';
 const CLOUDFLARE_PRODUCTION_DATABASE_NAME = 'minecraft-recipe-tree-production';
 const CLOUDFLARE_PRODUCTION_BUCKET_NAME = 'minecraft-recipe-tree-production-assets';
@@ -74,12 +76,22 @@ export default defineConfig(async () => {
               '/api/datasets',
               '/api/export-failures',
               '/api/feedback',
+              '/api/recipe-favorites',
               '/api/modpacks*',
               '/dataset/publications/*',
               '/dataset/preview-sets/*',
             ],
           },
-          d1_databases: isCloudflareProduction
+          d1_databases: isCloudflareBeta
+            ? [
+                {
+                  binding: 'DB',
+                  database_name: CLOUDFLARE_BETA_DATABASE_NAME,
+                  database_id: CLOUDFLARE_BETA_DATABASE_ID,
+                  migrations_dir: 'drizzle',
+                },
+              ]
+            : isCloudflareProduction
             ? [
                 {
                   binding: 'DB',

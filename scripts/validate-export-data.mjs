@@ -535,6 +535,42 @@ export async function validateExportData(exportRoot = defaultExportRoot, options
     }
   };
 
+  const validateRetainedIngredients = (retained, catalysts, location) => {
+    if (retained === undefined) return;
+    if (!isRecord(retained)) {
+      fail(`${location} must be an object keyed by retained catalog item.`);
+      return;
+    }
+    const catalystKeys = new Set(
+      Array.isArray(catalysts)
+        ? catalysts.flatMap(slot =>
+            Array.isArray(slot)
+              ? slot.filter(Array.isArray).map(entry => entry[0])
+              : [],
+          )
+        : [],
+    );
+    for (const [key, detail] of Object.entries(retained)) {
+      if (!itemKeys.has(key) || !catalystKeys.has(key) || !isRecord(detail)) {
+        fail(`${location}.${key} must describe an item present in recipe.cat.`);
+        continue;
+      }
+      const reusable =
+        detail.mode === 'reusable' && hasExactKeys(detail, ['mode']);
+      const durability =
+        detail.mode === 'durability' &&
+        hasExactKeys(detail, ['mode', 'uses']) &&
+        Number.isSafeInteger(detail.uses) &&
+        detail.uses > 0;
+      if (!reusable && !durability) {
+        fail(
+          `${location}.${key} must be {mode: "reusable"} or ` +
+            '{mode: "durability", uses: positive integer}.',
+        );
+      }
+    }
+  };
+
   const validateStructure = (structure, location) => {
     if (structure === undefined) return;
     if (
@@ -805,6 +841,7 @@ export async function validateExportData(exportRoot = defaultExportRoot, options
       validateSlots(recipe.in, `${location}.in`, 'in');
       validateSlots(recipe.out, `${location}.out`, 'out');
       validateSlots(recipe.cat, `${location}.cat`, 'cat');
+      validateRetainedIngredients(recipe.retained, recipe.cat, `${location}.retained`);
       validateStructure(recipe.structure, `${location}.structure`);
     }
   }

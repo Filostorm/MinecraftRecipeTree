@@ -354,6 +354,8 @@ test('bounded workers stop dequeuing on the first failure and drain active secon
             active -= 1;
           }
         }
+        const failedGate = gates.find(gate => gate.path === path && gate.failure);
+        if (failedGate) throw failedGate.failure;
       }
       return originalFetch(input, init);
     };
@@ -361,7 +363,10 @@ test('bounded workers stop dequeuing on the first failure and drain active secon
     const capture = loggerCapture();
     let settled = false;
     let outcome;
-    uploadPromise = runUpload(data, api, {logger: capture.logger}).then(
+    uploadPromise = runUpload(data, api, {
+      logger: capture.logger,
+      sleepImpl: async () => {},
+    }).then(
       value => {
         settled = true;
         outcome = {value};

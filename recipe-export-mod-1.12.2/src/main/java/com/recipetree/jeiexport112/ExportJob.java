@@ -73,6 +73,10 @@ final class ExportJob {
             if (phaseNumber == 1) {
                 phase = new RecipePhase(context, runtime.getRecipeRegistry(), ingredientRegistry);
                 phaseNumber = 2;
+            } else if (phaseNumber == 2 && request.qualitySample == null
+                    && ProjectEEmcPhase.isAvailable()) {
+                phase = new ProjectEEmcPhase(context, ingredientRegistry);
+                phaseNumber = 3;
             } else {
                 phase = null;
                 finishSuccess();

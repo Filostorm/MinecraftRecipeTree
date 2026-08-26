@@ -18,7 +18,6 @@ export function TreeShareModal({
   onShare,
   onImport,
   onChooseFile,
-  onSaveToInstance,
 }: {
   visible: boolean;
   interfaceZoom?: number;
@@ -26,12 +25,10 @@ export function TreeShareModal({
   onShare: () => Promise<string>;
   onImport: (raw: string) => Promise<void>;
   onChooseFile: () => Promise<string | null>;
-  onSaveToInstance: () => Promise<string>;
 }) {
   const [raw, setRaw] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
-  const [desktopWeb, setDesktopWeb] = useState(false);
   useEffect(() => {
     if (!visible) {
       setRaw('');
@@ -39,13 +36,6 @@ export function TreeShareModal({
       setBusy(false);
     }
   }, [visible]);
-  useEffect(() => {
-    setDesktopWeb(
-      Platform.OS === 'web' &&
-        typeof window !== 'undefined' &&
-        window.matchMedia('(min-width: 768px) and (pointer: fine)').matches,
-    );
-  }, []);
 
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
@@ -76,9 +66,9 @@ export function TreeShareModal({
           ]}>
           <View style={styles.header}>
             <View style={{flex: 1}}>
-              <Text style={styles.title}>Share or import tree</Text>
+              <Text style={styles.title}>Share or open tree history</Text>
               <Text style={styles.subtitle}>
-                The same .mrtree.json code works in the site, app, and Minecraft mod.
+                A .mrtree.json history opens against its matching modpack version.
               </Text>
             </View>
             <TouchableOpacity accessibilityRole="button" onPress={onClose} style={styles.close}>
@@ -91,26 +81,10 @@ export function TreeShareModal({
             disabled={busy}
             style={styles.primary}
             onPress={() => void run(async () => setMessage(await onShare()))}>
-            <Text style={styles.primaryText}>Share current tree</Text>
+            <Text style={styles.primaryText}>Share current tree history</Text>
           </TouchableOpacity>
 
-          {desktopWeb && (
-            <TouchableOpacity
-              accessibilityRole="button"
-              disabled={busy}
-              style={styles.instanceButton}
-              onPress={() => void run(async () => setMessage(await onSaveToInstance()))}>
-              <View style={{flex: 1}}>
-                <Text style={styles.instanceTitle}>Save into modpack instance</Text>
-                <Text style={styles.instanceCopy}>
-                  Choose the instance folder. The mod will find it under config/recipe-tree-shares.
-                </Text>
-              </View>
-              <Text style={styles.instanceArrow}>›</Text>
-            </TouchableOpacity>
-          )}
-
-          <Text style={styles.label}>IMPORT SHARED TREE</Text>
+          <Text style={styles.label}>OPEN SHARED TREE HISTORY</Text>
           <PortableTreeDropZone
             disabled={busy}
             onDropTree={async dropped => {
@@ -123,7 +97,7 @@ export function TreeShareModal({
             multiline
             value={raw}
             onChangeText={setRaw}
-            placeholder="Paste the shared .mrtree.json code here…"
+            placeholder="Paste the shared .mrtree.json history here…"
             placeholderTextColor={theme.textDim}
             autoCapitalize="none"
             autoCorrect={false}
@@ -143,14 +117,14 @@ export function TreeShareModal({
                   }
                 })
               }>
-              <Text style={styles.secondaryText}>Import file</Text>
+              <Text style={styles.secondaryText}>Choose history file</Text>
             </TouchableOpacity>
             <TouchableOpacity
               accessibilityRole="button"
               disabled={busy || raw.trim().length === 0}
               style={[styles.primary, styles.importButton, (busy || !raw.trim()) && styles.disabled]}
               onPress={() => void run(() => onImport(raw.trim()))}>
-              <Text style={styles.primaryText}>{busy ? 'Working…' : 'Import tree'}</Text>
+              <Text style={styles.primaryText}>{busy ? 'Working…' : 'Open history'}</Text>
             </TouchableOpacity>
           </View>
           {!!message && <Text style={styles.message}>{message}</Text>}

@@ -121,7 +121,8 @@ public final class ExportEvents {
         EnumSet<ExportJob.Phase> phases = switch (auto.toLowerCase(Locale.ROOT)) {
             case "all" -> EnumSet.allOf(ExportJob.Phase.class);
             case "items" -> EnumSet.of(ExportJob.Phase.ITEMS);
-            case "recipes" -> EnumSet.of(ExportJob.Phase.ITEMS, ExportJob.Phase.RECIPES);
+            case "recipes" -> EnumSet.of(
+                    ExportJob.Phase.ITEMS, ExportJob.Phase.RECIPES, ExportJob.Phase.EMC);
             case "mobs" -> EnumSet.of(ExportJob.Phase.MOBS);
             case "blockdrops" -> EnumSet.of(ExportJob.Phase.BLOCK_DROPS);
             case "trades" -> EnumSet.of(ExportJob.Phase.ITEMS, ExportJob.Phase.TRADES);

@@ -319,12 +319,14 @@ async function headObject({
   const label = `Preview object HEAD ${record.path}`;
   const attempts = OBJECT_HEAD_RETRY_DELAYS_MS.length + 1;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const response = await request(
+    const response = await requestWithTransportRetry(
       fetchImpl,
       objectUrl(baseUrl, assetSetId, record.path),
       {method: 'HEAD', headers: authorizationHeaders(token)},
       timeoutMs,
       label,
+      logger,
+      sleepImpl,
     );
     if (response.status === 200) {
       exactObjectBytes(response, String(record.bytes), label);

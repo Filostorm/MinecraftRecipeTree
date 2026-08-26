@@ -59,6 +59,27 @@ final class ItemCatalog {
         return ensureTyped(typed);
     }
 
+    String ensureSynthetic(String key, String resourceId, String name, String modId, String type) {
+        if (!known.add(key)) {
+            return key;
+        }
+        try {
+            writer.beginObject();
+            writer.name("k").value(key);
+            writer.name("id").value(resourceId);
+            writer.name("n").value(name);
+            writer.name("m").value(modId);
+            if (type != null && !type.isBlank() && !"item".equals(type)) {
+                writer.name("t").value(type);
+            }
+            writer.endObject();
+        } catch (IOException exception) {
+            throw new UncheckedIOException("Failed writing synthetic ingredient to items.json", exception);
+        }
+        count++;
+        return key;
+    }
+
     static boolean isEmptyIngredient(ITypedIngredient<?> typed) {
         Object ingredient = typed.getIngredient();
         return (typed.getType() == VanillaTypes.ITEM_STACK

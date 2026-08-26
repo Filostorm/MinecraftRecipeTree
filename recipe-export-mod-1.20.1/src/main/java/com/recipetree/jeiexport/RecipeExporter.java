@@ -18,6 +18,7 @@ import mezz.jei.api.recipe.category.IRecipeCategory;
 import mezz.jei.api.runtime.IJeiRuntime;
 import net.minecraft.client.renderer.Rect2i;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.ItemStack;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
@@ -89,6 +90,16 @@ final class RecipeExporter implements ExportJob.PhaseRunner {
     }
 
     private record OverlayKey(LayoutKey layout, String contentFingerprint) {
+    }
+
+    private record RetentionData(String mode, Integer uses) {
+        private static RetentionData reusable() {
+            return new RetentionData("reusable", null);
+        }
+
+        private static RetentionData durability(int uses) {
+            return new RetentionData("durability", Math.max(1, uses));
+        }
     }
 
     private static final class BaseLayer implements AutoCloseable {
@@ -269,6 +280,7 @@ final class RecipeExporter implements ExportJob.PhaseRunner {
             JsonArray in = new JsonArray();
             JsonArray out = new JsonArray();
             JsonArray cata = new JsonArray();
+            JsonObject retained = new JsonObject();
             for (IRecipeSlotView slot : drawable.getRecipeSlotsView().getSlotViews()) {
                 List<ITypedIngredient<?>> ingredients = slot.getAllIngredients().toList();
                 if (ingredients.isEmpty()) {
@@ -281,6 +293,8 @@ final class RecipeExporter implements ExportJob.PhaseRunner {
                             categoryUid, ingredients.size());
                 }
                 JsonArray slotArr = new JsonArray();
+                JsonArray retainedSlotArr = new JsonArray();
+                Map<String, RetentionData> retainedSlotDetails = new HashMap<>();
                 Set<String> seenPairs = new LinkedHashSet<>();
                 for (ITypedIngredient<?> typed : ingredients) {
                     if (ItemCatalog.isEmptyIngredient(typed)) {
@@ -294,7 +308,15 @@ final class RecipeExporter implements ExportJob.PhaseRunner {
                     JsonArray pair = new JsonArray();
                     pair.add(key);
                     pair.add(amount);
-                    slotArr.add(pair);
+                    RetentionData retention = slot.getRole() == mezz.jei.api.recipe.RecipeIngredientRole.INPUT
+                            ? craftingRetention(typed)
+                            : null;
+                    if (retention == null) {
+                        slotArr.add(pair);
+                    } else {
+                        retainedSlotArr.add(pair);
+                        retainedSlotDetails.put(key, retention);
+                    }
                     switch (slot.getRole()) {
                         case INPUT -> inputKeys.add(key);
                         case OUTPUT -> outputKeys.add(key);
@@ -305,11 +327,32 @@ final class RecipeExporter implements ExportJob.PhaseRunner {
                         }
                     }
                 }
-                if (slotArr.isEmpty()) {
+                if (slotArr.isEmpty() && retainedSlotArr.isEmpty()) {
                     continue;
                 }
+                if (!slotArr.isEmpty() && !retainedSlotArr.isEmpty()) {
+                    // Alternatives are OR members. Publishing separate consumed and retained
+                    // slots would turn that into an AND requirement, so mixed slots stay consumed.
+                    retainedSlotArr.forEach(slotArr::add);
+                    retainedSlotArr = new JsonArray();
+                    retainedSlotDetails.clear();
+                }
                 switch (slot.getRole()) {
-                    case INPUT -> in.add(slotArr);
+                    case INPUT -> {
+                        if (retainedSlotArr.isEmpty()) {
+                            in.add(slotArr);
+                        } else {
+                            cata.add(retainedSlotArr);
+                            retainedSlotDetails.forEach((key, detail) -> {
+                                JsonObject value = new JsonObject();
+                                value.addProperty("mode", detail.mode());
+                                if (detail.uses() != null) {
+                                    value.addProperty("uses", detail.uses());
+                                }
+                                retained.add(key, value);
+                            });
+                        }
+                    }
                     case OUTPUT -> out.add(slotArr);
                     case CATALYST -> cata.add(slotArr);
                     default -> {
@@ -320,6 +363,9 @@ final class RecipeExporter implements ExportJob.PhaseRunner {
             rj.add("out", out);
             if (!cata.isEmpty()) {
                 rj.add("cat", cata);
+            }
+            if (retained.size() > 0) {
+                rj.add("retained", retained);
             }
 
             String imageName = reuseRecipeImage(rj);
@@ -389,6 +435,25 @@ final class RecipeExporter implements ExportJob.PhaseRunner {
             ctx.indexRecipe(key, true, registeredCatIndex, exportedIndex);
         }
         exportedTotal++;
+    }
+
+    @Nullable
+    private static RetentionData craftingRetention(ITypedIngredient<?> ingredient) {
+        if (ingredient.getType() != VanillaTypes.ITEM_STACK ||
+                !(ingredient.getIngredient() instanceof ItemStack input) ||
+                input.isEmpty() || !input.hasCraftingRemainingItem()) {
+            return null;
+        }
+        ItemStack returned = input.getCraftingRemainingItem();
+        if (returned.isEmpty() || !returned.is(input.getItem())) {
+            return null;
+        }
+        int damagePerCraft = returned.getDamageValue() - input.getDamageValue();
+        if (damagePerCraft > 0 && input.isDamageableItem()) {
+            int remainingDurability = Math.max(1, input.getMaxDamage() - input.getDamageValue());
+            return RetentionData.durability(remainingDurability / damagePerCraft);
+        }
+        return RetentionData.reusable();
     }
 
     @Nullable

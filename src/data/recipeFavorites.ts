@@ -1,0 +1,101 @@
+import {Platform} from 'react-native';
+import type {RecipeRef} from '../types';
+import type {DatasetDescriptor} from './datasetCatalog';
+import {recipeFavoriteClientId} from './recipeFavoriteClient';
+
+const FAVORITES_ENDPOINT = Platform.OS === 'web'
+  ? '/api/recipe-favorites'
+  : 'https://minecraftrecipetree.craftsmannsoftware.com/api/recipe-favorites';
+const MAX_FAVORITES = 50_000;
+
+export interface CommunityRecipeFavorite {
+  itemKey: string;
+  recipeRef: RecipeRef;
+  count: number;
+}
+
+function isLocalOnlyPack(descriptor: DatasetDescriptor): boolean {
+  return /^local-[a-f0-9]{16}$/u.test(descriptor.slug);
+}
+
+function isRecipeRef(value: unknown): value is RecipeRef {
+  return (
+    Array.isArray(value) &&
+    value.length === 2 &&
+    value.every(part => Number.isSafeInteger(part) && part >= 0)
+  );
+}
+
+export function parseCommunityRecipeFavorites(value: unknown): CommunityRecipeFavorite[] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Recipe favorite response is not an object.');
+  }
+  const record = value as Record<string, unknown>;
+  if (Object.keys(record).length !== 1 || !Array.isArray(record.favorites)) {
+    throw new Error('Recipe favorite response has an invalid shape.');
+  }
+  if (record.favorites.length > MAX_FAVORITES) {
+    throw new Error('Recipe favorite response is too large.');
+  }
+  const seen = new Set<string>();
+  return record.favorites.map((entry, index) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new Error(`Recipe favorite ${index} is invalid.`);
+    }
+    const favorite = entry as Record<string, unknown>;
+    if (
+      Object.keys(favorite).length !== 3 ||
+      typeof favorite.itemKey !== 'string' ||
+      favorite.itemKey.length === 0 ||
+      favorite.itemKey.length > 512 ||
+      seen.has(favorite.itemKey) ||
+      !isRecipeRef(favorite.recipeRef) ||
+      !Number.isSafeInteger(favorite.count) ||
+      (favorite.count as number) < 1
+    ) {
+      throw new Error(`Recipe favorite ${index} is invalid.`);
+    }
+    seen.add(favorite.itemKey);
+    return {
+      itemKey: favorite.itemKey,
+      recipeRef: favorite.recipeRef,
+      count: favorite.count as number,
+    };
+  });
+}
+
+export async function loadCommunityRecipeFavorites(
+  descriptor: DatasetDescriptor,
+): Promise<CommunityRecipeFavorite[]> {
+  if (isLocalOnlyPack(descriptor)) return [];
+  const query = new URLSearchParams({
+    packSlug: descriptor.slug,
+    publicationId: descriptor.publicationId,
+  });
+  const response = await fetch(`${FAVORITES_ENDPOINT}?${query}`, {
+    headers: {Accept: 'application/json'},
+    cache: 'no-store',
+  });
+  if (!response.ok) throw new Error(`Recipe favorites returned HTTP ${response.status}.`);
+  return parseCommunityRecipeFavorites(await response.json());
+}
+
+export async function updateCommunityRecipeFavorite(
+  descriptor: DatasetDescriptor,
+  itemKey: string,
+  recipeRef: RecipeRef | null,
+): Promise<void> {
+  if (isLocalOnlyPack(descriptor)) return;
+  const response = await fetch(FAVORITES_ENDPOINT, {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json', Accept: 'application/json'},
+    body: JSON.stringify({
+      packSlug: descriptor.slug,
+      publicationId: descriptor.publicationId,
+      clientId: await recipeFavoriteClientId(),
+      itemKey,
+      recipeRef,
+    }),
+  });
+  if (!response.ok) throw new Error(`Recipe favorite update returned HTTP ${response.status}.`);
+}

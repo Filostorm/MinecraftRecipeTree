@@ -317,12 +317,14 @@ async function headObject(options, {retryNotFound = false} = {}) {
   const label = `Core dataset object HEAD ${record.path}`;
   const attempts = OBJECT_HEAD_RETRY_DELAYS_MS.length + 1;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const response = await request(
+    const response = await requestWithTransportRetry(
       fetchImpl,
       objectUrl(baseUrl, record.path),
       {method: 'HEAD', headers: authorizationHeaders(token, publicationId)},
       timeoutMs,
       label,
+      logger,
+      sleepImpl,
     );
     if (response.status === 200) {
       exactObjectBytes(response, String(record.bytes), label);

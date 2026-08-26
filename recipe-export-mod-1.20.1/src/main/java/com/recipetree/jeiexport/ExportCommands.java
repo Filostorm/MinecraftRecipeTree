@@ -28,7 +28,8 @@ public final class ExportCommands {
         dispatcher.register(Commands.literal("jeiexport")
                 .then(startLiteral("all", EnumSet.allOf(ExportJob.Phase.class)))
                 .then(startLiteral("items", EnumSet.of(ExportJob.Phase.ITEMS)))
-                .then(startLiteral("recipes", EnumSet.of(ExportJob.Phase.ITEMS, ExportJob.Phase.RECIPES)))
+                .then(startLiteral("recipes", EnumSet.of(
+                        ExportJob.Phase.ITEMS, ExportJob.Phase.RECIPES, ExportJob.Phase.EMC)))
                 .then(startLiteral("mobs", EnumSet.of(ExportJob.Phase.MOBS)))
                 .then(startLiteral("blockdrops", EnumSet.of(ExportJob.Phase.BLOCK_DROPS)))
                 .then(startLiteral("trades", EnumSet.of(ExportJob.Phase.ITEMS, ExportJob.Phase.TRADES)))
@@ -113,7 +114,9 @@ public final class ExportCommands {
             return 0;
         }
 
-        boolean needsJei = phases.contains(ExportJob.Phase.ITEMS) || phases.contains(ExportJob.Phase.RECIPES);
+        boolean needsJei = phases.contains(ExportJob.Phase.ITEMS)
+                || phases.contains(ExportJob.Phase.RECIPES)
+                || phases.contains(ExportJob.Phase.EMC);
         IJeiRuntime runtime = JeiExportPlugin.runtime();
         if (needsJei && runtime == null) {
             source.sendFailure(prefixed("JEI is not ready yet. Make sure JEI is installed and wait for the world to finish loading.", ChatFormatting.RED));
@@ -140,7 +143,8 @@ public final class ExportCommands {
     private static String friendlyExportName(EnumSet<ExportJob.Phase> phases) {
         if (phases.equals(EnumSet.allOf(ExportJob.Phase.class))) return "everything";
         if (phases.equals(EnumSet.of(ExportJob.Phase.ITEMS))) return "items";
-        if (phases.equals(EnumSet.of(ExportJob.Phase.ITEMS, ExportJob.Phase.RECIPES))) {
+        if (phases.equals(EnumSet.of(
+                ExportJob.Phase.ITEMS, ExportJob.Phase.RECIPES, ExportJob.Phase.EMC))) {
             return "items and recipes";
         }
         if (phases.equals(EnumSet.of(ExportJob.Phase.MOBS))) return "creatures";
