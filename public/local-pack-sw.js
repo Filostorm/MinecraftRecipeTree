@@ -1,5 +1,18 @@
 const LOCAL_PACK_CACHE = 'minecraft-recipe-tree-local-packs-v1';
 const LOCAL_PACK_ROUTE_PREFIX = '/__local-packs/';
+const HOSTED_IMAGE_PACK_CACHE = 'minecraft-recipe-tree-hosted-image-packs-v1';
+const MAX_PACK_BYTES = 1024 * 1024;
+const MAX_MEMORY_PACK_BYTES = 32 * 1024 * 1024;
+const MAX_PERSISTENT_PACKS = 192;
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const CORE_IMAGE_ROUTE =
+  /^\/dataset\/publications\/([a-f0-9]{64})\/exports\/assets\/s\/(\d+)-(\d+)-(\d+)\.webp$/;
+const PREVIEW_IMAGE_ROUTE =
+  /^\/dataset\/preview-sets\/([a-f0-9]{64})\/assets\/s\/(\d+)-(\d+)-(\d+)\.webp$/;
+
+const memoryPacks = new Map();
+const pendingPacks = new Map();
+let memoryPackBytes = 0;
 
 self.addEventListener('install', event => {
   self.skipWaiting();
@@ -10,15 +23,218 @@ self.addEventListener('activate', event => {
   event.waitUntil(self.clients.claim());
 });
 
+function packedCoordinate(url) {
+  let match = CORE_IMAGE_ROUTE.exec(url.pathname);
+  let packPath;
+  if (match) {
+    if (url.search !== `?dataset=${match[1]}`) return null;
+    packPath =
+      `/dataset/publications/${match[1]}/exports/assets/pack-${match[2]}.bin` +
+      url.search;
+  } else {
+    match = PREVIEW_IMAGE_ROUTE.exec(url.pathname);
+    if (!match) return null;
+    const query = /^\?dataset=([a-f0-9]{64})&preview=([a-f0-9]{64})$/.exec(url.search);
+    if (!query || query[2] !== match[1]) return null;
+    packPath =
+      `/dataset/preview-sets/${match[1]}/assets/pack-${match[2]}.bin` +
+      url.search;
+  }
+
+  const packNumber = Number(match[2]);
+  const offset = Number(match[3]);
+  const length = Number(match[4]);
+  if (
+    !Number.isSafeInteger(packNumber) ||
+    packNumber < 0 ||
+    String(packNumber).padStart(3, '0') !== match[2] ||
+    !Number.isSafeInteger(offset) ||
+    offset < 0 ||
+    String(offset) !== match[3] ||
+    !Number.isSafeInteger(length) ||
+    length <= 0 ||
+    String(length) !== match[4] ||
+    !Number.isSafeInteger(offset + length) ||
+    offset + length > MAX_PACK_BYTES
+  ) {
+    return null;
+  }
+  return {
+    packUrl: new URL(packPath, url.origin).href,
+    offset,
+    length,
+  };
+}
+
+function hex(bytes) {
+  return [...bytes].map(byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function validatedPack(response, packUrl) {
+  if (!response.ok) {
+    throw new Error(`Image pack request failed with HTTP ${response.status} at ${packUrl}.`);
+  }
+  const digest = response.headers.get('x-mrt-pack-sha256');
+  const storedBytesText = response.headers.get('x-mrt-stored-bytes');
+  const contentLengthText = response.headers.get('content-length');
+  const storedBytes = Number(storedBytesText);
+  if (
+    response.headers.get('content-type') !== 'application/octet-stream' ||
+    !digest ||
+    !SHA256_PATTERN.test(digest) ||
+    !/^[1-9]\d*$/.test(storedBytesText ?? '') ||
+    !/^[1-9]\d*$/.test(contentLengthText ?? '') ||
+    !Number.isSafeInteger(storedBytes) ||
+    storedBytes > MAX_PACK_BYTES ||
+    contentLengthText !== storedBytesText
+  ) {
+    throw new Error(`Image pack response has invalid immutable headers at ${packUrl}.`);
+  }
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (bytes.byteLength !== storedBytes) {
+    throw new Error(`Image pack response has an invalid byte length at ${packUrl}.`);
+  }
+  if (!self.crypto?.subtle) {
+    throw new Error('This browser cannot verify cached image packs with SHA-256.');
+  }
+  const observedDigest = hex(
+    new Uint8Array(await self.crypto.subtle.digest('SHA-256', bytes.slice().buffer)),
+  );
+  if (observedDigest !== digest) {
+    throw new Error(`Image pack response failed SHA-256 verification at ${packUrl}.`);
+  }
+  return {bytes, digest};
+}
+
+function rememberPack(packUrl, pack) {
+  const previous = memoryPacks.get(packUrl);
+  if (previous) memoryPackBytes -= previous.bytes.byteLength;
+  memoryPacks.delete(packUrl);
+  memoryPacks.set(packUrl, pack);
+  memoryPackBytes += pack.bytes.byteLength;
+  while (memoryPackBytes > MAX_MEMORY_PACK_BYTES && memoryPacks.size > 1) {
+    const oldestUrl = memoryPacks.keys().next().value;
+    const oldest = memoryPacks.get(oldestUrl);
+    memoryPacks.delete(oldestUrl);
+    memoryPackBytes -= oldest.bytes.byteLength;
+  }
+}
+
+async function prunePersistentPacks(cache) {
+  const keys = await cache.keys();
+  const excess = keys.length - MAX_PERSISTENT_PACKS;
+  if (excess <= 0) return;
+  const results = await Promise.all(keys.slice(0, excess).map(request => cache.delete(request)));
+  if (results.some(deleted => !deleted)) {
+    console.error('The hosted image-pack cache could not remove every expired entry.');
+  }
+}
+
+async function loadPack(packUrl) {
+  const remembered = memoryPacks.get(packUrl);
+  if (remembered) {
+    rememberPack(packUrl, remembered);
+    return remembered;
+  }
+  const pending = pendingPacks.get(packUrl);
+  if (pending) return pending;
+
+  const operation = (async () => {
+    const cache = await caches.open(HOSTED_IMAGE_PACK_CACHE);
+    const cached = await cache.match(packUrl);
+    if (cached) {
+      try {
+        const pack = await validatedPack(cached, packUrl);
+        rememberPack(packUrl, pack);
+        return pack;
+      } catch (error) {
+        console.error('A cached image pack failed validation and will be refetched.', {
+          packUrl,
+          error,
+        });
+        if (!(await cache.delete(packUrl))) {
+          console.error('The invalid cached image pack could not be removed.', {packUrl});
+        }
+      }
+    }
+
+    const response = await fetch(packUrl, {
+      cache: 'no-store',
+      credentials: 'same-origin',
+      headers: {Accept: 'application/octet-stream'},
+    });
+    const pack = await validatedPack(response, packUrl);
+    await cache.put(
+      packUrl,
+      new Response(pack.bytes.slice(), {
+        status: 200,
+        headers: {
+          'Cache-Control': 'public, max-age=31536000, immutable',
+          'Content-Length': String(pack.bytes.byteLength),
+          'Content-Type': 'application/octet-stream',
+          'X-MRT-Pack-SHA256': pack.digest,
+          'X-MRT-Stored-Bytes': String(pack.bytes.byteLength),
+          'X-Content-Type-Options': 'nosniff',
+        },
+      }),
+    );
+    await prunePersistentPacks(cache);
+    rememberPack(packUrl, pack);
+    return pack;
+  })().finally(() => {
+    pendingPacks.delete(packUrl);
+  });
+  pendingPacks.set(packUrl, operation);
+  return operation;
+}
+
+async function packedImageResponse(coordinate) {
+  try {
+    const pack = await loadPack(coordinate.packUrl);
+    if (coordinate.offset + coordinate.length > pack.bytes.byteLength) {
+      throw new Error(`Image coordinate exceeds its verified pack at ${coordinate.packUrl}.`);
+    }
+    const bytes = pack.bytes.slice(
+      coordinate.offset,
+      coordinate.offset + coordinate.length,
+    );
+    return new Response(bytes, {
+      status: 200,
+      headers: {
+        'Cache-Control': 'public, max-age=31536000, immutable, no-transform',
+        'Content-Length': String(bytes.byteLength),
+        'Content-Type': 'image/webp',
+        'X-Content-Type-Options': 'nosniff',
+        'X-MRT-Image-Pack-Cache': 'local',
+      },
+    });
+  } catch (error) {
+    console.error('A packed dataset image could not be reconstructed locally.', {
+      packUrl: coordinate.packUrl,
+      offset: coordinate.offset,
+      length: coordinate.length,
+      error,
+    });
+    return new Response('Dataset image unavailable', {
+      status: 502,
+      headers: {
+        'Cache-Control': 'no-store',
+        'Content-Type': 'text/plain; charset=utf-8',
+      },
+    });
+  }
+}
+
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
-  if (
-    event.request.method !== 'GET' ||
-    url.origin !== self.location.origin ||
-    !url.pathname.startsWith(LOCAL_PACK_ROUTE_PREFIX)
-  ) {
+  if (event.request.method !== 'GET' || url.origin !== self.location.origin) return;
+
+  const coordinate = packedCoordinate(url);
+  if (coordinate) {
+    event.respondWith(packedImageResponse(coordinate));
     return;
   }
+  if (!url.pathname.startsWith(LOCAL_PACK_ROUTE_PREFIX)) return;
 
   event.respondWith(
     caches.open(LOCAL_PACK_CACHE).then(async cache => {

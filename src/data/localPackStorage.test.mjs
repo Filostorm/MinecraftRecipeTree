@@ -40,7 +40,7 @@ test('service worker preparation has a bounded failure instead of blocking catal
   try {
     await assert.rejects(
       registerLocalPackServiceWorker(),
-      /could not finish preparing local pack support/u,
+      /could not finish preparing its image cache/u,
     );
     assert.equal(listeners.size, 0);
   } finally {
@@ -98,7 +98,9 @@ test('reports file-saving and finalization after archive reading reaches 100%', 
     configurable: true,
     value: {
       serviceWorker: {
-        controller: {},
+        controller: {
+          scriptURL: 'https://viewer.example/local-pack-sw.js?v=packed-images-v1',
+        },
         ready: Promise.resolve(),
         async register() {},
       },

@@ -45,6 +45,7 @@ const MRPI_VERSION = 1;
 const IMMUTABLE = 'public, max-age=31536000, immutable';
 const IMMUTABLE_IMAGE = `${IMMUTABLE}, no-transform`;
 const STORED_BYTES_HEADER = 'X-MRT-Stored-Bytes';
+const PACK_SHA256_HEADER = 'X-MRT-Pack-SHA256';
 const MAX_MANIFEST_CACHE_ENTRIES = 12;
 const MAX_INDEX_CACHE_ENTRIES = 96;
 const MAX_INDEX_CACHE_BYTES = 3 * 1024 * 1024;
@@ -554,6 +555,47 @@ async function serveRange(
   return requestResponse(request, response);
 }
 
+async function serveWholePack(
+  request: Request,
+  bucket: DatasetR2Bucket,
+  objectKey: string,
+  record: {path: string; bytes: number; sha256: string},
+  validatesMetadata: (object: DatasetR2Object) => boolean,
+): Promise<Response> {
+  const object = await bucket.get(objectKey);
+  if (!object || object.key !== objectKey || !validatesMetadata(object)) {
+    console.error('Committed immutable image pack is missing or has invalid R2 metadata.', {
+      objectKey,
+    });
+    return new Response('Dataset image pack unavailable', {
+      status: 502,
+      headers: {'Cache-Control': 'no-store'},
+    });
+  }
+  const bytes = new Uint8Array(await object.arrayBuffer());
+  if (bytes.byteLength !== record.bytes || (await sha256Hex(bytes)) !== record.sha256) {
+    console.error('Committed immutable image pack failed byte-length or SHA-256 validation.', {
+      objectKey,
+    });
+    return new Response('Dataset image pack invalid', {
+      status: 502,
+      headers: {'Cache-Control': 'no-store'},
+    });
+  }
+  const response = new Response(bytes, {
+    status: 200,
+    headers: {
+      'Cache-Control': IMMUTABLE,
+      'Content-Length': String(bytes.byteLength),
+      'Content-Type': 'application/octet-stream',
+      [PACK_SHA256_HEADER]: record.sha256,
+      [STORED_BYTES_HEADER]: String(bytes.byteLength),
+      'X-Content-Type-Options': 'nosniff',
+    },
+  });
+  return requestResponse(request, response);
+}
+
 export async function handleCoreDatasetRead(
   request: Request,
   runtime: DatasetRuntime,
@@ -595,6 +637,16 @@ export async function handleCoreDatasetRead(
       coreObjectKey(publicationId, path),
       record,
       object => coreObjectMatches(object, publicationId, record),
+    );
+  }
+  const wholePack = publication.state.manifest.packs.find(pack => pack.path === path);
+  if (wholePack) {
+    return serveWholePack(
+      request,
+      bucket,
+      coreObjectKey(publicationId, wholePack.path),
+      wholePack,
+      object => coreObjectMatches(object, publicationId, wholePack),
     );
   }
   const coordinate = parseCoordinate(path, MAX_CORE_PACK_BYTES);
@@ -694,6 +746,16 @@ export async function handlePreviewDatasetRead(
       previewObjectKey(assetSetId, path),
       record,
       object => previewObjectMatches(object, assetSetId, publicationId, record),
+    );
+  }
+  const wholePack = publication.state.manifest.packs.find(pack => pack.path === path);
+  if (wholePack) {
+    return serveWholePack(
+      request,
+      bucket,
+      previewObjectKey(assetSetId, wholePack.path),
+      wholePack,
+      object => previewObjectMatches(object, assetSetId, publicationId, wholePack),
     );
   }
   const coordinate = parseCoordinate(path, MAX_PREVIEW_PACK_BYTES);
