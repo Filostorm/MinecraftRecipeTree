@@ -1,5 +1,33 @@
 # Production deployment verifications
 
+## 2026-08-26 — large-tree graph performance release
+
+- Application commit: `e868cfdccf046c86427bfea1db6fc2ad19eac625`
+- Standalone Worker: `minecraft-recipe-tree-production`
+- Standalone Worker version: `beb494c3-4656-474b-8b92-ca3e85d594a1`
+- Canonical URL: `https://minecraftrecipetree.craftsmannsoftware.com/`
+
+Passed:
+
+- The exact beta source was promoted onto the latest production branch without modifying the
+  unrelated local EMC-preview work in the primary checkout.
+- The focused graph suite passed 24/24 tests, TypeScript validation passed, and the production
+  bundle deployed successfully with the existing native D1 and R2 bindings.
+- Before the provider limit was reached, a fresh canonical browser session hydrated the current
+  MeatballCraft release and loaded the release's hashed application assets.
+
+Production verification failure:
+
+- Cloudflare began returning HTTP `429` with Error 1027 immediately after deployment, stating that
+  the account owner had reached plan limits. The failure affects both the canonical hostname and
+  the direct `minecraft-recipe-tree-production.gtjoe51.workers.dev` hostname.
+- The already-hydrated browser session subsequently logged explicit reverse-index shard load
+  failures, and a fresh `/publish` session rendered Cloudflare's temporary rate-limit page.
+- Because the provider rejected every subsequent request, `/api/datasets`, `/api/modpacks`, the
+  hashed bootstrap, stylesheet, and lazy graph bundle, upload authorization, feedback, and failure
+  reporting could not complete their required post-deployment checks. No synthetic production
+  data was created.
+
 ## 2026-08-26 — graph planning fixes and GTNH 2.8.4 refresh
 
 - Application commit: `a194471f140d869947868f86653632f32ca66b43`
