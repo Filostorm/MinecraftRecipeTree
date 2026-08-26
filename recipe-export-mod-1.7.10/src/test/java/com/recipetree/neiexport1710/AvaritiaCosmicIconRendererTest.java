@@ -15,6 +15,7 @@ public class AvaritiaCosmicIconRendererTest {
             AvaritiaCosmicIconRenderer.requireProgram(0);
             fail("Expected a zero shader program to fail closed");
         } catch (IllegalStateException expected) {
+            assertTrue(expected.getMessage().contains(AvaritiaCosmicIconRenderer.CONTRACT));
             assertTrue(expected.getMessage().contains("unshaded mask texture"));
         }
     }

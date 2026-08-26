@@ -12,7 +12,7 @@ import org.apache.logging.log4j.Logger;
 @Mod(
         modid = GtnhNeiExportMod.MOD_ID,
         name = "Recipe Tree GTNH NEI Exporter",
-        version = "1.0.151",
+        version = "1.0.154",
         acceptableRemoteVersions = "*",
         dependencies = "required-after:NotEnoughItems"
 )

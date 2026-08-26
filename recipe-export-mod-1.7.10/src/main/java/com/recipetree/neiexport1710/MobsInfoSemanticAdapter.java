@@ -38,12 +38,13 @@ final class MobsInfoSemanticAdapter {
             "gtnh-2.8.4-mobsinfo-0.5.6-item-reference-semantics-v2";
     static final String UNPROMOTED = "<unpromoted>";
     static final int EXPECTED_SOURCE_PAGES = 401;
+    static final int EXPECTED_PREVIEW_SLOT_ICONS = 6092;
     static final String EXPECTED_COUNT_VECTOR =
             "sourcePages=401,exportedPages=401,excludedBlankPages=0,inputPages=401,"
-                    + "outputPages=401,emptyOutputPages=0,inputSlots=401,outputSlots=5692,"
-                    + "alternatives=7025";
+                    + "outputPages=401,emptyOutputPages=0,inputSlots=401,outputSlots=5691,"
+                    + "alternatives=7024";
     static final String EXPECTED_SHA256 =
-            "9ed2e0e28aa06e1dece8763d652996d8bb476f73f22be4cdc312acb8c473ae70";
+            "0725194f323c86155078aac7720d23e5eb5b570f4a28a76ead3a233a64f95adc";
 
     private static final Map<ICraftingHandler,
             List<CompleteCategoryAdapters.RecipeSemanticOverride>> SEMANTICS =

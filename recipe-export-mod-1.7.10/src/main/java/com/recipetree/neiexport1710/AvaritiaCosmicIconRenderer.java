@@ -16,6 +16,8 @@ import org.lwjgl.opengl.GLContext;
 final class AvaritiaCosmicIconRenderer {
 
     static final String CONTRACT = "gtnh-avaritia-1.77-cosmic-inventory-shader-v1";
+    static final String ETERNAL_CONTRACT =
+            "gtnh-eternalsingularity-1.2.3-cosmic-inventory-shader-v1";
 
     private static final String COSMIC_INTERFACE =
             "fox.spiteful.avaritia.render.ICosmicRenderItem";
@@ -25,13 +27,30 @@ final class AvaritiaCosmicIconRenderer {
             "fox.spiteful.avaritia.render.CosmicRenderShenanigans";
     private static final String SHADER_HELPER =
             "fox.spiteful.avaritia.render.ShaderHelper";
+    private static final String ETERNAL_RENDERER =
+            "singulariteam.eternalsingularity.render.EternalItemRenderer";
+    private static final String ETERNAL_STATE =
+            "singulariteam.eternalsingularity.render.CosmicRenderStuffs";
+    private static final String ETERNAL_SHADER_HELPER =
+            "singulariteam.eternalsingularity.render.ShaderHelper";
 
+    private final String contract;
     private final String itemClassName;
     private final String rendererClassName;
+    private final String cosmicStateClassName;
+    private final String shaderHelperClassName;
 
-    private AvaritiaCosmicIconRenderer(String itemClassName, String rendererClassName) {
+    private AvaritiaCosmicIconRenderer(
+            String contract,
+            String itemClassName,
+            String rendererClassName,
+            String cosmicStateClassName,
+            String shaderHelperClassName) {
+        this.contract = contract;
         this.itemClassName = itemClassName;
         this.rendererClassName = rendererClassName;
+        this.cosmicStateClassName = cosmicStateClassName;
+        this.shaderHelperClassName = shaderHelperClassName;
     }
 
     static AvaritiaCosmicIconRenderer createIfTarget(ItemStack stack) throws ExportFailure {
@@ -41,16 +60,27 @@ final class AvaritiaCosmicIconRenderer {
         }
         IItemRenderer renderer = MinecraftForgeClient.getItemRenderer(
                 stack, IItemRenderer.ItemRenderType.INVENTORY);
-        if (renderer == null || !hasNamedSuperclass(renderer.getClass(), COSMIC_RENDERER)) {
+        if (renderer == null) {
             throw new ExportFailure(
                     "ITEM_ICON_RENDER",
-                    CONTRACT + " expected the registered inventory renderer for "
-                            + stack.getItem().getClass().getName()
-                            + " to extend " + COSMIC_RENDERER + "; got "
-                            + (renderer == null ? "<null>" : renderer.getClass().getName()));
+                    CONTRACT + " expected a registered inventory renderer for "
+                            + stack.getItem().getClass().getName() + "; got <null>");
         }
-        return new AvaritiaCosmicIconRenderer(
-                stack.getItem().getClass().getName(), renderer.getClass().getName());
+        if (hasNamedSuperclass(renderer.getClass(), COSMIC_RENDERER)) {
+            return new AvaritiaCosmicIconRenderer(
+                    CONTRACT, stack.getItem().getClass().getName(),
+                    renderer.getClass().getName(), COSMIC_STATE, SHADER_HELPER);
+        }
+        if (hasNamedSuperclass(renderer.getClass(), ETERNAL_RENDERER)) {
+            return new AvaritiaCosmicIconRenderer(
+                    ETERNAL_CONTRACT, stack.getItem().getClass().getName(),
+                    renderer.getClass().getName(), ETERNAL_STATE, ETERNAL_SHADER_HELPER);
+        }
+        throw new ExportFailure(
+                "ITEM_ICON_RENDER",
+                CONTRACT + " has no promoted cosmic renderer family for "
+                        + stack.getItem().getClass().getName() + "; got "
+                        + renderer.getClass().getName());
     }
 
     void drawExactlyOnce(
@@ -68,7 +98,7 @@ final class AvaritiaCosmicIconRenderer {
                                 && capabilities.GL_ARB_fragment_shader);
                 if (!shaderObjectsAvailable) {
                     throw new IllegalStateException(
-                            CONTRACT + " requires GLSL shader objects, but the active Minecraft "
+                            contract + " requires GLSL shader objects, but the active Minecraft "
                                     + "OpenGL context does not provide them");
                 }
                 OpenGlHelper.shadersSupported = true;
@@ -79,7 +109,7 @@ final class AvaritiaCosmicIconRenderer {
                         canonicalKey);
             }
 
-            Class<?> shaderHelper = Class.forName(SHADER_HELPER);
+            Class<?> shaderHelper = Class.forName(shaderHelperClassName);
             Field cosmicShader = shaderHelper.getField("cosmicShader");
             program = cosmicShader.getInt(null);
             if (program <= 0) {
@@ -88,15 +118,15 @@ final class AvaritiaCosmicIconRenderer {
                 program = cosmicShader.getInt(null);
                 initialized = true;
             }
-            requireProgram(program);
+            requireProgram(program, contract);
 
             ownerDraw.draw();
 
             int programAfterDraw = cosmicShader.getInt(null);
-            requireProgram(programAfterDraw);
+            requireProgram(programAfterDraw, contract);
             if (programAfterDraw != program) {
                 throw new IllegalStateException(
-                        CONTRACT + " cosmic shader program changed during one inventory draw: "
+                        contract + " cosmic shader program changed during one inventory draw: "
                                 + program + " -> " + programAfterDraw);
             }
         } catch (Throwable error) {
@@ -104,7 +134,7 @@ final class AvaritiaCosmicIconRenderer {
         } finally {
             try {
                 ARBShaderObjects.glUseProgramObjectARB(0);
-                Class<?> cosmicState = Class.forName(COSMIC_STATE);
+                Class<?> cosmicState = Class.forName(cosmicStateClassName);
                 cosmicState.getField("inventoryRender").setBoolean(null, false);
                 cosmicState.getField("cosmicOpacity").setFloat(null, 1.0F);
             } catch (Throwable restore) {
@@ -118,19 +148,23 @@ final class AvaritiaCosmicIconRenderer {
             if (failure instanceof Exception) {
                 throw (Exception) failure;
             }
-            throw new IllegalStateException(CONTRACT + " failed", failure);
+            throw new IllegalStateException(contract + " failed", failure);
         }
 
         GtnhNeiExportMod.LOGGER.info(
                 "[gtnh-nei-export] AVARITIA_COSMIC_ICON_RENDER_VERIFIED item={} itemClass={} "
-                        + "renderer={} shaderProgram={} initialized={}",
-                canonicalKey, itemClassName, rendererClassName, program, initialized);
+                + "renderer={} shaderProgram={} initialized={} contract={}",
+                canonicalKey, itemClassName, rendererClassName, program, initialized, contract);
     }
 
     static int requireProgram(int program) {
+        return requireProgram(program, CONTRACT);
+    }
+
+    private static int requireProgram(int program, String contract) {
         if (program <= 0) {
             throw new IllegalStateException(
-                    CONTRACT + " could not initialize Avaritia's cosmic shader; refusing to "
+                    contract + " could not initialize its cosmic shader; refusing to "
                             + "export the unshaded mask texture");
         }
         return program;

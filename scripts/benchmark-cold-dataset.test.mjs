@@ -341,9 +341,13 @@ test('upstream forwarding allows only typed application shell assets and rejects
   assert.doesNotThrow(() =>
     assertAllowedApplicationUpstreamResponse('/.rsc', {'content-type': 'text/x-component'}),
   );
+  assert.doesNotThrow(() =>
+    assertAllowedApplicationUpstreamResponse('/local-pack-sw.js', {'content-type': 'text/javascript'}),
+  );
   for (const [path, mediaType] of [
     ['/bootstrap', 'text/plain'],
     ['/extra.json', 'application/json'],
+    ['/other-sw.js', 'text/javascript'],
     ['/publish.rsc', 'text/x-component'],
     ['/assets/bootstrap.bin', 'application/octet-stream'],
     ['/', 'text/plain'],

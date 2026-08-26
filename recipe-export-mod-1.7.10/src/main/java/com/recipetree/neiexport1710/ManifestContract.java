@@ -346,7 +346,8 @@ final class ManifestContract {
         requireInt(nei, "adaptedBuildCraftPhasedFacadeItemIcons",
                 BuildCraftPhasedFacadeIconRenderer.EXPECTED_ITEM_ICONS);
         requireInt(nei, "adaptedMobsInfoInfernalPreviewOutputIcons", 58);
-        requireInt(nei, "adaptedMobsInfoPreviewSlotIcons", 6093);
+        requireInt(nei, "adaptedMobsInfoPreviewSlotIcons",
+                MobsInfoSemanticAdapter.EXPECTED_PREVIEW_SLOT_ICONS);
         requireIntRange(nei, "adaptedDraconicMobSoulItemIcons", 1, 401);
         positive(nei, "normalizedTcnaAspectCostInputOccurrences");
         positive(nei, "normalizedTcnaAspectCostDistinctKeys");

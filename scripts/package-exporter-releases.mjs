@@ -116,9 +116,9 @@ export const EXPORTER_RELEASE_DEFINITIONS = Object.freeze([
     minecraftVersion: '1.7.10',
     recipeViewer: 'NEI 2.8.44-GTNH',
     loader: 'Forge 10.13.4.1614',
-    version: '1.0.151',
-    source: 'recipe-export-mod-1.7.10/build/libs/recipe-tree-gtnh-nei-exporter-1.0.151.jar',
-    filename: 'recipe-tree-exporter-gtnh-1.7.10-1.0.151.jar',
+    version: '1.0.154',
+    source: 'recipe-export-mod-1.7.10/build/libs/recipe-tree-gtnh-nei-exporter-1.0.154.jar',
+    filename: 'recipe-tree-exporter-gtnh-1.7.10-1.0.154.jar',
     qualityProfiles: Object.freeze(['gtnh-1.7.10']),
     artifactProvenance: Object.freeze({
       format: 'mrt-exporter-build-v1',
@@ -127,7 +127,7 @@ export const EXPORTER_RELEASE_DEFINITIONS = Object.freeze([
     }),
     acceptanceCorpora: Object.freeze({
       'gtnh-1.7.10': Object.freeze({
-        items: 143885,
+        items: 143882,
         recipes: 568820,
         categories: 287,
         mobs: 0,
