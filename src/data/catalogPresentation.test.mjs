@@ -86,11 +86,12 @@ test('excludes AE facades globally while retaining real covered cables', () => {
   );
 });
 
-test('excludes microblock cover carriers across supported generations', () => {
+test('excludes cover carriers across supported generations', () => {
   for (const [id, mod] of [
     ['ForgeMicroblock:microblock', 'ForgeMicroblock'],
     ['microblockcbe:microblock', 'microblockcbe'],
     ['cb_microblock:microblock', 'cb_microblock'],
+    ['ThermalDynamics:cover', 'ThermalDynamics'],
   ]) {
     assert.equal(
       isItemCatalogEligible(item({
@@ -106,7 +107,7 @@ test('excludes microblock cover carriers across supported generations', () => {
   for (const [id, name, mod] of [
     ['microblockcbe:saw_diamond', 'Diamond Saw', 'microblockcbe'],
     ['ForgeMicroblock:stoneRod', 'Stone Rod', 'ForgeMicroblock'],
-    ['thermaldynamics:cover', 'Stone Cover', 'thermaldynamics'],
+    ['thermaldynamics:duct_0', 'Cryo-Stabilized Fluxduct', 'thermaldynamics'],
     ['gregtech:gt.metaitem.01', 'Fluid Filter Cover', 'gregtech'],
   ]) {
     assert.equal(

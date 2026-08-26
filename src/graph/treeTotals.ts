@@ -344,6 +344,7 @@ export function calculateTreeTotals(
         sourceId: string;
         outputs: ReturnType<typeof slotSummary>;
         selectedOutput: ReturnType<typeof slotSummary>[number] | undefined;
+        selectedRequired: number | null;
         runs: number | null;
       };
   const stack: VisitFrame[] = [
@@ -362,9 +363,9 @@ export function calculateTreeTotals(
     const frame = stack.pop()!;
     if (frame.phase === 'exit') {
       for (const output of frame.outputs) {
-        if (output === frame.selectedOutput) continue;
+        const selectedSurplus = output === frame.selectedOutput;
         const stochastic = output.probability !== undefined;
-        if (stochastic) {
+        if (stochastic && !selectedSurplus) {
           const warningKey =
             `${frame.source.ref?.[0] ?? 'unknown'}:` +
             `${frame.source.ref?.[1] ?? 'unknown'}:${output.key}`;
@@ -380,10 +381,18 @@ export function calculateTreeTotals(
             );
           }
         }
+        const selectedConsumption = selectedSurplus ? frame.selectedRequired : 0;
         const amount =
-          stochastic || output.amount == null || frame.runs == null
+          stochastic ||
+          output.amount == null ||
+          frame.runs == null ||
+          selectedConsumption == null
             ? null
-            : output.amount * frame.runs;
+            : Math.max(
+                0,
+                output.amount * frame.runs - selectedConsumption,
+              );
+        if (selectedSurplus && (amount == null || amount <= 0)) continue;
         addTotal(
           byproducts,
           output.key,
@@ -502,6 +511,7 @@ export function calculateTreeTotals(
       sourceId: virtualChildren ? `${frame.nodeId}.s` : source.id,
       outputs,
       selectedOutput,
+      selectedRequired: required,
       runs,
     });
     for (let index = source.inputs.length - 1; index >= 0; index -= 1) {
