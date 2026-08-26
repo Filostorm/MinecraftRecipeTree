@@ -97,6 +97,8 @@ final class ItemCatalog {
             modId = namespace(rawResourceId == null ? "" : rawResourceId);
         }
 
+        uid = ItemNbtIdentity.refine(uid, rawResourceId, ingredient);
+
         try {
             LegacyIngredientIdentity.Identity identity = LegacyIngredientIdentity.adapt(
                     ingredient, uid, rawResourceId, name, modId, this::nestedItemIdentity);

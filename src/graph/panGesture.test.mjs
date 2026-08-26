@@ -63,15 +63,25 @@ test('interface zoom scales graph menu chrome without scaling the graph canvas',
   assert.doesNotMatch(graphCanvasMarkup, /graphMenuScaleStyle|zoom:\s*interfaceZoom/u);
 });
 
+test('collapsed graph controls put their label on the chevron button', () => {
+  assert.match(
+    graphScreenSource,
+    /!showGraphControls && \([\s\S]*?<Text style=\{\[styles\.ctrlBtnText, noSelect\]\}>\s*Graph controls\s*<\/Text>[\s\S]*?<DisclosureChevron/u,
+  );
+  assert.doesNotMatch(graphScreenSource, /controlOptionsTitle:|accessibilityRole="header"[\s\S]*?>\s*Graph controls/u);
+  assert.doesNotMatch(graphScreenSource, /controlMenuBtnText/u);
+});
+
 test('compact byproduct nodes support alternate recipe gestures', () => {
   assert.match(
     graphScreenSource,
-    /double tap or right click to change recipe/u,
+    /double tap to change recipe/u,
   );
   assert.match(
     graphScreenSource,
-    /onContextMenu:[\s\S]*?preventDefault[\s\S]*?onChangeRecipe\(\)/u,
+    /onContextMenu:[\s\S]*?preventDefault[\s\S]*?onActions\(nodeActionPointer\(event\)\)/u,
   );
+  assert.match(graphScreenSource, /long press or right click for node options/u);
   assert.match(
     graphScreenSource,
     /pendingTapRef\.current = setTimeout\([\s\S]*?onTap\(\)[\s\S]*?280/u,
@@ -79,6 +89,39 @@ test('compact byproduct nodes support alternate recipe gestures', () => {
   assert.match(
     graphScreenSource,
     /treeTotals\.byproductCoverageByNode\.has\(n\.item\.id\)[\s\S]*?openPickerWithErrorHandling/u,
+  );
+});
+
+test('node actions use an anchored state-aware menu instead of a modal', () => {
+  assert.doesNotMatch(graphScreenSource, /<Modal transparent visible/u);
+  assert.match(graphScreenSource, /accessibilityRole="menu"/u);
+  assert.match(graphScreenSource, /nodeContextMenuPlacement\(/u);
+  assert.match(graphScreenSource, /hasSelectedRecipe \? 'Change recipe' : 'Set recipe'/u);
+  assert.match(graphScreenSource, />Add used by<\/Text>/u);
+  assert.match(graphScreenSource, /<ContextAmountStepper amount=\{amount\}/u);
+  assert.match(graphScreenSource, /hasSelectedRecipe && \(/u);
+});
+
+test('compact nodes do not reveal hidden quantities on hover', () => {
+  assert.doesNotMatch(graphScreenSource, /onHoverIn=.*Quantity|quantityTooltipVisible/u);
+  assert.match(
+    graphScreenSource,
+    /countBadgeText === '✓' \|\| \(showAmounts && quantityPlacement === 'badge'\)/u,
+  );
+});
+
+test('node alternative previews stay aligned to the item icon pixel grid', () => {
+  assert.match(
+    graphScreenSource,
+    /const alternatives = Array\.from\([\s\S]*?item\.id[\s\S]*?item\.n[\s\S]*?\.values\(\)/u,
+  );
+  assert.match(
+    graphScreenSource,
+    /<ItemIcon itemKey=\{itemKey\} size=\{32\} \/>/u,
+  );
+  assert.doesNotMatch(
+    graphScreenSource,
+    /<ItemIcon itemKey=\{itemKey\} size=\{28\} \/>/u,
   );
 });
 

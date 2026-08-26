@@ -56,6 +56,36 @@ test('excludes Ender IO JEI energy while retaining other energy resources', () =
   );
 });
 
+test('excludes AE facades globally while retaining real covered cables', () => {
+  assert.equal(
+    isItemCatalogEligible(item({
+      k: 'item|appliedenergistics2:facade:{item:"minecraft:stone",damage:0}',
+      id: 'appliedenergistics2:facade',
+      n: 'Cable Facade - Stone',
+      m: 'appliedenergistics2',
+    })),
+    false,
+  );
+  assert.equal(
+    isItemCatalogEligible(item({
+      k: 'item|ae2:facade',
+      id: 'ae2:facade',
+      n: 'Cable Facade',
+      m: 'ae2',
+    })),
+    false,
+  );
+  assert.equal(
+    isItemCatalogEligible(item({
+      k: 'item|appliedenergistics2:part:20',
+      id: 'appliedenergistics2:part',
+      n: 'ME Covered Cable - White',
+      m: 'appliedenergistics2',
+    })),
+    true,
+  );
+});
+
 test('uses concise labels for Multiblock Madness custom ingredient types', () => {
   assert.deepEqual(
     catalogTypePresentation('custom_thaumcraft.api.aspects.aspectlist_0409b2e6'),

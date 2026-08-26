@@ -64,6 +64,8 @@ export interface ItemTreeNode {
   variantCount?: number;
   /** Resolved members of a logical ingredient tag. */
   alternatives?: string[];
+  /** Stable first member of the parent slot used to persist an alternative selection. */
+  selectionKey?: string;
   /** Canonical tag id reconstructed from an unambiguous variant family. */
   tag?: string;
   /** Required by the parent source but retained after the recipe runs. */

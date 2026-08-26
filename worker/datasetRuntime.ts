@@ -47,6 +47,11 @@ export interface DatasetRuntime {
   PREVIEW_ASSETS?: DatasetR2Bucket;
   /** Beta-only read origin for the public, immutable production dataset corpus. */
   BETA_DATA_ORIGIN?: string;
+  /** Optional beta-only immutable candidate substituted into one catalog descriptor. */
+  BETA_CANDIDATE_DATASET_SLUG?: string;
+  BETA_CANDIDATE_PUBLICATION_ID?: string;
+  BETA_CANDIDATE_PREVIEW_ASSET_SET_ID?: string;
+  BETA_CANDIDATE_PACK_VERSION?: string;
   DATASET_ADMIN_ENABLED?: string;
   CORE_DATASET_UPLOAD_TOKEN?: string;
   PREVIEW_UPLOAD_ASSET_SET_ID?: string;

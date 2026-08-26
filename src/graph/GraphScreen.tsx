@@ -10,6 +10,7 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  type GestureResponderEvent,
 } from 'react-native';
 import {formatDropStat} from '../components/DropList';
 import {DisclosureChevron} from '../components/DisclosureChevron';
@@ -65,9 +66,9 @@ import {
   type ByproductSupplyEdge,
   attachedRootVisualX,
   byproductSupplyEdges,
+  compactQuantityPlacement,
   layoutTree,
   recipeImageDisplay,
-  shouldShowCompactQuantity,
 } from './layout';
 import {
   RADIAL_ITEM_SIZE,
@@ -152,6 +153,16 @@ import type {
   TreeTotals,
 } from './treeTotals';
 import {visibleGraphElements} from './viewportCulling';
+import {indexedRecipeRefs} from './indexedRecipeRefs';
+import {
+  shouldShowNodeAmounts,
+  shouldUseLowDetailGraph,
+} from './renderDetail';
+import {
+  nodeContextMenuPlacement,
+  type NodeContextAnchor,
+  type NodeContextMenuPlacement,
+} from './nodeContextMenu';
 import {
   findTreeTotalTarget,
   type TreeTotalTargetKind,
@@ -197,6 +208,36 @@ interface PickerState {
   rememberSource: boolean;
   productionPlan?: ProductionPlan;
   collapsedGroupKeys: Set<string>;
+}
+
+interface NodeMenuState {
+  node: ItemTreeNode;
+  anchor: NodeContextAnchor;
+}
+
+interface NodeActionPointer {
+  clientX?: number;
+  clientY?: number;
+  pageX?: number;
+  pageY?: number;
+}
+
+type NodeActionEvent = GestureResponderEvent | (NodeActionPointer & {
+  nativeEvent?: NodeActionPointer;
+  preventDefault?: () => void;
+  stopPropagation?: () => void;
+});
+
+function nodeActionPointer(event?: NodeActionEvent): NodeActionPointer | undefined {
+  if (!event) return undefined;
+  const native = 'nativeEvent' in event ? event.nativeEvent : undefined;
+  const source = (native ?? event) as NodeActionPointer;
+  return {
+    clientX: source.clientX,
+    clientY: source.clientY,
+    pageX: source.pageX,
+    pageY: source.pageY,
+  };
 }
 
 function visiblePickerEntries(
@@ -300,6 +341,22 @@ function releaseByproductFulfillments(
       removedProducerCount: removedSourceIds.size,
     });
   }
+}
+
+function parentRecipeSource(
+  root: ItemTreeNode | null,
+  target: ItemTreeNode,
+): SourceTreeNode | null {
+  if (!root || root === target) return null;
+  const stack = [root];
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    const source = current.source;
+    if (!source) continue;
+    if (source.inputs.includes(target)) return source;
+    stack.push(...source.inputs);
+  }
+  return null;
 }
 
 /** Dragging the canvas must never start a text selection (web). */
@@ -481,6 +538,7 @@ export function GraphScreen({
   pickerRef.current = picker;
   const [showRootActions, setShowRootActions] = useState(false);
   const [showTreeShare, setShowTreeShare] = useState(false);
+  const [nodeMenu, setNodeMenu] = useState<NodeMenuState | null>(null);
   useEffect(() => setShowRootActions(false), [graphRequestId]);
   useEffect(() => {
     if (tab !== 'graph') setShowRootActions(false);
@@ -490,6 +548,8 @@ export function GraphScreen({
       ? 'graph/source-picker'
       : tab === 'graph' && pickerLookup
         ? 'graph/source-lookup'
+        : tab === 'graph' && nodeMenu
+          ? 'graph/node-options'
         : tab,
     tab === 'graph' && (picker || pickerLookup) ? 'modal' : 'screen',
   );
@@ -538,8 +598,8 @@ export function GraphScreen({
   const anchorRef = useRef<View>(null);
 
   const recipesFor = useCallback(
-    (key: string): RecipeRef[] => {
-      const all = (data.index[key]?.p ?? []).filter(
+    (key: string, equivalentKeys?: readonly string[]): RecipeRef[] => {
+      const all = indexedRecipeRefs(data.index, key, equivalentKeys, 'p').filter(
         r =>
           !data.metaCategories.has(r[0]) &&
           !isDefaultDisabledRecipeCategory(data.categories[r[0]]),
@@ -560,8 +620,8 @@ export function GraphScreen({
   );
 
   const usagesFor = useCallback(
-    (key: string): RecipeRef[] => {
-      const all = (data.index[key]?.u ?? []).filter(
+    (key: string, equivalentKeys?: readonly string[]): RecipeRef[] => {
+      const all = indexedRecipeRefs(data.index, key, equivalentKeys, 'u').filter(
         ref =>
           !data.metaCategories.has(ref[0]) &&
           !isDefaultDisabledRecipeCategory(data.categories[ref[0]]),
@@ -581,24 +641,37 @@ export function GraphScreen({
   );
 
   const recipeRefsFor = useCallback(
-    (key: string, direction: GraphDirection = graphDirection): RecipeRef[] =>
-      direction === 'outputs' ? usagesFor(key) : recipesFor(key),
+    (
+      key: string,
+      direction: GraphDirection = graphDirection,
+      equivalentKeys?: readonly string[],
+    ): RecipeRef[] =>
+      direction === 'outputs'
+        ? usagesFor(key, equivalentKeys)
+        : recipesFor(key, equivalentKeys),
     [graphDirection, recipesFor, usagesFor],
   );
 
   /** Direction-appropriate recipe choices, plus physical sources for ingredient trees. */
   const choicesFor = useCallback(
-    (key: string, direction: GraphDirection = graphDirection): SourceChoice[] => {
-      const recipes = recipeRefsFor(key, direction).map(
+    (
+      key: string,
+      direction: GraphDirection = graphDirection,
+      equivalentKeys?: readonly string[],
+    ): SourceChoice[] => {
+      const lookupKeys = [...new Set([key, ...(equivalentKeys ?? [])])];
+      const recipes = recipeRefsFor(key, direction, equivalentKeys).map(
         ref => ({t: 'recipe', ref}) as SourceChoice,
       );
       if (direction === 'outputs') return recipes;
+      const blockChoices = lookupKeys.flatMap(lookupKey => data.minedFrom.get(lookupKey) ?? []);
+      const mobChoices = lookupKeys.flatMap(lookupKey => data.droppedByMobs.get(lookupKey) ?? []);
       return [
         ...recipes,
-        ...(data.minedFrom.get(key) ?? []).map(
+        ...blockChoices.map(
           ({blockKey, stat}) => ({t: 'block', blockKey, stat}) as SourceChoice,
         ),
-        ...(data.droppedByMobs.get(key) ?? []).map(
+        ...mobChoices.map(
           ({mob, stat}) => ({t: 'mob', mob, stat}) as SourceChoice,
         ),
       ];
@@ -607,12 +680,12 @@ export function GraphScreen({
   );
 
   const preferredSourceFor = useCallback(
-    (key: string): SourceChoice | null => {
+    (key: string, equivalentKeys?: readonly string[]): SourceChoice | null => {
       if (graphDirection === 'outputs') return null;
       const preferred = preferredSourcesRef.current[key];
       if (!preferred) return null;
       if (preferred.t === 'recipe') {
-        const exists = (data.index[key]?.p ?? []).some(
+        const exists = indexedRecipeRefs(data.index, key, equivalentKeys, 'p').some(
           ref =>
             !data.metaCategories.has(ref[0]) &&
             !isDefaultDisabledRecipeCategory(data.categories[ref[0]]) &&
@@ -630,7 +703,9 @@ export function GraphScreen({
             }
           : null;
       }
-      return choicesFor(key).find(choice => choiceMatchesPreference(choice, preferred)) ?? null;
+      return choicesFor(key, graphDirection, equivalentKeys).find(choice =>
+        choiceMatchesPreference(choice, preferred),
+      ) ?? null;
     },
     [graphDirection, choicesFor, data.index, data.categories, data.metaCategories],
   );
@@ -736,6 +811,11 @@ export function GraphScreen({
             amount: spec.amount,
             variantCount: spec.variants,
             alternatives: spec.alternatives,
+            selectionKey:
+              Object.entries(ingredientSelections ?? {}).find(
+                ([selectionKey, selectedKey]) =>
+                  selectedKey === spec.key && spec.alternatives.includes(selectionKey),
+              )?.[0] ?? spec.key,
             tag: spec.tag,
             nonConsumed: spec.nonConsumed,
             consumptionProbability:
@@ -778,7 +858,9 @@ export function GraphScreen({
           for (const child of children) {
             if (child.cyclic) continue;
             const preferred =
-              graphDirection === 'inputs' ? preferredSourceFor(child.key) : null;
+              graphDirection === 'inputs'
+                ? preferredSourceFor(child.key, child.alternatives)
+                : null;
             if (preferred) applyChoiceRef.current?.(child, preferred);
           }
         }
@@ -1095,7 +1177,7 @@ export function GraphScreen({
       try {
       const currentPreferred =
         direction === 'inputs' ? preferredSourcesRef.current[target.key] : undefined;
-      const allChoices = choicesFor(target.key, direction);
+      const allChoices = choicesFor(target.key, direction, target.alternatives);
       const physicalChoices = allChoices.filter(choice => choice.t !== 'recipe');
       const recipeChoices = allChoices.filter(
         (choice): choice is RecipeSourceChoice => choice.t === 'recipe',
@@ -1574,9 +1656,9 @@ export function GraphScreen({
         bump();
         return;
       }
-      const choices = choicesFor(node.key);
+      const choices = choicesFor(node.key, graphDirection, node.alternatives);
       if (choices.length === 0) return;
-      const preferred = preferredSourceFor(node.key);
+      const preferred = preferredSourceFor(node.key, node.alternatives);
       if (preferred) {
         applyChoice(node, preferred);
       } else if (choices.length === 1) {
@@ -1597,6 +1679,68 @@ export function GraphScreen({
       graphDirection,
     ],
   );
+
+  const collapseNodeRecipe = useCallback(
+    (node: ItemTreeNode) => {
+      if (node.source) {
+        onItemTap(node);
+      } else if (node.deferredRecipeExpansion) {
+        node.deferredRecipeExpansion = undefined;
+        bump();
+      }
+      setNodeMenu(null);
+    },
+    [bump, onItemTap],
+  );
+
+  const unsetNodeRecipe = useCallback(
+    (node: ItemTreeNode) => {
+      const next = {...preferredSourcesRef.current};
+      for (const key of new Set([node.key, ...(node.alternatives ?? [])])) delete next[key];
+      preferredSourcesRef.current = next;
+      persistPreferredSources(next);
+      setPreferredSources(next);
+      if (node.source) releaseByproductFulfillmentsFromSubtree(node);
+      node.source = undefined;
+      node.deferredRecipeExpansion = undefined;
+      bump();
+      setNodeMenu(null);
+    },
+    [bump, releaseByproductFulfillmentsFromSubtree],
+  );
+
+  const selectNodeAlternative = useCallback(
+    (node: ItemTreeNode, selectedKey: string) => {
+      if (!node.alternatives?.includes(selectedKey)) {
+        console.error('A graph ingredient alternative was not present in its logical slot.', {
+          nodeId: node.id,
+          selectedKey,
+          alternatives: node.alternatives,
+        });
+        return;
+      }
+      if (node.source) releaseByproductFulfillmentsFromSubtree(node);
+      node.source = undefined;
+      node.deferredRecipeExpansion = undefined;
+      const parent = parentRecipeSource(rootRef.current, node);
+      const selectionKey = node.selectionKey ?? node.alternatives[0];
+      if (parent?.kind === 'recipe' && parent.direction !== 'outputs' && parent.recipe) {
+        const selections = {
+          ...parent.ingredientSelections,
+          [selectionKey]: selectedKey,
+        };
+        parent.ingredientSelections = selections;
+        parent.recipe = applyIngredientSelections(parent.recipe, selections);
+      }
+      node.key = selectedKey;
+      node.cyclic = node.ancestors.includes(selectedKey);
+      bump();
+      setNodeMenu(null);
+    },
+    [bump, releaseByproductFulfillmentsFromSubtree],
+  );
+
+  useEffect(() => setNodeMenu(null), [graphRequestId, tab]);
 
   useEffect(() => {
     if (graphSessionRestoreAttemptedRef.current) return;
@@ -1740,6 +1884,38 @@ export function GraphScreen({
   const graph = graphLayout.graph;
   const graphRef = useRef(graph);
   graphRef.current = graph;
+  const openNodeMenu = useCallback(
+    (node: ItemTreeNode, pointer?: NodeActionPointer) => {
+      const laidNode = graphRef.current?.nodes.find(candidate => candidate.item.id === node.id);
+      const currentTransform = transformRef.current;
+      let anchor: NodeContextAnchor = laidNode
+        ? {
+            x: currentTransform.x + (laidNode.x + laidNode.w / 2) * currentTransform.scale,
+            y: currentTransform.y + (laidNode.y + laidNode.h / 2) * currentTransform.scale,
+          }
+        : {
+            x: viewportRef.current.w / 2,
+            y: viewportRef.current.h / 2,
+          };
+
+      if (Platform.OS === 'web' && pointer) {
+        const element = wrapRef.current as unknown as HTMLElement | null;
+        const rect = element?.getBoundingClientRect?.();
+        const clientX = pointer.clientX ?? pointer.pageX;
+        const clientY = pointer.clientY ?? pointer.pageY;
+        if (rect && Number.isFinite(clientX) && Number.isFinite(clientY)) {
+          anchor = {
+            x: (clientX as number) - rect.left,
+            y: (clientY as number) - rect.top,
+          };
+        }
+      }
+
+      setShowRootActions(false);
+      setNodeMenu({node, anchor});
+    },
+    [],
+  );
   const treeTotals = useMemo(() => {
     if (!root || graphDirection === 'outputs') {
       return {
@@ -1799,6 +1975,9 @@ export function GraphScreen({
     ).edges as ByproductSupplyEdge[];
     return {...visible, supplyEdges: visibleSupplyEdges};
   }, [exportingTree, graph, supplyEdges, transform, viewportSize]);
+  const lowDetailGraph =
+    !exportingTree && shouldUseLowDetailGraph(transform.scale, graph?.nodes.length ?? 0);
+  const showNodeAmounts = shouldShowNodeAmounts(transform.scale, exportingTree);
   const displayedAmountFor = useCallback(
     (node: ItemTreeNode) =>
       graphDirection === 'outputs'
@@ -2381,6 +2560,25 @@ export function GraphScreen({
     Platform.OS === 'web'
       ? ({zoom: interfaceZoom} as unknown as object)
       : null;
+  const nodeMenuDirection: GraphDirection =
+    nodeMenu?.node.id === 'root' ? 'inputs' : graphDirection;
+  const nodeMenuChoiceCount = nodeMenu
+    ? choicesFor(
+        nodeMenu.node.key,
+        nodeMenuDirection,
+        nodeMenu.node.alternatives,
+      ).length
+    : 0;
+  const nodeMenuHasRememberedSource = nodeMenu
+    ? !!preferredSourceFor(nodeMenu.node.key, nodeMenu.node.alternatives)
+    : false;
+  const nodeMenuPlacement = nodeMenu
+    ? nodeContextMenuPlacement(
+        nodeMenu.anchor,
+        {width: viewportSize.w, height: viewportSize.h},
+        interfaceZoom,
+      )
+    : null;
 
   return (
     <View style={styles.root}>
@@ -2436,7 +2634,7 @@ export function GraphScreen({
                 ? ({zoom: displayTransform.scale} as unknown as object)
                 : null,
             ]}>
-          {renderedGraph?.edges.map((e, i) => (
+          {!lowDetailGraph && renderedGraph?.edges.map((e, i) => (
             <View
               key={`e${i}`}
               style={[
@@ -2454,7 +2652,7 @@ export function GraphScreen({
               ]}
             />
           ))}
-          {renderedGraph?.supplyEdges.map(edge => (
+          {!lowDetailGraph && renderedGraph?.supplyEdges.map(edge => (
             <View
               key={`byproduct:${edge.targetNodeId}:${edge.producerSourceId}`}
               pointerEvents="none"
@@ -2471,7 +2669,23 @@ export function GraphScreen({
             />
           ))}
           {renderedGraph?.nodes.map(n =>
-            compactMode || n.radial ? (
+            lowDetailGraph ? (
+              <LowDetailNodeView
+                key={n.id}
+                x={n.x}
+                y={n.y}
+                w={n.w}
+                h={n.h}
+                node={n.item}
+                expanded={n.kind === 'source'}
+                onActions={pointer => openNodeMenu(n.item, pointer)}
+                onTap={() =>
+                  n.item.id === 'root'
+                    ? setShowRootActions(value => !value)
+                    : onItemTap(n.item)
+                }
+              />
+            ) : compactMode || n.radial ? (
               <CompactItemNodeView
                 key={n.id}
                 x={
@@ -2494,12 +2708,20 @@ export function GraphScreen({
                   (!isRecursiveItemNode(n.item) &&
                     (!!n.item.deferredRecipeExpansion ||
                       treeTotals.byproductCoverageByNode.has(n.item.id) ||
-                      choicesFor(n.item.key).length > 0))
+                      choicesFor(
+                        n.item.key,
+                        graphDirection,
+                        n.item.alternatives,
+                      ).length > 0))
                 }
                 terminal={
                   isRecursiveItemNode(n.item) ||
                   (!n.item.deferredRecipeExpansion &&
-                    choicesFor(n.item.key).length === 0)
+                    choicesFor(
+                      n.item.key,
+                      graphDirection,
+                      n.item.alternatives,
+                    ).length === 0)
                 }
                 terminalLabel={
                   isRecursiveItemNode(n.item)
@@ -2512,12 +2734,17 @@ export function GraphScreen({
                 radialRoot={radialLayout && n.item.id === 'root'}
                 branchLabel={n.compactBranch === true}
                 showLabel
+                showAmounts={showNodeAmounts}
                 deferredDuplicate={!!n.item.deferredRecipeExpansion}
                 rootActions={n.item.id === 'root' ? rootNodeActions : undefined}
                 onChangeRecipe={
                   n.item.id !== 'root' &&
                   treeTotals.byproductCoverageByNode.has(n.item.id) &&
-                  choicesFor(n.item.key).length > 0
+                  choicesFor(
+                    n.item.key,
+                    graphDirection,
+                    n.item.alternatives,
+                  ).length > 0
                     ? () =>
                         openPickerWithErrorHandling(
                           n.item,
@@ -2534,6 +2761,7 @@ export function GraphScreen({
                           : openPickerWithErrorHandling(n.item),
                       )
                 }
+                onActions={pointer => openNodeMenu(n.item, pointer)}
               />
             ) : n.kind === 'item' ? (
               <ItemNodeView
@@ -2547,7 +2775,11 @@ export function GraphScreen({
                 expandable={
                   !isRecursiveItemNode(n.item) &&
                   (!!n.item.deferredRecipeExpansion ||
-                    choicesFor(n.item.key).length > 0)
+                    choicesFor(
+                      n.item.key,
+                      graphDirection,
+                      n.item.alternatives,
+                    ).length > 0)
                 }
                 deferredDuplicate={!!n.item.deferredRecipeExpansion}
                 terminalLabel={
@@ -2557,6 +2789,7 @@ export function GraphScreen({
                       ? 'no outputs'
                       : 'no inputs'
                 }
+                showAmounts={showNodeAmounts}
                 rootActions={n.item.id === 'root' ? rootNodeActions : undefined}
                 onTap={() =>
                   n.item.id === 'root'
@@ -2564,6 +2797,7 @@ export function GraphScreen({
                     : handleCollapsedIngredientTap(n.item, () => onItemTap(n.item))
                 }
                 onInfo={() => openItem(n.item.key)}
+                onActions={pointer => openNodeMenu(n.item, pointer)}
               />
             ) : (
               <SourceNodeView
@@ -2580,11 +2814,16 @@ export function GraphScreen({
                 radialRoot={radialLayout && n.item.id === 'root'}
                 focused={n.source?.id === focusedSourceId}
                 animateMobs={animateMobs}
+                showAmounts={showNodeAmounts}
                 rootActions={n.item.id === 'root' ? rootNodeActions : undefined}
                 canSwap={
                   n.item.id !== 'root' &&
                   !isRecursiveItemNode(n.item) &&
-                  choicesFor(n.item.key).length > 1
+                  choicesFor(
+                    n.item.key,
+                    graphDirection,
+                    n.item.alternatives,
+                  ).length > 1
                 }
                 onCollapse={() =>
                   n.item.id === 'root'
@@ -2593,6 +2832,7 @@ export function GraphScreen({
                 }
                 onSwap={() => openPickerWithErrorHandling(n.item)}
                 onInfo={() => openItem(n.item.key)}
+                onActions={pointer => openNodeMenu(n.item, pointer)}
               />
             ),
           )}
@@ -2653,8 +2893,18 @@ export function GraphScreen({
             accessibilityRole="button"
             accessibilityLabel={showGraphControls ? 'Collapse graph controls' : 'Expand graph controls'}
             accessibilityState={{expanded: showGraphControls}}
-            style={[styles.ctrlBtn, styles.controlMenuBtn, showGraphControls && styles.ctrlBtnActive]}
+            style={[
+              styles.ctrlBtn,
+              styles.controlMenuBtn,
+              !showGraphControls && styles.controlMenuBtnCollapsed,
+              showGraphControls && styles.ctrlBtnActive,
+            ]}
             onPress={onToggleGraphControls}>
+            {!showGraphControls && (
+              <Text style={[styles.ctrlBtnText, noSelect]}>
+                Graph controls
+              </Text>
+            )}
             <DisclosureChevron
               expanded={showGraphControls}
               color={showGraphControls ? theme.accent : theme.text}
@@ -2921,6 +3171,47 @@ export function GraphScreen({
             }
             applyChoice(p.target, choice);
           }}
+        />
+      )}
+      {nodeMenu && nodeMenuPlacement && (
+        <NodeActionMenu
+          node={nodeMenu.node}
+          interfaceZoom={interfaceZoom}
+          placement={nodeMenuPlacement}
+          canSetRecipe={nodeMenuChoiceCount > 0}
+          hasRememberedSource={nodeMenuHasRememberedSource}
+          amount={
+            nodeMenu.node.id === 'root'
+              ? root.productionPlan?.amount ?? root.amount ?? 1
+              : undefined
+          }
+          onClose={() => setNodeMenu(null)}
+          onSelectAlternative={selectedKey =>
+            selectNodeAlternative(nodeMenu.node, selectedKey)
+          }
+          onSetOrChangeRecipe={() => {
+            const target = nodeMenu.node;
+            const coverage = treeTotals.byproductCoverageByNode.get(target.id);
+            setNodeMenu(null);
+            if (target.id === 'root') {
+              openRootPicker('inputs');
+            } else {
+              openPickerWithErrorHandling(target, coverage, nodeMenuDirection);
+            }
+          }}
+          onAddUsedBy={
+            nodeMenu.node.id === 'root'
+              ? () => {
+                  setNodeMenu(null);
+                  openRootPicker('outputs');
+                }
+              : undefined
+          }
+          onAmountChange={
+            nodeMenu.node.id === 'root' ? updateRootRequestedAmount : undefined
+          }
+          onUnsetRecipe={() => unsetNodeRecipe(nodeMenu.node)}
+          onCollapseRecipe={() => collapseNodeRecipe(nodeMenu.node)}
         />
       )}
       <TreeShareModal
@@ -3193,6 +3484,298 @@ function TreeTotalsSection({
   );
 }
 
+function useNodeActionHandlers(
+  onPress: () => void,
+  onActions: (pointer?: NodeActionPointer) => void,
+) {
+  const longPressedRef = useRef(false);
+  const press = () => {
+    if (longPressedRef.current) {
+      longPressedRef.current = false;
+      return;
+    }
+    onPress();
+  };
+  const longPress = (event: GestureResponderEvent) => {
+    longPressedRef.current = true;
+    onActions(nodeActionPointer(event));
+  };
+  const contextMenuProps =
+    Platform.OS === 'web'
+      ? ({
+          onContextMenu: (event: NodeActionEvent) => {
+            event.preventDefault?.();
+            event.stopPropagation?.();
+            onActions(nodeActionPointer(event));
+          },
+        } as object)
+      : {};
+  return {press, longPress, contextMenuProps};
+}
+
+function LowDetailNodeView({
+  x,
+  y,
+  w,
+  h,
+  node,
+  expanded,
+  onTap,
+  onActions,
+}: {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  node: ItemTreeNode;
+  expanded: boolean;
+  onTap: () => void;
+  onActions: (pointer?: NodeActionPointer) => void;
+}) {
+  const handlers = useNodeActionHandlers(onTap, onActions);
+  return (
+    <Pressable
+      {...handlers.contextMenuProps}
+      accessibilityRole="button"
+      accessibilityLabel="Recipe graph node; zoom in for details"
+      onPress={handlers.press}
+      onLongPress={handlers.longPress}
+      delayLongPress={450}
+      style={[
+        styles.lowDetailNode,
+        expanded && styles.lowDetailSourceNode,
+        node.id === 'root' && styles.lowDetailRootNode,
+        {left: x, top: y, width: Math.max(16, w), height: Math.max(16, h)},
+      ]}
+    />
+  );
+}
+
+function ContextAmountStepper({
+  amount,
+  onAmountChange,
+}: {
+  amount: number;
+  onAmountChange: (amount: number) => void;
+}) {
+  const [amountText, setAmountText] = useState(String(amount));
+  useEffect(() => setAmountText(String(amount)), [amount]);
+  const updateAmountText = (value: string) => {
+    setAmountText(value);
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed >= 1) onAmountChange(parsed);
+  };
+  return (
+    <View style={styles.nodeActionAmountSection}>
+      <Text style={styles.nodeActionSectionLabel}>Requested amount</Text>
+      <View style={styles.nodeActionAmountStepper}>
+        <TouchableOpacity
+          {...signalTarget('graph.node-menu.amount.decrease')}
+          accessibilityRole="button"
+          accessibilityLabel="Decrease requested amount"
+          style={styles.nodeActionAmountButton}
+          onPress={() => onAmountChange(amount - 1)}>
+          <Text style={styles.nodeActionAmountButtonText}>−</Text>
+        </TouchableOpacity>
+        <TextInput
+          accessibilityLabel="Amount requested"
+          style={styles.nodeActionAmountInput}
+          value={amountText}
+          onChangeText={updateAmountText}
+          onBlur={() => setAmountText(String(amount))}
+          keyboardType="number-pad"
+          inputMode="numeric"
+          selectTextOnFocus
+        />
+        <TouchableOpacity
+          {...signalTarget('graph.node-menu.amount.increase')}
+          accessibilityRole="button"
+          accessibilityLabel="Increase requested amount"
+          style={[styles.nodeActionAmountButton, styles.nodeActionAmountButtonPrimary]}
+          onPress={() => onAmountChange(amount + 1)}>
+          <Text
+            style={[
+              styles.nodeActionAmountButtonText,
+              styles.nodeActionAmountButtonPrimaryText,
+            ]}>
+            +
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+function NodeActionMenu({
+  node,
+  interfaceZoom,
+  placement,
+  canSetRecipe,
+  hasRememberedSource,
+  amount,
+  onClose,
+  onSelectAlternative,
+  onSetOrChangeRecipe,
+  onAddUsedBy,
+  onAmountChange,
+  onUnsetRecipe,
+  onCollapseRecipe,
+}: {
+  node: ItemTreeNode;
+  interfaceZoom: number;
+  placement: NodeContextMenuPlacement;
+  canSetRecipe: boolean;
+  hasRememberedSource: boolean;
+  amount?: number;
+  onClose: () => void;
+  onSelectAlternative: (selectedKey: string) => void;
+  onSetOrChangeRecipe: () => void;
+  onAddUsedBy?: () => void;
+  onAmountChange?: (amount: number) => void;
+  onUnsetRecipe: () => void;
+  onCollapseRecipe: () => void;
+}) {
+  const data = useData();
+  const alternatives = Array.from(
+    new Map(
+      (node.alternatives ?? []).map(itemKey => {
+        const item = data.itemsByKey.get(itemKey);
+        const identity = item
+          ? `${item.t ?? 'item'}\u0000${item.id}\u0000${item.n}`
+          : itemKey;
+        return [identity, itemKey] as const;
+      }),
+    ).values(),
+  );
+  const hasSelectedRecipe = !!node.source || !!node.deferredRecipeExpansion;
+  const isRoot = node.id === 'root';
+  const stateLabel = node.deferredRecipeExpansion
+    ? 'Recipe expanded elsewhere'
+    : node.source
+      ? 'Recipe expanded'
+      : canSetRecipe
+        ? 'No recipe selected'
+        : 'No recipe available';
+  const menuScaleStyle =
+    Platform.OS === 'web' ? ({zoom: interfaceZoom} as unknown as object) : null;
+  return (
+    <View style={styles.nodeActionLayer} pointerEvents="box-none">
+      <Pressable
+        style={styles.nodeActionDismiss}
+        accessibilityLabel="Close node menu"
+        onPress={onClose}
+      />
+      <View
+        pointerEvents="box-none"
+        style={[
+          styles.nodeActionAnchor,
+          {left: placement.left, top: placement.top},
+        ]}>
+        <Pressable
+          accessibilityRole="menu"
+          accessibilityLabel={`${data.itemsByKey.get(node.key)?.n ?? node.key} node menu`}
+          style={[
+            styles.nodeActionCard,
+            {width: placement.width, maxHeight: placement.maxHeight},
+            menuScaleStyle,
+          ]}
+          onPointerDown={event => event.stopPropagation()}
+          onTouchStart={event => event.stopPropagation()}
+          onPress={event => event.stopPropagation()}>
+          <View style={styles.nodeActionHeader}>
+            <ItemIcon itemKey={node.key} size={32} />
+            <View style={styles.nodeActionHeaderCopy}>
+              <Text style={styles.nodeActionTitle} numberOfLines={1}>
+                {data.itemsByKey.get(node.key)?.n ?? node.key}
+              </Text>
+              <Text style={styles.nodeActionHint}>
+                {isRoot ? `Starting node · ${stateLabel}` : stateLabel}
+              </Text>
+            </View>
+          </View>
+          {amount !== undefined && onAmountChange && (
+            <ContextAmountStepper amount={amount} onAmountChange={onAmountChange} />
+          )}
+          {alternatives.length > 1 && (
+            <View style={styles.nodeAlternativeSection}>
+              <Text style={styles.nodeActionSectionLabel}>
+                {node.tag ? `#${node.tag}` : 'Ingredient alternatives'}
+              </Text>
+              <ScrollView style={styles.nodeAlternativeScroll}>
+                {alternatives.map(itemKey => (
+                  <TouchableOpacity
+                    key={itemKey}
+                    accessibilityRole="button"
+                    accessibilityState={{selected: itemKey === node.key}}
+                    style={[
+                      styles.nodeAlternativeRow,
+                      itemKey === node.key && styles.nodeAlternativeRowSelected,
+                    ]}
+                    onPress={() => onSelectAlternative(itemKey)}>
+                    <ItemIcon itemKey={itemKey} size={32} />
+                    <Text style={styles.nodeAlternativeName} numberOfLines={2}>
+                      {data.itemsByKey.get(itemKey)?.n ?? itemKey}
+                    </Text>
+                    {itemKey === node.key && (
+                      <Text style={styles.nodeAlternativeSelected}>✓</Text>
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          )}
+          <View style={styles.nodeActionButtons}>
+            {canSetRecipe && (
+              <TouchableOpacity
+                {...signalTarget('graph.node-menu.set-recipe')}
+                accessibilityRole="button"
+                style={[styles.nodeActionButton, styles.nodeActionButtonPrimary]}
+                onPress={onSetOrChangeRecipe}>
+                <Text style={styles.nodeActionButtonPrimaryText}>
+                  {hasSelectedRecipe ? 'Change recipe' : 'Set recipe'}
+                </Text>
+                <Text style={styles.nodeActionButtonPrimaryHint}>
+                  {hasSelectedRecipe ? 'Choose a different source' : 'Choose how to make this item'}
+                </Text>
+              </TouchableOpacity>
+            )}
+            {onAddUsedBy && (
+              <TouchableOpacity
+                {...signalTarget('graph.node-menu.add-used-by')}
+                accessibilityRole="button"
+                style={styles.nodeActionButton}
+                onPress={onAddUsedBy}>
+                <Text style={styles.nodeActionButtonText}>Add used by</Text>
+                <Text style={styles.nodeActionButtonHint}>Add a recipe that consumes the starting item</Text>
+              </TouchableOpacity>
+            )}
+            {hasSelectedRecipe && (
+              <TouchableOpacity
+                {...signalTarget('graph.node-menu.collapse-recipe')}
+                accessibilityRole="button"
+                style={styles.nodeActionButton}
+                onPress={onCollapseRecipe}>
+                <Text style={styles.nodeActionButtonText}>Collapse recipe</Text>
+                <Text style={styles.nodeActionButtonHint}>Keep the remembered source</Text>
+              </TouchableOpacity>
+            )}
+            {(hasSelectedRecipe || hasRememberedSource) && (
+              <TouchableOpacity
+                {...signalTarget('graph.node-menu.unset-recipe')}
+                accessibilityRole="button"
+                style={[styles.nodeActionButton, styles.nodeActionButtonDanger]}
+                onPress={onUnsetRecipe}>
+                <Text style={styles.nodeActionButtonDangerText}>Unset recipe</Text>
+                <Text style={styles.nodeActionButtonHint}>Clear this node and its remembered source</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
 function CompactItemNodeView({
   x,
   y,
@@ -3207,10 +3790,12 @@ function CompactItemNodeView({
   radialRoot = false,
   branchLabel = false,
   showLabel,
+  showAmounts,
   deferredDuplicate,
   rootActions,
   onChangeRecipe,
   onTap,
+  onActions,
 }: {
   x: number;
   y: number;
@@ -3225,10 +3810,12 @@ function CompactItemNodeView({
   radialRoot?: boolean;
   branchLabel?: boolean;
   showLabel: boolean;
+  showAmounts: boolean;
   deferredDuplicate: boolean;
   rootActions?: RootNodeActionProps;
   onChangeRecipe?: () => void;
   onTap: () => void;
+  onActions: (pointer?: NodeActionPointer) => void;
 }) {
   const data = useData();
   const item = data.itemsByKey.get(node.key);
@@ -3242,12 +3829,15 @@ function CompactItemNodeView({
     byproductCoverage?.remainingAmount ?? requiredAmount,
   );
   const countBadgeText = byproductCoverage?.remainingAmount === 0 ? '✓' : amount;
+  const quantityPlacement =
+    countBadgeText === '✓'
+      ? 'badge'
+      : compactQuantityPlacement(
+          countBadgeText,
+          radialRoot ? RADIAL_ROOT_ITEM_ICON_SIZE : 32,
+        );
   const showCountBadge =
-    countBadgeText === '✓' ||
-    shouldShowCompactQuantity(
-      countBadgeText,
-      radialRoot ? RADIAL_ROOT_ITEM_ICON_SIZE : 32,
-    );
+    countBadgeText === '✓' || (showAmounts && quantityPlacement === 'badge');
   const byproductLabel = byproductCoverage
     ? byproductCoverage.remainingAmount === 0
       ? `completed by byproduct ${formatIngredientQuantity(node.key, byproductCoverage.creditedAmount)}`
@@ -3280,29 +3870,22 @@ function CompactItemNodeView({
       onTap();
     }, 280);
   };
-  const webContextMenuProps =
-    Platform.OS === 'web' && onChangeRecipe
-      ? ({
-          onContextMenu: (event: {
-            preventDefault?: () => void;
-            stopPropagation?: () => void;
-          }) => {
-            event.preventDefault?.();
-            event.stopPropagation?.();
-            clearPendingTap();
-            onChangeRecipe();
-          },
-        } as object)
-      : {};
+  const handlers = useNodeActionHandlers(handleTap, () => {
+    clearPendingTap();
+    onActions();
+  });
   return (
     <>
       <Pressable
       {...signalTarget(`graph.node.expand.${nodeDepthBucket(node)}`)}
-      {...webContextMenuProps}
+      {...handlers.contextMenuProps}
       accessibilityRole={selectable ? 'button' : undefined}
-      accessibilityLabel={`${name}, quantity ${formatIngredientQuantity(node.key, requiredAmount)}${terminal ? `, ${terminalLabel}` : ''}${deferredDuplicate ? ', recipe expanded elsewhere, tap to move expansion here' : ''}${byproductLabel ? `, ${byproductLabel}` : ''}${node.nonConsumed ? ', not consumed' : ''}${node.consumptionProbability !== undefined ? `, ${node.consumptionProbability == null ? 'unknown' : `${String(Math.round(node.consumptionProbability * 10_000) / 100)} percent`} consume chance` : ''}${node.productionProbability !== undefined ? `, ${node.productionProbability == null ? 'unknown' : `${String(Math.round(node.productionProbability * 10_000) / 100)} percent`} produce chance` : ''}${isRoot ? ', open amount and recipe controls' : selectable && !deferredDuplicate ? byproductCoverage?.remainingAmount === 0 ? ', navigate to producing recipe' : ', choose source' : ''}${onChangeRecipe ? ', double tap or right click to change recipe' : ''}`}
+      accessibilityLabel={`${name}, quantity ${formatIngredientQuantity(node.key, requiredAmount)}${terminal ? `, ${terminalLabel}` : ''}${deferredDuplicate ? ', recipe expanded elsewhere, tap to move expansion here' : ''}${byproductLabel ? `, ${byproductLabel}` : ''}${node.nonConsumed ? ', not consumed' : ''}${node.consumptionProbability !== undefined ? `, ${node.consumptionProbability == null ? 'unknown' : `${String(Math.round(node.consumptionProbability * 10_000) / 100)} percent`} consume chance` : ''}${node.productionProbability !== undefined ? `, ${node.productionProbability == null ? 'unknown' : `${String(Math.round(node.productionProbability * 10_000) / 100)} percent`} produce chance` : ''}${isRoot ? ', open amount and recipe controls' : selectable && !deferredDuplicate ? byproductCoverage?.remainingAmount === 0 ? ', navigate to producing recipe' : ', choose source' : ''}${onChangeRecipe ? ', double tap to change recipe' : ''}, long press or right click for node options`}
       disabled={!selectable || node.loading}
-      onPress={handleTap}
+      focusable
+      onPress={handlers.press}
+      onLongPress={handlers.longPress}
+      delayLongPress={450}
       style={[
         radial ? styles.radialItemNode : styles.compactItemNode,
         branchLabel && styles.compactBranchNode,
@@ -3389,9 +3972,11 @@ function ItemNodeView({
   expandable,
   deferredDuplicate,
   terminalLabel,
+  showAmounts,
   rootActions,
   onTap,
   onInfo,
+  onActions,
 }: {
   x: number;
   y: number;
@@ -3402,9 +3987,11 @@ function ItemNodeView({
   expandable: boolean;
   deferredDuplicate: boolean;
   terminalLabel: string;
+  showAmounts: boolean;
   rootActions?: RootNodeActionProps;
   onTap: () => void;
   onInfo: () => void;
+  onActions: (pointer?: NodeActionPointer) => void;
 }) {
   const data = useData();
   const item = data.itemsByKey.get(node.key);
@@ -3424,15 +4011,23 @@ function ItemNodeView({
           ? '▸'
           : '·';
   const byproductText = byproductCoverage
-    ? byproductCoverage.remainingAmount === 0
-      ? `  ✓ ${formatIngredientQuantity(node.key, byproductCoverage.creditedAmount)} byproduct`
-      : `  ${formatIngredientQuantity(node.key, byproductCoverage.remainingAmount)} needed · ${formatIngredientQuantity(node.key, byproductCoverage.creditedAmount)} byproduct`
+    ? !showAmounts
+      ? byproductCoverage.remainingAmount === 0
+        ? '  ✓ byproduct'
+        : '  byproduct'
+      : byproductCoverage.remainingAmount === 0
+        ? `  ✓ ${formatIngredientQuantity(node.key, byproductCoverage.creditedAmount)} byproduct`
+        : `  ${formatIngredientQuantity(node.key, byproductCoverage.remainingAmount)} needed · ${formatIngredientQuantity(node.key, byproductCoverage.creditedAmount)} byproduct`
     : '';
+  const handlers = useNodeActionHandlers(onTap, onActions);
   return (
     <>
       <Pressable
       {...signalTarget(`graph.node.expand.${nodeDepthBucket(node)}`)}
-      onPress={onTap}
+      {...handlers.contextMenuProps}
+      onPress={handlers.press}
+      onLongPress={handlers.longPress}
+      delayLongPress={450}
       accessibilityRole="button"
       accessibilityLabel={`${name}, quantity ${formatIngredientQuantity(node.key, requiredAmount)}${!expandable ? `, ${terminalLabel}` : ''}${deferredDuplicate ? ', recipe expanded elsewhere, tap to move expansion here' : ''}${node.productionProbability !== undefined ? `, ${node.productionProbability == null ? 'unknown' : `${String(Math.round(node.productionProbability * 10_000) / 100)} percent`} produce chance` : ''}${isRoot ? ', open amount and recipe controls' : byproductCoverage ? byproductCoverage.remainingAmount === 0 ? ', completed by byproduct, navigate to producing recipe' : `, partially completed by byproduct, ${formatIngredientQuantity(node.key, byproductCoverage.remainingAmount)} still needed, choose source` : expandable && !deferredDuplicate ? ', choose source' : ''}`}
       style={[
@@ -3462,7 +4057,7 @@ function ItemNodeView({
         </Text>
         <Text style={[styles.itemNodeSub, noSelect]} numberOfLines={1}>
           {glyph}
-          {shouldShowIngredientQuantity(node.key, requiredAmount)
+          {showAmounts && shouldShowIngredientQuantity(node.key, requiredAmount)
             ? `  ${formatIngredientQuantity(node.key, requiredAmount)}`
             : ''}
           {isRecursiveItemNode(node) ? '  ↻' : ''}
@@ -3512,11 +4107,13 @@ function SourceNodeView({
   radialRoot,
   focused,
   animateMobs,
+  showAmounts,
   rootActions,
   canSwap,
   onCollapse,
   onSwap,
   onInfo,
+  onActions,
 }: {
   x: number;
   y: number;
@@ -3530,11 +4127,13 @@ function SourceNodeView({
   radialRoot: boolean;
   focused: boolean;
   animateMobs: boolean;
+  showAmounts: boolean;
   rootActions?: RootNodeActionProps;
   canSwap: boolean;
   onCollapse: () => void;
   onSwap: () => void;
   onInfo: () => void;
+  onActions: (pointer?: NodeActionPointer) => void;
 }) {
   const data = useData();
   const catalogItem = data.itemsByKey.get(item.key);
@@ -3548,9 +4147,7 @@ function SourceNodeView({
     item.tag && logicalName !== concreteName
       ? `${logicalName} · ${concreteName}`
       : concreteName;
-  const amountText = shouldShowIngredientQuantity(item.key, requiredAmount)
-    ? ` ${formatIngredientQuantity(item.key, requiredAmount)}`
-    : '';
+  const amountText = formatIngredientQuantity(item.key, requiredAmount);
   const context =
     source.kind === 'recipe'
       ? source.direction === 'outputs'
@@ -3576,35 +4173,49 @@ function SourceNodeView({
   const sourceCardWidth =
     isRoot && rootActions ? w - ROOT_SOURCE_ACTIONS_WIDTH : w;
   const headerCopy = (
-    <Text style={[styles.sourceHeaderText, noSelect]} numberOfLines={1}>
-      {name}
-      <Text style={[styles.sourceHeaderAmount, noSelect]}>{amountText}</Text>
-      <Text style={[styles.sourceHeaderContext, noSelect]}> · {context}</Text>
-      {byproductCoverage && (
-        <Text style={[styles.sourceHeaderByproduct, noSelect]}>
-          {' · '}
-          {formatIngredientQuantity(item.key, byproductCoverage.creditedAmount)} byproduct
+    <View style={styles.sourceHeaderCopy}>
+      <Text style={[styles.sourceHeaderName, noSelect]} numberOfLines={1}>
+        {name}
+      </Text>
+      {showAmounts && (
+        <Text style={[styles.sourceHeaderAmount, noSelect]} numberOfLines={1}>
+          {' '}{amountText}
         </Text>
       )}
-      {machineEstimate && (
-        <Text style={[styles.sourceHeaderParallel, noSelect]}>
+      <Text style={[styles.sourceHeaderContext, noSelect]} numberOfLines={1}>
+        {' · '}{context}
+      </Text>
+      {byproductCoverage && (
+        <Text style={[styles.sourceHeaderByproduct, noSelect]} numberOfLines={1}>
+          {' · '}
+          {showAmounts
+            ? `${formatIngredientQuantity(item.key, byproductCoverage.creditedAmount)} byproduct`
+            : 'byproduct'}
+        </Text>
+      )}
+      {showAmounts && machineEstimate && (
+        <Text style={[styles.sourceHeaderParallel, noSelect]} numberOfLines={1}>
           {' · '}
           {machineEstimate.machines}× {machineName}
         </Text>
       )}
-    </Text>
+    </View>
   );
+  const handlers = useNodeActionHandlers(onCollapse, onActions);
 
   return (
     <Pressable
       {...(isRoot ? signalTarget('graph.root-actions.toggle-expanded') : {})}
+      {...handlers.contextMenuProps}
       accessibilityRole={isRoot ? 'button' : undefined}
       accessibilityLabel={
         isRoot
           ? `${rootActions ? 'Close' : 'Open'} amount and recipe controls for ${name}`
           : undefined
       }
-      onPress={isRoot ? onCollapse : undefined}
+      onPress={isRoot ? handlers.press : undefined}
+      onLongPress={handlers.longPress}
+      delayLongPress={450}
       style={[
         styles.sourceNode,
         {left: x, top: y, width: sourceCardWidth, height: h},
@@ -3625,7 +4236,9 @@ function SourceNodeView({
         {...signalTarget(`graph.node.collapse.${nodeDepthBucket(item)}`)}
         pointerEvents={isRoot ? 'box-none' : 'auto'}
         accessibilityRole={isRoot ? undefined : 'button'}
-        onPress={isRoot ? undefined : onCollapse}
+        onPress={isRoot ? undefined : handlers.press}
+        onLongPress={isRoot ? undefined : handlers.longPress}
+        delayLongPress={450}
         style={styles.sourceHeader}>
         {isRoot ? (
           <View style={styles.rootSourceIconFrame}>
@@ -3763,6 +4376,125 @@ const styles = StyleSheet.create({
   canvas: {flex: 1, overflow: 'hidden', backgroundColor: theme.bg},
   anchor: {position: 'absolute', left: 0, top: 0, width: 0, height: 0},
   nativeAnchor: {width: 1, height: 1},
+  lowDetailNode: {
+    position: 'absolute',
+    minWidth: 16,
+    minHeight: 16,
+    borderWidth: 2,
+    borderColor: theme.borderLight,
+    borderRadius: 8,
+    backgroundColor: theme.panel,
+    opacity: 0.78,
+  },
+  lowDetailSourceNode: {
+    borderColor: theme.accent,
+    backgroundColor: theme.panelAlt,
+  },
+  lowDetailRootNode: {
+    borderColor: theme.radialRoot,
+    borderWidth: 4,
+    opacity: 1,
+  },
+  nodeActionLayer: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    zIndex: 90,
+  },
+  nodeActionDismiss: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+  },
+  nodeActionAnchor: {position: 'absolute', zIndex: 91},
+  nodeActionCard: {
+    padding: 10,
+    gap: 9,
+    borderWidth: 1,
+    borderColor: theme.borderLight,
+    borderRadius: 9,
+    backgroundColor: theme.panel,
+    shadowColor: '#000',
+    shadowOpacity: 0.38,
+    shadowRadius: 16,
+    shadowOffset: {width: 0, height: 8},
+    elevation: 20,
+    overflow: 'hidden',
+  },
+  nodeActionHeader: {flexDirection: 'row', alignItems: 'center', gap: 10},
+  nodeActionHeaderCopy: {flex: 1},
+  nodeActionTitle: {color: theme.text, fontSize: 14, fontWeight: '700'},
+  nodeActionHint: {color: theme.textDim, fontSize: 11, marginTop: 2},
+  nodeActionAmountSection: {gap: 6},
+  nodeActionAmountStepper: {flexDirection: 'row', alignItems: 'center'},
+  nodeActionAmountButton: {
+    width: 38,
+    height: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: theme.panelAlt,
+  },
+  nodeActionAmountButtonPrimary: {
+    borderColor: theme.accent,
+    backgroundColor: theme.accent,
+  },
+  nodeActionAmountButtonText: {color: theme.text, fontSize: 18, fontWeight: '800'},
+  nodeActionAmountButtonPrimaryText: {color: '#0b1610'},
+  nodeActionAmountInput: {
+    flex: 1,
+    height: 34,
+    paddingHorizontal: 8,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: theme.border,
+    color: theme.text,
+    backgroundColor: '#0f141b',
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  nodeAlternativeSection: {gap: 7, minHeight: 0, flexShrink: 1},
+  nodeActionSectionLabel: {
+    color: theme.accent,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  nodeAlternativeScroll: {maxHeight: 220},
+  nodeAlternativeRow: {
+    minHeight: 46,
+    paddingHorizontal: 9,
+    paddingVertical: 7,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    borderRadius: 8,
+  },
+  nodeAlternativeRowSelected: {backgroundColor: theme.panelAlt},
+  nodeAlternativeName: {flex: 1, color: theme.text, fontSize: 13},
+  nodeAlternativeSelected: {color: theme.accent, fontSize: 16, fontWeight: '800'},
+  nodeActionButtons: {gap: 5},
+  nodeActionButton: {
+    minHeight: 44,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 8,
+    backgroundColor: theme.panelAlt,
+  },
+  nodeActionButtonPrimary: {borderColor: theme.accent, backgroundColor: '#173724'},
+  nodeActionButtonDanger: {borderColor: theme.warn},
+  nodeActionButtonText: {color: theme.text, fontSize: 13, fontWeight: '700'},
+  nodeActionButtonHint: {color: theme.textDim, fontSize: 10, marginTop: 2},
+  nodeActionButtonPrimaryText: {color: theme.accent, fontSize: 13, fontWeight: '800'},
+  nodeActionButtonPrimaryHint: {color: theme.text, fontSize: 10, marginTop: 2},
+  nodeActionButtonDangerText: {color: theme.warn, fontSize: 13, fontWeight: '700'},
   edge: {position: 'absolute', backgroundColor: theme.borderLight},
   byproductSupplyEdge: {
     position: 'absolute',
@@ -3958,11 +4690,45 @@ const styles = StyleSheet.create({
     gap: 5,
     marginBottom: 3,
   },
-  sourceHeaderText: {color: theme.text, fontSize: 11, fontWeight: '600', flex: 1},
-  sourceHeaderAmount: {color: theme.accent, fontWeight: '700'},
-  sourceHeaderContext: {color: theme.textDim, fontWeight: '400'},
-  sourceHeaderByproduct: {color: theme.accentAlt, fontWeight: '600'},
-  sourceHeaderParallel: {color: theme.warn, fontWeight: '700'},
+  sourceHeaderCopy: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
+  sourceHeaderName: {
+    minWidth: 0,
+    flexShrink: 1,
+    color: theme.text,
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  sourceHeaderAmount: {
+    flexShrink: 0,
+    color: theme.accent,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  sourceHeaderContext: {
+    minWidth: 0,
+    flexShrink: 1,
+    color: theme.textDim,
+    fontSize: 11,
+    fontWeight: '400',
+  },
+  sourceHeaderByproduct: {
+    flexShrink: 1,
+    color: theme.accentAlt,
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  sourceHeaderParallel: {
+    flexShrink: 1,
+    color: theme.warn,
+    fontSize: 11,
+    fontWeight: '700',
+  },
   headerBtn: {paddingHorizontal: 2},
   dropRow: {flexDirection: 'row', alignItems: 'center', flex: 1, paddingHorizontal: 4},
   dropName: {color: theme.text, fontSize: 12},
@@ -4107,6 +4873,7 @@ const styles = StyleSheet.create({
   recipeLookupCancelText: {color: theme.text, fontSize: 13, fontWeight: '700'},
   controlOptions: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: 6,
   },
   totalsPanel: {
@@ -4197,6 +4964,13 @@ const styles = StyleSheet.create({
   controlMenuBtn: {
     width: 38,
     paddingHorizontal: 0,
+  },
+  controlMenuBtnCollapsed: {
+    width: 'auto',
+    minWidth: 118,
+    paddingHorizontal: 10,
+    flexDirection: 'row',
+    gap: 6,
   },
   fitControl: {
     position: 'absolute',

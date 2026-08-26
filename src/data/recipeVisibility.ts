@@ -3,21 +3,36 @@ import type {CatalogItem, Category, Recipe, SlotEntry} from '../types';
 const CONTAINER_TOKEN =
   /(?:^|[\s_:.\-/])(bucket|bottle|bowl|can|cell|capsule|container|flask|jar|tank|reservoir|drum|canteen|vial|feeder|sponge)(?:$|[\s_:.\-/])/i;
 
-function slotType(slot: SlotEntry[]): string | null {
+function entryType(
+  key: string,
+  itemsByKey?: ReadonlyMap<string, CatalogItem>,
+): string {
+  const separator = key.indexOf('|');
+  const keyType = separator < 0 ? 'unknown' : key.slice(0, separator);
+  const catalogType = itemsByKey?.get(key)?.t ?? keyType;
+  const normalized = catalogType.toLocaleLowerCase();
+  if (normalized === 'fluid' || normalized.includes('hybridfluid')) return 'fluid';
+  return keyType;
+}
+
+function slotType(
+  slot: SlotEntry[],
+  itemsByKey?: ReadonlyMap<string, CatalogItem>,
+): string | null {
   const types = new Set(
-    slot.map(([key]) => {
-      const separator = key.indexOf('|');
-      return separator < 0 ? 'unknown' : key.slice(0, separator);
-    }),
+    slot.map(([key]) => entryType(key, itemsByKey)),
   );
   return types.size === 1 ? [...types][0] : null;
 }
 
-function partitionSlots(slots: SlotEntry[][] | undefined) {
+function partitionSlots(
+  slots: SlotEntry[][] | undefined,
+  itemsByKey?: ReadonlyMap<string, CatalogItem>,
+) {
   const byType = new Map<string, SlotEntry[][]>();
   for (const slot of slots ?? []) {
     if (slot.length === 0) continue;
-    const type = slotType(slot);
+    const type = slotType(slot, itemsByKey);
     if (!type) return null;
     const entries = byType.get(type) ?? [];
     entries.push(slot);
@@ -45,11 +60,49 @@ function looksLikeContainerTransition(
   output: SlotEntry[],
   itemsByKey?: ReadonlyMap<string, CatalogItem>,
 ): boolean {
+  const inputItems = input
+    .map(([key]) => itemsByKey?.get(key))
+    .filter((item): item is CatalogItem => !!item);
+  const outputItems = output
+    .map(([key]) => itemsByKey?.get(key))
+    .filter((item): item is CatalogItem => !!item);
+  const sameRegistryItem = inputItems.some(inputItem =>
+    outputItems.some(outputItem => outputItem.id === inputItem.id),
+  );
   const identityText = [
     ...itemIdentityText(input, itemsByKey),
     ...itemIdentityText(output, itemsByKey),
   ];
-  return identityText.some(value => CONTAINER_TOKEN.test(value));
+  const hasContainerMarker = identityText.some(value => CONTAINER_TOKEN.test(value));
+  if (sameRegistryItem && hasContainerMarker) return true;
+
+  // Vanilla changes registry items when its built-in containers change state.
+  const registryIds = new Set(
+    [...inputItems, ...outputItems].map(item => item.id.toLocaleLowerCase()),
+  );
+  const hasPair = (empty: string, filled: readonly string[]) =>
+    registryIds.has(empty) && filled.some(id => registryIds.has(id));
+  return (
+    hasPair('minecraft:bucket', [
+      'minecraft:water_bucket',
+      'minecraft:lava_bucket',
+      'minecraft:milk_bucket',
+      'minecraft:powder_snow_bucket',
+    ]) ||
+    hasPair('minecraft:glass_bottle', [
+      'minecraft:potion',
+      'minecraft:splash_potion',
+      'minecraft:lingering_potion',
+      'minecraft:honey_bottle',
+      'minecraft:dragon_breath',
+    ]) ||
+    hasPair('minecraft:bowl', [
+      'minecraft:mushroom_stew',
+      'minecraft:rabbit_stew',
+      'minecraft:beetroot_soup',
+      'minecraft:suspicious_stew',
+    ])
+  );
 }
 
 /**
@@ -75,8 +128,8 @@ export function isFluidContainerTransferRecipe(
   ) {
     return false;
   }
-  const inputs = partitionSlots(recipe.in);
-  const outputs = partitionSlots(recipe.out);
+  const inputs = partitionSlots(recipe.in, itemsByKey);
+  const outputs = partitionSlots(recipe.out, itemsByKey);
   if (!inputs || !outputs) return false;
 
   const inputItems = inputs.get('item') ?? [];

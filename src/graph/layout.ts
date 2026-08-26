@@ -56,6 +56,17 @@ export function shouldShowCompactQuantity(
   return estimatedTextWidth <= itemIconSize / 2;
 }
 
+export type CompactQuantityPlacement = 'badge' | 'tooltip';
+
+/** Wide quantities stay available in a hover/focus tooltip instead of crowding the icon. */
+export function compactQuantityPlacement(
+  formattedAmount: string,
+  itemIconSize = 32,
+): CompactQuantityPlacement {
+  if (shouldShowCompactQuantity(formattedAmount, itemIconSize)) return 'badge';
+  return 'tooltip';
+}
+
 /**
  * Keep the starting item's visual center independent from the extra collision
  * space reserved for its controls. Radial layout already returns the visual

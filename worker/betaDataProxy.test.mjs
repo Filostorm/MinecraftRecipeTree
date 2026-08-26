@@ -3,6 +3,12 @@ import test from 'node:test';
 import {proxyBetaDatasetRequest} from './betaDataProxy.ts';
 
 const PRODUCTION_ORIGIN = 'https://minecraftrecipetree.craftsmannsoftware.com';
+const CANDIDATE = {
+  BETA_CANDIDATE_DATASET_SLUG: 'meatballcraft',
+  BETA_CANDIDATE_PUBLICATION_ID: '1'.repeat(64),
+  BETA_CANDIDATE_PREVIEW_ASSET_SET_ID: '2'.repeat(64),
+  BETA_CANDIDATE_PACK_VERSION: 'prerelease-0.18.6.4',
+};
 
 test('beta data proxy is inactive without an explicit origin and ignores non-dataset routes', async () => {
   const request = new Request('https://beta.example/api/datasets');
@@ -105,6 +111,49 @@ test('beta catalog responses are locally reframed after an upstream Worker', asy
   assert.equal(await response.text(), '{"datasets":[]}');
   assert.equal(response.headers.get('content-encoding'), null);
   assert.equal(response.headers.get('content-length'), '15');
+});
+
+test('beta catalog can expose an immutable candidate without activating production', async () => {
+  const request = new Request('https://beta.example/api/datasets');
+  const productionDescriptor = {
+    slug: 'meatballcraft',
+    displayName: 'MeatballCraft',
+    minecraftVersion: '1.12.2',
+    packVersion: 'old',
+    publicationId: 'a'.repeat(64),
+    previewAssetSetId: 'b'.repeat(64),
+    isDefault: true,
+  };
+  const response = await proxyBetaDatasetRequest(
+    request,
+    {BETA_DATA_ORIGIN: PRODUCTION_ORIGIN, ...CANDIDATE},
+    new URL(request.url),
+    async () => Response.json({datasets: [productionDescriptor]}),
+  );
+  const catalog = await response.json();
+  assert.deepEqual(catalog.datasets[0], {
+    ...productionDescriptor,
+    packVersion: CANDIDATE.BETA_CANDIDATE_PACK_VERSION,
+    publicationId: CANDIDATE.BETA_CANDIDATE_PUBLICATION_ID,
+    previewAssetSetId: CANDIDATE.BETA_CANDIDATE_PREVIEW_ASSET_SET_ID,
+  });
+  assert.equal(response.headers.get('x-mrt-beta-data-origin'), PRODUCTION_ORIGIN);
+});
+
+test('beta catalog candidate override fails closed when partially configured', async () => {
+  const request = new Request('https://beta.example/api/datasets');
+  await assert.rejects(
+    proxyBetaDatasetRequest(
+      request,
+      {
+        BETA_DATA_ORIGIN: PRODUCTION_ORIGIN,
+        BETA_CANDIDATE_DATASET_SLUG: 'meatballcraft',
+      },
+      new URL(request.url),
+      async () => Response.json({datasets: []}),
+    ),
+    /configured together/,
+  );
 });
 
 test('beta data proxy rejects an unsafe or path-bearing origin', async () => {

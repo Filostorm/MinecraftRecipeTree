@@ -7,6 +7,12 @@ const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === 'seatbelt';
 const isCloudflareBeta = process.env.MRT_DEPLOY_TARGET === 'cloudflare-beta';
 const isCloudflareProduction = process.env.MRT_DEPLOY_TARGET === 'cloudflare-production';
 const BETA_DATA_ORIGIN = 'https://minecraftrecipetree.craftsmannsoftware.com';
+const BETA_CANDIDATE_DATASET_SLUG = 'meatballcraft';
+const BETA_CANDIDATE_PUBLICATION_ID =
+  '18ca32e0cc84d739136a7f88fe2545504feab41c1a84f5a88ebe6189b9b8a4a1';
+const BETA_CANDIDATE_PREVIEW_ASSET_SET_ID =
+  '2a96514f1d9ebb416deb5db862c17fffd5e9ebafb172541e8be7023bb1b83d28';
+const BETA_CANDIDATE_PACK_VERSION = 'prerelease-0.18.6.4';
 const SITE_CREATOR_PLACEHOLDER_DATABASE_ID = '00000000-0000-4000-8000-000000000000';
 const CLOUDFLARE_PRODUCTION_DATABASE_ID = 'e6624ef2-8bd9-49e5-8d32-0671351c61c3';
 const CLOUDFLARE_PRODUCTION_DATABASE_NAME = 'minecraft-recipe-tree-production';
@@ -41,7 +47,13 @@ export default defineConfig(async () => {
           ...(isCloudflareBeta
             ? {
                 name: 'minecraft-recipe-tree-beta',
-                vars: {BETA_DATA_ORIGIN},
+                vars: {
+                  BETA_DATA_ORIGIN,
+                  BETA_CANDIDATE_DATASET_SLUG,
+                  BETA_CANDIDATE_PUBLICATION_ID,
+                  BETA_CANDIDATE_PREVIEW_ASSET_SET_ID,
+                  BETA_CANDIDATE_PACK_VERSION,
+                },
               }
             : isCloudflareProduction
               ? {

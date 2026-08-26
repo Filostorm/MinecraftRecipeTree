@@ -17,6 +17,9 @@ const items = new Map([
   ['item|test:water_source', {k: 'item|test:water_source', id: 'test:water_source', n: 'Infinite Water Source', m: 'test'}],
   ['item|test:duct:empty', {k: 'item|test:duct:empty', id: 'test:duct', n: 'Fluxduct (Empty)', m: 'test'}],
   ['item|test:duct:charged', {k: 'item|test:duct:charged', id: 'test:duct', n: 'Fluxduct', m: 'test'}],
+  ['item|test:cell_product', {k: 'item|test:cell_product', id: 'test:cell_product', n: 'Living Cell', m: 'test'}],
+  ['item|test:spent_product', {k: 'item|test:spent_product', id: 'test:spent_product', n: 'Spent Material', m: 'test'}],
+  ['custom_test.hybridfluid_12345678|water', {k: 'custom_test.hybridfluid_12345678|water', id: 'test:water', n: 'Water', m: 'test', t: 'custom_test.hybridfluid_12345678'}],
 ]);
 
 test('classifies filling and emptying of fluid containers', () => {
@@ -106,6 +109,32 @@ test('recognizes sponge fluid-state transitions', () => {
       items,
     ),
     true,
+  );
+});
+
+test('recognizes custom hybrid-fluid container transfers', () => {
+  assert.equal(
+    isFluidContainerTransferRecipe(
+      {
+        in: [[['item|test:tank:empty', 1]], [['custom_test.hybridfluid_12345678|water', 1000]]],
+        out: [[['item|test:tank:water', 1]]],
+      },
+      items,
+    ),
+    true,
+  );
+});
+
+test('does not hide unique recipes merely because an item name contains cell', () => {
+  assert.equal(
+    isFluidContainerTransferRecipe(
+      {
+        in: [[['item|test:cell_product', 1]]],
+        out: [[['item|test:spent_product', 1]], [['fluid|test:essence', 250]]],
+      },
+      items,
+    ),
+    false,
   );
 });
 
