@@ -3,7 +3,10 @@ import test from 'node:test';
 import {
   DENSE_GRAPH_LOW_DETAIL_SCALE,
   DENSE_GRAPH_NODE_THRESHOLD,
+  LOW_DETAIL_RECIPE_HOVER_MAX_MAGNIFICATION,
+  LOW_DETAIL_RECIPE_HOVER_TARGET_SCALE,
   NODE_AMOUNT_LABEL_MIN_SCALE,
+  lowDetailRecipeHoverMagnification,
   shouldShowNodeAmounts,
   shouldUseLowDetailGraph,
 } from './renderDetail.ts';
@@ -23,4 +26,17 @@ test('hides graph amounts at distant zoom while retaining them in exports', () =
   assert.equal(shouldShowNodeAmounts(NODE_AMOUNT_LABEL_MIN_SCALE - 0.01), false);
   assert.equal(shouldShowNodeAmounts(0.12, true), true);
   assert.equal(shouldShowNodeAmounts(Number.NaN), false);
+});
+
+test('magnifies one hovered low-detail recipe to a readable bounded scale', () => {
+  assert.equal(
+    lowDetailRecipeHoverMagnification(0.4),
+    LOW_DETAIL_RECIPE_HOVER_TARGET_SCALE / 0.4,
+  );
+  assert.equal(
+    lowDetailRecipeHoverMagnification(0.01),
+    LOW_DETAIL_RECIPE_HOVER_MAX_MAGNIFICATION,
+  );
+  assert.equal(lowDetailRecipeHoverMagnification(1), 1);
+  assert.equal(lowDetailRecipeHoverMagnification(Number.NaN), 1);
 });
