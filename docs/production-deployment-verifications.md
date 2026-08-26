@@ -1,5 +1,36 @@
 # Production deployment verifications
 
+## 2026-08-26 — Worker request reduction release
+
+- Application commit: `303fdcfa0e07fc7f7f1324e7f9b795ede1a5affa`
+- Standalone Worker: `minecraft-recipe-tree-production`
+- Standalone Worker version: `d7b0ea5c-1ff1-45c0-8906-359ec6735a43`
+- Canonical URL: `https://minecraftrecipetree.craftsmannsoftware.com/`
+
+Passed:
+
+- The exact beta release was promoted onto the latest production branch. The complete data suite
+  passed 545/545 tests, TypeScript validation passed, and the production build promoted a validated
+  prerendered root shell before deployment with the existing native D1 and R2 bindings.
+- The direct production hostname returned the static homepage with HTTP `200`. Its Vinext bootstrap
+  import, serialized RSC stylesheet, hashed application bundle, lazy graph bundle, and versioned
+  local-pack service worker all returned `200` with their expected content types.
+- A fresh direct-production browser tab hydrated the application and explicitly rendered the
+  catalog HTTP `429` error. This confirms the static viewer shell runs without a Worker invocation
+  and does not silently conceal the unavailable Worker-backed catalog.
+
+Production verification failure:
+
+- Cloudflare's account-wide Free-plan Worker limit remains exhausted. The canonical hostname still
+  requires the app-router Worker and returned HTTP `429` for the homepage, hashed assets, and the
+  local-pack service worker. Both the direct and canonical hostnames returned `429` for
+  `/api/datasets`, `/api/modpacks`, upload authorization, feedback, and failure-report routing.
+- The new coalesced whole-pack endpoints therefore could not be exercised against production data;
+  their authorization, integrity, range, and service-worker behavior passed in the 545-test release
+  suite. No synthetic production data or mutation request was created.
+- The release is deployed, but the canonical application and every Worker-backed API remain
+  unavailable until Cloudflare resets the account quota or the account is upgraded.
+
 ## 2026-08-26 — large-tree graph performance release
 
 - Application commit: `e868cfdccf046c86427bfea1db6fc2ad19eac625`
