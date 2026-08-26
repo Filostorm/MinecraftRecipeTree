@@ -812,6 +812,19 @@ test('immutable core reads require exact publication queries and MRPI-authorized
   assert.deepEqual([...new Uint8Array(await image.arrayBuffer())], [5, 6, 7, 8]);
   const rangeRead = env.PREVIEW_ASSETS.reads.find(read => read.key.endsWith('/assets/pack-000.bin'));
   assert.deepEqual(rangeRead.range, {offset: 4, length: 4});
+
+  const wholePack = await send(
+    env,
+    `${base}/assets/pack-000.bin?dataset=${PUBLICATION}`,
+  );
+  assert.equal(wholePack.status, 200);
+  assert.equal(wholePack.headers.get('content-type'), 'application/octet-stream');
+  assert.equal(wholePack.headers.get('x-mrt-pack-sha256'), fixture.manifest.packs[0].sha256);
+  assert.equal(wholePack.headers.get('x-mrt-stored-bytes'), String(fixture.manifest.packs[0].bytes));
+  assert.deepEqual(
+    [...new Uint8Array(await wholePack.arrayBuffer())],
+    [...fixture.objects.get('assets/pack-000.bin')],
+  );
 });
 
 test('application, API, and error responses receive the centralized security policy', async () => {
@@ -875,6 +888,15 @@ test('preview reads derive storage identity only from the immutable route and ex
   const image = await send(env, `${base}/assets/s/000-4-4.webp${query}`);
   assert.equal(image.status, 200);
   assert.deepEqual([...new Uint8Array(await image.arrayBuffer())], [25, 26, 27, 28]);
+  const wholePack = await send(env, `${base}/assets/pack-000.bin${query}`);
+  assert.equal(wholePack.status, 200);
+  assert.equal(wholePack.headers.get('content-type'), 'application/octet-stream');
+  assert.equal(wholePack.headers.get('x-mrt-pack-sha256'), fixture.manifest.packs[0].sha256);
+  assert.equal(wholePack.headers.get('x-mrt-stored-bytes'), String(fixture.manifest.packs[0].bytes));
+  assert.deepEqual(
+    [...new Uint8Array(await wholePack.arrayBuffer())],
+    [...fixture.objects.get('assets/pack-000.bin')],
+  );
   assert.equal(await send(env, `/dataset/previews/manifest.json${query}`).then(r => r.status), 410);
 });
 

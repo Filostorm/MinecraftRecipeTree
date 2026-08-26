@@ -23,6 +23,7 @@ const MAX_LOCAL_PACKS = 24;
 const MAX_LOCAL_FILE_BYTES = 128 * 1024 * 1024;
 const LOCAL_CATALOG_FORMAT = 1;
 const LOCAL_INVENTORY_FORMAT = 1;
+const VIEWER_SERVICE_WORKER_URL = '/local-pack-sw.js?v=packed-images-v1';
 export const LOCAL_PACK_CATALOG_CHANGED_EVENT = 'mrt:local-pack-catalog-changed';
 
 interface LocalPackRecord extends DatasetDescriptor {
@@ -303,19 +304,22 @@ export async function registerLocalPackServiceWorker(): Promise<void> {
   try {
     await Promise.race([
       (async () => {
-        await navigator.serviceWorker.register('/local-pack-sw.js', {scope: '/'});
+        await navigator.serviceWorker.register(VIEWER_SERVICE_WORKER_URL, {scope: '/'});
         await navigator.serviceWorker.ready;
-        if (navigator.serviceWorker.controller) return;
+        const expectedScriptUrl = new URL(VIEWER_SERVICE_WORKER_URL, window.location.origin).href;
+        if (navigator.serviceWorker.controller?.scriptURL === expectedScriptUrl) return;
         await new Promise<void>(resolve => {
           onControllerChange = () => {
-            resolve();
+            if (navigator.serviceWorker.controller?.scriptURL === expectedScriptUrl) {
+              resolve();
+            }
           };
           navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
         });
       })(),
       new Promise<never>((_resolve, reject) => {
         timeout = window.setTimeout(
-          () => reject(new Error('The viewer could not finish preparing local pack support.')),
+          () => reject(new Error('The viewer could not finish preparing its image cache.')),
           5_000,
         );
       }),

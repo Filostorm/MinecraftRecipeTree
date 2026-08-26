@@ -155,6 +155,12 @@ export function DatasetCatalogProvider({children}: {children: React.ReactNode}) 
     (async () => {
       try {
         const configuration = requestConfiguration();
+        const serviceWorkerReady = registerLocalPackServiceWorker().catch(workerError => {
+          console.warn(
+            'Packed-image caching and saved pack file loading are unavailable on this device.',
+            workerError,
+          );
+        });
         const response = await fetch(configuration.catalogUrl, {
           cache: 'no-store',
           signal: controller.signal,
@@ -182,6 +188,9 @@ export function DatasetCatalogProvider({children}: {children: React.ReactNode}) 
           // immediately while its service worker and browser cache finish initializing.
           if (!requestedSlug?.startsWith('local-')) throw selectionError;
         }
+        // A first-time browser must be controlled before data-backed views mount. Otherwise a
+        // large tree can issue one Worker request per image while the service worker activates.
+        await serviceWorkerReady;
         if (!alive) return;
         if (!requestedSlug?.startsWith('local-')) {
           setDatasets(publishedDatasets);
@@ -193,11 +202,6 @@ export function DatasetCatalogProvider({children}: {children: React.ReactNode}) 
         }
 
         let localDatasets: readonly DatasetDescriptor[] = [];
-        try {
-          await registerLocalPackServiceWorker();
-        } catch (localError) {
-          console.warn('Saved pack file loading is unavailable on this device.', localError);
-        }
         try {
           localDatasets = await listLocalPackDescriptors();
         } catch (localError) {

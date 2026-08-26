@@ -1,3 +1,5 @@
+'use client';
+
 import {StatusBar} from 'expo-status-bar';
 import React, {Suspense, useEffect, useMemo, useRef, useState} from 'react';
 import {
