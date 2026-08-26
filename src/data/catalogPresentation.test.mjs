@@ -86,6 +86,36 @@ test('excludes AE facades globally while retaining real covered cables', () => {
   );
 });
 
+test('excludes microblock cover carriers across supported generations', () => {
+  for (const [id, mod] of [
+    ['ForgeMicroblock:microblock', 'ForgeMicroblock'],
+    ['microblockcbe:microblock', 'microblockcbe'],
+    ['cb_microblock:microblock', 'cb_microblock'],
+  ]) {
+    assert.equal(
+      isItemCatalogEligible(item({
+        k: `item|${id}|{mat:"minecraft:stone"}`,
+        id,
+        n: 'Stone Cover',
+        m: mod,
+      })),
+      false,
+    );
+  }
+
+  for (const [id, name, mod] of [
+    ['microblockcbe:saw_diamond', 'Diamond Saw', 'microblockcbe'],
+    ['ForgeMicroblock:stoneRod', 'Stone Rod', 'ForgeMicroblock'],
+    ['thermaldynamics:cover', 'Stone Cover', 'thermaldynamics'],
+    ['gregtech:gt.metaitem.01', 'Fluid Filter Cover', 'gregtech'],
+  ]) {
+    assert.equal(
+      isItemCatalogEligible(item({k: `item|${id}`, id, n: name, m: mod})),
+      true,
+    );
+  }
+});
+
 test('uses concise labels for Multiblock Madness custom ingredient types', () => {
   assert.deepEqual(
     catalogTypePresentation('custom_thaumcraft.api.aspects.aspectlist_0409b2e6'),
