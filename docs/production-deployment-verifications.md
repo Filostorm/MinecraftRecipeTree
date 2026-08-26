@@ -1,5 +1,47 @@
 # Production deployment verifications
 
+## 2026-08-26 — graph planning fixes and GTNH 2.8.4 refresh
+
+- Application commit: `a194471f140d869947868f86653632f32ca66b43`
+- Standalone Worker: `minecraft-recipe-tree-production`
+- Standalone Worker version: `fccbfaa4-1e99-4b42-9822-37116643da7b`
+- Canonical URL: `https://minecraftrecipetree.craftsmannsoftware.com/`
+- GTNH core publication: `645b42d21ecb44a6e844cdbd02a88266b6123039557cf7aa49321c06d35c0b0f`
+- GTNH preview set: `75a9410ccc9c90813140ce8d22b6380a4f441e2a23f989182de92e31dc13487d`
+
+Passed:
+
+- The beta Worker hydrated first and exposed Auto expand, hid `thermaldynamics:cover`, displayed
+  deterministic selected-output surplus in Byproducts remaining, loaded a hashed application
+  asset, and retained the required production data-origin header.
+- The production build and TypeScript validation passed. The complete data suite passed 541/541
+  tests after the sandbox-blocked loopback suite was rerun with local-network permission; 32
+  focused Auto expand, byproduct, catalog, EMC, and recipe-favorite tests also passed.
+- A fresh canonical browser session hydrated MeatballCraft, showed Auto expand, hid the Thermal
+  Dynamics cover carrier, and listed the overproduced TARDIS Structure Controller in Byproducts
+  remaining. A fresh GTNH session hydrated version 2.8.4 without browser errors, and `/publish`
+  rendered the local exporter ZIP drop zone.
+- The GTNH channel moved from its prior publication with an exact compare-and-swap guard. The
+  public catalog now exposes the new core and preview identities, while retaining four channels
+  and exactly one default.
+- The canonical homepage, Vinext bootstrap import, serialized RSC stylesheet, lazy graph bundle,
+  `/api/datasets`, `/api/modpacks`, GTNH core manifest, and GTNH preview manifest returned `200`.
+  The GTNH manifests report 143,882 items, 568,820 recipes, 287 categories, zero failures, and
+  1,063 preview packs.
+- Unauthenticated dataset upload and feedback-inbox requests returned `401`; invalid same-origin
+  feedback and failure-report submissions returned `400`; unsupported failure-report reads
+  returned `405`; and legacy modpack mutation remained forbidden with `403`. No verification row,
+  feedback report, failure report, GitHub issue, or upload object was created.
+
+Verification notes:
+
+- The first immutable-manifest probes omitted the routes' required content-addressed query and
+  correctly returned `400`. Repeating both probes with the canonical query returned `200` with
+  immutable caching and exact GTNH identities.
+- Opening the saved MeatballCraft TARDIS graph logged its existing explicit diagnostic that one
+  legacy JEI layout preview is unavailable; the structured recipe remained visible and the graph
+  stayed functional. Fresh GTNH and publish sessions logged no browser errors.
+
 ## 2026-08-05 — local-only imports and large-tree stabilization
 
 - Application commit: `fa766d6dc7e2eab40e6645d95578b3267da07cde`
