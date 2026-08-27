@@ -11,6 +11,10 @@ import {
 } from './panGesture.ts';
 
 const graphScreenSource = await readFile(new URL('./GraphScreen.tsx', import.meta.url), 'utf8');
+const lowDetailCanvasSource = await readFile(
+  new URL('./LowDetailGraphCanvas.tsx', import.meta.url),
+  'utf8',
+);
 
 test('native graph scale avoids composited scaling and snaps to physical pixels', () => {
   assert.deepEqual(graphDisplayTransform({x: 10.24, y: 20.26, scale: 1}, 2), {
@@ -43,6 +47,18 @@ test('web graph zoom keeps detailed content crisp and composites low-detail tree
     /lowDetailGraph[\s\S]*?translateX:\s*displayTransform\.x[\s\S]*?transformOrigin:\s*'0 0'/u,
   );
   assert.match(anchorMarkup, /Platform\.OS !== 'web'[\s\S]*?translateX:\s*displayTransform\.x/u);
+});
+
+test('far-zoom web graphs use one inert canvas without recipe hover expansion', () => {
+  assert.match(graphScreenSource, /<LowDetailGraphCanvas/u);
+  assert.match(graphScreenSource, /rasterLowDetailGraph \? 0 : GRAPH_VIEWPORT_OVERSCAN/u);
+  assert.doesNotMatch(
+    graphScreenSource,
+    /lowDetailRecipeHover|hoveredLowDetailRecipe|previewMagnification|pointermove/u,
+  );
+  assert.match(lowDetailCanvasSource, /createElement\('canvas'\)/u);
+  assert.match(lowDetailCanvasSource, /pointerEvents="none"/u);
+  assert.match(lowDetailCanvasSource, /imageSmoothingEnabled = false/u);
 });
 
 test('interface zoom scales graph menu chrome without scaling the graph canvas', () => {
