@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   RADIAL_ITEM_SIZE,
+  RADIAL_NODE_GAP,
   RADIAL_ROOT_DIAMOND_SIZE,
   RADIAL_ROOT_SIZE,
   layoutRadialTree,
@@ -10,6 +11,7 @@ import {
 import {
   COMPACT_LABEL_HEIGHT,
   COMPACT_LABEL_WIDTH,
+  COMPACT_ROOT_LABEL_HEIGHT,
 } from './layout.ts';
 
 function item(id, options = {}) {
@@ -39,6 +41,54 @@ function highFanout(inputCount) {
     'root',
     Array.from({length: inputCount}, (_, index) => item(`input-${index}`)),
   );
+}
+
+function regularForest(branchCount, inputsPerBranch) {
+  return sourceNode(
+    'root',
+    Array.from({length: branchCount}, (_, branchIndex) =>
+      sourceNode(
+        `branch-${branchIndex}`,
+        Array.from({length: inputsPerBranch}, (_, inputIndex) =>
+          item(`branch-${branchIndex}-input-${inputIndex}`),
+        ),
+      ),
+    ),
+  );
+}
+
+function balancedTree(branchingFactor, depth, prefix = 'root') {
+  if (depth === 0) return item(`${prefix}-leaf`);
+  return sourceNode(
+    prefix,
+    Array.from({length: branchingFactor}, (_, index) =>
+      balancedTree(branchingFactor, depth - 1, `${prefix}-${index}`),
+    ),
+  );
+}
+
+function seededIrregularTree(
+  initialSeed,
+  depth = 6,
+  maximumChildren = 6,
+  terminalChance = 0.32,
+) {
+  let seed = initialSeed >>> 0;
+  let nextId = 0;
+  const random = () => {
+    seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0;
+    return seed / 2 ** 32;
+  };
+  const build = remainingDepth => {
+    const id = `irregular-${nextId++}`;
+    if (remainingDepth === 0 || random() < terminalChance) return item(id);
+    const childCount = 1 + Math.floor(random() * maximumChildren);
+    return sourceNode(
+      id,
+      Array.from({length: childCount}, () => build(remainingDepth - 1)),
+    );
+  };
+  return build(depth);
 }
 
 function deepChain(nodeCount) {
@@ -72,6 +122,40 @@ function distanceBetween(graph, leftId, rightId) {
   return Math.hypot(leftCenter.x - rightCenter.x, leftCenter.y - rightCenter.y);
 }
 
+function assertHierarchyMovesOutward(graph, root) {
+  const nodeById = new Map(graph.nodes.map(node => [node.id, node]));
+  const rootNode = graph.nodes.find(node => node.depth === 0);
+  assert.ok(rootNode, 'missing radial root');
+  const rootCenter = nodeCenter(rootNode);
+  const stack = [root];
+  while (stack.length > 0) {
+    const parentItem = stack.pop();
+    const parentId = parentItem.source?.id ?? parentItem.id;
+    const parentNode = nodeById.get(parentId);
+    assert.ok(parentNode, `missing radial node ${parentId}`);
+    const parentCenter = nodeCenter(parentNode);
+    const parentRadius = Math.hypot(
+      parentCenter.x - rootCenter.x,
+      parentCenter.y - rootCenter.y,
+    );
+    for (const childItem of parentItem.source?.inputs ?? []) {
+      const childId = childItem.source?.id ?? childItem.id;
+      const childNode = nodeById.get(childId);
+      assert.ok(childNode, `missing radial node ${childId}`);
+      const childCenter = nodeCenter(childNode);
+      const childRadius = Math.hypot(
+        childCenter.x - rootCenter.x,
+        childCenter.y - rootCenter.y,
+      );
+      assert.ok(
+        childRadius > parentRadius,
+        `${childId} moved inward from ${parentId}: ${childRadius} <= ${parentRadius}`,
+      );
+      stack.push(childItem);
+    }
+  }
+}
+
 function angleBetweenChildren(graph, parentId, leftId, rightId) {
   const parent = graph.nodes.find(node => node.id === parentId);
   const left = graph.nodes.find(node => node.id === leftId);
@@ -90,6 +174,29 @@ function angleBetweenChildren(graph, parentId, leftId, rightId) {
   );
   const delta = Math.abs(leftAngle - rightAngle) % (Math.PI * 2);
   return Math.min(delta, Math.PI * 2 - delta);
+}
+
+function assertChildFanOrder(graph, parentId, childIds) {
+  const parent = graph.nodes.find(node => node.id === parentId);
+  assert.ok(parent, `missing radial parent ${parentId}`);
+  const parentCenter = nodeCenter(parent);
+  const angles = childIds.map(childId => {
+    const child = graph.nodes.find(node => node.id === childId);
+    assert.ok(child, `missing radial child ${childId}`);
+    const childCenter = nodeCenter(child);
+    return Math.atan2(
+      childCenter.y - parentCenter.y,
+      childCenter.x - parentCenter.x,
+    );
+  });
+  let fanSpan = 0;
+  for (let index = 1; index < angles.length; index += 1) {
+    const rawDelta = (angles[index] - angles[index - 1]) % (Math.PI * 2);
+    const delta = rawDelta > 0 ? rawDelta : rawDelta + Math.PI * 2;
+    assert.ok(delta < Math.PI / 2, `${parentId} reordered child ${childIds[index]}`);
+    fanSpan += delta;
+  }
+  assert.ok(fanSpan < Math.PI, `${parentId} wrapped its child fan`);
 }
 
 function assertNoNodeOverlaps(graph) {
@@ -112,7 +219,9 @@ function assertNoCompactLabelOverlaps(graph) {
       x: node.x + node.w / 2 - width / 2,
       y: node.y,
       w: width,
-      h: node.h + COMPACT_LABEL_HEIGHT,
+      h:
+        node.h +
+        (node.depth === 0 ? COMPACT_ROOT_LABEL_HEIGHT : COMPACT_LABEL_HEIGHT),
     };
   });
   for (let leftIndex = 0; leftIndex < collisionRects.length; leftIndex += 1) {
@@ -121,6 +230,34 @@ function assertNoCompactLabelOverlaps(graph) {
         rectanglesOverlap(collisionRects[leftIndex], collisionRects[rightIndex]),
         false,
         `${collisionRects[leftIndex].id} label overlaps ${collisionRects[rightIndex].id}`,
+      );
+    }
+  }
+}
+
+function assertCompactLabelClearance(graph) {
+  const collisionRects = graph.nodes.map(node => {
+    const width = Math.max(node.w, COMPACT_LABEL_WIDTH);
+    return {
+      id: node.id,
+      x: node.x + node.w / 2 - width / 2,
+      y: node.y,
+      w: width,
+      h:
+        node.h +
+        (node.depth === 0 ? COMPACT_ROOT_LABEL_HEIGHT : COMPACT_LABEL_HEIGHT),
+    };
+  });
+  for (let leftIndex = 0; leftIndex < collisionRects.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < collisionRects.length; rightIndex += 1) {
+      const left = collisionRects[leftIndex];
+      const right = collisionRects[rightIndex];
+      assert.ok(
+        left.x + left.w + RADIAL_NODE_GAP <= right.x + 0.001 ||
+          right.x + right.w + RADIAL_NODE_GAP <= left.x + 0.001 ||
+          left.y + left.h + RADIAL_NODE_GAP <= right.y + 0.001 ||
+          right.y + right.h + RADIAL_NODE_GAP <= left.y + 0.001,
+        `${left.id} is too close to ${right.id}`,
       );
     }
   }
@@ -142,6 +279,18 @@ test('stagger planner uses multiple concentric rows for high-cardinality levels'
   assert.ok(first.rowCount > 1);
   assert.equal(new Set(first.radiusByIndex).size, first.rowCount);
   assert.equal(first.radiusByIndex.length, itemCount);
+});
+
+test('stagger planner grows beyond eight rows for an extremely wide level', () => {
+  const itemCount = 2_048;
+  const angles = Array.from({length: itemCount}, (_, index) =>
+    Math.PI * 2 * ((index + 0.5) / itemCount),
+  );
+  const diameters = Array.from({length: itemCount}, () => RADIAL_ITEM_SIZE);
+  const plan = planStaggeredRadialRows(angles, diameters, 180);
+
+  assert.ok(plan.rowCount > 8);
+  assert.ok(plan.rowCount <= Math.ceil(Math.sqrt(itemCount)));
 });
 
 test('places a large initial ingredient set around the centered recipe without overlaps', () => {
@@ -305,6 +454,67 @@ test('keeps multiple labeled ingredient fans local to their recipes', () => {
     distances.reduce((sum, distance) => sum + distance, 0) / distances.length < 600,
   );
   assertNoCompactLabelOverlaps(graph);
+});
+
+test('keeps a deep, broadly branching labeled tree compact', () => {
+  const graph = layoutRadialTree(balancedTree(8, 3), true, () => true, true);
+  const edgeLengths = graph.edges.map(edge => edge.w).sort((left, right) => left - right);
+  const p99EdgeLength = edgeLengths[Math.floor((edgeLengths.length - 1) * 0.99)];
+  const maximumEdgeLength = edgeLengths.at(-1);
+  const area = (graph.maxX - graph.minX) * (graph.maxY - graph.minY);
+
+  assert.equal(graph.nodes.length, 585);
+  // Group-wide collision offsets produced a 2,382 px maximum spoke and 29.6M px² bounds.
+  assert.ok(p99EdgeLength < 1_550, `p99 spoke was ${p99EdgeLength}`);
+  assert.ok(maximumEdgeLength < 1_600, `maximum spoke was ${maximumEdgeLength}`);
+  assert.ok(area < 13_500_000, `radial area was ${area}`);
+  assertNoCompactLabelOverlaps(graph);
+  assertCompactLabelClearance(graph);
+});
+
+test('keeps a very wide labeled level compact without group-wide spoke inflation', () => {
+  const graph = layoutRadialTree(regularForest(96, 8), true, () => true, true);
+  const maximumEdgeLength = Math.max(...graph.edges.map(edge => edge.w));
+  const area = (graph.maxX - graph.minX) * (graph.maxY - graph.minY);
+
+  assert.equal(graph.nodes.length, 865);
+  // Production labels previously produced a 3,162 px maximum spoke and 44.9M px² bounds.
+  assert.ok(maximumEdgeLength < 2_050, `maximum spoke was ${maximumEdgeLength}`);
+  assert.ok(area < 21_000_000, `radial area was ${area}`);
+  for (let branchIndex = 0; branchIndex < 96; branchIndex += 1) {
+    assertChildFanOrder(
+      graph,
+      `branch-${branchIndex}.source`,
+      Array.from({length: 8}, (_, inputIndex) =>
+        `branch-${branchIndex}-input-${inputIndex}`,
+      ),
+    );
+  }
+  assertCompactLabelClearance(graph);
+});
+
+test('keeps every dependency moving outward on a deep labeled tree', () => {
+  const root = balancedTree(2, 10);
+  const graph = layoutRadialTree(root, true, () => true, true);
+  const edgeLengths = graph.edges.map(edge => edge.w).sort((left, right) => left - right);
+  const p99EdgeLength = edgeLengths[Math.floor((edgeLengths.length - 1) * 0.99)];
+  const maximumEdgeLength = edgeLengths.at(-1);
+  const area = (graph.maxX - graph.minX) * (graph.maxY - graph.minY);
+
+  assert.equal(graph.nodes.length, 2_047);
+  assertHierarchyMovesOutward(graph, root);
+  assert.ok(p99EdgeLength < 1_850, `p99 spoke was ${p99EdgeLength}`);
+  assert.ok(maximumEdgeLength < 2_250, `maximum spoke was ${maximumEdgeLength}`);
+  assert.ok(area < 48_000_000, `radial area was ${area}`);
+});
+
+test('keeps outward placement feasible for an irregular labeled tree', () => {
+  const root = seededIrregularTree(249);
+  const graph = layoutRadialTree(root, true, () => true, true);
+
+  assert.equal(graph.nodes.length, 94);
+  assertHierarchyMovesOutward(graph, root);
+  assertCompactLabelClearance(graph);
 });
 
 test('compacts descendant inputs instead of inheriting a large root sector', () => {
