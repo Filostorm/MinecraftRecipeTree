@@ -1,5 +1,33 @@
 # Production deployment verifications
 
+## 2026-08-27 — static far-zoom canvas rendering
+
+- Application commit: `1ea570a31ee94b4766b957db67a83eeb3f0ca65f`
+- Beta Worker version: `e6784b48-b257-478c-9bd2-4d6b5e1f560e`
+- Production Worker: `minecraft-recipe-tree-production`
+- Production Worker version: `d5a04c11-5529-4ffc-903d-f9bcf552d67a`
+- Canonical URL: `https://minecraftrecipetree.craftsmannsoftware.com/`
+
+Passed:
+
+- The exact seven-file beta-validated graph change was promoted onto the latest production branch
+  without modifying the unrelated work in the primary checkout. The complete release suite passed
+  722/722 tests, TypeScript validation passed, and both Worker bundles built cleanly.
+- A generated 161-item local exporter fixture exercised the real dense-tree threshold through the
+  released beta and production interfaces. Fitting its 161-node graph mounted exactly one
+  viewport-sized canvas with `pointer-events: none` and zero interactive graph-node buttons.
+- Fresh beta and canonical production browser tabs hydrated MeatballCraft with 189,137 searchable
+  items. The beta catalog retained its required production data-origin header.
+- The canonical homepage, Vinext bootstrap import, serialized RSC stylesheet, lazy graph bundle,
+  local-pack service worker, `/publish`, `/api/datasets`, and `/api/modpacks` returned `200` with
+  their expected content types. The canonical router retained the signal-edge compatibility header
+  and identified the standalone production Worker as the active application origin.
+- Upload administration and feedback inbox reads returned `401`; unsupported failure-report reads
+  returned `405`; deliberately invalid same-origin feedback and failure reports returned `400`;
+  and legacy modpack mutation remained forbidden with `403`.
+- Remote D1 readback retained four dataset channels, two legacy modpacks, three feedback reports,
+  and zero exporter-failure reports. The verification query reported zero rows written.
+
 ## 2026-08-26 — large-tree rendering and required Unique mode
 
 - Application commit: `82bc5bfe8e7f4566dcf11386a27c820176299ae9`
