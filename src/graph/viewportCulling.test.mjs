@@ -99,3 +99,24 @@ test('keeps a 10,000-node off-screen tree to a bounded mounted window', () => {
   assert.ok(visible.edges.length < 20, `mounted ${visible.edges.length} edges`);
   assert.equal(visible.culled, true);
 });
+
+test('skips connector geometry work when low-detail rendering hides every edge', () => {
+  const graph = {
+    nodes: [node('root', 0, 0), node('child', 100, 0)],
+    edges: [{x: 50, y: 24, w: 50, h: 2}],
+    minX: 0,
+    minY: 0,
+    maxX: 150,
+    maxY: 50,
+  };
+  const visible = visibleGraphElements(
+    graph,
+    {x: 0, y: 0, scale: 0.2},
+    {w: 320, h: 240},
+    0,
+    false,
+  );
+  assert.deepEqual(visible.nodes.map(entry => entry.id), ['root', 'child']);
+  assert.deepEqual(visible.edges, []);
+  assert.equal(visible.culled, true);
+});

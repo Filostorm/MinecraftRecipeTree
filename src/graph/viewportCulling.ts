@@ -62,6 +62,7 @@ export function visibleGraphElements(
   transform: GraphTransform,
   viewport: GraphViewport,
   overscan = GRAPH_VIEWPORT_OVERSCAN,
+  includeEdges = true,
 ): VisibleGraphElements {
   if (
     viewport.w <= 0 ||
@@ -92,16 +93,18 @@ export function visibleGraphElements(
       node.y + node.h,
     ),
   );
-  const edges = graph.edges.filter(edge => {
-    const edgeRect = edgeBounds(edge);
-    return intersectsViewport(
-      bounds,
-      edgeRect.left,
-      edgeRect.top,
-      edgeRect.right,
-      edgeRect.bottom,
-    );
-  });
+  const edges = includeEdges
+    ? graph.edges.filter(edge => {
+        const edgeRect = edgeBounds(edge);
+        return intersectsViewport(
+          bounds,
+          edgeRect.left,
+          edgeRect.top,
+          edgeRect.right,
+          edgeRect.bottom,
+        );
+      })
+    : [];
   return {
     nodes,
     edges,

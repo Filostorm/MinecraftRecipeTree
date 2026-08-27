@@ -31,13 +31,17 @@ test('native graph scale avoids composited scaling and snaps to physical pixels'
   );
 });
 
-test('web graph zoom uses layout scaling instead of a composited scale transform', () => {
+test('web graph zoom keeps detailed content crisp and composites low-detail trees', () => {
   assert.match(graphScreenSource, /zoom:\s*displayTransform\.scale/u);
   const anchorMarkup = graphScreenSource.slice(
-    graphScreenSource.indexOf('Keep translation outside the web scale layer'),
-    graphScreenSource.indexOf('{renderedGraph?.edges.map'),
+    graphScreenSource.indexOf('Keep translation outside the detailed web scale layer'),
+    graphScreenSource.indexOf('{!lowDetailGraph && renderedGraph?.edges.map'),
   );
   assert.match(anchorMarkup, /Platform\.OS === 'web'[\s\S]*?left:\s*displayTransform\.x/u);
+  assert.match(
+    anchorMarkup,
+    /lowDetailGraph[\s\S]*?translateX:\s*displayTransform\.x[\s\S]*?transformOrigin:\s*'0 0'/u,
+  );
   assert.match(anchorMarkup, /Platform\.OS !== 'web'[\s\S]*?translateX:\s*displayTransform\.x/u);
 });
 
