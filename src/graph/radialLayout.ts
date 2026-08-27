@@ -13,13 +13,12 @@ import type {ItemTreeNode} from './model.ts';
 const FULL_TURN = Math.PI * 2;
 const EDGE_THICKNESS = 2;
 const RADIAL_DEPTH_GAP = 64;
-const RADIAL_NODE_GAP = 20;
+export const RADIAL_NODE_GAP = 20;
 const RADIAL_TERMINAL_GAP = RADIAL_NODE_GAP;
-const RADIAL_COLLISION_PLACEMENT_STEP = 12;
 const RADIAL_COLLISION_ROTATION_STEP = Math.PI / 36;
 const RADIAL_COLLISION_ROTATION_STEPS = 8;
 const MAX_COLLISION_PLACEMENT_ATTEMPTS = 100_000;
-const MAX_STAGGERED_ROWS = 8;
+const MIN_STAGGERED_ROW_SEARCH = 8;
 const MIN_LOCAL_FAN_SPAN = Math.PI / 7.5;
 const MAX_LOCAL_FAN_SPAN = Math.PI * 5 / 6;
 
@@ -46,10 +45,10 @@ function positiveAngularDelta(from: number, to: number): number {
 /**
  * Assign one ordered polar level to collision-safe concentric rows.
  *
- * Adjacent angular nodes are interleaved between rows. The planner evaluates
- * up to eight row counts and chooses the smallest outer radius, so a
- * high-cardinality ingredient level becomes a compact staggered annulus rather
- * than one enormous circle.
+ * Adjacent angular nodes are interleaved between rows. The planner evaluates a
+ * square-root-sized search for the smallest outer radius, so its row count can
+ * continue growing with a very large level without an expensive quadratic
+ * scan or an arbitrary fixed ceiling.
  */
 export function planStaggeredRadialRows(
   angles: number[],
@@ -80,7 +79,10 @@ export function planStaggeredRadialRows(
   for (const diameter of diameters) maximumDiameter = Math.max(maximumDiameter, diameter);
   const rowGap = maximumDiameter + RADIAL_NODE_GAP;
   let best: StaggeredRadialRows | null = null;
-  const maximumRows = Math.min(MAX_STAGGERED_ROWS, angles.length);
+  const maximumRows = Math.min(
+    angles.length,
+    Math.max(MIN_STAGGERED_ROW_SEARCH, Math.ceil(Math.sqrt(angles.length))),
+  );
 
   for (let rowCount = 1; rowCount <= maximumRows; rowCount += 1) {
     const rowByIndex = angles.map((_, index) => index % rowCount);
@@ -88,9 +90,7 @@ export function planStaggeredRadialRows(
 
     for (let row = 0; row < rowCount; row += 1) {
       const indices: number[] = [];
-      rowByIndex.forEach((assignedRow, index) => {
-        if (assignedRow === row) indices.push(index);
-      });
+      for (let index = row; index < angles.length; index += rowCount) indices.push(index);
       if (indices.length <= 1) continue;
 
       indices.forEach((index, offset) => {
@@ -229,6 +229,7 @@ interface RadialUnit {
   visualH: number;
   collisionW: number;
   collisionH: number;
+  collisionOffsetY: number;
   collisionDiameter: number;
   terminal: boolean;
   leafCount: number;
@@ -260,6 +261,7 @@ function makeRadialUnit(
     visualH: visualSize.h,
     collisionW: collisionSize.w,
     collisionH: collisionSize.h,
+    collisionOffsetY: 0,
     collisionDiameter: Math.max(collisionSize.w, collisionSize.h),
     terminal,
     leafCount: 0,
@@ -319,6 +321,7 @@ function flattenRadialTree(
     rootUnit.collisionH = rootUnit.visualH;
     rootUnit.collisionDiameter = Math.max(rootUnit.collisionW, rootUnit.collisionH);
   }
+  rootUnit.collisionOffsetY = Math.max(0, rootUnit.collisionH - rootUnit.visualH) / 2;
   const units = [rootUnit];
   const expansionStack = [0];
 
@@ -346,6 +349,7 @@ function flattenRadialTree(
         child.collisionH = RADIAL_ITEM_SIZE + COMPACT_LABEL_HEIGHT;
         child.collisionDiameter = Math.max(child.collisionW, child.collisionH);
       }
+      child.collisionOffsetY = Math.max(0, child.collisionH - child.visualH) / 2;
       const childIndex = units.length;
       units.push(child);
       parent.children.push(childIndex);
@@ -406,7 +410,6 @@ interface SpatialEntry {
   y: number;
   halfW: number;
   halfH: number;
-  cells: string[];
 }
 
 class RadialSpatialIndex {
@@ -444,61 +447,90 @@ class RadialSpatialIndex {
     }
     const halfW = this.units[index].collisionW / 2;
     const halfH = this.units[index].collisionH / 2;
+    const collisionY = y + this.units[index].collisionOffsetY;
+    const cells = this.cellKeysFor(x, collisionY, Math.max(halfW, halfH) + RADIAL_NODE_GAP);
     const entry = {
       x,
-      y,
+      y: collisionY,
       halfW,
       halfH,
-      cells: this.cellKeysFor(x, y, Math.max(halfW, halfH) + RADIAL_NODE_GAP),
     };
     this.entries.set(index, entry);
-    for (const key of entry.cells) {
+    for (const key of cells) {
       const bucket = this.cells.get(key) ?? new Set<number>();
       bucket.add(index);
       this.cells.set(key, bucket);
     }
   }
 
-  remove(index: number): void {
-    const entry = this.entries.get(index);
-    if (!entry) {
-      throw new Error(`Radial spatial index cannot remove missing node ${index}.`);
+  nearestClearDistanceAlongRay(
+    index: number,
+    originX: number,
+    originY: number,
+    ux: number,
+    uy: number,
+    minimumDistance: number,
+  ): number {
+    if (
+      ![originX, originY, ux, uy, minimumDistance].every(Number.isFinite) ||
+      minimumDistance <= 0 ||
+      Math.abs(Math.hypot(ux, uy) - 1) > 1e-6
+    ) {
+      throw new Error(`Radial graph node ${index} has an invalid placement ray.`);
     }
-    for (const key of entry.cells) {
-      const bucket = this.cells.get(key);
-      bucket?.delete(index);
-      if (bucket?.size === 0) this.cells.delete(key);
-    }
-    this.entries.delete(index);
-  }
-
-  collides(index: number, x: number, y: number): boolean {
+    let distance = minimumDistance;
     const halfW = this.units[index].collisionW / 2;
     const halfH = this.units[index].collisionH / 2;
-    const candidates = new Set<number>();
-    for (const key of this.cellKeysFor(
-      x,
-      y,
-      Math.max(halfW, halfH) + RADIAL_NODE_GAP,
-    )) {
-      for (const candidate of this.cells.get(key) ?? []) candidates.add(candidate);
-    }
-    for (const candidate of candidates) {
-      if (candidate === index) continue;
-      const entry = this.entries.get(candidate);
-      if (!entry) {
-        throw new Error(`Radial spatial index lost node ${candidate}.`);
+    const collisionOriginY = originY + this.units[index].collisionOffsetY;
+    for (let attempts = 0; attempts <= MAX_COLLISION_PLACEMENT_ATTEMPTS; attempts += 1) {
+      const x = originX + ux * distance;
+      const y = collisionOriginY + uy * distance;
+      const candidates = new Set<number>();
+      for (const key of this.cellKeysFor(
+        x,
+        y,
+        Math.max(halfW, halfH) + RADIAL_NODE_GAP,
+      )) {
+        for (const candidate of this.cells.get(key) ?? []) candidates.add(candidate);
       }
-      const horizontalClearance = halfW + entry.halfW + RADIAL_NODE_GAP;
-      const verticalClearance = halfH + entry.halfH + RADIAL_NODE_GAP;
-      if (
-        Math.abs(x - entry.x) < horizontalClearance - 0.001 &&
-        Math.abs(y - entry.y) < verticalClearance - 0.001
-      ) {
-        return true;
+
+      let nextDistance = distance;
+      for (const candidate of candidates) {
+        const entry = this.entries.get(candidate);
+        if (!entry) {
+          throw new Error(`Radial spatial index lost node ${candidate}.`);
+        }
+        const horizontalClearance = halfW + entry.halfW + RADIAL_NODE_GAP - 0.001;
+        const verticalClearance = halfH + entry.halfH + RADIAL_NODE_GAP - 0.001;
+        if (
+          Math.abs(x - entry.x) >= horizontalClearance ||
+          Math.abs(y - entry.y) >= verticalClearance
+        ) {
+          continue;
+        }
+
+        const horizontalExit = Math.abs(ux) <= 1e-9
+          ? Infinity
+          : Math.max(
+              (entry.x - horizontalClearance - originX) / ux,
+              (entry.x + horizontalClearance - originX) / ux,
+            );
+        const verticalExit = Math.abs(uy) <= 1e-9
+          ? Infinity
+          : Math.max(
+              (entry.y - verticalClearance - collisionOriginY) / uy,
+              (entry.y + verticalClearance - collisionOriginY) / uy,
+            );
+        const collisionExit = Math.min(horizontalExit, verticalExit);
+        if (!Number.isFinite(collisionExit) || collisionExit < distance) {
+          throw new Error(`Radial collision exit for node ${index} is invalid.`);
+        }
+        nextDistance = Math.max(nextDistance, collisionExit + 0.001);
       }
+      if (nextDistance <= distance + 1e-9) return distance;
+      distance = nextDistance;
     }
-    return false;
+    throw new Error(`Radial graph node ${index} could not find collision-free placement.`);
   }
 }
 
@@ -512,13 +544,18 @@ function collisionRotationOffsets(parent: RadialUnit): number[] {
   return offsets;
 }
 
+/** Minimum parent-relative ray distance that ends strictly farther from the root. */
+function minimumOutwardDistance(parent: RadialUnit, ux: number, uy: number): number {
+  if (parent.depth === 0) return 0;
+  const outwardProjection = parent.centerX * ux + parent.centerY * uy;
+  return outwardProjection < 0 ? -2 * outwardProjection + 0.001 : 0;
+}
+
 /**
- * Place every sibling group on parent-centered annuli. A shared collision
- * offset moves the complete group together, preserving approximately equal
- * parent-to-child edge lengths instead of aligning descendants to root-centered
- * depth rings. Before extending those edges, the solver rotates a descendant
- * fan through nearby angular lanes so occupied neighboring branches do not
- * force an otherwise compact recipe ring far away from its parent.
+ * Place each sibling at its nearest collision-free radius on one shared local
+ * lane. Moving a whole fan outward for one blocked child creates the very long
+ * spokes seen in large trees; keeping one fan rotation preserves sibling order,
+ * while immediate insertion prevents overlaps without penalizing every child.
  */
 function placeBranchLocalRings(units: RadialUnit[], levels: number[][]): void {
   const spatialIndex = new RadialSpatialIndex(units);
@@ -529,7 +566,6 @@ function placeBranchLocalRings(units: RadialUnit[], levels: number[][]): void {
     if (!indices || indices.length === 0) {
       throw new Error(`Radial graph layout is missing tree depth ${depth}.`);
     }
-
     const parentIndices = [...new Set(indices.map(index => units[index].parentIndex))]
       .sort((left, right) => {
         if (left === null || right === null) return Number(left === null) - Number(right === null);
@@ -557,53 +593,73 @@ function placeBranchLocalRings(units: RadialUnit[], levels: number[][]): void {
         minimumParentDistance,
       );
 
-      let collisionOffset = 0;
       const rotationOffsets = collisionRotationOffsets(parent);
-      for (let attempts = 0; ; attempts += 1) {
-        let placement:
-          | {
-              rotationOffset: number;
-              candidates: Array<{index: number; centerX: number; centerY: number}>;
-            }
-          | undefined;
-        for (const rotationOffset of rotationOffsets) {
-          const candidates = childIndices.map((index, offset) => {
-            const unit = units[index];
-            const displayAngle = unit.angle + rotationOffset - Math.PI / 2;
-            const parentDistance = rowPlan.radiusByIndex[offset] + collisionOffset;
-            return {
-              index,
-              centerX: parent.centerX + Math.cos(displayAngle) * parentDistance,
-              centerY: parent.centerY + Math.sin(displayAngle) * parentDistance,
-            };
-          });
-          if (
-            candidates.every(candidate =>
-              !spatialIndex.collides(candidate.index, candidate.centerX, candidate.centerY),
-            )
-          ) {
-            placement = {rotationOffset, candidates};
-            break;
-          }
-        }
-        if (placement) {
-          for (const childIndex of childIndices) {
-            rotateSubtreeAngles(units, childIndex, placement.rotationOffset);
-          }
-          for (const candidate of placement.candidates) {
-            const unit = units[candidate.index];
-            unit.centerX = candidate.centerX;
-            unit.centerY = candidate.centerY;
-            spatialIndex.insert(candidate.index, candidate.centerX, candidate.centerY);
-          }
-          break;
-        }
-        collisionOffset += RADIAL_COLLISION_PLACEMENT_STEP;
-        if (attempts > MAX_COLLISION_PLACEMENT_ATTEMPTS) {
-          throw new Error(
-            `Radial graph branch ${parentIndex} could not find collision-free placement.`,
+      let fanRotation: number | undefined;
+      let bestMaximumExtraDistance = Infinity;
+      let bestTotalExtraDistance = Infinity;
+      const previewDistanceByChild = new Map<number, number>();
+      for (const rotationOffset of rotationOffsets) {
+        let maximumExtraDistance = 0;
+        let totalExtraDistance = 0;
+        const candidateDistances = new Map<number, number>();
+        for (let childOffset = 0; childOffset < childIndices.length; childOffset += 1) {
+          const childIndex = childIndices[childOffset];
+          const child = units[childIndex];
+          const preferredDistance = rowPlan.radiusByIndex[childOffset];
+          const displayAngle = child.angle + rotationOffset - Math.PI / 2;
+          const ux = Math.cos(displayAngle);
+          const uy = Math.sin(displayAngle);
+          const distance = spatialIndex.nearestClearDistanceAlongRay(
+            childIndex,
+            parent.centerX,
+            parent.centerY,
+            ux,
+            uy,
+            Math.max(preferredDistance, minimumOutwardDistance(parent, ux, uy)),
           );
+          const extraDistance = distance - preferredDistance;
+          maximumExtraDistance = Math.max(maximumExtraDistance, extraDistance);
+          totalExtraDistance += extraDistance;
+          candidateDistances.set(childIndex, distance);
         }
+        if (
+          maximumExtraDistance < bestMaximumExtraDistance - 0.001 ||
+          (Math.abs(maximumExtraDistance - bestMaximumExtraDistance) <= 0.001 &&
+            totalExtraDistance < bestTotalExtraDistance - 0.001)
+        ) {
+          fanRotation = rotationOffset;
+          bestMaximumExtraDistance = maximumExtraDistance;
+          bestTotalExtraDistance = totalExtraDistance;
+          previewDistanceByChild.clear();
+          for (const [childIndex, distance] of candidateDistances) {
+            previewDistanceByChild.set(childIndex, distance);
+          }
+        }
+        if (maximumExtraDistance <= 0.001) break;
+      }
+      if (fanRotation === undefined) {
+        throw new Error(`Radial graph branch ${parentIndex} has no placement lane.`);
+      }
+
+      for (let childOffset = 0; childOffset < childIndices.length; childOffset += 1) {
+        const childIndex = childIndices[childOffset];
+        const child = units[childIndex];
+        const preferredDistance = rowPlan.radiusByIndex[childOffset];
+        const displayAngle = child.angle + fanRotation - Math.PI / 2;
+        const ux = Math.cos(displayAngle);
+        const uy = Math.sin(displayAngle);
+        const distance = spatialIndex.nearestClearDistanceAlongRay(
+          childIndex,
+          parent.centerX,
+          parent.centerY,
+          ux,
+          uy,
+          Math.max(preferredDistance, previewDistanceByChild.get(childIndex) ?? preferredDistance),
+        );
+        rotateSubtreeAngles(units, childIndex, fanRotation);
+        child.centerX = parent.centerX + ux * distance;
+        child.centerY = parent.centerY + uy * distance;
+        spatialIndex.insert(childIndex, child.centerX, child.centerY);
       }
     }
   }
@@ -648,10 +704,10 @@ function addRadialEdge(edges: EdgeRect[], parent: RadialUnit, child: RadialUnit)
  *
  * The selected output is centered, dependency subtrees receive contiguous
  * angular sectors with sublinear leaf weighting so sparse deep branches retain
- * usable interior clearance. Sibling groups expand through parent-centered,
- * staggered annuli, and a global spatial index moves complete sibling groups
- * together when cross-branch collisions require more clearance. Node views
- * themselves are never rotated, so item icons and recipe previews remain upright.
+ * usable interior clearance. Siblings begin on parent-centered staggered
+ * annuli, then each blocked node advances directly to the nearest free point
+ * on its fan's shared outward lane. Node views themselves are never rotated,
+ * so item icons and recipe previews remain upright.
  */
 export function layoutRadialTree(
   root: ItemTreeNode,
