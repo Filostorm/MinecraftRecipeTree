@@ -1,5 +1,30 @@
 # Production deployment verifications
 
+## 2026-08-26 — large-tree rendering and required Unique mode
+
+- Application commit: `82bc5bfe8e7f4566dcf11386a27c820176299ae9`
+- Standalone Worker: `minecraft-recipe-tree-production`
+- Standalone Worker version: `56635931-edbc-4159-90bb-ddf6464cb795`
+- Canonical URL: `https://minecraftrecipetree.craftsmannsoftware.com/`
+
+Passed:
+
+- The three beta-validated large-tree commits were promoted onto the latest production branch
+  without modifying the unrelated work in the primary checkout. The complete release suite passed
+  720/720 tests, TypeScript validation passed, and the production Worker bundle built cleanly.
+- A fresh canonical browser tab hydrated MeatballCraft with 189,137 searchable items. The publish
+  page also hydrated and exposed its local exporter ZIP drop zone.
+- The canonical homepage, Vinext bootstrap import, serialized RSC stylesheet, lazy graph bundle,
+  local-pack service worker, `/api/datasets`, `/api/modpacks`, and `/publish` returned `200` with
+  their expected content types. The graph bundle contains the required Unique-mode lock and its
+  large-tree performance explanation.
+- The canonical router retained the signal-edge compatibility header and identified the standalone
+  production Worker as the active application origin.
+- Upload administration and feedback inbox reads returned `401`; unsupported failure-report reads
+  returned `405`; and deliberately invalid same-origin feedback and failure reports returned `400`.
+  Remote D1 readback retained four dataset channels, two legacy modpacks, three feedback reports,
+  and zero exporter-failure reports with zero rows written.
+
 ## 2026-08-26 — Worker request reduction release
 
 - Application commit: `303fdcfa0e07fc7f7f1324e7f9b795ede1a5affa`
