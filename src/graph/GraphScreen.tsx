@@ -163,9 +163,10 @@ import type {
   TreeTotal,
   TreeTotals,
 } from './treeTotals';
-import {visibleGraphElements} from './viewportCulling';
+import {GRAPH_VIEWPORT_OVERSCAN, visibleGraphElements} from './viewportCulling';
 import {indexedRecipeRefs} from './indexedRecipeRefs';
 import {
+  lowDetailRecipeHoverNodeId,
   lowDetailRecipeHoverMagnification,
   shouldShowNodeAmounts,
   shouldUseLowDetailGraph,
@@ -2015,6 +2016,8 @@ export function GraphScreen({
         : [],
     [graph, treeTotals],
   );
+  const lowDetailGraph =
+    !exportingTree && shouldUseLowDetailGraph(transform.scale, graph?.nodes.length ?? 0);
   const renderedGraph = useMemo(() => {
     if (!graph) return null;
     if (exportingTree) {
@@ -2025,20 +2028,31 @@ export function GraphScreen({
         culled: false,
       };
     }
-    const visible = visibleGraphElements(graph, transform, viewportSize);
-    const visibleSupplyEdges = visibleGraphElements(
-      {...graph, edges: supplyEdges},
+    const visible = visibleGraphElements(
+      graph,
       transform,
       viewportSize,
-    ).edges as ByproductSupplyEdge[];
+      GRAPH_VIEWPORT_OVERSCAN,
+      !lowDetailGraph,
+    );
+    const visibleSupplyEdges = lowDetailGraph
+      ? []
+      : (visibleGraphElements(
+          {...graph, edges: supplyEdges},
+          transform,
+          viewportSize,
+        ).edges as ByproductSupplyEdge[]);
     return {...visible, supplyEdges: visibleSupplyEdges};
-  }, [exportingTree, graph, supplyEdges, transform, viewportSize]);
-  const lowDetailGraph =
-    !exportingTree && shouldUseLowDetailGraph(transform.scale, graph?.nodes.length ?? 0);
+  }, [exportingTree, graph, lowDetailGraph, supplyEdges, transform, viewportSize]);
   const showNodeAmounts = shouldShowNodeAmounts(transform.scale, exportingTree);
   const [hoveredLowDetailRecipeId, setHoveredLowDetailRecipeId] = useState<string | null>(null);
+  const hoveredLowDetailRecipeIdRef = useRef<string | null>(null);
+  hoveredLowDetailRecipeIdRef.current = hoveredLowDetailRecipeId;
+  const lowDetailRecipeHoverCandidateRef = useRef<string | null>(null);
   const lowDetailRecipeHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scheduleLowDetailRecipeHover = useCallback((nodeId: string | null) => {
+    if (lowDetailRecipeHoverCandidateRef.current === nodeId) return;
+    lowDetailRecipeHoverCandidateRef.current = nodeId;
     if (lowDetailRecipeHoverTimerRef.current) {
       clearTimeout(lowDetailRecipeHoverTimerRef.current);
       lowDetailRecipeHoverTimerRef.current = null;
@@ -2049,7 +2063,9 @@ export function GraphScreen({
     }
     lowDetailRecipeHoverTimerRef.current = setTimeout(() => {
       lowDetailRecipeHoverTimerRef.current = null;
-      setHoveredLowDetailRecipeId(nodeId);
+      if (lowDetailRecipeHoverCandidateRef.current === nodeId) {
+        setHoveredLowDetailRecipeId(nodeId);
+      }
     }, LOW_DETAIL_RECIPE_HOVER_DELAY_MS);
   }, []);
   useEffect(
@@ -2072,6 +2088,10 @@ export function GraphScreen({
             node.source?.kind === 'recipe',
         )
       : undefined;
+  const lowDetailGraphRef = useRef(lowDetailGraph);
+  lowDetailGraphRef.current = lowDetailGraph;
+  const lowDetailHoverNodesRef = useRef(renderedGraph?.nodes ?? []);
+  lowDetailHoverNodesRef.current = renderedGraph?.nodes ?? [];
   const displayedAmountFor = useCallback(
     (node: ItemTreeNode) =>
       graphDirection === 'outputs'
@@ -2080,6 +2100,15 @@ export function GraphScreen({
           : node.amount
         : requiredAmountFor(node, treeTotals),
     [graphDirection, treeTotals],
+  );
+  const handleLowDetailNodeTap = useCallback(
+    (node: ItemTreeNode) =>
+      node.id === 'root' ? setShowRootActions(value => !value) : onItemTap(node),
+    [onItemTap],
+  );
+  const handleLowDetailNodeActions = useCallback(
+    (node: ItemTreeNode, pointer?: NodeActionPointer) => openNodeMenu(node, pointer),
+    [openNodeMenu],
   );
 
   const [focusedSourceId, setFocusedSourceId] = useState<string | null>(null);
@@ -2611,6 +2640,9 @@ export function GraphScreen({
       canvasCleanup.current = null;
       const el = view as unknown as HTMLElement | null;
       if (el && typeof el.addEventListener === 'function') {
+        let hoverAnimationFrame = 0;
+        let hoverClientPoint: {x: number; y: number} | null = null;
+        const animationWindow = el.ownerDocument?.defaultView;
         const onWheel = (e: WheelEvent) => {
           e.preventDefault();
           const rect = el.getBoundingClientRect();
@@ -2629,6 +2661,56 @@ export function GraphScreen({
           );
           zoomAt(point.x, point.y, graphWheelZoomFactor(e.deltaY, e.deltaMode));
         };
+        const resolveLowDetailHover = () => {
+          hoverAnimationFrame = 0;
+          if (!lowDetailGraphRef.current || !hoverClientPoint) {
+            scheduleLowDetailRecipeHover(null);
+            return;
+          }
+          const rect = el.getBoundingClientRect();
+          const viewport = viewportRef.current;
+          if (viewport.w <= 0 || viewport.h <= 0) {
+            console.error('Low-detail recipe hover was ignored because the viewport is not measurable.', {
+              viewport,
+            });
+            scheduleLowDetailRecipeHover(null);
+            return;
+          }
+          const point = graphViewportPointFromClient(
+            hoverClientPoint.x,
+            hoverClientPoint.y,
+            rect,
+            {width: viewport.w, height: viewport.h},
+          );
+          const currentNodeId =
+            lowDetailRecipeHoverCandidateRef.current ?? hoveredLowDetailRecipeIdRef.current;
+          scheduleLowDetailRecipeHover(
+            lowDetailRecipeHoverNodeId(
+              lowDetailHoverNodesRef.current,
+              transformRef.current,
+              point,
+              currentNodeId,
+            ),
+          );
+        };
+        const onPointerMove = (event: PointerEvent) => {
+          if (!lowDetailGraphRef.current) return;
+          hoverClientPoint = {x: event.clientX, y: event.clientY};
+          if (hoverAnimationFrame !== 0) return;
+          if (!animationWindow?.requestAnimationFrame) {
+            console.error('Low-detail recipe hover requires requestAnimationFrame support.');
+            return;
+          }
+          hoverAnimationFrame = animationWindow.requestAnimationFrame(resolveLowDetailHover);
+        };
+        const onPointerLeave = () => {
+          hoverClientPoint = null;
+          if (hoverAnimationFrame !== 0 && animationWindow?.cancelAnimationFrame) {
+            animationWindow.cancelAnimationFrame(hoverAnimationFrame);
+            hoverAnimationFrame = 0;
+          }
+          scheduleLowDetailRecipeHover(null);
+        };
         const preventNativeDrag = (e: Event) => e.preventDefault();
         const preventPagePinch = (event: Event) => {
           const touchEvent = event as TouchEvent;
@@ -2644,6 +2726,8 @@ export function GraphScreen({
         el.style.setProperty('touch-action', 'none');
         el.style.setProperty('overscroll-behavior', 'contain');
         el.addEventListener('wheel', onWheel, {passive: false});
+        el.addEventListener('pointermove', onPointerMove, {passive: true});
+        el.addEventListener('pointerleave', onPointerLeave, {passive: true});
         el.addEventListener('touchstart', preventPagePinch, {passive: false});
         el.addEventListener('touchmove', preventPagePinch, {passive: false});
         el.addEventListener('gesturestart', preventNativeDrag, {passive: false});
@@ -2652,6 +2736,11 @@ export function GraphScreen({
         el.addEventListener('dragstart', preventNativeDrag, true);
         canvasCleanup.current = () => {
           el.removeEventListener('wheel', onWheel);
+          el.removeEventListener('pointermove', onPointerMove);
+          el.removeEventListener('pointerleave', onPointerLeave);
+          if (hoverAnimationFrame !== 0 && animationWindow?.cancelAnimationFrame) {
+            animationWindow.cancelAnimationFrame(hoverAnimationFrame);
+          }
           el.removeEventListener('touchstart', preventPagePinch);
           el.removeEventListener('touchmove', preventPagePinch);
           el.removeEventListener('gesturestart', preventNativeDrag);
@@ -2663,7 +2752,7 @@ export function GraphScreen({
         console.warn('Graph canvas could not attach native pan-suppression listeners.');
       }
     },
-    [zoomAt],
+    [scheduleLowDetailRecipeHover, zoomAt],
   );
 
   // Drag to pan, two-finger pinch to zoom.
@@ -2814,19 +2903,27 @@ export function GraphScreen({
         }}
         {...responder.panHandlers}>
         {/*
-          Keep translation outside the web scale layer. CSS zoom makes Safari
-          lay out text and pixel art at the requested graph scale instead of
-          resampling one transformed bitmap of the entire recipe subtree.
+          Keep translation outside the detailed web scale layer. Detailed nodes
+          use CSS zoom for crisp text and pixel art. Low-detail graphs have no
+          text, so a composited transform avoids relaying out thousands of icons.
         */}
         <View
           style={[
             styles.anchor,
             Platform.OS !== 'web' && styles.nativeAnchor,
             Platform.OS === 'web'
-              ? {
-                  left: displayTransform.x,
-                  top: displayTransform.y,
-                }
+              ? lowDetailGraph
+                ? ({
+                    transform: [
+                      {translateX: displayTransform.x},
+                      {translateY: displayTransform.y},
+                    ],
+                    willChange: 'transform',
+                  } as unknown as object)
+                : {
+                    left: displayTransform.x,
+                    top: displayTransform.y,
+                  }
               : {
                   transform: [
                     {translateX: displayTransform.x},
@@ -2842,7 +2939,13 @@ export function GraphScreen({
               styles.anchor,
               Platform.OS !== 'web' && styles.nativeAnchor,
               Platform.OS === 'web' && !displayTransform.nativeScale
-                ? ({zoom: displayTransform.scale} as unknown as object)
+                ? lowDetailGraph
+                  ? ({
+                      transform: [{scale: displayTransform.scale}],
+                      transformOrigin: '0 0',
+                      willChange: 'transform',
+                    } as unknown as object)
+                  : ({zoom: displayTransform.scale} as unknown as object)
                 : null,
             ]}>
           {!lowDetailGraph && renderedGraph?.edges.map((e, i) => (
@@ -2889,17 +2992,8 @@ export function GraphScreen({
                 h={n.h}
                 node={n.item}
                 expanded={n.kind === 'source'}
-                onHoverChange={
-                  n.source?.kind === 'recipe'
-                    ? hovered => scheduleLowDetailRecipeHover(hovered ? n.id : null)
-                    : undefined
-                }
-                onActions={pointer => openNodeMenu(n.item, pointer)}
-                onTap={() =>
-                  n.item.id === 'root'
-                    ? setShowRootActions(value => !value)
-                    : onItemTap(n.item)
-                }
+                onActions={handleLowDetailNodeActions}
+                onTap={handleLowDetailNodeTap}
               />
             ) : compactMode || n.radial ? (
               <CompactItemNodeView
@@ -3781,14 +3875,13 @@ const LowDetailItemIcon = React.memo(function LowDetailItemIcon({itemKey}: {item
   return <ItemIcon itemKey={itemKey} size={32} />;
 });
 
-function LowDetailNodeView({
+const LowDetailNodeView = React.memo(function LowDetailNodeView({
   x,
   y,
   w,
   h,
   node,
   expanded,
-  onHoverChange,
   onTap,
   onActions,
 }: {
@@ -3798,11 +3891,15 @@ function LowDetailNodeView({
   h: number;
   node: ItemTreeNode;
   expanded: boolean;
-  onHoverChange?: (hovered: boolean) => void;
-  onTap: () => void;
-  onActions: (pointer?: NodeActionPointer) => void;
+  onTap: (node: ItemTreeNode) => void;
+  onActions: (node: ItemTreeNode, pointer?: NodeActionPointer) => void;
 }) {
-  const handlers = useNodeActionHandlers(onTap, onActions);
+  const handleTap = useCallback(() => onTap(node), [node, onTap]);
+  const handleActions = useCallback(
+    (pointer?: NodeActionPointer) => onActions(node, pointer),
+    [node, onActions],
+  );
+  const handlers = useNodeActionHandlers(handleTap, handleActions);
   return (
     <Pressable
       {...handlers.contextMenuProps}
@@ -3810,8 +3907,6 @@ function LowDetailNodeView({
       accessibilityLabel="Recipe graph node; zoom in for details"
       onPress={handlers.press}
       onLongPress={handlers.longPress}
-      onHoverIn={onHoverChange ? () => onHoverChange(true) : undefined}
-      onHoverOut={onHoverChange ? () => onHoverChange(false) : undefined}
       delayLongPress={450}
       style={[
         styles.lowDetailNode,
@@ -3823,7 +3918,7 @@ function LowDetailNodeView({
       <LowDetailItemIcon itemKey={node.key} />
     </Pressable>
   );
-}
+});
 
 function ContextAmountStepper({
   amount,

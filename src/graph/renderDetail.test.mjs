@@ -6,6 +6,7 @@ import {
   LOW_DETAIL_RECIPE_HOVER_MAX_MAGNIFICATION,
   LOW_DETAIL_RECIPE_HOVER_TARGET_SCALE,
   NODE_AMOUNT_LABEL_MIN_SCALE,
+  lowDetailRecipeHoverNodeId,
   lowDetailRecipeHoverMagnification,
   shouldShowNodeAmounts,
   shouldUseLowDetailGraph,
@@ -39,4 +40,47 @@ test('magnifies one hovered low-detail recipe to a readable bounded scale', () =
   );
   assert.equal(lowDetailRecipeHoverMagnification(1), 1);
   assert.equal(lowDetailRecipeHoverMagnification(Number.NaN), 1);
+});
+
+test('resolves far-zoom recipe hover with a stable screen-space target', () => {
+  const nodes = [
+    {id: 'item', x: 100, y: 100, w: 100, h: 80},
+    {id: 'recipe-a', x: 1_000, y: 1_000, w: 200, h: 120, source: {kind: 'recipe'}},
+    {id: 'recipe-b', x: 1_600, y: 1_000, w: 200, h: 120, source: {kind: 'recipe'}},
+  ];
+  const transform = {x: 0, y: 0, scale: 0.05};
+
+  assert.equal(
+    lowDetailRecipeHoverNodeId(nodes, transform, {x: 46, y: 53}, null),
+    'recipe-a',
+  );
+  assert.equal(
+    lowDetailRecipeHoverNodeId(nodes, transform, {x: 68, y: 53}, 'recipe-a'),
+    'recipe-a',
+  );
+  assert.equal(
+    lowDetailRecipeHoverNodeId(nodes, transform, {x: 80, y: 53}, 'recipe-a'),
+    'recipe-b',
+  );
+  assert.equal(lowDetailRecipeHoverNodeId(nodes, transform, {x: 500, y: 500}, null), null);
+});
+
+test('rejects invalid low-detail hover geometry', () => {
+  const nodes = [{id: 'recipe', x: 0, y: 0, w: 100, h: 100, source: {kind: 'recipe'}}];
+  assert.throws(
+    () => lowDetailRecipeHoverNodeId(nodes, {x: 0, y: 0, scale: 0}, {x: 0, y: 0}, null),
+    /geometry is invalid/,
+  );
+  assert.throws(
+    () =>
+      lowDetailRecipeHoverNodeId(
+        nodes,
+        {x: 0, y: 0, scale: 1},
+        {x: 0, y: 0},
+        null,
+        20,
+        10,
+      ),
+    /geometry is invalid/,
+  );
 });
