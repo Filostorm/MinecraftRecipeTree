@@ -166,8 +166,10 @@ import type {
 import {GRAPH_VIEWPORT_OVERSCAN, visibleGraphElements} from './viewportCulling';
 import {indexedRecipeRefs} from './indexedRecipeRefs';
 import {
+  DENSE_GRAPH_NODE_THRESHOLD,
   lowDetailRecipeHoverNodeId,
   lowDetailRecipeHoverMagnification,
+  shouldRequireUniqueRecipes,
   shouldShowNodeAmounts,
   shouldUseLowDetailGraph,
 } from './renderDetail';
@@ -592,6 +594,19 @@ export function GraphScreen({
   const [expandRecipesOnce, setExpandRecipesOnce] = useState(loadExpandRecipesOnce);
   const expandRecipesOnceRef = useRef(expandRecipesOnce);
   expandRecipesOnceRef.current = expandRecipesOnce;
+  const [largeTreeUniqueModeRequired, setLargeTreeUniqueModeRequired] = useState(false);
+  const largeTreeUniqueModeRequiredRef = useRef(false);
+  const largeTreeUniqueModeRootRef = useRef<ItemTreeNode | null>(null);
+  const [showLargeTreeUniqueNotice, setShowLargeTreeUniqueNotice] = useState(false);
+  useEffect(() => {
+    largeTreeUniqueModeRequiredRef.current = false;
+    largeTreeUniqueModeRootRef.current = null;
+    setLargeTreeUniqueModeRequired(false);
+    setShowLargeTreeUniqueNotice(false);
+    const storedPreference = loadExpandRecipesOnce();
+    expandRecipesOnceRef.current = storedPreference;
+    setExpandRecipesOnce(storedPreference);
+  }, [graphRequestId]);
   const pendingRecipeExpansionOwnersRef = useRef(new Map<string, ItemTreeNode>());
   const [exportingTree, setExportingTree] = useState(false);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
@@ -1099,6 +1114,7 @@ export function GraphScreen({
         console.error('The saved graph could not be reconstructed; its snapshot was discarded.', error);
         clearGraphSession(data.descriptor);
         const cleanRoot = makeRoot(session.rootKey);
+        largeTreeUniqueModeRootRef.current = cleanRoot;
         rootRef.current = cleanRoot;
         setRoot(cleanRoot);
         needsFitRef.current = true;
@@ -1818,6 +1834,7 @@ export function GraphScreen({
   useEffect(() => {
     if (!graphRootKey) return;
     const newRoot = makeRoot(graphRootKey);
+    largeTreeUniqueModeRootRef.current = newRoot;
     rootRef.current = newRoot;
     setRoot(newRoot);
     needsFitRef.current = true;
@@ -2455,18 +2472,20 @@ export function GraphScreen({
   }, []);
 
   const updateExpandRecipesOnce = useCallback(
-    (value: boolean) => {
+    (value: boolean, persistPreference = true) => {
       expandRecipesOnceRef.current = value;
       setExpandRecipesOnce(value);
       needsFitRef.current = true;
-      try {
-        const storage = globalThis.localStorage;
-        if (storage) storage.setItem(EXPAND_RECIPES_ONCE_KEY, value ? '1' : '0');
-        else if (Platform.OS === 'web') {
-          console.warn('Expand-once graph mode is using memory only because localStorage is unavailable.');
+      if (persistPreference) {
+        try {
+          const storage = globalThis.localStorage;
+          if (storage) storage.setItem(EXPAND_RECIPES_ONCE_KEY, value ? '1' : '0');
+          else if (Platform.OS === 'web') {
+            console.warn('Expand-once graph mode is using memory only because localStorage is unavailable.');
+          }
+        } catch (error) {
+          console.error('Expand-once graph preference could not be saved to localStorage.', error);
         }
-      } catch (error) {
-        console.error('Expand-once graph preference could not be saved to localStorage.', error);
       }
 
       if (value) {
@@ -2489,6 +2508,22 @@ export function GraphScreen({
     },
     [applyRecipeChoice, bump, graphDirection],
   );
+
+  useEffect(() => {
+    if (
+      largeTreeUniqueModeRequiredRef.current ||
+      !root ||
+      largeTreeUniqueModeRootRef.current !== root ||
+      !shouldRequireUniqueRecipes(graph?.nodes.length ?? 0)
+    ) {
+      return;
+    }
+    largeTreeUniqueModeRequiredRef.current = true;
+    setLargeTreeUniqueModeRequired(true);
+    if (!expandRecipesOnceRef.current) {
+      updateExpandRecipesOnce(true, false);
+    }
+  }, [graph?.nodes.length, root, updateExpandRecipesOnce]);
 
   const toggleCommunityAutoExpand = useCallback(async () => {
     if (graphDirection !== 'inputs') return;
@@ -3210,11 +3245,21 @@ export function GraphScreen({
               onPress={toggleCompactMode}
             />
             <CtrlBtn
-              label="Unique"
-              accessibilityLabel="Use unique recipes"
+              label={largeTreeUniqueModeRequired ? 'Unique · Locked' : 'Unique'}
+              accessibilityLabel={
+                largeTreeUniqueModeRequired
+                  ? 'Unique recipes are required for this large tree'
+                  : 'Use unique recipes'
+              }
               metricsId="graph.control.expand-once"
               active={expandRecipesOnce}
-              onPress={() => updateExpandRecipesOnce(!expandRecipesOnce)}
+              onPress={() => {
+                if (largeTreeUniqueModeRequired) {
+                  setShowLargeTreeUniqueNotice(true);
+                  return;
+                }
+                updateExpandRecipesOnce(!expandRecipesOnce);
+              }}
             />
             {graphDirection === 'inputs' && !/^local-[a-f0-9]{16}$/u.test(data.descriptor.slug) && (
               <CtrlBtn
@@ -3269,6 +3314,25 @@ export function GraphScreen({
           </TouchableOpacity>
         )}
       </View>
+      {showLargeTreeUniqueNotice && (
+        <View
+          style={[styles.uniqueModeNotice, graphMenuScaleStyle]}
+          accessibilityRole="alert">
+          <Text style={[styles.uniqueModeNoticeText, noSelect]}>
+            Unique mode stays on after this tree reaches {DENSE_GRAPH_NODE_THRESHOLD} nodes. It
+            prevents duplicate recipe branches from multiplying and keeps very large trees
+            responsive. Start a new, smaller tree to change it.
+          </Text>
+          <TouchableOpacity
+            {...signalTarget('graph.control.expand-once-notice.dismiss')}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss unique mode notice"
+            style={styles.uniqueModeNoticeDismiss}
+            onPress={() => setShowLargeTreeUniqueNotice(false)}>
+            <Text style={styles.uniqueModeNoticeDismissText}>Got it</Text>
+          </TouchableOpacity>
+        </View>
+      )}
       <TouchableOpacity
         {...signalTarget('graph.control.fit')}
         accessibilityRole="button"
@@ -5302,6 +5366,39 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     gap: 6,
   },
+  uniqueModeNotice: {
+    position: 'absolute',
+    right: 10,
+    bottom: 10,
+    zIndex: 30,
+    width: 390,
+    maxWidth: '92%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 11,
+    paddingVertical: 9,
+    borderWidth: 1,
+    borderColor: theme.warn,
+    borderRadius: 8,
+    backgroundColor: 'rgba(23,29,38,0.97)',
+  },
+  uniqueModeNoticeText: {
+    flex: 1,
+    color: theme.text,
+    fontSize: 10,
+    lineHeight: 14,
+  },
+  uniqueModeNoticeDismiss: {
+    minHeight: 30,
+    justifyContent: 'center',
+    paddingHorizontal: 9,
+    borderRadius: 6,
+    backgroundColor: theme.panelAlt,
+    borderColor: theme.borderLight,
+    borderWidth: 1,
+  },
+  uniqueModeNoticeDismissText: {color: theme.text, fontSize: 10, fontWeight: '800'},
   totalsPanel: {
     position: 'absolute',
     top: 54,
