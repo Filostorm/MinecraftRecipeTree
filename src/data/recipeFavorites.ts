@@ -14,6 +14,12 @@ export interface CommunityRecipeFavorite {
   count: number;
 }
 
+export interface PersonalRecipeFavorite {
+  itemKey: string;
+  recipeRef: RecipeRef;
+  updatedAt: number;
+}
+
 function isLocalOnlyPack(descriptor: DatasetDescriptor): boolean {
   return /^local-[a-f0-9]{16}$/u.test(descriptor.slug);
 }
@@ -80,6 +86,93 @@ export async function loadCommunityRecipeFavorites(
   return parseCommunityRecipeFavorites(await response.json());
 }
 
+export async function loadRecipeFavoriteLeaderboard(
+  descriptor: DatasetDescriptor,
+): Promise<CommunityRecipeFavorite[]> {
+  if (isLocalOnlyPack(descriptor)) return [];
+  const query = new URLSearchParams({
+    packSlug: descriptor.slug,
+    publicationId: descriptor.publicationId,
+  });
+  const response = await fetch(`${FAVORITES_ENDPOINT}/leaderboard?${query}`, {
+    headers: {Accept: 'application/json'},
+    cache: 'no-store',
+    credentials: 'include',
+  });
+  if (!response.ok) throw new Error(`Recipe favorite leaderboard returned HTTP ${response.status}.`);
+  const value = await response.json() as unknown;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Recipe favorite leaderboard response is not an object.');
+  }
+  const record = value as Record<string, unknown>;
+  if (Object.keys(record).length !== 1 || !Array.isArray(record.entries)) {
+    throw new Error('Recipe favorite leaderboard response has an invalid shape.');
+  }
+  return parseCommunityRecipeFavorites({favorites: record.entries});
+}
+
+export async function loadPersonalRecipeFavorites(
+  descriptor: DatasetDescriptor,
+): Promise<PersonalRecipeFavorite[]> {
+  if (isLocalOnlyPack(descriptor)) return [];
+  const query = new URLSearchParams({
+    packSlug: descriptor.slug,
+    publicationId: descriptor.publicationId,
+  });
+  const response = await fetch(`${FAVORITES_ENDPOINT}/mine?${query}`, {
+    headers: {Accept: 'application/json'},
+    cache: 'no-store',
+    credentials: 'include',
+  });
+  if (!response.ok) throw new Error(`Personal recipe favorites returned HTTP ${response.status}.`);
+  const value = await response.json() as unknown;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Personal recipe favorites response is not an object.');
+  }
+  const record = value as Record<string, unknown>;
+  if (Object.keys(record).length !== 1 || !Array.isArray(record.favorites)) {
+    throw new Error('Personal recipe favorites response has an invalid shape.');
+  }
+  if (record.favorites.length > MAX_FAVORITES) {
+    throw new Error('Personal recipe favorites response is too large.');
+  }
+  const seen = new Set<string>();
+  return record.favorites.map((entry, index) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new Error(`Personal recipe favorite ${index} is invalid.`);
+    }
+    const favorite = entry as Record<string, unknown>;
+    if (
+      Object.keys(favorite).length !== 3 ||
+      typeof favorite.itemKey !== 'string' ||
+      favorite.itemKey.length === 0 ||
+      favorite.itemKey.length > 512 ||
+      seen.has(favorite.itemKey) ||
+      !isRecipeRef(favorite.recipeRef) ||
+      !Number.isSafeInteger(favorite.updatedAt) ||
+      (favorite.updatedAt as number) < 0
+    ) {
+      throw new Error(`Personal recipe favorite ${index} is invalid.`);
+    }
+    seen.add(favorite.itemKey);
+    return {
+      itemKey: favorite.itemKey,
+      recipeRef: favorite.recipeRef,
+      updatedAt: favorite.updatedAt as number,
+    };
+  });
+}
+
+export async function claimAnonymousRecipeFavorites(): Promise<void> {
+  const response = await fetch(`${FAVORITES_ENDPOINT}/claim`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json', Accept: 'application/json'},
+    credentials: 'include',
+    body: JSON.stringify({clientId: await recipeFavoriteClientId()}),
+  });
+  if (!response.ok) throw new Error(`Recipe favorite claim returned HTTP ${response.status}.`);
+}
+
 export async function updateCommunityRecipeFavorite(
   descriptor: DatasetDescriptor,
   itemKey: string,
@@ -89,6 +182,7 @@ export async function updateCommunityRecipeFavorite(
   const response = await fetch(FAVORITES_ENDPOINT, {
     method: 'PUT',
     headers: {'Content-Type': 'application/json', Accept: 'application/json'},
+    credentials: 'include',
     body: JSON.stringify({
       packSlug: descriptor.slug,
       publicationId: descriptor.publicationId,

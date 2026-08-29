@@ -108,3 +108,70 @@ export const recipeFavorites = sqliteTable(
     ),
   ],
 );
+
+export const users = sqliteTable(
+  'users',
+  {
+    id: text('id').primaryKey(),
+    provider: text('provider').notNull(),
+    providerUserId: text('provider_user_id').notNull(),
+    displayName: text('display_name').notNull(),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  table => [uniqueIndex('users_provider_identity_idx').on(table.provider, table.providerUserId)],
+);
+
+export const userSessions = sqliteTable(
+  'user_sessions',
+  {
+    tokenHash: text('token_hash').primaryKey(),
+    userId: text('user_id').notNull().references(() => users.id, {onDelete: 'cascade'}),
+    createdAt: integer('created_at').notNull(),
+    expiresAt: integer('expires_at').notNull(),
+  },
+  table => [
+    index('user_sessions_user_idx').on(table.userId),
+    index('user_sessions_expiry_idx').on(table.expiresAt),
+  ],
+);
+
+export const oauthLoginStates = sqliteTable(
+  'oauth_login_states',
+  {
+    stateHash: text('state_hash').primaryKey(),
+    codeVerifier: text('code_verifier').notNull(),
+    returnTo: text('return_to').notNull(),
+    createdAt: integer('created_at').notNull(),
+    expiresAt: integer('expires_at').notNull(),
+  },
+  table => [index('oauth_login_states_expiry_idx').on(table.expiresAt)],
+);
+
+export const accountRecipeFavorites = sqliteTable(
+  'account_recipe_favorites',
+  {
+    userId: text('user_id').notNull().references(() => users.id, {onDelete: 'cascade'}),
+    packSlug: text('pack_slug').notNull(),
+    publicationId: text('publication_id').notNull(),
+    itemKey: text('item_key').notNull(),
+    recipeCategory: integer('recipe_category').notNull(),
+    recipeIndex: integer('recipe_index').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  table => [
+    uniqueIndex('account_recipe_favorites_user_item_idx').on(
+      table.userId,
+      table.packSlug,
+      table.publicationId,
+      table.itemKey,
+    ),
+    index('account_recipe_favorites_ranking_idx').on(
+      table.packSlug,
+      table.publicationId,
+      table.itemKey,
+      table.recipeCategory,
+      table.recipeIndex,
+    ),
+  ],
+);

@@ -7,6 +7,8 @@ const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === 'seatbelt';
 const isCloudflareBeta = process.env.MRT_DEPLOY_TARGET === 'cloudflare-beta';
 const isCloudflareProduction = process.env.MRT_DEPLOY_TARGET === 'cloudflare-production';
 const BETA_DATA_ORIGIN = 'https://minecraftrecipetree.craftsmannsoftware.com';
+const BETA_APP_ORIGIN = 'https://minecraft-recipe-tree-beta.gtjoe51.workers.dev';
+const PRODUCTION_APP_ORIGIN = 'https://minecraftrecipetree.craftsmannsoftware.com';
 const BETA_CANDIDATE_DATASET_SLUG = 'gt-new-horizons';
 const BETA_CANDIDATE_PUBLICATION_ID =
   '645b42d21ecb44a6e844cdbd02a88266b6123039557cf7aa49321c06d35c0b0f';
@@ -51,6 +53,7 @@ export default defineConfig(async () => {
                 name: 'minecraft-recipe-tree-beta',
                 vars: {
                   BETA_DATA_ORIGIN,
+                  PUBLIC_APP_ORIGIN: BETA_APP_ORIGIN,
                   BETA_CANDIDATE_DATASET_SLUG,
                   BETA_CANDIDATE_PUBLICATION_ID,
                   BETA_CANDIDATE_PREVIEW_ASSET_SET_ID,
@@ -60,7 +63,10 @@ export default defineConfig(async () => {
             : isCloudflareProduction
               ? {
                   name: 'minecraft-recipe-tree-production',
-                  vars: {DATASET_ADMIN_ENABLED: 'true'},
+                  vars: {
+                    DATASET_ADMIN_ENABLED: 'true',
+                    PUBLIC_APP_ORIGIN: PRODUCTION_APP_ORIGIN,
+                  },
                 }
               : {}),
           main: './worker/index.ts',
@@ -76,7 +82,8 @@ export default defineConfig(async () => {
               '/api/datasets',
               '/api/export-failures',
               '/api/feedback',
-              '/api/recipe-favorites',
+              '/api/recipe-favorites*',
+              '/api/auth/*',
               '/api/modpacks*',
               '/dataset/publications/*',
               '/dataset/preview-sets/*',
