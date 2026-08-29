@@ -62,6 +62,8 @@ import {
   type GraphRenderRecovery,
 } from './src/graph/graphRenderError';
 import {clearGraphSession} from './src/graph/graphSession';
+import {UserProvider, useUser} from './src/account/UserContext';
+import {FavoritesModal} from './src/account/FavoritesModal';
 
 const LazyGraphScreen = React.lazy(async () => {
   const module = await import('./src/graph/GraphScreen');
@@ -125,9 +127,11 @@ export default function App() {
         style={styles.app}
         edges={Platform.OS === 'web' ? ['top', 'right', 'bottom', 'left'] : ['top', 'right', 'left']}>
         <StatusBar style="light" />
-        <DatasetCatalogProvider>
-          <DatasetRoot />
-        </DatasetCatalogProvider>
+        <UserProvider>
+          <DatasetCatalogProvider>
+            <DatasetRoot />
+          </DatasetCatalogProvider>
+        </UserProvider>
       </SafeAreaView>
     </SafeAreaProvider>
   );
@@ -377,12 +381,14 @@ function Shell({
 }) {
   const data = useData();
   const recipeStages = useRecipeStages();
+  const account = useUser();
   const ui = useUi();
   const {tab, setTab, graphRequestId} = ui;
   const {width} = useWindowDimensions();
   const [hasHydrated, setHasHydrated] = useState(Platform.OS !== 'web');
   const compactHeader = hasHydrated && width < 720;
   const [showRecipeHistory, setShowRecipeHistory] = useState(false);
+  const [showFavorites, setShowFavorites] = useState(false);
   const [showRecipeStages, setShowRecipeStages] = useState(false);
   const [showGraphGuide, setShowGraphGuide] = useState(false);
   const [showIssueReport, setShowIssueReport] = useState(false);
@@ -393,7 +399,9 @@ function Shell({
   const [showDatasetDetails, setShowDatasetDetails] = useState(false);
   const [interfaceZoom, setInterfaceZoom] = useState(1);
   const [contentZoom, setContentZoom] = useState(1);
-  const shellSurface = showRecipeStages
+  const shellSurface = showFavorites
+      ? 'favorites'
+      : showRecipeStages
       ? 'recipe-stages'
       : showGraphGuide
         ? 'graph-guide'
@@ -404,7 +412,7 @@ function Shell({
             : tab;
   useSignalSurface(
     shellSurface,
-    showRecipeStages || showGraphGuide || showIssueReport || showRecipeHistory
+    showFavorites || showRecipeStages || showGraphGuide || showIssueReport || showRecipeHistory
       ? 'modal'
       : 'screen',
   );
@@ -612,6 +620,32 @@ function Shell({
               accessibilityLabel="Import a local modpack exporter ZIP">
               <Text style={styles.infoMenuItemIcon}>⇧</Text>
               <Text style={styles.infoMenuItemText}>Import pack</Text>
+            </TouchableOpacity>
+          )}
+          {Platform.OS === 'web' && (
+            <TouchableOpacity
+              {...signalTarget('header.recipe-favorites')}
+              style={styles.infoMenuItem}
+              onPress={() => {
+                lightImpactFeedback();
+                closeInfoMenu();
+                setShowFavorites(true);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={
+                account.user
+                  ? `Open synced favorites for ${account.user.displayName}`
+                  : 'Open recipe favorites and sign in'
+              }>
+              <Text style={styles.infoMenuItemIcon}>★</Text>
+              <View style={styles.infoMenuItemCopy}>
+                <Text style={styles.infoMenuItemText}>Favorites</Text>
+                <Text style={styles.infoMenuItemSubtext} numberOfLines={1}>
+                  {account.status === 'loading'
+                    ? 'Checking account…'
+                    : account.user?.displayName ?? 'Sign in to sync'}
+                </Text>
+              </View>
             </TouchableOpacity>
           )}
           <TouchableOpacity
@@ -904,6 +938,13 @@ function Shell({
           visible
           interfaceZoom={interfaceZoom}
           onClose={() => setShowRecipeHistory(false)}
+        />
+      )}
+      {showFavorites && (
+        <FavoritesModal
+          visible
+          interfaceZoom={interfaceZoom}
+          onClose={() => setShowFavorites(false)}
         />
       )}
       {showGraphGuide && (
@@ -1200,6 +1241,8 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   infoMenuItemText: {color: theme.text, fontSize: 12, fontWeight: '700'},
+  infoMenuItemCopy: {flex: 1, minWidth: 0},
+  infoMenuItemSubtext: {color: theme.textDim, fontSize: 9, marginTop: 1},
   infoMenuItemTextActive: {color: theme.accent},
   nativeHeaderMenuText: {color: theme.text, fontSize: 12, fontWeight: '700'},
   interfaceZoomControls: {

@@ -24,6 +24,7 @@ import {FEEDBACK_ROUTE, handleFeedback} from './feedback.ts';
 import {EXPORT_FAILURE_ROUTE, handleExportFailureIssue} from './exportFailureIssue.ts';
 import {MIGRATION_BASE_PATH, handleStorageMigration} from './migration.ts';
 import {RECIPE_FAVORITES_ROUTE, handleRecipeFavorites} from './recipeFavorites.ts';
+import {AUTH_ROUTE_PREFIX, handleUserAccounts} from './userAccounts.ts';
 
 const CONTENT_SECURITY_POLICY =
   "default-src 'self'; base-uri 'self'; connect-src 'self' https://metrics.craftsmannsoftware.com; " +
@@ -157,8 +158,14 @@ async function dispatchRequest(
   if (url.pathname === EXPORT_FAILURE_ROUTE) {
     return handleExportFailureIssue(request, runtime, url);
   }
-  if (url.pathname === RECIPE_FAVORITES_ROUTE) {
+  if (
+    url.pathname === RECIPE_FAVORITES_ROUTE ||
+    url.pathname.startsWith(`${RECIPE_FAVORITES_ROUTE}/`)
+  ) {
     return handleRecipeFavorites(request, runtime, url);
+  }
+  if (url.pathname.startsWith(AUTH_ROUTE_PREFIX)) {
+    return handleUserAccounts(request, runtime, url);
   }
   if (url.pathname.startsWith(MIGRATION_BASE_PATH)) {
     return handleStorageMigration(request, runtime, url);

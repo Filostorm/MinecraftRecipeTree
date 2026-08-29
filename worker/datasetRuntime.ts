@@ -60,6 +60,10 @@ export interface DatasetRuntime {
   FEEDBACK_ADMIN_TOKEN?: string;
   /** Server-only token with Issues: write and Contents: write access to the application repo. */
   GITHUB_ISSUES_TOKEN?: string;
+  /** Canonical origin and Discord OAuth credentials for public user accounts. */
+  PUBLIC_APP_ORIGIN?: string;
+  DISCORD_CLIENT_ID?: string;
+  DISCORD_CLIENT_SECRET?: string;
   /** Short-lived, server-only credentials used only while migrating away from Sites storage. */
   MIGRATION_EXPORT_TOKEN?: string;
   MIGRATION_IMPORT_TOKEN?: string;

@@ -83,6 +83,7 @@
     "test:multiblock": "node --test scripts/validate-export-data.test.mjs src/components/multiblockProjection.test.mjs src/data/currentMultiblockCompatibilityStructures.test.mjs src/data/legacyMultiblockMadness323Structures.test.mjs src/data/recipeStructure.test.mjs",
     "test:cold-dataset": "node --test scripts/benchmark-cold-dataset.test.mjs",
     "test:migration": "node --test worker/migration.test.mjs",
+    "test:accounts": "node --test worker/userAccounts.test.mjs worker/recipeFavorites.test.mjs",
     "test:archive-streaming": "node --test src/data/fflateStreaming.test.mjs",
     "test:publication-rights": "node --test src/components/mobPlaceholder.test.mjs src/data/datasetAttribution.test.mjs src/data/publicationRights.test.mjs worker/index.test.mjs",
     "test:mob-sprites": "node --test src/components/mobSpriteAnimation.test.mjs",

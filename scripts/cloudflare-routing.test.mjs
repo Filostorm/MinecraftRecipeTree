@@ -21,6 +21,7 @@ const d1Migrations = await Promise.all([
   readFile(new URL('../drizzle/0003_tidy_ogun.sql', import.meta.url), 'utf8'),
   readFile(new URL('../drizzle/0004_rainy_maverick.sql', import.meta.url), 'utf8'),
   readFile(new URL('../drizzle/0005_harsh_stick.sql', import.meta.url), 'utf8'),
+  readFile(new URL('../drizzle/0006_yummy_lyja.sql', import.meta.url), 'utf8'),
 ]);
 
 test('Cloudflare routes catalog, immutable datasets, and administration through the Worker', () => {
@@ -61,8 +62,8 @@ test('Cloudflare routes catalog, immutable datasets, and administration through 
   );
   assert.match(
     viteConfig,
-    /isCloudflareProduction[\s\S]*?name:\s*['"]minecraft-recipe-tree-production['"][\s\S]*?vars:\s*\{DATASET_ADMIN_ENABLED:\s*['"]true['"]\}/,
-    'standalone production must enable only token-authenticated dataset administration',
+    /isCloudflareProduction[\s\S]*?name:\s*['"]minecraft-recipe-tree-production['"][\s\S]*?DATASET_ADMIN_ENABLED:\s*['"]true['"][\s\S]*?PUBLIC_APP_ORIGIN:\s*PRODUCTION_APP_ORIGIN/,
+    'standalone production must enable token-authenticated administration and bind its account origin',
   );
   assert.match(
     viteConfig,
@@ -92,7 +93,8 @@ test('Cloudflare routes catalog, immutable datasets, and administration through 
     '/api/datasets',
     '/api/export-failures',
     '/api/feedback',
-    '/api/recipe-favorites',
+    '/api/recipe-favorites*',
+    '/api/auth/*',
     '/api/modpacks*',
     '/dataset/publications/*',
     '/dataset/preview-sets/*',
@@ -181,6 +183,9 @@ test('the environment template exposes only the current server-side operator con
     'PREVIEW_UPLOAD_TOKEN',
     'FEEDBACK_ADMIN_TOKEN',
     'GITHUB_ISSUES_TOKEN',
+    'PUBLIC_APP_ORIGIN',
+    'DISCORD_CLIENT_ID',
+    'DISCORD_CLIENT_SECRET',
   ]);
   assert.equal(values.BETA_DATA_ORIGIN, 'https://minecraftrecipetree.craftsmannsoftware.com');
   assert.equal(values.DATASET_ADMIN_ENABLED, 'false');
@@ -192,6 +197,9 @@ test('the environment template exposes only the current server-side operator con
   assert.doesNotMatch(values.FEEDBACK_ADMIN_TOKEN, /[\s\u0000-\u001f\u007f]/);
   assert.ok(values.GITHUB_ISSUES_TOKEN.length >= 32);
   assert.doesNotMatch(values.GITHUB_ISSUES_TOKEN, /[\s\u0000-\u001f\u007f]/);
+  assert.equal(values.PUBLIC_APP_ORIGIN, 'https://minecraftrecipetree.craftsmannsoftware.com');
+  assert.ok(values.DISCORD_CLIENT_SECRET.length >= 32);
+  assert.doesNotMatch(values.DISCORD_CLIENT_SECRET, /[\s\u0000-\u001f\u007f]/);
   assert.doesNotMatch(environmentExample, /^PREVIEW_ASSET_SET_ID=/m);
   assert.doesNotMatch(environmentExample, /^EXPO_PUBLIC_.*TOKEN=/m);
 });

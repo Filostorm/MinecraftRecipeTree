@@ -51,9 +51,12 @@ import {isFluidContainerTransferRecipe} from '../data/recipeVisibility';
 import {recipeDisplayTitle} from '../data/recipeTitles';
 import {recipeNeedsLayoutPreviewUnavailableNotice} from '../data/recipePresentation';
 import {
+  claimAnonymousRecipeFavorites,
   loadCommunityRecipeFavorites,
+  loadPersonalRecipeFavorites,
   updateCommunityRecipeFavorite,
 } from '../data/recipeFavorites';
+import {useUser} from '../account/UserContext';
 import {theme} from '../theme';
 import {DropStat, Mob, Recipe, RecipeRef} from '../types';
 import {useUi} from '../ui/UiContext';
@@ -524,6 +527,7 @@ export function GraphScreen({
   controlsToggleInHeader?: boolean;
 }) {
   const data = useData();
+  const account = useUser();
   const {
     hiddenStages: hiddenRecipeStages,
     toggleStage: toggleRecipeStage,
@@ -610,6 +614,43 @@ export function GraphScreen({
     useState<PreferredSources>(loadPreferredSources);
   const preferredSourcesRef = useRef(preferredSources);
   preferredSourcesRef.current = preferredSources;
+  const personalFavoriteSyncRequestRef = useRef(0);
+  useEffect(() => {
+    if (!account.user || /^local-[a-f0-9]{16}$/u.test(data.descriptor.slug)) return;
+    const requestId = personalFavoriteSyncRequestRef.current + 1;
+    personalFavoriteSyncRequestRef.current = requestId;
+    void (async () => {
+      try {
+        await claimAnonymousRecipeFavorites();
+        const favorites = await loadPersonalRecipeFavorites(data.descriptor);
+        if (personalFavoriteSyncRequestRef.current !== requestId) return;
+        const next: PreferredSources = {};
+        for (const [itemKey, source] of Object.entries(preferredSourcesRef.current)) {
+          if (source.t !== 'recipe' || !data.index[itemKey]) next[itemKey] = source;
+        }
+        for (const favorite of favorites) {
+          const existing = preferredSourcesRef.current[favorite.itemKey];
+          next[favorite.itemKey] =
+            existing?.t === 'recipe' &&
+            existing.ref[0] === favorite.recipeRef[0] &&
+            existing.ref[1] === favorite.recipeRef[1]
+              ? existing
+              : {t: 'recipe', ref: favorite.recipeRef};
+        }
+        preferredSourcesRef.current = next;
+        persistPreferredSources(next);
+        setPreferredSources(next);
+      } catch (error) {
+        console.error('Signed-in recipe favorites could not be synchronized.', error);
+        setExportMessage('Signed-in favorites could not be synchronized.');
+      }
+    })();
+    return () => {
+      if (personalFavoriteSyncRequestRef.current === requestId) {
+        personalFavoriteSyncRequestRef.current += 1;
+      }
+    };
+  }, [account.revision, account.user, data.descriptor, data.index]);
   const communityPreferredSourcesRef = useRef<PreferredSources>({});
   const communityAutoExpandRef = useRef(false);
   const communityFavoriteRequestRef = useRef(0);
@@ -1771,13 +1812,18 @@ export function GraphScreen({
       preferredSourcesRef.current = next;
       persistPreferredSources(next);
       setPreferredSources(next);
+      for (const key of new Set([node.key, ...(node.alternatives ?? [])])) {
+        void updateCommunityRecipeFavorite(data.descriptor, key, null).catch(error => {
+          console.error('The cleared recipe favorite could not be synchronized.', {key, error});
+        });
+      }
       if (node.source) releaseByproductFulfillmentsFromSubtree(node);
       node.source = undefined;
       node.deferredRecipeExpansion = undefined;
       bump();
       setNodeMenu(null);
     },
-    [bump, releaseByproductFulfillmentsFromSubtree],
+    [bump, data.descriptor, releaseByproductFulfillmentsFromSubtree],
   );
 
   const selectNodeAlternative = useCallback(
