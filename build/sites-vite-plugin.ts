@@ -17,15 +17,41 @@ async function exists(path: string): Promise<boolean> {
 const MAX_FAVICON_BYTES = 64 * 1024;
 const MAX_LOCAL_PACK_SERVICE_WORKER_BYTES = 64 * 1024;
 const MAX_PACK_ICON_BYTES = 256 * 1024;
+const MAX_THEME_FONT_BYTES = 512 * 1024;
 const PACK_ICON_FILES = Object.freeze([
   'gt-new-horizons.webp',
   'meatballcraft.webp',
   'multiblock-madness-2.webp',
   'multiblock-madness.webp',
 ]);
-const STATIC_SECURITY_HEADERS = `
+const THEME_FONT_FILES = Object.freeze([
+  'Monocraft-OFL.txt',
+  'Monocraft.ttf',
+]);
+function requireHttpsOrigin(value: string): string {
+  const url = new URL(value);
+  if (
+    url.protocol !== 'https:' ||
+    url.username ||
+    url.password ||
+    url.pathname !== '/' ||
+    url.search ||
+    url.hash ||
+    url.origin !== value
+  ) {
+    throw new Error(`Static CSP connection source is not an exact HTTPS origin: ${value}`);
+  }
+  return url.origin;
+}
+
+function staticSecurityHeaders(connectSrcOrigins: readonly string[]): string {
+  const additionalConnectSources = connectSrcOrigins.map(requireHttpsOrigin).join(' ');
+  const connectSources = additionalConnectSources
+    ? ` https://metrics.craftsmannsoftware.com ${additionalConnectSources}`
+    : ' https://metrics.craftsmannsoftware.com';
+  return `
 /*
-  Content-Security-Policy: default-src 'self'; base-uri 'self'; connect-src 'self' https://metrics.craftsmannsoftware.com; font-src 'self' data:; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: blob:; object-src 'none'; script-src 'self' 'unsafe-inline' https://metrics.craftsmannsoftware.com; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; connect-src 'self'${connectSources}; font-src 'self' data:; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: blob:; object-src 'none'; script-src 'self' 'unsafe-inline' https://metrics.craftsmannsoftware.com; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:
   Cross-Origin-Opener-Policy: same-origin
   Cross-Origin-Resource-Policy: same-origin
   Permissions-Policy: camera=(), display-capture=(), geolocation=(), microphone=(), payment=(), usb=()
@@ -38,6 +64,7 @@ const STATIC_SECURITY_HEADERS = `
   Cache-Control: public, max-age=31536000, immutable
 
 `;
+}
 
 async function appendHeaderBlock(root: string, block: string): Promise<void> {
   const headersPath = resolve(root, 'dist', 'client', '_headers');
@@ -126,8 +153,55 @@ async function copyPackIcons(root: string): Promise<void> {
   );
 }
 
+async function copyThemeFonts(root: string): Promise<void> {
+  const sourceDirectory = resolve(root, 'public', 'fonts');
+  const destinationDirectory = resolve(root, 'dist', 'client', 'fonts');
+  const entries = await readdir(sourceDirectory, {withFileTypes: true});
+  const names = entries.map(entry => entry.name).sort();
+  if (
+    names.length !== THEME_FONT_FILES.length ||
+    names.some((name, index) => name !== THEME_FONT_FILES[index])
+  ) {
+    console.error('Sites build failed: theme font directory does not match its exact manifest.', {
+      sourceDirectory,
+      expected: THEME_FONT_FILES,
+      actual: names,
+    });
+    throw new Error('Theme font directory violates its deployment contract');
+  }
+
+  await rm(destinationDirectory, {recursive: true, force: true});
+  await mkdir(destinationDirectory, {recursive: true});
+  for (const entry of entries) {
+    const source = resolve(sourceDirectory, entry.name);
+    const metadata = await lstat(source);
+    if (
+      basename(source) !== entry.name ||
+      !entry.isFile() ||
+      !metadata.isFile() ||
+      metadata.nlink !== 1 ||
+      metadata.size <= 0 ||
+      metadata.size > MAX_THEME_FONT_BYTES
+    ) {
+      console.error(`Sites build failed: theme font asset is not a bounded single-link file: ${source}`);
+      throw new Error('Theme font asset violates its deployment contract');
+    }
+    await copyFile(source, resolve(destinationDirectory, entry.name));
+  }
+
+  await appendHeaderBlock(
+    root,
+    '/fonts/*\n  Cache-Control: public, max-age=86400\n  X-Content-Type-Options: nosniff',
+  );
+}
+
 /** Copies Sites metadata into the deployable artifact after Vite builds. */
-export function sites(): Plugin {
+export function sites({
+  connectSrcOrigins = [],
+}: {
+  connectSrcOrigins?: readonly string[];
+} = {}): Plugin {
+  const securityHeaders = staticSecurityHeaders(connectSrcOrigins);
   let root = process.cwd();
 
   return {
@@ -148,7 +222,8 @@ export function sites(): Plugin {
       await copyFavicon(root);
       await copyLocalPackServiceWorker(root);
       await copyPackIcons(root);
-      await appendHeaderBlock(root, STATIC_SECURITY_HEADERS);
+      await copyThemeFonts(root);
+      await appendHeaderBlock(root, securityHeaders);
 
       const outputDirectory = resolve(root, 'dist', '.openai');
       const hostingConfig = resolve(root, '.openai', 'hosting.json');

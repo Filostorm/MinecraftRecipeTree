@@ -60,10 +60,17 @@ export interface DatasetRuntime {
   FEEDBACK_ADMIN_TOKEN?: string;
   /** Server-only token with Issues: write and Contents: write access to the application repo. */
   GITHUB_ISSUES_TOKEN?: string;
-  /** Canonical origin and Discord OAuth credentials for public user accounts. */
-  PUBLIC_APP_ORIGIN?: string;
-  DISCORD_CLIENT_ID?: string;
-  DISCORD_CLIENT_SECRET?: string;
+  /** Hosted Supabase project used to verify account access tokens. */
+  SUPABASE_URL?: string;
+  /** Server-only Supabase secret key used only for destructive Auth administration. */
+  SUPABASE_SECRET_KEY?: string;
+  /** Server-only Stripe credentials used for hosted donation Checkout and signed webhooks. */
+  STRIPE_SECRET_KEY?: string;
+  STRIPE_WEBHOOK_SECRET?: string;
+  /** Monthly operating budgets; the public meter resets at the start of each UTC month. */
+  DONATION_SUPABASE_MONTHLY_CENTS?: string;
+  DONATION_CLOUDFLARE_MONTHLY_CENTS?: string;
+  DONATION_GITHUB_ACTIONS_MONTHLY_CENTS?: string;
   /** Short-lived, server-only credentials used only while migrating away from Sites storage. */
   MIGRATION_EXPORT_TOKEN?: string;
   MIGRATION_IMPORT_TOKEN?: string;

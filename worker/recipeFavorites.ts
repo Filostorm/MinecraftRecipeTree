@@ -8,12 +8,16 @@ import {
   sha256Hex,
 } from './datasetRuntime.ts';
 import {currentUser, ensureUserAccountSchema} from './userAccounts.ts';
+import {betaCatalogIncludesPublication} from './betaDataProxy.ts';
 
 export const RECIPE_FAVORITES_ROUTE = '/api/recipe-favorites';
 
 const MAX_BODY_BYTES = 4 * 1024;
+const MAX_CLAIM_BODY_BYTES = 96 * 1024;
+const MAX_CLAIM_FAVORITES = 100;
 const MAX_ITEM_KEY_LENGTH = 512;
 const MAX_CLIENT_ID_LENGTH = 128;
+const MAX_DISPLAY_NAME_LENGTH = 80;
 const MAX_GROUPED_FAVORITES = 50_000;
 const LEADERBOARD_LIMIT = 100;
 const UNSAFE_TEXT_PATTERN = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/u;
@@ -100,14 +104,17 @@ function requestOriginAllowed(request: Request, url: URL): boolean {
   }
 }
 
-async function parseJsonBody(request: Request): Promise<unknown | Response> {
+async function parseJsonBody(
+  request: Request,
+  maximumBytes = MAX_BODY_BYTES,
+): Promise<unknown | Response> {
   const contentLength = request.headers.get('content-length');
-  if (contentLength && (!/^\d+$/u.test(contentLength) || Number(contentLength) > MAX_BODY_BYTES)) {
+  if (contentLength && (!/^\d+$/u.test(contentLength) || Number(contentLength) > maximumBytes)) {
     return noStoreJson({error: 'Favorite update is too large.'}, 413);
   }
   try {
     const body = await request.text();
-    if (new TextEncoder().encode(body).byteLength > MAX_BODY_BYTES) {
+    if (new TextEncoder().encode(body).byteLength > maximumBytes) {
       return noStoreJson({error: 'Favorite update is too large.'}, 413);
     }
     return JSON.parse(body) as unknown;
@@ -117,6 +124,7 @@ async function parseJsonBody(request: Request): Promise<unknown | Response> {
 }
 
 async function requireCurrentPack(
+  runtime: DatasetRuntime,
   db: D1Database,
   packSlug: string,
   publicationId: string,
@@ -129,7 +137,8 @@ async function requireCurrentPack(
     )
     .bind(packSlug, publicationId)
     .first<{slug: string}>();
-  return row?.slug === packSlug;
+  if (row?.slug === packSlug) return true;
+  return (await betaCatalogIncludesPublication(runtime, packSlug, publicationId)) === true;
 }
 
 function packIdentity(url: URL): {packSlug: string; publicationId: string} | null {
@@ -164,6 +173,26 @@ interface PersonalFavoriteRow {
   updated_at: number;
 }
 
+interface LeaderboardRow {
+  identity_type: 'account' | 'anonymous';
+  identity_key: string;
+  display_name: string;
+  favorite_count: number;
+}
+
+async function requestingAnonymousClientHash(request: Request): Promise<string | null> {
+  const clientId = request.headers.get('X-MRT-Favorite-Client');
+  if (!clientId) return null;
+  if (
+    !boundedText(clientId, MAX_CLIENT_ID_LENGTH) ||
+    !/^[a-f0-9-]{32,128}$/iu.test(clientId)
+  ) {
+    console.warn('A favorite leaderboard request supplied an invalid browser identifier.');
+    return null;
+  }
+  return sha256Hex(new TextEncoder().encode(clientId));
+}
+
 function validFavoriteIdentity(row: {
   item_key: string;
   recipe_category: number;
@@ -186,17 +215,21 @@ function validFavoriteRow(row: FavoriteRow): boolean {
   );
 }
 
-async function validateRequestedPack(db: D1Database, url: URL) {
+async function validateRequestedPack(runtime: DatasetRuntime, db: D1Database, url: URL) {
   const identity = packIdentity(url);
   if (!identity) return {response: noStoreJson({error: 'A current saved pack is required.'}, 400)};
-  if (!(await requireCurrentPack(db, identity.packSlug, identity.publicationId))) {
+  if (!(await requireCurrentPack(runtime, db, identity.packSlug, identity.publicationId))) {
     return {response: noStoreJson({error: 'That saved pack version is not available.'}, 404)};
   }
   return identity;
 }
 
-async function getCommunityFavorites(db: D1Database, url: URL): Promise<Response> {
-  const pack = await validateRequestedPack(db, url);
+async function getCommunityFavorites(
+  runtime: DatasetRuntime,
+  db: D1Database,
+  url: URL,
+): Promise<Response> {
+  const pack = await validateRequestedPack(runtime, db, url);
   if ('response' in pack) return pack.response;
   const result = await db
     .prepare(
@@ -228,29 +261,75 @@ async function getCommunityFavorites(db: D1Database, url: URL): Promise<Response
   return noStoreJson({favorites});
 }
 
-async function getLeaderboard(db: D1Database, url: URL): Promise<Response> {
-  const pack = await validateRequestedPack(db, url);
+async function getLeaderboard(
+  request: Request,
+  runtime: DatasetRuntime,
+  db: D1Database,
+  url: URL,
+): Promise<Response> {
+  const pack = await validateRequestedPack(runtime, db, url);
   if ('response' in pack) return pack.response;
+  const [user, anonymousClientHash] = await Promise.all([
+    currentUser(request, runtime),
+    requestingAnonymousClientHash(request),
+  ]);
   const result = await db
     .prepare(
-      `SELECT item_key, recipe_category, recipe_index, COUNT(*) AS favorite_count
-       FROM account_recipe_favorites
-       WHERE pack_slug = ? AND publication_id = ?
-       GROUP BY item_key, recipe_category, recipe_index
-       ORDER BY favorite_count DESC, item_key ASC, recipe_category ASC, recipe_index ASC
+      `WITH favorite_users AS (
+         SELECT 'account' AS identity_type,
+                account_recipe_favorites.user_id AS identity_key,
+                users.display_name AS display_name,
+                COUNT(*) AS favorite_count
+         FROM account_recipe_favorites
+         INNER JOIN users ON users.id = account_recipe_favorites.user_id
+         WHERE account_recipe_favorites.pack_slug = ?
+           AND account_recipe_favorites.publication_id = ?
+         GROUP BY account_recipe_favorites.user_id, users.display_name
+
+         UNION ALL
+
+         SELECT 'anonymous' AS identity_type,
+                recipe_favorites.client_hash AS identity_key,
+                'Unknown user' AS display_name,
+                COUNT(*) AS favorite_count
+         FROM recipe_favorites
+         WHERE recipe_favorites.pack_slug = ?
+           AND recipe_favorites.publication_id = ?
+         GROUP BY recipe_favorites.client_hash
+       )
+       SELECT identity_type, identity_key, display_name, favorite_count
+       FROM favorite_users
+       ORDER BY favorite_count DESC,
+                display_name COLLATE NOCASE ASC,
+                identity_key ASC
        LIMIT ?`,
     )
-    .bind(pack.packSlug, pack.publicationId, LEADERBOARD_LIMIT)
-    .all<FavoriteRow>();
+    .bind(
+      pack.packSlug,
+      pack.publicationId,
+      pack.packSlug,
+      pack.publicationId,
+      LEADERBOARD_LIMIT,
+    )
+    .all<LeaderboardRow>();
   if (!result.success) throw new Error('D1 reported an unsuccessful favorite-leaderboard query.');
   const entries = (result.results ?? []).map(row => {
-    if (!validFavoriteRow(row)) {
+    if (
+      !boundedText(row.display_name, MAX_DISPLAY_NAME_LENGTH) ||
+      (row.identity_type !== 'account' && row.identity_type !== 'anonymous') ||
+      !boundedText(row.identity_key, MAX_CLIENT_ID_LENGTH) ||
+      !Number.isSafeInteger(row.favorite_count) ||
+      row.favorite_count < 1
+    ) {
       throw new Error('Favorite leaderboard storage contains invalid aggregate data.');
     }
     return {
-      itemKey: row.item_key,
-      recipeRef: [row.recipe_category, row.recipe_index] as [number, number],
+      displayName: row.display_name,
       count: row.favorite_count,
+      isAnonymous: row.identity_type === 'anonymous',
+      isCurrent:
+        (row.identity_type === 'account' && row.identity_key === user?.id) ||
+        (row.identity_type === 'anonymous' && row.identity_key === anonymousClientHash),
     };
   });
   return noStoreJson({entries});
@@ -258,12 +337,13 @@ async function getLeaderboard(db: D1Database, url: URL): Promise<Response> {
 
 async function getPersonalFavorites(
   request: Request,
+  runtime: DatasetRuntime,
   db: D1Database,
   url: URL,
 ): Promise<Response> {
-  const user = await currentUser(request, db);
+  const user = await currentUser(request, runtime);
   if (!user) return noStoreJson({error: 'Sign in to sync favorites.'}, 401);
-  const pack = await validateRequestedPack(db, url);
+  const pack = await validateRequestedPack(runtime, db, url);
   if ('response' in pack) return pack.response;
   const result = await db
     .prepare(
@@ -289,7 +369,12 @@ async function getPersonalFavorites(
   return noStoreJson({favorites});
 }
 
-async function updateFavorite(request: Request, db: D1Database, url: URL): Promise<Response> {
+async function updateFavorite(
+  request: Request,
+  runtime: DatasetRuntime,
+  db: D1Database,
+  url: URL,
+): Promise<Response> {
   if (!requestOriginAllowed(request, url)) {
     console.warn('A cross-origin recipe-favorite write was refused.', {
       origin: request.headers.get('origin'),
@@ -317,11 +402,14 @@ async function updateFavorite(request: Request, db: D1Database, url: URL): Promi
   ) {
     return noStoreJson({error: 'Favorite update contains invalid values.'}, 400);
   }
-  if (!(await requireCurrentPack(db, parsed.packSlug, parsed.publicationId))) {
+  if (!(await requireCurrentPack(runtime, db, parsed.packSlug, parsed.publicationId))) {
     return noStoreJson({error: 'That saved pack version is not available.'}, 404);
   }
 
-  const user = await currentUser(request, db);
+  const user = await currentUser(request, runtime);
+  if (!user && request.headers.has('authorization')) {
+    return noStoreJson({error: 'Your account session is invalid or expired.'}, 401);
+  }
   const now = Date.now();
   if (user) {
     const result = ref === null
@@ -393,6 +481,7 @@ async function updateFavorite(request: Request, db: D1Database, url: URL): Promi
 
 async function claimAnonymousFavorites(
   request: Request,
+  runtime: DatasetRuntime,
   db: D1Database,
   url: URL,
 ): Promise<Response> {
@@ -400,19 +489,42 @@ async function claimAnonymousFavorites(
     console.warn('A cross-origin favorite claim was refused.', {origin: request.headers.get('origin')});
     return noStoreJson({error: 'Cross-origin favorite updates are not allowed.'}, 403);
   }
-  const user = await currentUser(request, db);
+  const user = await currentUser(request, runtime);
   if (!user) return noStoreJson({error: 'Sign in to sync favorites.'}, 401);
-  const parsed = await parseJsonBody(request);
+  const parsed = await parseJsonBody(request, MAX_CLAIM_BODY_BYTES);
   if (parsed instanceof Response) return parsed;
   if (
     !isRecord(parsed) ||
-    !hasExactKeys(parsed, ['clientId']) ||
+    !hasExactKeys(parsed, ['clientId', 'favorites', 'packSlug', 'publicationId']) ||
     !boundedText(parsed.clientId, MAX_CLIENT_ID_LENGTH) ||
-    !/^[a-f0-9-]{32,128}$/iu.test(parsed.clientId)
+    !/^[a-f0-9-]{32,128}$/iu.test(parsed.clientId) ||
+    !boundedText(parsed.packSlug, 80) ||
+    !DATASET_SLUG_PATTERN.test(parsed.packSlug) ||
+    typeof parsed.publicationId !== 'string' ||
+    !CORE_DATASET_PUBLICATION_ID_PATTERN.test(parsed.publicationId) ||
+    !Array.isArray(parsed.favorites) ||
+    parsed.favorites.length > MAX_CLAIM_FAVORITES
   ) {
     return noStoreJson({error: 'Favorite claim contains invalid values.'}, 400);
   }
+  const favorites: Array<{itemKey: string; recipeRef: [number, number]}> = [];
+  for (const [index, value] of parsed.favorites.entries()) {
+    if (!isRecord(value) || !hasExactKeys(value, ['itemKey', 'recipeRef'])) {
+      console.warn('A browser favorite claim had an invalid entry shape.', {index});
+      return noStoreJson({error: 'Favorite claim contains invalid values.'}, 400);
+    }
+    const ref = recipeRef(value.recipeRef);
+    if (!boundedText(value.itemKey, MAX_ITEM_KEY_LENGTH) || !ref) {
+      console.warn('A browser favorite claim had invalid entry values.', {index});
+      return noStoreJson({error: 'Favorite claim contains invalid values.'}, 400);
+    }
+    favorites.push({itemKey: value.itemKey, recipeRef: ref});
+  }
+  if (!(await requireCurrentPack(runtime, db, parsed.packSlug, parsed.publicationId))) {
+    return noStoreJson({error: 'That saved pack version is not available.'}, 404);
+  }
   const clientHash = await sha256Hex(new TextEncoder().encode(parsed.clientId));
+  const now = Date.now();
   const results = await db.batch([
     db
       .prepare(
@@ -431,11 +543,36 @@ async function claimAnonymousFavorites(
       )
       .bind(user.id, clientHash),
     db.prepare('DELETE FROM recipe_favorites WHERE client_hash = ?').bind(clientHash),
+    ...favorites.map(favorite =>
+      db
+        .prepare(
+          `INSERT INTO account_recipe_favorites
+             (user_id, pack_slug, publication_id, item_key,
+              recipe_category, recipe_index, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT (user_id, pack_slug, publication_id, item_key)
+           DO UPDATE SET recipe_category = excluded.recipe_category,
+                         recipe_index = excluded.recipe_index,
+                         updated_at = excluded.updated_at`,
+        )
+        .bind(
+          user.id,
+          parsed.packSlug,
+          parsed.publicationId,
+          favorite.itemKey,
+          favorite.recipeRef[0],
+          favorite.recipeRef[1],
+          now,
+        ),
+    ),
   ]);
   if (results.some(result => !result.success)) {
     throw new Error('D1 reported an unsuccessful anonymous favorite claim.');
   }
-  return noStoreJson({claimed: results[0]?.meta?.changes ?? 0});
+  return noStoreJson({
+    claimed: results[0]?.meta?.changes ?? 0,
+    imported: favorites.length,
+  });
 }
 
 export async function handleRecipeFavorites(
@@ -448,21 +585,21 @@ export async function handleRecipeFavorites(
   try {
     await ensureRecipeFavoritesSchema(db);
     if (url.pathname === RECIPE_FAVORITES_ROUTE) {
-      if (request.method === 'GET') return getCommunityFavorites(db, url);
-      if (request.method === 'PUT') return updateFavorite(request, db, url);
+      if (request.method === 'GET') return getCommunityFavorites(runtime, db, url);
+      if (request.method === 'PUT') return updateFavorite(request, runtime, db, url);
       return methodNotAllowed('GET, PUT');
     }
     if (url.pathname === `${RECIPE_FAVORITES_ROUTE}/leaderboard`) {
       if (request.method !== 'GET') return methodNotAllowed('GET');
-      return getLeaderboard(db, url);
+      return getLeaderboard(request, runtime, db, url);
     }
     if (url.pathname === `${RECIPE_FAVORITES_ROUTE}/mine`) {
       if (request.method !== 'GET') return methodNotAllowed('GET');
-      return getPersonalFavorites(request, db, url);
+      return getPersonalFavorites(request, runtime, db, url);
     }
     if (url.pathname === `${RECIPE_FAVORITES_ROUTE}/claim`) {
       if (request.method !== 'POST') return methodNotAllowed('POST');
-      return claimAnonymousFavorites(request, db, url);
+      return claimAnonymousFavorites(request, runtime, db, url);
     }
     return noStoreJson({error: 'Not found.'}, 404);
   } catch (error) {

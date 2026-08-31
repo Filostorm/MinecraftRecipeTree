@@ -5,6 +5,7 @@ import {
   buildPortableTree,
   parsePortableTree,
   portableSelectionAsStored,
+  resolveConnectedPortableSelections,
 } from './portableTree.ts';
 
 const descriptor = {
@@ -100,5 +101,43 @@ test('requires a shared history to match the selected pack publication and versi
       publicationId: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
     }),
     /different publication/,
+  );
+});
+
+test('keeps valid sibling recipes while removing unavailable branches and their descendants', async () => {
+  const recipe = (path, itemKey, recipeKey) => ({
+    path,
+    itemKey,
+    source: {kind: 'recipe', recipeKey},
+  });
+  const selections = [
+    recipe([], 'item|root', 'test|root'),
+    recipe([0], 'item|missing', 'test|missing'),
+    recipe([0, 0], 'item|orphan', 'test|orphan'),
+    recipe([1], 'item|sibling', 'test|sibling'),
+  ];
+  const resolvedKeys = [];
+  const result = await resolveConnectedPortableSelections(
+    selections,
+    async selection => {
+      resolvedKeys.push(selection.itemKey);
+      if (selection.itemKey === 'item|missing') {
+        throw new Error('Recipe is unavailable.');
+      }
+      return portableSelectionAsStored(selection, [1, resolvedKeys.length]);
+    },
+  );
+
+  assert.deepEqual(
+    result.selections.map(selection => selection.itemKey),
+    ['item|root', 'item|sibling'],
+  );
+  assert.deepEqual(resolvedKeys, ['item|root', 'item|missing', 'item|sibling']);
+  assert.deepEqual(
+    result.skipped.map(skipped => [skipped.selection.itemKey, skipped.reason]),
+    [
+      ['item|missing', 'unavailable'],
+      ['item|orphan', 'dependent'],
+    ],
   );
 });

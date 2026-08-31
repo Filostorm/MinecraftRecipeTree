@@ -21,7 +21,8 @@ const d1Migrations = await Promise.all([
   readFile(new URL('../drizzle/0003_tidy_ogun.sql', import.meta.url), 'utf8'),
   readFile(new URL('../drizzle/0004_rainy_maverick.sql', import.meta.url), 'utf8'),
   readFile(new URL('../drizzle/0005_harsh_stick.sql', import.meta.url), 'utf8'),
-  readFile(new URL('../drizzle/0006_yummy_lyja.sql', import.meta.url), 'utf8'),
+  readFile(new URL('../drizzle/0006_lumpy_ricochet.sql', import.meta.url), 'utf8'),
+  readFile(new URL('../drizzle/0007_simple_madrox.sql', import.meta.url), 'utf8'),
 ]);
 
 test('Cloudflare routes catalog, immutable datasets, and administration through the Worker', () => {
@@ -62,8 +63,8 @@ test('Cloudflare routes catalog, immutable datasets, and administration through 
   );
   assert.match(
     viteConfig,
-    /isCloudflareProduction[\s\S]*?name:\s*['"]minecraft-recipe-tree-production['"][\s\S]*?DATASET_ADMIN_ENABLED:\s*['"]true['"][\s\S]*?PUBLIC_APP_ORIGIN:\s*PRODUCTION_APP_ORIGIN/,
-    'standalone production must enable token-authenticated administration and bind its account origin',
+    /isCloudflareProduction[\s\S]*?name:\s*['"]minecraft-recipe-tree-production['"][\s\S]*?DATASET_ADMIN_ENABLED:\s*['"]true['"][\s\S]*?SUPABASE_URL/,
+    'standalone production must enable token-authenticated administration and bind its account provider',
   );
   assert.match(
     viteConfig,
@@ -80,6 +81,11 @@ test('Cloudflare routes catalog, immutable datasets, and administration through 
     /resolve\(root, ['"]public['"], ['"]pack-icons['"]\)[\s\S]*?resolve\(root, ['"]dist['"], ['"]client['"], ['"]pack-icons['"]\)[\s\S]*?metadata\.nlink !== 1[\s\S]*?MAX_PACK_ICON_BYTES[\s\S]*?copyFile/,
     'only the exact bounded pack icon set may be copied into the deployable client',
   );
+  assert.match(
+    sitesVitePlugin,
+    /resolve\(root, ['"]public['"], ['"]fonts['"]\)[\s\S]*?THEME_FONT_FILES[\s\S]*?metadata\.nlink !== 1[\s\S]*?MAX_THEME_FONT_BYTES[\s\S]*?copyFile/,
+    'only the exact bounded licensed theme font set may be copied into the deployable client',
+  );
   const workerFirstSource = /run_worker_first:\s*\[([\s\S]*?)\]/.exec(viteConfig)?.[1];
   assert.ok(workerFirstSource, 'vite.config.ts must define an explicit run_worker_first route list');
   const workerFirstRoutes = [...workerFirstSource.matchAll(/['"]([^'"]+)['"]/g)].map(
@@ -95,6 +101,7 @@ test('Cloudflare routes catalog, immutable datasets, and administration through 
     '/api/feedback',
     '/api/recipe-favorites*',
     '/api/auth/*',
+    '/api/donations*',
     '/api/modpacks*',
     '/dataset/publications/*',
     '/dataset/preview-sets/*',
@@ -132,6 +139,16 @@ test('Cloudflare routes catalog, immutable datasets, and administration through 
     sitesVitePlugin,
     /\/assets\/\*[\s\S]*?max-age=31536000,\s*immutable/,
     'content-hashed client assets should be cached immutably',
+  );
+  assert.match(
+    viteConfig,
+    /sites\(\{connectSrcOrigins:\s*\[SUPABASE_URL\]\}\)/,
+    'static viewer responses must allow the configured Supabase OAuth origin',
+  );
+  assert.match(
+    sitesVitePlugin,
+    /connectSrcOrigins\.map\(requireHttpsOrigin\)/,
+    'static CSP additions must be validated as exact HTTPS origins',
   );
 });
 
@@ -183,9 +200,13 @@ test('the environment template exposes only the current server-side operator con
     'PREVIEW_UPLOAD_TOKEN',
     'FEEDBACK_ADMIN_TOKEN',
     'GITHUB_ISSUES_TOKEN',
-    'PUBLIC_APP_ORIGIN',
-    'DISCORD_CLIENT_ID',
-    'DISCORD_CLIENT_SECRET',
+    'SUPABASE_URL',
+    'SUPABASE_SECRET_KEY',
+    'STRIPE_SECRET_KEY',
+    'STRIPE_WEBHOOK_SECRET',
+    'DONATION_SUPABASE_MONTHLY_CENTS',
+    'DONATION_CLOUDFLARE_MONTHLY_CENTS',
+    'DONATION_GITHUB_ACTIONS_MONTHLY_CENTS',
   ]);
   assert.equal(values.BETA_DATA_ORIGIN, 'https://minecraftrecipetree.craftsmannsoftware.com');
   assert.equal(values.DATASET_ADMIN_ENABLED, 'false');
@@ -197,9 +218,17 @@ test('the environment template exposes only the current server-side operator con
   assert.doesNotMatch(values.FEEDBACK_ADMIN_TOKEN, /[\s\u0000-\u001f\u007f]/);
   assert.ok(values.GITHUB_ISSUES_TOKEN.length >= 32);
   assert.doesNotMatch(values.GITHUB_ISSUES_TOKEN, /[\s\u0000-\u001f\u007f]/);
-  assert.equal(values.PUBLIC_APP_ORIGIN, 'https://minecraftrecipetree.craftsmannsoftware.com');
-  assert.ok(values.DISCORD_CLIENT_SECRET.length >= 32);
-  assert.doesNotMatch(values.DISCORD_CLIENT_SECRET, /[\s\u0000-\u001f\u007f]/);
+  assert.equal(values.SUPABASE_URL, 'https://replace-with-project-ref.supabase.co');
+  assert.equal(values.SUPABASE_SECRET_KEY, 'sb_secret_replace_with_server_secret');
+  assert.match(values.STRIPE_SECRET_KEY, /^sk_test_/);
+  assert.match(values.STRIPE_WEBHOOK_SECRET, /^whsec_/);
+  for (const name of [
+    'DONATION_SUPABASE_MONTHLY_CENTS',
+    'DONATION_CLOUDFLARE_MONTHLY_CENTS',
+    'DONATION_GITHUB_ACTIONS_MONTHLY_CENTS',
+  ]) {
+    assert.match(values[name], /^\d+$/);
+  }
   assert.doesNotMatch(environmentExample, /^PREVIEW_ASSET_SET_ID=/m);
   assert.doesNotMatch(environmentExample, /^EXPO_PUBLIC_.*TOKEN=/m);
 });

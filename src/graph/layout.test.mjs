@@ -223,6 +223,10 @@ test('reserves standalone control space around an open compact starting item', (
   assert.ok(open.nodes[1].y > closed.nodes[1].y);
 });
 
+test('reserves a two-line source header for item and recipe type names', () => {
+  assert.equal(SOURCE_HEADER, 34);
+});
+
 test('keeps radial starting item anchored when its attached controls open', () => {
   const radialX = -51;
   assert.equal(

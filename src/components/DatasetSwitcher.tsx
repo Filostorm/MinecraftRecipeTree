@@ -199,6 +199,7 @@ export function DatasetSwitcher({
               {brand}
               {datasetButton}
               {uploadButton}
+              {trailingAction}
             </View>
             <View style={styles.fullControlRow}>
               {leadingAction}

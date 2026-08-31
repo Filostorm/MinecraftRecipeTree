@@ -1,8 +1,15 @@
-import React, {createContext, useCallback, useContext, useEffect, useMemo, useState} from 'react';
+import type {User} from '@supabase/supabase-js';
+import React, {createContext, useCallback, useContext, useEffect, useMemo, useRef, useState} from 'react';
 import {Platform} from 'react-native';
+import {cleanFailedAccountAuthRedirect, supabaseAccountClient} from './supabaseClient';
+import {validDisplayName, validEmail, validPassword} from './userCredentials';
+import {recipeTreeUserIdentity} from './userIdentity';
 
 export interface RecipeTreeUser {
+  id: string;
   displayName: string;
+  email: string | null;
+  provider: string | null;
 }
 
 type AccountStatus = 'loading' | 'anonymous' | 'authenticated' | 'error';
@@ -12,35 +19,23 @@ interface UserContextValue {
   user: RecipeTreeUser | null;
   revision: number;
   error: string | null;
-  signIn(): void;
+  signInWithDiscord(): Promise<void>;
+  sendMagicLink(email: string): Promise<void>;
+  signInWithPassword(email: string, password: string): Promise<void>;
+  signUpWithPassword(email: string, password: string): Promise<'signed_in' | 'confirmation_required'>;
+  updateDisplayName(displayName: string): Promise<void>;
+  updateEmail(email: string): Promise<void>;
+  updatePassword(password: string): Promise<void>;
+  deleteAccount(): Promise<void>;
   signOut(): Promise<void>;
   refresh(): Promise<void>;
 }
 
 const UserContext = createContext<UserContextValue | null>(null);
 
-function parseSession(value: unknown): RecipeTreeUser | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('Account session response is not an object.');
-  }
-  const record = value as Record<string, unknown>;
-  if (Object.keys(record).length !== 1) {
-    throw new Error('Account session response has an invalid shape.');
-  }
-  if (record.user === null) return null;
-  if (!record.user || typeof record.user !== 'object' || Array.isArray(record.user)) {
-    throw new Error('Account session response contains an invalid user.');
-  }
-  const user = record.user as Record<string, unknown>;
-  if (
-    Object.keys(user).length !== 1 ||
-    typeof user.displayName !== 'string' ||
-    user.displayName.length === 0 ||
-    user.displayName.length > 80
-  ) {
-    throw new Error('Account session response contains invalid profile data.');
-  }
-  return {displayName: user.displayName};
+function currentReturnUrl(): string {
+  if (typeof window === 'undefined') throw new Error('Account redirects require a browser window.');
+  return `${window.location.origin}${window.location.pathname}`;
 }
 
 export function UserProvider({children}: {children: React.ReactNode}) {
@@ -48,6 +43,28 @@ export function UserProvider({children}: {children: React.ReactNode}) {
   const [user, setUser] = useState<RecipeTreeUser | null>(null);
   const [revision, setRevision] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const appliedIdentity = useRef('uninitialized');
+
+  const applyUser = useCallback((next: User | null) => {
+    try {
+      const mapped = next ? recipeTreeUserIdentity(next) : null;
+      const identity = mapped
+        ? `${mapped.id}\u0000${mapped.displayName}\u0000${mapped.email ?? ''}\u0000${mapped.provider ?? ''}`
+        : 'anonymous';
+      setUser(mapped);
+      setStatus(mapped ? 'authenticated' : 'anonymous');
+      setError(null);
+      if (identity !== appliedIdentity.current) {
+        appliedIdentity.current = identity;
+        setRevision(value => value + 1);
+      }
+    } catch (cause) {
+      console.error('Supabase account profile could not be applied.', cause);
+      setUser(null);
+      setStatus('error');
+      setError('Account profile could not be loaded.');
+    }
+  }, []);
 
   const refresh = useCallback(async () => {
     if (Platform.OS !== 'web') {
@@ -56,55 +73,187 @@ export function UserProvider({children}: {children: React.ReactNode}) {
       return;
     }
     try {
-      const response = await fetch('/api/auth/session', {
-        headers: {Accept: 'application/json'},
-        cache: 'no-store',
-        credentials: 'include',
-      });
-      if (!response.ok) throw new Error(`Account session returned HTTP ${response.status}.`);
-      const nextUser = parseSession(await response.json());
-      setUser(nextUser);
-      setStatus(nextUser ? 'authenticated' : 'anonymous');
-      setError(null);
-      setRevision(value => value + 1);
+      const client = await supabaseAccountClient();
+      const {data, error: authError} = await client.auth.getUser();
+      if (authError && authError.name !== 'AuthSessionMissingError') throw authError;
+      applyUser(data.user ?? null);
     } catch (cause) {
       console.error('Account session could not be loaded.', cause);
       setUser(null);
       setStatus('error');
       setError('Account sync is temporarily unavailable.');
     }
-  }, []);
+  }, [applyUser]);
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
-  const signIn = useCallback(() => {
-    if (Platform.OS !== 'web' || typeof window === 'undefined') {
-      console.error('Discord sign-in is currently available only in the web app.');
+    if (Platform.OS !== 'web') {
+      setStatus('anonymous');
       return;
     }
-    const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-    window.location.assign(`/api/auth/discord/start?${new URLSearchParams({returnTo})}`);
+    let alive = true;
+    let unsubscribe: (() => void) | null = null;
+    void supabaseAccountClient()
+      .then(async client => {
+        if (!alive) return;
+        const {error: initializationError} = await client.auth.initialize();
+        if (initializationError) {
+          cleanFailedAccountAuthRedirect();
+          throw initializationError;
+        }
+        if (!alive) return;
+        const subscription = client.auth.onAuthStateChange((_event, session) => {
+          if (alive) applyUser(session?.user ?? null);
+        });
+        unsubscribe = () => subscription.data.subscription.unsubscribe();
+        return refresh();
+      })
+      .catch(cause => {
+        if (!alive) return;
+        console.error('Account session initialization failed.', cause);
+        setStatus('error');
+        setError(cause instanceof Error ? cause.message : 'Account sync is temporarily unavailable.');
+      });
+    return () => {
+      alive = false;
+      unsubscribe?.();
+    };
+  }, [applyUser, refresh]);
+
+  const signInWithDiscord = useCallback(async () => {
+    if (Platform.OS !== 'web') {
+      throw new Error('Discord sign-in is currently available only in the web app.');
+    }
+    const client = await supabaseAccountClient();
+    const {error: authError} = await client.auth.signInWithOAuth({
+      provider: 'discord',
+      options: {redirectTo: currentReturnUrl()},
+    });
+    if (authError) throw authError;
   }, []);
+
+  const sendMagicLink = useCallback(async (email: string) => {
+    if (Platform.OS !== 'web') {
+      throw new Error('Email sign-in is currently available only in the web app.');
+    }
+    const client = await supabaseAccountClient();
+    const {error: authError} = await client.auth.signInWithOtp({
+      email: validEmail(email),
+      options: {
+        emailRedirectTo: currentReturnUrl(),
+        shouldCreateUser: true,
+      },
+    });
+    if (authError) throw authError;
+  }, []);
+
+  const signInWithPassword = useCallback(async (email: string, password: string) => {
+    if (Platform.OS !== 'web') {
+      throw new Error('Password sign-in is currently available only in the web app.');
+    }
+    const client = await supabaseAccountClient();
+    const {error: authError} = await client.auth.signInWithPassword({
+      email: validEmail(email),
+      password: validPassword(password),
+    });
+    if (authError) throw authError;
+  }, []);
+
+  const signUpWithPassword = useCallback(async (
+    email: string,
+    password: string,
+  ): Promise<'signed_in' | 'confirmation_required'> => {
+    if (Platform.OS !== 'web') {
+      throw new Error('Account creation is currently available only in the web app.');
+    }
+    const client = await supabaseAccountClient();
+    const {data, error: authError} = await client.auth.signUp({
+      email: validEmail(email),
+      password: validPassword(password),
+      options: {emailRedirectTo: currentReturnUrl()},
+    });
+    if (authError) throw authError;
+    return data.session ? 'signed_in' : 'confirmation_required';
+  }, []);
+
+  const updateEmail = useCallback(async (email: string) => {
+    if (Platform.OS !== 'web') throw new Error('Account settings are available only in the web app.');
+    const client = await supabaseAccountClient();
+    const {error: authError} = await client.auth.updateUser({email: validEmail(email)});
+    if (authError) throw authError;
+  }, []);
+
+  const updateDisplayName = useCallback(async (displayName: string) => {
+    if (Platform.OS !== 'web') throw new Error('Account settings are available only in the web app.');
+    const client = await supabaseAccountClient();
+    const {data, error: authError} = await client.auth.updateUser({
+      data: {display_name: validDisplayName(displayName)},
+    });
+    if (authError) throw authError;
+    if (!data.user) throw new Error('Supabase did not return the updated account profile.');
+    applyUser(data.user);
+  }, [applyUser]);
+
+  const updatePassword = useCallback(async (password: string) => {
+    if (Platform.OS !== 'web') throw new Error('Account settings are available only in the web app.');
+    const client = await supabaseAccountClient();
+    const {error: authError} = await client.auth.updateUser({password: validPassword(password)});
+    if (authError) throw authError;
+  }, []);
+
+  const deleteAccount = useCallback(async () => {
+    if (Platform.OS !== 'web') throw new Error('Account deletion is available only in the web app.');
+    const {accountFetch} = await import('./supabaseClient');
+    const response = await accountFetch('/api/auth/account', {method: 'DELETE'});
+    const body = await response.json().catch(() => null) as {error?: unknown} | null;
+    if (!response.ok) {
+      throw new Error(typeof body?.error === 'string' ? body.error : 'Account could not be deleted.');
+    }
+    const client = await supabaseAccountClient();
+    const {error: authError} = await client.auth.signOut({scope: 'local'});
+    if (authError) throw authError;
+    applyUser(null);
+  }, [applyUser]);
 
   const signOut = useCallback(async () => {
     if (Platform.OS !== 'web') return;
-    const response = await fetch('/api/auth/signout', {
-      method: 'POST',
-      headers: {Accept: 'application/json'},
-      credentials: 'include',
-    });
-    if (!response.ok) throw new Error(`Account sign-out returned HTTP ${response.status}.`);
-    setUser(null);
-    setStatus('anonymous');
-    setError(null);
-    setRevision(value => value + 1);
+    const client = await supabaseAccountClient();
+    const {error: authError} = await client.auth.signOut();
+    if (authError) throw authError;
   }, []);
 
   const value = useMemo<UserContextValue>(
-    () => ({status, user, revision, error, signIn, signOut, refresh}),
-    [error, refresh, revision, signIn, signOut, status, user],
+    () => ({
+      status,
+      user,
+      revision,
+      error,
+      signInWithDiscord,
+      sendMagicLink,
+      signInWithPassword,
+      signUpWithPassword,
+      updateDisplayName,
+      updateEmail,
+      updatePassword,
+      deleteAccount,
+      signOut,
+      refresh,
+    }),
+    [
+      deleteAccount,
+      error,
+      refresh,
+      revision,
+      sendMagicLink,
+      signInWithDiscord,
+      signInWithPassword,
+      signOut,
+      signUpWithPassword,
+      status,
+      updateEmail,
+      updateDisplayName,
+      updatePassword,
+      user,
+    ],
   );
   return <UserContext.Provider value={value}>{children}</UserContext.Provider>;
 }

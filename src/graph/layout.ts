@@ -12,8 +12,8 @@ export const COMPACT_LABEL_WIDTH = 96;
 export const COMPACT_LABEL_HEIGHT = 16;
 export const COMPACT_ROOT_LABEL_GAP = 8;
 export const COMPACT_ROOT_LABEL_HEIGHT = COMPACT_ROOT_LABEL_GAP + 12;
-/** Header strip on source nodes: icon + "Name ×N · Category". */
-export const SOURCE_HEADER = 22;
+/** Two-line source header: item name and amount above its recipe type. */
+export const SOURCE_HEADER = 34;
 /** Fixed placed-block canvas used for structure recipes inside the graph. */
 export const SOURCE_STRUCTURE_PREVIEW_WIDTH = 280;
 export const SOURCE_STRUCTURE_PREVIEW_HEIGHT = 220;

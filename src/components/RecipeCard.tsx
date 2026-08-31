@@ -11,6 +11,7 @@ import {
   shouldShowIngredientQuantity,
 } from '../data/ingredientQuantities';
 import {recipeDisplayTitle} from '../data/recipeTitles';
+import {projecteEmcTransmutation} from '../data/projecteEmc';
 import {theme} from '../theme';
 import {slotSummary} from '../data/slotSummary';
 import {Recipe} from '../types';
@@ -44,6 +45,8 @@ export function RecipeCard({
   grouped = false,
   machineKey,
   machineLabel,
+  actionAccessibilityLabel,
+  actionHint,
 }: {
   recipe: Recipe;
   dir: string;
@@ -63,10 +66,15 @@ export function RecipeCard({
   /** First JEI catalyst for the recipe category, used to open the machine's own recipes. */
   machineKey?: string;
   machineLabel?: string;
+  /** Override the default graph action description when the card opens another recipe surface. */
+  actionAccessibilityLabel?: string;
+  /** Override the visible graph action hint when the card opens another recipe surface. */
+  actionHint?: string;
 }) {
   const data = useData();
   const {openItem} = useUi();
   const presentation = recipePresentationKind(recipe);
+  const emcTransmutation = projecteEmcTransmutation(recipe);
   if (presentation === 'failure') {
     return (
       <View style={styles.card}>
@@ -90,9 +98,9 @@ export function RecipeCard({
       accessibilityRole={onPress ? 'button' : undefined}
       accessibilityLabel={
         onPress
-          ? graphDirection === 'outputs'
+          ? actionAccessibilityLabel ?? (graphDirection === 'outputs'
             ? `Make ${usageOutputSubject ?? 'the primary product'} the tree root using ${actionSubject ?? 'this item'} through ${displayTitle ?? 'this recipe'}`
-            : `Start an ingredient tree for ${actionSubject ?? 'this item'} with ${displayTitle ?? 'this recipe'}`
+            : `Start an ingredient tree for ${actionSubject ?? 'this item'} with ${displayTitle ?? 'this recipe'}`)
           : undefined
       }
       activeOpacity={onPress ? 0.72 : 1}
@@ -123,7 +131,7 @@ export function RecipeCard({
           ]}
           resizeMode="contain"
         />
-      ) : !recipe.structure ? (
+      ) : !recipe.structure && !emcTransmutation ? (
         <Text style={styles.previewUnavailable}>
           Structured recipe · layout preview unavailable
         </Text>
@@ -201,9 +209,9 @@ export function RecipeCard({
       ) : null}
       {onPress ? (
         <Text style={styles.cardActionHint}>
-          {graphDirection === 'outputs'
+          {actionHint ?? (graphDirection === 'outputs'
             ? `Tap to make ${usageOutputSubject ?? 'the primary product'} the new root`
-            : 'Tap to add recipe to the graph'}
+            : 'Tap to add recipe to the graph')}
         </Text>
       ) : null}
     </TouchableOpacity>

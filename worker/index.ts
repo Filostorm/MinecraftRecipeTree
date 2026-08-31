@@ -24,15 +24,28 @@ import {FEEDBACK_ROUTE, handleFeedback} from './feedback.ts';
 import {EXPORT_FAILURE_ROUTE, handleExportFailureIssue} from './exportFailureIssue.ts';
 import {MIGRATION_BASE_PATH, handleStorageMigration} from './migration.ts';
 import {RECIPE_FAVORITES_ROUTE, handleRecipeFavorites} from './recipeFavorites.ts';
-import {AUTH_ROUTE_PREFIX, handleUserAccounts} from './userAccounts.ts';
+import {AUTH_ROUTE_PREFIX, handleUserAccounts, supabaseProjectUrl} from './userAccounts.ts';
+import {DONATIONS_ROUTE, handleDonations} from './donations.ts';
 
-const CONTENT_SECURITY_POLICY =
-  "default-src 'self'; base-uri 'self'; connect-src 'self' https://metrics.craftsmannsoftware.com; " +
-  "font-src 'self' data:; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: blob:; " +
-  "object-src 'none'; script-src 'self' 'unsafe-inline' https://metrics.craftsmannsoftware.com; " +
-  "style-src 'self' 'unsafe-inline'; worker-src 'self' blob:";
 const PERMISSIONS_POLICY =
   'camera=(), display-capture=(), geolocation=(), microphone=(), payment=(), usb=()';
+
+function contentSecurityPolicy(runtime: DatasetRuntime): string {
+  let supabaseOrigin = '';
+  if (runtime.SUPABASE_URL) {
+    try {
+      supabaseOrigin = ` ${supabaseProjectUrl(runtime.SUPABASE_URL)}`;
+    } catch (error) {
+      console.error('The configured Supabase origin could not be added to browser connections.', error);
+    }
+  }
+  return (
+    `default-src 'self'; base-uri 'self'; connect-src 'self' https://metrics.craftsmannsoftware.com${supabaseOrigin}; ` +
+    "font-src 'self' data:; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: blob:; " +
+    "object-src 'none'; script-src 'self' 'unsafe-inline' https://metrics.craftsmannsoftware.com; " +
+    "style-src 'self' 'unsafe-inline'; worker-src 'self' blob:"
+  );
+}
 
 interface LegacyModpackRow {
   id: string;
@@ -97,9 +110,13 @@ async function handleLegacyModpackApi(
   }
 }
 
-function withSecurityHeaders(request: Request, response: Response): Response {
+function withSecurityHeaders(
+  request: Request,
+  response: Response,
+  runtime: DatasetRuntime,
+): Response {
   const headers = new Headers(response.headers);
-  headers.set('Content-Security-Policy', CONTENT_SECURITY_POLICY);
+  headers.set('Content-Security-Policy', contentSecurityPolicy(runtime));
   headers.set('Cross-Origin-Opener-Policy', 'same-origin');
   headers.set('Cross-Origin-Resource-Policy', 'same-origin');
   headers.set('Permissions-Policy', PERMISSIONS_POLICY);
@@ -167,6 +184,9 @@ async function dispatchRequest(
   if (url.pathname.startsWith(AUTH_ROUTE_PREFIX)) {
     return handleUserAccounts(request, runtime, url);
   }
+  if (url.pathname === DONATIONS_ROUTE || url.pathname.startsWith(`${DONATIONS_ROUTE}/`)) {
+    return handleDonations(request, runtime, url);
+  }
   if (url.pathname.startsWith(MIGRATION_BASE_PATH)) {
     return handleStorageMigration(request, runtime, url);
   }
@@ -213,11 +233,12 @@ const worker = {
     env: Parameters<typeof handler.fetch>[1],
     ctx: Parameters<typeof handler.fetch>[2],
   ): Promise<Response> {
+    const runtime = (env ?? {}) as DatasetRuntime;
     try {
-      return withSecurityHeaders(request, await dispatchRequest(request, env, ctx));
+      return withSecurityHeaders(request, await dispatchRequest(request, env, ctx), runtime);
     } catch (error) {
       console.error('Minecraft Recipe Tree request failed closed.', error);
-      return withSecurityHeaders(request, noStoreJson({error: 'Request failed.'}, 500));
+      return withSecurityHeaders(request, noStoreJson({error: 'Request failed.'}, 500), runtime);
     }
   },
 };

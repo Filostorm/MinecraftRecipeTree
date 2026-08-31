@@ -1,3 +1,50 @@
+@font-face {
+  font-family: 'Monocraft';
+  src: url('/fonts/Monocraft.ttf') format('truetype');
+  font-display: swap;
+  font-style: normal;
+  font-weight: 100 900;
+}
+
+:root,
+:root[data-mrt-theme='dark'] {
+  --mrt-bg: #0e1116;
+  --mrt-panel: #161b23;
+  --mrt-panelAlt: #1d242f;
+  --mrt-border: #2a3342;
+  --mrt-borderLight: #3a4659;
+  --mrt-text: #e6ebf2;
+  --mrt-textDim: #8b97a8;
+  --mrt-accent: #58c47b;
+  --mrt-accentAlt: #5aa7fa;
+  --mrt-transfer: #4ecdc4;
+  --mrt-radialRoot: #c69cff;
+  --mrt-radialRootPanel: #352448;
+  --mrt-warn: #e0b341;
+  --mrt-danger: #e06363;
+  --mrt-slot: #c6c6c6;
+  color-scheme: dark;
+}
+
+:root[data-mrt-theme='light'] {
+  --mrt-bg: #f4f1ea;
+  --mrt-panel: #ffffff;
+  --mrt-panelAlt: #ebe7dd;
+  --mrt-border: #d4ccbf;
+  --mrt-borderLight: #a9a092;
+  --mrt-text: #1c252b;
+  --mrt-textDim: #5f6a72;
+  --mrt-accent: #287c42;
+  --mrt-accentAlt: #316ca8;
+  --mrt-transfer: #16877c;
+  --mrt-radialRoot: #7746ae;
+  --mrt-radialRootPanel: #eee4f7;
+  --mrt-warn: #966a08;
+  --mrt-danger: #b83d3d;
+  --mrt-slot: #c6c6c6;
+  color-scheme: light;
+}
+
 html,
 body {
   width: 100%;
@@ -9,7 +56,7 @@ body {
 body {
   display: flex;
   flex-direction: column;
-  background: #0e1116;
+  background: var(--mrt-bg);
 }
 
 /*
@@ -27,4 +74,9 @@ body > div:first-of-type {
 
 * {
   box-sizing: border-box;
+}
+
+:root[data-mrt-font='minecraft'] body,
+:root[data-mrt-font='minecraft'] body * {
+  font-family: 'Monocraft', monospace !important;
 }

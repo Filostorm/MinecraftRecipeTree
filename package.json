@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "main": "index.ts",
   "dependencies": {
+    "@supabase/supabase-js": "^2.112.4",
     "drizzle-orm": "0.45.2",
     "expo": "~56.0.11",
     "expo-clipboard": "~56.0.4",
@@ -13,14 +14,16 @@
     "expo-status-bar": "~56.0.4",
     "fflate": "0.7.4",
     "html-to-image": "^1.11.13",
-    "next": "16.2.12",
+    "jose": "^6.2.10",
+    "next": "16.3.3",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-native": "0.85.3",
     "react-native-react": "npm:react@19.2.3",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-svg": "15.15.4",
-    "react-native-web": "^0.21.2"
+    "react-native-web": "^0.21.2",
+    "stripe": "^22.6.0"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.48.0",
@@ -83,7 +86,8 @@
     "test:multiblock": "node --test scripts/validate-export-data.test.mjs src/components/multiblockProjection.test.mjs src/data/currentMultiblockCompatibilityStructures.test.mjs src/data/legacyMultiblockMadness323Structures.test.mjs src/data/recipeStructure.test.mjs",
     "test:cold-dataset": "node --test scripts/benchmark-cold-dataset.test.mjs",
     "test:migration": "node --test worker/migration.test.mjs",
-    "test:accounts": "node --test worker/userAccounts.test.mjs worker/recipeFavorites.test.mjs",
+    "test:accounts": "node --test src/account/authRedirect.test.mjs src/account/userCredentials.test.mjs src/account/userIdentity.test.mjs src/ui/themePreference.test.mjs worker/userAccounts.test.mjs worker/recipeFavorites.test.mjs worker/donations.test.mjs",
+    "test:donations": "node --test worker/donations.test.mjs src/data/donations.test.mjs",
     "test:archive-streaming": "node --test src/data/fflateStreaming.test.mjs",
     "test:publication-rights": "node --test src/components/mobPlaceholder.test.mjs src/data/datasetAttribution.test.mjs src/data/publicationRights.test.mjs worker/index.test.mjs",
     "test:mob-sprites": "node --test src/components/mobSpriteAnimation.test.mjs",
