@@ -1,5 +1,39 @@
 # Production deployment verifications
 
+## 2026-08-31 — favorites, graph workflows, EMC rendering, and Forge 1.12 viewer
+
+- Application commit: `9fb54d31f484f190f90a1f920e6c5e1d950d4890`
+- Beta Worker version: `269c64d9-79ab-4fb9-8ee4-da5c3a60aa1c`
+- Production Worker: `minecraft-recipe-tree-production`
+- Production Worker version: `6f38204e-db50-4420-828e-a1e31dce1663`
+- Canonical URL: `https://minecraftrecipetree.craftsmannsoftware.com/`
+
+Passed:
+
+- The exact beta commit was fast-forwarded to `main`. The Forge 1.12 exporter compiled and passed
+  its Gradle tests, exporter packaging tests and graph layout tests passed, and both Cloudflare
+  Worker builds completed successfully.
+- A fresh beta browser session hydrated without console errors, its hashed application asset
+  returned `200`, and `/api/datasets` returned the required production data-origin header.
+- The production D1 database had no pending migrations and exposes both Discord avatar columns.
+  The standalone Worker deployed with the existing D1 and R2 bindings.
+- A fresh canonical browser session hydrated MeatballCraft and rendered the structured
+  EMC-to-Cobblestone recipe. The homepage, Vinext bootstrap import, serialized RSC stylesheet,
+  hashed application and graph bundles, local-pack service worker, `/publish`, `/api/datasets`,
+  `/api/modpacks`, `/api/auth/session`, and `/api/donations` returned `200` with their expected
+  content types.
+- The canonical router retained its application-origin, Worker-origin, and signal-edge headers.
+  Dataset upload administration and feedback inbox reads returned `401`; unsupported
+  failure-report reads returned `405`; invalid same-origin feedback and failure reports returned
+  `400`; and legacy modpack mutation returned `403`.
+- Remote D1 readback retained four dataset channels, two legacy modpacks, three feedback reports,
+  and zero exporter-failure reports. Verification wrote zero rows.
+
+Verification note:
+
+- One existing legacy JEI recipe still logs the explicit diagnostic that its exporter did not
+  produce a layout preview. Its structured recipe remains visible and the graph stays functional.
+
 ## 2026-08-30 — accounts, donations, EMC, and portable recipe imports
 
 - Application commit: `27d818bfe3df07ed4b7d71b73e2af73911352573`
