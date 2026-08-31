@@ -54,6 +54,21 @@ public class IngredientQuantityTest {
                 "requious.compat.jei.ingredient.Unknown"));
     }
 
+    @Test
+    public void runtimeNeutralCallerCanRejectUnknownUnitFallback() {
+        try {
+            IngredientQuantity.amount(new Object(), new IngredientQuantity.UnknownQuantityReporter() {
+                @Override
+                public void report(Class<?> ingredientClass) {
+                    throw new IllegalArgumentException("unsupported " + ingredientClass.getName());
+                }
+            });
+            fail("Expected runtime planner to reject an unknown quantity class");
+        } catch (IllegalArgumentException expected) {
+            assertTrue(expected.getMessage().contains("unsupported java.lang.Object"));
+        }
+    }
+
     private static void assertInvalid(Number number, String expectedMessage) {
         try {
             IngredientQuantity.validatedAmount(number, "example.Invalid", "amount");

@@ -84,9 +84,9 @@ export const EXPORTER_RELEASE_DEFINITIONS = Object.freeze([
     minecraftVersion: '1.12.2',
     recipeViewer: 'HEI/JEI 4',
     loader: 'Forge 14.23.5',
-    version: '1.1.7',
-    source: 'recipe-export-mod-1.12.2/build/libs/recipe-export-mod-1.12.2-1.1.7.jar',
-    filename: 'recipe-tree-exporter-forge-1.12.2-1.1.7.jar',
+    version: '1.2.0-beta.108',
+    source: 'recipe-export-mod-1.12.2/build/libs/recipe-export-mod-1.12.2-1.2.0-beta.108.jar',
+    filename: 'recipe-tree-exporter-forge-1.12.2-1.2.0-beta.108.jar',
     qualityProfiles: Object.freeze(['meatballcraft-1.12.2', 'multiblock-madness-1.12.2']),
     artifactProvenance: Object.freeze({
       format: 'mrt-exporter-build-v1',
@@ -116,9 +116,9 @@ export const EXPORTER_RELEASE_DEFINITIONS = Object.freeze([
     minecraftVersion: '1.7.10',
     recipeViewer: 'NEI 2.8.44-GTNH',
     loader: 'Forge 10.13.4.1614',
-    version: '1.0.154',
-    source: 'recipe-export-mod-1.7.10/build/libs/recipe-tree-gtnh-nei-exporter-1.0.154.jar',
-    filename: 'recipe-tree-exporter-gtnh-1.7.10-1.0.154.jar',
+    version: '1.0.150',
+    source: 'recipe-export-mod-1.7.10/build/libs/recipe-tree-gtnh-nei-exporter-1.0.150.jar',
+    filename: 'recipe-tree-exporter-gtnh-1.7.10-1.0.150.jar',
     qualityProfiles: Object.freeze(['gtnh-1.7.10']),
     artifactProvenance: Object.freeze({
       format: 'mrt-exporter-build-v1',
@@ -127,7 +127,7 @@ export const EXPORTER_RELEASE_DEFINITIONS = Object.freeze([
     }),
     acceptanceCorpora: Object.freeze({
       'gtnh-1.7.10': Object.freeze({
-        items: 143882,
+        items: 143885,
         recipes: 568820,
         categories: 287,
         mobs: 0,
