@@ -20,6 +20,7 @@ import {
 } from '../components/itemIconSizing';
 import {MobSprite} from '../components/MobSprite';
 import {MultiblockPreview} from '../components/MultiblockPreview';
+import {ItemChip} from '../components/RecipeCard';
 import {
   PickerGroupProgress,
   PickerModal,
@@ -74,6 +75,8 @@ import {
   ITEM_W,
   ROOT_ATTACHED_ACTIONS_WIDTH,
   ROOT_SOURCE_ACTIONS_WIDTH,
+  SOURCE_EMC_PREVIEW_HEIGHT,
+  SOURCE_EMC_PREVIEW_WIDTH,
   SOURCE_HEADER,
   SOURCE_STRUCTURE_PREVIEW_WIDTH,
   type ByproductSupplyEdge,
@@ -165,7 +168,7 @@ import {
   recipeExpansionFromSource,
   recipeExpansionIdentity,
 } from './expansionOwnership';
-import {isRecursiveItemNode, makeRoot} from './model';
+import {isEmcTransmutationSource, isRecursiveItemNode, makeRoot} from './model';
 import type {
   DeferredRecipeExpansion,
   ItemTreeNode,
@@ -5071,6 +5074,7 @@ function SourceNodeView({
   const machineName = machineKey
     ? data.itemsByKey.get(machineKey)?.n ?? machineKey
     : 'machine';
+  const showEmcRecipe = isEmcTransmutationSource(source);
   const sourceCardWidth =
     isRoot && rootActions ? w - ROOT_SOURCE_ACTIONS_WIDTH : w;
   const headerCopy = (
@@ -5181,7 +5185,45 @@ function SourceNodeView({
           availableWidth={SOURCE_STRUCTURE_PREVIEW_WIDTH}
         />
       )}
+      {showEmcRecipe && source.recipe && (
+        <View
+          accessible
+          accessibilityLabel={`${source.catTitle}: EMC converts into ${name}`}
+          style={styles.emcRecipePreview}>
+          <View style={styles.emcRecipeFlow}>
+            {materialInputSummary(source.recipe).map(input => (
+              <ItemChip
+                key={`emc-input-${input.key}`}
+                itemKey={input.key}
+                amount={input.amount}
+                variableAmount={input.variableAmount}
+                variants={input.variants}
+                tag={input.tag}
+                probability={input.probability}
+                probabilityRole="consume"
+                interactive={false}
+              />
+            ))}
+            <Text style={[styles.emcRecipeArrow, noSelect]}>→</Text>
+            {slotSummary(source.recipe.out).map(output => (
+              <ItemChip
+                key={`emc-output-${output.key}`}
+                itemKey={output.key}
+                amount={output.amount}
+                variableAmount={output.variableAmount}
+                variants={output.variants}
+                tag={output.tag}
+                probability={output.probability}
+                probabilityRole="produce"
+                highlight
+                interactive={false}
+              />
+            ))}
+          </View>
+        </View>
+      )}
       {source.kind === 'recipe' &&
+        !showEmcRecipe &&
         !source.recipe?.structure &&
         source.recipe?.img &&
         source.dir && (
@@ -5206,6 +5248,7 @@ function SourceNodeView({
         )}
       {source.kind === 'recipe' &&
         source.recipe &&
+        !showEmcRecipe &&
         !source.recipe.structure &&
         emcTransmutation && (
           <ProjecteEmcPreview {...emcTransmutation} />
@@ -5674,6 +5717,25 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
   },
+  emcRecipePreview: {
+    width: SOURCE_EMC_PREVIEW_WIDTH,
+    height: SOURCE_EMC_PREVIEW_HEIGHT,
+    alignSelf: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 7,
+    backgroundColor: '#0f141b',
+  },
+  emcRecipeFlow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+  },
+  emcRecipeArrow: {color: theme.textDim, fontSize: 16, fontWeight: '700'},
   headerBtn: {paddingHorizontal: 2},
   dropRow: {flexDirection: 'row', alignItems: 'center', flex: 1, paddingHorizontal: 4},
   dropName: {color: theme.text, fontSize: 12},
