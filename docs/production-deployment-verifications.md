@@ -1,5 +1,35 @@
 # Production deployment verifications
 
+## 2026-08-30 — accounts, donations, EMC, and portable recipe imports
+
+- Application commit: `27d818bfe3df07ed4b7d71b73e2af73911352573`
+- Standalone Worker: `minecraft-recipe-tree-production`
+- Standalone Worker version: `8286e0d0-7db6-4254-b1c1-dadae6a218de`
+- Canonical URL: `https://minecraftrecipetree.craftsmannsoftware.com/`
+- D1 migrations: `0006_lumpy_ricochet.sql`, `0007_simple_madrox.sql`, and
+  `0008_lucky_lord_hawal.sql`
+
+Passed:
+
+- All 64 focused graph, session, import, account, and donation tests passed. TypeScript validation
+  and the repository diff check also passed.
+- The three pending D1 migrations completed before the production Worker was deployed.
+- Fresh canonical and direct-Worker requests returned `200`, the canonical interface hydrated in a
+  fresh browser tab, and a hashed application asset loaded successfully.
+- Importing a deliberately unavailable root recipe restored the usable portion of the tree, showed
+  the partial-import notice, skipped the unavailable selection, and produced no orphan nodes or
+  generic tree-open failure.
+- `/api/datasets`, `/api/modpacks`, `/api/auth/session`, and `/api/donations` returned `200`.
+  Dataset upload authorization, feedback, and failure-report routes rejected unauthenticated,
+  unsupported, or invalid requests without persisting test data.
+- The canonical router retained its application-origin, Worker-origin, and signal-edge headers.
+
+Open data diagnostic:
+
+- One existing JEI recipe did not include an exporter-generated layout preview. The structured
+  recipe remained visible and functional, and the missing preview was reported in the browser
+  console rather than silently concealed.
+
 ## 2026-08-27 — static far-zoom canvas rendering
 
 - Application commit: `1ea570a31ee94b4766b957db67a83eeb3f0ca65f`
