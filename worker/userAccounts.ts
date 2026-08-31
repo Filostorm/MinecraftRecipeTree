@@ -1,18 +1,16 @@
+import {createRemoteJWKSet, jwtVerify, type JWTPayload} from 'jose';
 import {
   type D1Database,
   type DatasetRuntime,
   methodNotAllowed,
   noStoreJson,
-  sha256Hex,
 } from './datasetRuntime.ts';
 
 export const AUTH_ROUTE_PREFIX = '/api/auth/';
-export const SESSION_COOKIE_NAME = '__Host-mrt-session';
-const OAUTH_COOKIE_NAME = '__Host-mrt-oauth';
-const SESSION_DURATION_SECONDS = 60 * 60 * 24 * 30;
-const OAUTH_DURATION_SECONDS = 60 * 10;
-const DISCORD_API_ORIGIN = 'https://discord.com';
 const initializedDatabases = new WeakMap<object, Promise<void>>();
+const jwksByOrigin = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
+const USER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const UNSAFE_DISPLAY_NAME_PATTERN = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/u;
 
 const schemaStatements = [
   `CREATE TABLE IF NOT EXISTS users (
@@ -25,23 +23,6 @@ const schemaStatements = [
   )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS users_provider_identity_idx
    ON users (provider, provider_user_id)`,
-  `CREATE TABLE IF NOT EXISTS user_sessions (
-    token_hash TEXT PRIMARY KEY NOT NULL,
-    user_id TEXT NOT NULL,
-    created_at INTEGER NOT NULL,
-    expires_at INTEGER NOT NULL,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  )`,
-  `CREATE INDEX IF NOT EXISTS user_sessions_user_idx ON user_sessions (user_id)`,
-  `CREATE INDEX IF NOT EXISTS user_sessions_expiry_idx ON user_sessions (expires_at)`,
-  `CREATE TABLE IF NOT EXISTS oauth_login_states (
-    state_hash TEXT PRIMARY KEY NOT NULL,
-    code_verifier TEXT NOT NULL,
-    return_to TEXT NOT NULL,
-    created_at INTEGER NOT NULL,
-    expires_at INTEGER NOT NULL
-  )`,
-  `CREATE INDEX IF NOT EXISTS oauth_login_states_expiry_idx ON oauth_login_states (expires_at)`,
   `CREATE TABLE IF NOT EXISTS account_recipe_favorites (
     user_id TEXT NOT NULL,
     pack_slug TEXT NOT NULL,
@@ -50,12 +31,16 @@ const schemaStatements = [
     recipe_category INTEGER NOT NULL,
     recipe_index INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
-    PRIMARY KEY (user_id, pack_slug, publication_id, item_key),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS account_recipe_favorites_user_item_idx
+   ON account_recipe_favorites (user_id, pack_slug, publication_id, item_key)`,
   `CREATE INDEX IF NOT EXISTS account_recipe_favorites_ranking_idx
    ON account_recipe_favorites
      (pack_slug, publication_id, item_key, recipe_category, recipe_index)`,
+  `CREATE INDEX IF NOT EXISTS account_recipe_favorites_user_leaderboard_idx
+   ON account_recipe_favorites (pack_slug, publication_id, user_id)`,
+  'PRAGMA optimize',
 ] as const;
 
 export interface AuthenticatedUser {
@@ -63,96 +48,37 @@ export interface AuthenticatedUser {
   displayName: string;
 }
 
-interface SessionRow {
-  id: string;
-  display_name: string;
-  expires_at: number;
+interface SqliteTableRow {
+  name: string;
 }
 
-function randomToken(byteLength = 32): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(byteLength));
-  return base64Url(bytes);
-}
-
-function base64Url(bytes: Uint8Array): string {
-  let binary = '';
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/u, '');
-}
-
-async function pkceChallenge(verifier: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
-  return base64Url(new Uint8Array(digest));
-}
-
-function cookieValue(request: Request, name: string): string | null {
-  for (const segment of (request.headers.get('cookie') ?? '').split(';')) {
-    const separator = segment.indexOf('=');
-    if (separator < 0 || segment.slice(0, separator).trim() !== name) continue;
-    return segment.slice(separator + 1).trim() || null;
-  }
-  return null;
-}
-
-function sessionCookie(value: string, maxAge: number): string {
-  return `${SESSION_COOKIE_NAME}=${value}; Path=/; Max-Age=${maxAge}; HttpOnly; Secure; SameSite=Lax`;
-}
-
-function oauthCookie(value: string, maxAge: number): string {
-  return `${OAUTH_COOKIE_NAME}=${value}; Path=/; Max-Age=${maxAge}; HttpOnly; Secure; SameSite=Lax`;
-}
-
-function canonicalOrigin(runtime: DatasetRuntime, requestUrl: URL): string {
-  if (!runtime.PUBLIC_APP_ORIGIN) {
-    throw new Error('PUBLIC_APP_ORIGIN is required for account sign-in.');
-  }
-  const configured = new URL(runtime.PUBLIC_APP_ORIGIN);
+export function supabaseProjectUrl(value: string | undefined): string {
+  if (!value) throw new Error('SUPABASE_URL is required for account sign-in.');
+  const parsed = new URL(value);
   if (
-    configured.protocol !== 'https:' ||
-    configured.username ||
-    configured.password ||
-    configured.pathname !== '/' ||
-    configured.search ||
-    configured.hash
+    parsed.protocol !== 'https:' ||
+    parsed.username ||
+    parsed.password ||
+    parsed.pathname !== '/' ||
+    parsed.search ||
+    parsed.hash
   ) {
-    throw new Error('PUBLIC_APP_ORIGIN must be an HTTPS origin without credentials or a path.');
+    throw new Error('SUPABASE_URL must be an HTTPS origin without credentials or a path.');
   }
-  if (requestUrl.origin !== configured.origin) {
-    throw new Error(`Account request origin ${requestUrl.origin} does not match PUBLIC_APP_ORIGIN.`);
+  if (!parsed.hostname.endsWith('.supabase.co')) {
+    throw new Error('SUPABASE_URL must use a hosted Supabase project origin.');
   }
-  return configured.origin;
+  return parsed.origin;
 }
 
-function oauthConfiguration(runtime: DatasetRuntime, requestUrl: URL) {
-  const origin = canonicalOrigin(runtime, requestUrl);
-  if (!runtime.DISCORD_CLIENT_ID || !/^\d{5,32}$/u.test(runtime.DISCORD_CLIENT_ID)) {
-    throw new Error('DISCORD_CLIENT_ID is missing or invalid.');
-  }
-  if (!runtime.DISCORD_CLIENT_SECRET || runtime.DISCORD_CLIENT_SECRET.length < 32) {
-    throw new Error('DISCORD_CLIENT_SECRET is missing or invalid.');
-  }
-  return {
-    origin,
-    clientId: runtime.DISCORD_CLIENT_ID,
-    clientSecret: runtime.DISCORD_CLIENT_SECRET,
-    redirectUri: `${origin}${AUTH_ROUTE_PREFIX}discord/callback`,
-  };
+function bearerToken(request: Request): string | null {
+  const authorization = request.headers.get('authorization');
+  if (!authorization) return null;
+  const match = /^Bearer ([A-Za-z0-9._~-]{80,4096})$/u.exec(authorization);
+  return match?.[1] ?? null;
 }
 
-function safeReturnTo(value: string | null): string {
-  if (!value) return '/';
-  if (
-    value.length > 512 ||
-    !value.startsWith('/') ||
-    value.startsWith('//') ||
-    /[\u0000-\u001f\u007f]/u.test(value)
-  ) {
-    throw new Error('The account return path is invalid.');
-  }
-  return value;
-}
-
-function sameOriginWrite(request: Request, url: URL): boolean {
+function requestOriginAllowed(request: Request, url: URL): boolean {
   const origin = request.headers.get('origin');
   if (!origin) return false;
   try {
@@ -160,6 +86,53 @@ function sameOriginWrite(request: Request, url: URL): boolean {
   } catch {
     return false;
   }
+}
+
+function supabaseSecretKey(value: string | undefined): string {
+  if (
+    !value ||
+    value.length < 32 ||
+    value.length > 4096 ||
+    /[\s\u0000-\u001f\u007f]/u.test(value) ||
+    (!value.startsWith('sb_secret_') && !value.startsWith('eyJ'))
+  ) {
+    throw new Error('SUPABASE_SECRET_KEY is missing or invalid.');
+  }
+  return value;
+}
+
+function displayNameFor(payload: JWTPayload): string {
+  const metadata = payload.user_metadata;
+  const record = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+    ? metadata as Record<string, unknown>
+    : {};
+  const candidates = [
+    record.display_name,
+    record.full_name,
+    record.name,
+    record.user_name,
+    record.preferred_username,
+    payload.email,
+  ];
+  const displayName = candidates.find(value => typeof value === 'string' && value.trim()) as
+    | string
+    | undefined;
+  const normalized = displayName?.trim() ?? 'Recipe Tree user';
+  if (normalized.length > 80 || UNSAFE_DISPLAY_NAME_PATTERN.test(normalized)) {
+    throw new Error('Supabase session contains an invalid display name.');
+  }
+  return normalized;
+}
+
+function projectJwks(projectUrl: string) {
+  const cached = jwksByOrigin.get(projectUrl);
+  if (cached) return cached;
+  const jwks = createRemoteJWKSet(
+    new URL(`${projectUrl}/auth/v1/.well-known/jwks.json`),
+    {cooldownDuration: 30_000, cacheMaxAge: 10 * 60 * 1000},
+  );
+  jwksByOrigin.set(projectUrl, jwks);
+  return jwks;
 }
 
 export function ensureUserAccountSchema(db: D1Database): Promise<void> {
@@ -183,271 +156,116 @@ export function ensureUserAccountSchema(db: D1Database): Promise<void> {
 
 export async function currentUser(
   request: Request,
-  db: D1Database,
+  runtime: DatasetRuntime,
 ): Promise<AuthenticatedUser | null> {
-  const token = cookieValue(request, SESSION_COOKIE_NAME);
-  if (!token || !/^[A-Za-z0-9_-]{40,128}$/u.test(token)) return null;
-  const tokenHash = await sha256Hex(new TextEncoder().encode(token));
-  const row = await db
-    .prepare(
-      `SELECT users.id, users.display_name, user_sessions.expires_at
-       FROM user_sessions
-       JOIN users ON users.id = user_sessions.user_id
-       WHERE user_sessions.token_hash = ? AND user_sessions.expires_at > ?
-       LIMIT 1`,
-    )
-    .bind(tokenHash, Date.now())
-    .first<SessionRow>();
-  if (!row) return null;
+  const token = bearerToken(request);
+  if (!token) return null;
+  const db = runtime.DB;
+  if (!db) throw new Error('D1 is required to save authenticated users.');
+  const projectUrl = supabaseProjectUrl(runtime.SUPABASE_URL);
+  let payload: JWTPayload;
+  try {
+    ({payload} = await jwtVerify(token, projectJwks(projectUrl), {
+      issuer: `${projectUrl}/auth/v1`,
+      audience: 'authenticated',
+      algorithms: ['ES256', 'RS256'],
+    }));
+  } catch (error) {
+    console.warn('A Supabase access token failed verification.', error);
+    return null;
+  }
   if (
-    !row.id ||
-    !row.display_name ||
-    !Number.isSafeInteger(row.expires_at) ||
-    row.expires_at <= Date.now()
+    typeof payload.sub !== 'string' ||
+    !USER_ID_PATTERN.test(payload.sub) ||
+    payload.role !== 'authenticated'
   ) {
-    throw new Error('User session storage contains invalid data.');
+    console.warn('A verified Supabase token did not contain an authenticated user identity.');
+    return null;
   }
-  return {id: row.id, displayName: row.display_name};
-}
-
-async function startDiscordSignIn(
-  request: Request,
-  runtime: DatasetRuntime,
-  db: D1Database,
-  url: URL,
-): Promise<Response> {
-  if ([...url.searchParams.keys()].some(key => key !== 'returnTo')) {
-    return noStoreJson({error: 'Sign-in request has unsupported parameters.'}, 400);
-  }
-  const configuration = oauthConfiguration(runtime, url);
-  const returnTo = safeReturnTo(url.searchParams.get('returnTo'));
-  const state = randomToken();
-  const verifier = randomToken(48);
-  const stateHash = await sha256Hex(new TextEncoder().encode(state));
+  const displayName = displayNameFor(payload);
   const now = Date.now();
-  const result = await db.batch([
-    db.prepare('DELETE FROM oauth_login_states WHERE expires_at <= ?').bind(now),
-    db
-      .prepare(
-        `INSERT INTO oauth_login_states
-           (state_hash, code_verifier, return_to, created_at, expires_at)
-         VALUES (?, ?, ?, ?, ?)`,
-      )
-      .bind(stateHash, verifier, returnTo, now, now + OAUTH_DURATION_SECONDS * 1000),
-  ]);
-  if (result.some(entry => !entry.success)) {
-    throw new Error('D1 could not create the Discord sign-in state.');
-  }
-  const authorize = new URL('/oauth2/authorize', DISCORD_API_ORIGIN);
-  authorize.search = new URLSearchParams({
-    response_type: 'code',
-    client_id: configuration.clientId,
-    scope: 'identify',
-    redirect_uri: configuration.redirectUri,
-    state,
-    code_challenge: await pkceChallenge(verifier),
-    code_challenge_method: 'S256',
-  }).toString();
-  return new Response(null, {
-    status: 302,
-    headers: {
-      'Cache-Control': 'no-store',
-      Location: authorize.href,
-      'Set-Cookie': oauthCookie(state, OAUTH_DURATION_SECONDS),
-    },
-  });
-}
-
-interface OAuthStateRow {
-  code_verifier: string;
-  return_to: string;
-  expires_at: number;
-}
-
-interface DiscordTokenResponse {
-  access_token?: unknown;
-  token_type?: unknown;
-}
-
-interface DiscordUserResponse {
-  id?: unknown;
-  global_name?: unknown;
-  username?: unknown;
-}
-
-async function finishDiscordSignIn(
-  request: Request,
-  runtime: DatasetRuntime,
-  db: D1Database,
-  url: URL,
-): Promise<Response> {
-  if ([...url.searchParams.keys()].some(key => !['code', 'state'].includes(key))) {
-    return noStoreJson({error: 'Discord callback has unsupported parameters.'}, 400);
-  }
-  const configuration = oauthConfiguration(runtime, url);
-  const state = url.searchParams.get('state');
-  const code = url.searchParams.get('code');
-  const cookieState = cookieValue(request, OAUTH_COOKIE_NAME);
-  if (
-    !state ||
-    !code ||
-    !cookieState ||
-    state !== cookieState ||
-    !/^[A-Za-z0-9_-]{40,128}$/u.test(state) ||
-    code.length > 1024
-  ) {
-    console.warn('Discord sign-in callback failed state validation.');
-    return noStoreJson({error: 'Discord sign-in could not be verified.'}, 400);
-  }
-  const stateHash = await sha256Hex(new TextEncoder().encode(state));
-  const stateRow = await db
-    .prepare(
-      `SELECT code_verifier, return_to, expires_at
-       FROM oauth_login_states
-       WHERE state_hash = ? AND expires_at > ?
-       LIMIT 1`,
-    )
-    .bind(stateHash, Date.now())
-    .first<OAuthStateRow>();
-  if (!stateRow) {
-    console.warn('Discord sign-in callback used an expired or unknown state.');
-    return noStoreJson({error: 'Discord sign-in expired. Please try again.'}, 400);
-  }
-  if (
-    !/^[A-Za-z0-9_-]{40,128}$/u.test(stateRow.code_verifier) ||
-    !Number.isSafeInteger(stateRow.expires_at) ||
-    stateRow.expires_at <= Date.now()
-  ) {
-    throw new Error('Discord sign-in state storage contains invalid data.');
-  }
-  const returnTo = safeReturnTo(stateRow.return_to);
-  const consumed = await db
-    .prepare('DELETE FROM oauth_login_states WHERE state_hash = ?')
-    .bind(stateHash)
-    .run();
-  if (!consumed.success) throw new Error('D1 could not consume the Discord sign-in state.');
-
-  const tokenResponse = await fetch(`${DISCORD_API_ORIGIN}/api/oauth2/token`, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json'},
-    body: new URLSearchParams({
-      grant_type: 'authorization_code',
-      client_id: configuration.clientId,
-      client_secret: configuration.clientSecret,
-      code,
-      redirect_uri: configuration.redirectUri,
-      code_verifier: stateRow.code_verifier,
-    }),
-  });
-  if (!tokenResponse.ok) {
-    console.error('Discord token exchange failed.', {status: tokenResponse.status});
-    return noStoreJson({error: 'Discord sign-in could not be completed.'}, 502);
-  }
-  const token = (await tokenResponse.json()) as DiscordTokenResponse;
-  if (
-    typeof token.access_token !== 'string' ||
-    token.access_token.length < 20 ||
-    token.token_type !== 'Bearer'
-  ) {
-    throw new Error('Discord token response has an invalid shape.');
-  }
-  const profileResponse = await fetch(`${DISCORD_API_ORIGIN}/api/users/@me`, {
-    headers: {Authorization: `Bearer ${token.access_token}`, Accept: 'application/json'},
-  });
-  if (!profileResponse.ok) {
-    console.error('Discord profile request failed.', {status: profileResponse.status});
-    return noStoreJson({error: 'Discord profile could not be loaded.'}, 502);
-  }
-  const profile = (await profileResponse.json()) as DiscordUserResponse;
-  const displayName = typeof profile.global_name === 'string' && profile.global_name.trim()
-    ? profile.global_name.trim()
-    : typeof profile.username === 'string'
-      ? profile.username.trim()
-      : '';
-  if (
-    typeof profile.id !== 'string' ||
-    !/^\d{5,32}$/u.test(profile.id) ||
-    !displayName ||
-    displayName.length > 80 ||
-    /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/u.test(displayName)
-  ) {
-    throw new Error('Discord profile response has invalid identity fields.');
-  }
-  const now = Date.now();
-  const proposedUserId = crypto.randomUUID();
-  const upsert = await db
+  const saved = await db
     .prepare(
       `INSERT INTO users
          (id, provider, provider_user_id, display_name, created_at, updated_at)
-       VALUES (?, 'discord', ?, ?, ?, ?)
-       ON CONFLICT (provider, provider_user_id)
-       DO UPDATE SET display_name = excluded.display_name, updated_at = excluded.updated_at`,
+       VALUES (?, 'supabase', ?, ?, ?, ?)
+       ON CONFLICT (id)
+       DO UPDATE SET display_name = excluded.display_name,
+                     updated_at = excluded.updated_at
+       WHERE users.display_name <> excluded.display_name`,
     )
-    .bind(proposedUserId, profile.id, displayName, now, now)
+    .bind(payload.sub, payload.sub, displayName, now, now)
     .run();
-  if (!upsert.success) throw new Error('D1 could not save the Discord user profile.');
-  const user = await db
-    .prepare(
-      `SELECT id, display_name FROM users
-       WHERE provider = 'discord' AND provider_user_id = ? LIMIT 1`,
-    )
-    .bind(profile.id)
-    .first<{id: string; display_name: string}>();
-  if (!user?.id || !user.display_name) throw new Error('Saved Discord user could not be read back.');
-
-  const sessionToken = randomToken(48);
-  const sessionHash = await sha256Hex(new TextEncoder().encode(sessionToken));
-  const sessionWrite = await db.batch([
-    db.prepare('DELETE FROM user_sessions WHERE expires_at <= ?').bind(now),
-    db
-      .prepare(
-        `INSERT INTO user_sessions (token_hash, user_id, created_at, expires_at)
-         VALUES (?, ?, ?, ?)`,
-      )
-      .bind(sessionHash, user.id, now, now + SESSION_DURATION_SECONDS * 1000),
-  ]);
-  if (sessionWrite.some(result => !result.success)) {
-    throw new Error('D1 could not create the user session.');
-  }
-  return new Response(null, {
-    status: 302,
-    headers: [
-      ['Cache-Control', 'no-store'],
-      ['Location', returnTo],
-      ['Set-Cookie', oauthCookie('', 0)],
-      ['Set-Cookie', sessionCookie(sessionToken, SESSION_DURATION_SECONDS)],
-    ],
-  });
+  if (!saved.success) throw new Error('D1 could not save the Supabase user profile.');
+  return {id: payload.sub, displayName};
 }
 
-async function sessionResponse(request: Request, db: D1Database): Promise<Response> {
-  const user = await currentUser(request, db);
+async function sessionResponse(request: Request, runtime: DatasetRuntime): Promise<Response> {
+  const user = await currentUser(request, runtime);
   return noStoreJson({user: user ? {displayName: user.displayName} : null});
 }
 
-async function signOut(request: Request, db: D1Database, url: URL): Promise<Response> {
-  if (!sameOriginWrite(request, url)) {
-    console.warn('A cross-origin account sign-out was refused.', {origin: request.headers.get('origin')});
-    return noStoreJson({error: 'Cross-origin account updates are not allowed.'}, 403);
-  }
-  const token = cookieValue(request, SESSION_COOKIE_NAME);
-  if (token) {
-    const tokenHash = await sha256Hex(new TextEncoder().encode(token));
-    const result = await db
-      .prepare('DELETE FROM user_sessions WHERE token_hash = ?')
-      .bind(tokenHash)
-      .run();
-    if (!result.success) throw new Error('D1 could not remove the user session.');
-  }
-  return new Response(`${JSON.stringify({signedOut: true})}\n`, {
-    status: 200,
+export async function deleteSupabaseAuthUser(
+  runtime: DatasetRuntime,
+  userId: string,
+  fetcher: typeof fetch = fetch,
+): Promise<void> {
+  const projectUrl = supabaseProjectUrl(runtime.SUPABASE_URL);
+  const secret = supabaseSecretKey(runtime.SUPABASE_SECRET_KEY);
+  const response = await fetcher(`${projectUrl}/auth/v1/admin/users/${encodeURIComponent(userId)}`, {
+    method: 'DELETE',
     headers: {
-      'Cache-Control': 'no-store',
-      'Content-Type': 'application/json; charset=utf-8',
-      'Set-Cookie': sessionCookie('', 0),
-      'X-Content-Type-Options': 'nosniff',
+      apikey: secret,
+      Authorization: `Bearer ${secret}`,
     },
   });
+  if (!response.ok) {
+    console.error('Supabase refused an authenticated account deletion.', {
+      status: response.status,
+      userId,
+    });
+    throw new Error('Supabase could not delete the account.');
+  }
+}
+
+async function deleteAccount(
+  request: Request,
+  runtime: DatasetRuntime,
+  url: URL,
+  db: D1Database,
+): Promise<Response> {
+  if (!requestOriginAllowed(request, url)) {
+    console.warn('A cross-origin account deletion was refused.', {
+      origin: request.headers.get('origin'),
+    });
+    return noStoreJson({error: 'Cross-origin account deletion is not allowed.'}, 403);
+  }
+  const user = await currentUser(request, runtime);
+  if (!user) return noStoreJson({error: 'Your account session is invalid or expired.'}, 401);
+  await deleteSupabaseAuthUser(runtime, user.id);
+
+  const donationTable = await db.prepare(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'donation_contributions' LIMIT 1",
+  ).first<SqliteTableRow>();
+  const statements = [
+    db.prepare('DELETE FROM account_recipe_favorites WHERE user_id = ?').bind(user.id),
+    db.prepare('DELETE FROM users WHERE id = ?').bind(user.id),
+  ];
+  if (donationTable?.name === 'donation_contributions') {
+    statements.push(
+      db.prepare(
+        `UPDATE donation_contributions
+         SET donor_key = ?, public_name = NULL, updated_at = ?
+         WHERE donor_key = ?`,
+      ).bind(`deleted:${crypto.randomUUID()}`, Date.now(), `user:${user.id}`),
+    );
+  }
+  const results = await db.batch(statements);
+  if (results.some(result => !result.success)) {
+    console.error('Supabase deleted an account, but D1 cleanup did not complete.', {userId: user.id});
+    throw new Error('Account identity cleanup did not complete.');
+  }
+  return noStoreJson({deleted: true});
 }
 
 export async function handleUserAccounts(
@@ -461,19 +279,11 @@ export async function handleUserAccounts(
     await ensureUserAccountSchema(db);
     if (url.pathname === `${AUTH_ROUTE_PREFIX}session`) {
       if (request.method !== 'GET') return methodNotAllowed('GET');
-      return await sessionResponse(request, db);
+      return await sessionResponse(request, runtime);
     }
-    if (url.pathname === `${AUTH_ROUTE_PREFIX}discord/start`) {
-      if (request.method !== 'GET') return methodNotAllowed('GET');
-      return await startDiscordSignIn(request, runtime, db, url);
-    }
-    if (url.pathname === `${AUTH_ROUTE_PREFIX}discord/callback`) {
-      if (request.method !== 'GET') return methodNotAllowed('GET');
-      return await finishDiscordSignIn(request, runtime, db, url);
-    }
-    if (url.pathname === `${AUTH_ROUTE_PREFIX}signout`) {
-      if (request.method !== 'POST') return methodNotAllowed('POST');
-      return await signOut(request, db, url);
+    if (url.pathname === `${AUTH_ROUTE_PREFIX}account`) {
+      if (request.method !== 'DELETE') return methodNotAllowed('DELETE');
+      return await deleteAccount(request, runtime, url, db);
     }
     return noStoreJson({error: 'Not found.'}, 404);
   } catch (error) {

@@ -2,19 +2,22 @@ import vinext from 'vinext';
 import {defineConfig} from 'vite';
 import hostingConfig from './.openai/hosting.json';
 import {sites} from './build/sites-vite-plugin';
+import {SUPABASE_PROJECT_URL} from './src/account/supabaseConfig';
 
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === 'seatbelt';
 const isCloudflareBeta = process.env.MRT_DEPLOY_TARGET === 'cloudflare-beta';
 const isCloudflareProduction = process.env.MRT_DEPLOY_TARGET === 'cloudflare-production';
 const BETA_DATA_ORIGIN = 'https://minecraftrecipetree.craftsmannsoftware.com';
-const BETA_APP_ORIGIN = 'https://minecraft-recipe-tree-beta.gtjoe51.workers.dev';
-const PRODUCTION_APP_ORIGIN = 'https://minecraftrecipetree.craftsmannsoftware.com';
+const SUPABASE_URL = SUPABASE_PROJECT_URL;
 const BETA_CANDIDATE_DATASET_SLUG = 'gt-new-horizons';
 const BETA_CANDIDATE_PUBLICATION_ID =
   '645b42d21ecb44a6e844cdbd02a88266b6123039557cf7aa49321c06d35c0b0f';
 const BETA_CANDIDATE_PREVIEW_ASSET_SET_ID =
   '75a9410ccc9c90813140ce8d22b6380a4f441e2a23f989182de92e31dc13487d';
 const BETA_CANDIDATE_PACK_VERSION = '2.8.4';
+const DONATION_GITHUB_ACTIONS_MONTHLY_CENTS = '400';
+const DONATION_CLOUDFLARE_MONTHLY_CENTS = '500';
+const DONATION_SUPABASE_MONTHLY_CENTS = '2500';
 const SITE_CREATOR_PLACEHOLDER_DATABASE_ID = '00000000-0000-4000-8000-000000000000';
 const CLOUDFLARE_BETA_DATABASE_ID = '8e0218ae-8adc-4a3b-a381-c11020757009';
 const CLOUDFLARE_BETA_DATABASE_NAME = 'minecraft-recipe-tree-beta';
@@ -44,7 +47,7 @@ export default defineConfig(async () => {
       : undefined,
     plugins: [
       vinext(),
-      sites(),
+      sites({connectSrcOrigins: [SUPABASE_URL]}),
       cloudflare({
         viteEnvironment: {name: 'rsc', childEnvironments: ['ssr']},
         config: {
@@ -53,11 +56,14 @@ export default defineConfig(async () => {
                 name: 'minecraft-recipe-tree-beta',
                 vars: {
                   BETA_DATA_ORIGIN,
-                  PUBLIC_APP_ORIGIN: BETA_APP_ORIGIN,
+                  SUPABASE_URL,
                   BETA_CANDIDATE_DATASET_SLUG,
                   BETA_CANDIDATE_PUBLICATION_ID,
                   BETA_CANDIDATE_PREVIEW_ASSET_SET_ID,
                   BETA_CANDIDATE_PACK_VERSION,
+                  DONATION_GITHUB_ACTIONS_MONTHLY_CENTS,
+                  DONATION_CLOUDFLARE_MONTHLY_CENTS,
+                  DONATION_SUPABASE_MONTHLY_CENTS,
                 },
               }
             : isCloudflareProduction
@@ -65,7 +71,10 @@ export default defineConfig(async () => {
                   name: 'minecraft-recipe-tree-production',
                   vars: {
                     DATASET_ADMIN_ENABLED: 'true',
-                    PUBLIC_APP_ORIGIN: PRODUCTION_APP_ORIGIN,
+                    SUPABASE_URL,
+                    DONATION_GITHUB_ACTIONS_MONTHLY_CENTS,
+                    DONATION_CLOUDFLARE_MONTHLY_CENTS,
+                    DONATION_SUPABASE_MONTHLY_CENTS,
                   },
                 }
               : {}),
@@ -84,6 +93,7 @@ export default defineConfig(async () => {
               '/api/feedback',
               '/api/recipe-favorites*',
               '/api/auth/*',
+              '/api/donations*',
               '/api/modpacks*',
               '/dataset/publications/*',
               '/dataset/preview-sets/*',

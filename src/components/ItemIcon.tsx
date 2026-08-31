@@ -5,6 +5,10 @@ import {
   hasItemIconUriFailed,
   type ItemIconLoadFailure,
 } from '../data/itemIconDiagnostics';
+import {
+  PROJECTE_EMC_KEY,
+  projecteEmcIconItemKey,
+} from '../data/projecteEmc';
 import {theme} from '../theme';
 import {CatalogItem} from '../types';
 import {
@@ -20,6 +24,7 @@ export const pixelated =
 const noSelect = Platform.OS === 'web' ? ({userSelect: 'none'} as unknown as object) : null;
 
 const FALLBACK_COLORS = ['#7d5ba6', '#5b8aa6', '#5ba67d', '#a6915b', '#a65b5b', '#5b5fa6', '#86a65b'];
+const reportedMissingEmcIcons = new Set<string>();
 
 function colorFor(key: string): string {
   let h = 0;
@@ -98,10 +103,27 @@ export function ItemIcon({item, itemKey, size}: {item?: CatalogItem; itemKey?: s
     throw error;
   }
   const data = useData();
-  const resolved = item ?? (itemKey ? data.itemsByKey.get(itemKey) : undefined);
+  const requestedKey = item?.k ?? itemKey;
+  const iconItemKey = requestedKey ? projecteEmcIconItemKey(requestedKey) : undefined;
+  const resolved =
+    requestedKey === PROJECTE_EMC_KEY
+      ? iconItemKey
+        ? data.itemsByKey.get(iconItemKey)
+        : undefined
+      : item ?? (iconItemKey ? data.itemsByKey.get(iconItemKey) : undefined);
+  if (requestedKey === PROJECTE_EMC_KEY && !resolved?.icon) {
+    const diagnosticKey = `${data.datasetIdentity}\u0000${iconItemKey ?? 'missing-key'}`;
+    if (!reportedMissingEmcIcons.has(diagnosticKey)) {
+      reportedMissingEmcIcons.add(diagnosticKey);
+      console.error('The ProjectE Transmutation Table icon is unavailable for EMC nodes.', {
+        datasetIdentity: data.datasetIdentity,
+        itemKey: iconItemKey,
+      });
+    }
+  }
   const uri = data.imageUrl(resolved?.icon);
-  const label = (resolved?.n ?? itemKey ?? '?').trim() || '?';
-  const colorKey = resolved?.k ?? itemKey ?? '?';
+  const label = (resolved?.n ?? iconItemKey ?? '?').trim() || '?';
+  const colorKey = resolved?.k ?? iconItemKey ?? '?';
   if (uri) {
     return (
       <UriItemIcon

@@ -63,7 +63,11 @@ import {
 } from './src/graph/graphRenderError';
 import {clearGraphSession} from './src/graph/graphSession';
 import {UserProvider, useUser} from './src/account/UserContext';
+import {AccountModal} from './src/account/AccountModal';
 import {FavoritesModal} from './src/account/FavoritesModal';
+import {SignInModal} from './src/account/SignInModal';
+import {DonationsModal} from './src/donations/DonationsModal';
+import {ThemePreferenceProvider, useThemePreference} from './src/ui/themePreference';
 
 const LazyGraphScreen = React.lazy(async () => {
   const module = await import('./src/graph/GraphScreen');
@@ -122,11 +126,20 @@ class GraphErrorBoundary extends React.Component<
 
 export default function App() {
   return (
+    <ThemePreferenceProvider>
+      <ThemedApp />
+    </ThemePreferenceProvider>
+  );
+}
+
+function ThemedApp() {
+  const {preference} = useThemePreference();
+  return (
     <SafeAreaProvider initialMetrics={initialWindowMetrics}>
       <SafeAreaView
         style={styles.app}
         edges={Platform.OS === 'web' ? ['top', 'right', 'bottom', 'left'] : ['top', 'right', 'left']}>
-        <StatusBar style="light" />
+        <StatusBar style={preference === 'light' ? 'dark' : 'light'} />
         <UserProvider>
           <DatasetCatalogProvider>
             <DatasetRoot />
@@ -389,17 +402,29 @@ function Shell({
   const compactHeader = hasHydrated && width < 720;
   const [showRecipeHistory, setShowRecipeHistory] = useState(false);
   const [showFavorites, setShowFavorites] = useState(false);
+  const [showSignIn, setShowSignIn] = useState(false);
+  const [showAccount, setShowAccount] = useState(false);
+  const [showDonations, setShowDonations] = useState(false);
+  const [donationOutcome, setDonationOutcome] = useState<'success' | 'canceled' | null>(null);
   const [showRecipeStages, setShowRecipeStages] = useState(false);
   const [showGraphGuide, setShowGraphGuide] = useState(false);
   const [showIssueReport, setShowIssueReport] = useState(false);
   const [showInfoMenu, setShowInfoMenu] = useState(false);
   const [showAppMenu, setShowAppMenu] = useState(false);
+  const [recipeImportRequestId, setRecipeImportRequestId] = useState(0);
+  const [recipeImportNotice, setRecipeImportNotice] = useState<string | null>(null);
   const [issueReportKind, setIssueReportKind] = useState<GitHubIssueKind>('bug');
   const [showGraphControls, setShowGraphControls] = useState(false);
   const [showDatasetDetails, setShowDatasetDetails] = useState(false);
   const [interfaceZoom, setInterfaceZoom] = useState(1);
   const [contentZoom, setContentZoom] = useState(1);
-  const shellSurface = showFavorites
+  const shellSurface = showSignIn
+      ? 'sign-in'
+      : showAccount
+      ? 'account'
+      : showDonations
+      ? 'donations'
+      : showFavorites
       ? 'favorites'
       : showRecipeStages
       ? 'recipe-stages'
@@ -412,7 +437,7 @@ function Shell({
             : tab;
   useSignalSurface(
     shellSurface,
-    showFavorites || showRecipeStages || showGraphGuide || showIssueReport || showRecipeHistory
+    showSignIn || showAccount || showDonations || showFavorites || showRecipeStages || showGraphGuide || showIssueReport || showRecipeHistory
       ? 'modal'
       : 'screen',
   );
@@ -438,6 +463,19 @@ function Shell({
   }), [contentZoom, data, interfaceZoom, tab, ui.graphDirection, ui.graphRootKey, ui.itemStack]);
   useEffect(() => {
     if (Platform.OS === 'web') setHasHydrated(true);
+  }, []);
+  useEffect(() => {
+    if (account.user) setShowSignIn(false);
+  }, [account.user]);
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    const outcome = url.searchParams.get('donation');
+    if (outcome !== 'success' && outcome !== 'canceled') return;
+    setDonationOutcome(outcome);
+    setShowDonations(true);
+    url.searchParams.delete('donation');
+    window.history.replaceState(window.history.state, '', url.toString());
   }, []);
   useEffect(() => {
     if (tab !== 'graph' || data.indexStatus === 'ready' || data.indexStatus === 'loading') return;
@@ -624,6 +662,38 @@ function Shell({
           )}
           {Platform.OS === 'web' && (
             <TouchableOpacity
+              {...signalTarget('header.import-recipe')}
+              style={styles.infoMenuItem}
+              onPress={() => {
+                lightImpactFeedback();
+                closeInfoMenu();
+                setTab('graph');
+                setRecipeImportRequestId(value => value + 1);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Import a recipe tree from JSON">
+              <Text style={styles.infoMenuItemIcon}>⇩</Text>
+              <Text style={styles.infoMenuItemText}>Import recipe</Text>
+            </TouchableOpacity>
+          )}
+          {Platform.OS === 'web' && (
+            <TouchableOpacity
+              {...signalTarget('header.donations')}
+              style={styles.infoMenuItem}
+              onPress={() => {
+                lightImpactFeedback();
+                closeInfoMenu();
+                setDonationOutcome(null);
+                setShowDonations(true);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Support Recipe Tree and view monthly donors">
+              <Text style={styles.infoMenuItemIcon}>♥</Text>
+              <Text style={styles.infoMenuItemText}>Support Recipe Tree</Text>
+            </TouchableOpacity>
+          )}
+          {Platform.OS === 'web' && (
+            <TouchableOpacity
               {...signalTarget('header.recipe-favorites')}
               style={styles.infoMenuItem}
               onPress={() => {
@@ -632,20 +702,9 @@ function Shell({
                 setShowFavorites(true);
               }}
               accessibilityRole="button"
-              accessibilityLabel={
-                account.user
-                  ? `Open synced favorites for ${account.user.displayName}`
-                  : 'Open recipe favorites and sign in'
-              }>
+              accessibilityLabel="Open recipe favorites leaderboard">
               <Text style={styles.infoMenuItemIcon}>★</Text>
-              <View style={styles.infoMenuItemCopy}>
-                <Text style={styles.infoMenuItemText}>Favorites</Text>
-                <Text style={styles.infoMenuItemSubtext} numberOfLines={1}>
-                  {account.status === 'loading'
-                    ? 'Checking account…'
-                    : account.user?.displayName ?? 'Sign in to sync'}
-                </Text>
-              </View>
+              <Text style={styles.infoMenuItemText}>Favorites</Text>
             </TouchableOpacity>
           )}
           <TouchableOpacity
@@ -720,6 +779,29 @@ function Shell({
       )}
     </View>
   );
+  const accountHeaderAction = Platform.OS === 'web' ? (
+    <TouchableOpacity
+      {...signalTarget('header.account')}
+      style={[styles.accountHeaderButton, account.user && styles.accountHeaderButtonSignedIn]}
+      onPress={() => {
+        lightImpactFeedback();
+        if (account.user) setShowAccount(true);
+        else setShowSignIn(true);
+      }}
+      accessibilityRole="button"
+      accessibilityLabel={
+        account.user
+          ? `Open account settings for ${account.user.displayName}`
+          : 'Sign in to Recipe Tree'
+      }>
+      <Text style={[styles.accountHeaderStatus, account.user && styles.accountHeaderStatusSignedIn]}>
+        {account.user ? '●' : '○'}
+      </Text>
+      <Text style={styles.accountHeaderText} numberOfLines={1}>
+        {account.status === 'loading' ? 'Checking…' : account.user?.displayName ?? 'Sign in'}
+      </Text>
+    </TouchableOpacity>
+  ) : null;
   const headerActions = (
     <View
       style={[
@@ -787,6 +869,12 @@ function Shell({
         </View>
       </TouchableOpacity>
     ) : null;
+  const headerTrailingAction = accountHeaderAction || graphControlsHeaderAction ? (
+    <View style={styles.headerTrailingActions}>
+      {accountHeaderAction}
+      {graphControlsHeaderAction}
+    </View>
+  ) : null;
   return (
     <View
       style={styles.shell}
@@ -799,7 +887,7 @@ function Shell({
           headerActions,
           fullWidthHeaderControls,
           headerMenuAction,
-          graphControlsHeaderAction,
+          headerTrailingAction,
           showAppMenu,
           next => {
             setShowAppMenu(next);
@@ -871,6 +959,10 @@ function Shell({
                       setShowGraphControls(value => !value)
                     }
                     controlsToggleInHeader={compactHeader}
+                    recipeImportRequestId={recipeImportRequestId}
+                    onRecipeImportRequestHandled={() => setRecipeImportRequestId(0)}
+                    recipeImportNotice={recipeImportNotice}
+                    onRecipeImportNoticeChange={setRecipeImportNotice}
                   />
                 </Suspense>
               </GraphErrorBoundary>
@@ -944,7 +1036,40 @@ function Shell({
         <FavoritesModal
           visible
           interfaceZoom={interfaceZoom}
+          contentZoom={contentZoom}
+          onContentZoomChange={previewContentZoom}
+          onContentZoomComplete={saveContentZoom}
           onClose={() => setShowFavorites(false)}
+        />
+      )}
+      {showSignIn && (
+        <SignInModal
+          visible
+          interfaceZoom={interfaceZoom}
+          onClose={() => setShowSignIn(false)}
+        />
+      )}
+      {showAccount && (
+        <AccountModal
+          visible
+          interfaceZoom={interfaceZoom}
+          onClose={() => setShowAccount(false)}
+          onOpenDonations={() => {
+            setShowAccount(false);
+            setDonationOutcome(null);
+            setShowDonations(true);
+          }}
+        />
+      )}
+      {showDonations && (
+        <DonationsModal
+          visible
+          interfaceZoom={interfaceZoom}
+          checkoutOutcome={donationOutcome}
+          onClose={() => {
+            setShowDonations(false);
+            setDonationOutcome(null);
+          }}
         />
       )}
       {showGraphGuide && (
@@ -1132,6 +1257,12 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 6,
   },
+  headerTrailingActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexShrink: 1,
+    gap: 6,
+  },
   subtitle: {color: theme.textDim, fontSize: 11, lineHeight: 16},
   tabBtn: {
     paddingHorizontal: 14,
@@ -1180,6 +1311,25 @@ const styles = StyleSheet.create({
   },
   nativeInfoMenuButton: {width: 44, minHeight: 44},
   headerUtilityButtonActive: {borderColor: theme.accent},
+  accountHeaderButton: {
+    minWidth: 76,
+    maxWidth: 180,
+    minHeight: 34,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    flexShrink: 1,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: theme.borderLight,
+    backgroundColor: theme.panelAlt,
+  },
+  accountHeaderButtonSignedIn: {borderColor: theme.accent},
+  accountHeaderStatus: {color: theme.textDim, fontSize: 11},
+  accountHeaderStatusSignedIn: {color: theme.accent},
+  accountHeaderText: {minWidth: 0, flexShrink: 1, color: theme.text, fontSize: 11, fontWeight: '800'},
   graphControlsHeaderButton: {
     width: 44,
     minHeight: 44,
@@ -1241,8 +1391,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   infoMenuItemText: {color: theme.text, fontSize: 12, fontWeight: '700'},
-  infoMenuItemCopy: {flex: 1, minWidth: 0},
-  infoMenuItemSubtext: {color: theme.textDim, fontSize: 9, marginTop: 1},
   infoMenuItemTextActive: {color: theme.accent},
   nativeHeaderMenuText: {color: theme.text, fontSize: 12, fontWeight: '700'},
   interfaceZoomControls: {

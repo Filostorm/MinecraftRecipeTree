@@ -122,32 +122,6 @@ export const users = sqliteTable(
   table => [uniqueIndex('users_provider_identity_idx').on(table.provider, table.providerUserId)],
 );
 
-export const userSessions = sqliteTable(
-  'user_sessions',
-  {
-    tokenHash: text('token_hash').primaryKey(),
-    userId: text('user_id').notNull().references(() => users.id, {onDelete: 'cascade'}),
-    createdAt: integer('created_at').notNull(),
-    expiresAt: integer('expires_at').notNull(),
-  },
-  table => [
-    index('user_sessions_user_idx').on(table.userId),
-    index('user_sessions_expiry_idx').on(table.expiresAt),
-  ],
-);
-
-export const oauthLoginStates = sqliteTable(
-  'oauth_login_states',
-  {
-    stateHash: text('state_hash').primaryKey(),
-    codeVerifier: text('code_verifier').notNull(),
-    returnTo: text('return_to').notNull(),
-    createdAt: integer('created_at').notNull(),
-    expiresAt: integer('expires_at').notNull(),
-  },
-  table => [index('oauth_login_states_expiry_idx').on(table.expiresAt)],
-);
-
 export const accountRecipeFavorites = sqliteTable(
   'account_recipe_favorites',
   {
@@ -173,5 +147,54 @@ export const accountRecipeFavorites = sqliteTable(
       table.recipeCategory,
       table.recipeIndex,
     ),
+    index('account_recipe_favorites_user_leaderboard_idx').on(
+      table.packSlug,
+      table.publicationId,
+      table.userId,
+    ),
   ],
+);
+
+export const donationContributions = sqliteTable(
+  'donation_contributions',
+  {
+    contributionId: text('contribution_id').primaryKey(),
+    donorKey: text('donor_key').notNull(),
+    publicName: text('public_name'),
+    cadence: text('cadence', {enum: ['one_time', 'monthly']}).notNull(),
+    stripePaymentIntentId: text('stripe_payment_intent_id'),
+    grossCents: integer('gross_cents').notNull(),
+    currency: text('currency').notNull(),
+    paidAt: integer('paid_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  table => [
+    index('donation_contributions_week_idx').on(table.currency, table.paidAt),
+    index('donation_contributions_donor_idx').on(table.donorKey, table.paidAt),
+    index('donation_contributions_payment_intent_idx').on(table.stripePaymentIntentId),
+  ],
+);
+
+export const donationRefunds = sqliteTable(
+  'donation_refunds',
+  {
+    stripeChargeId: text('stripe_charge_id').primaryKey(),
+    stripePaymentIntentId: text('stripe_payment_intent_id').notNull(),
+    refundedCents: integer('refunded_cents').notNull(),
+    currency: text('currency').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  table => [
+    index('donation_refunds_payment_intent_idx').on(table.stripePaymentIntentId),
+  ],
+);
+
+export const donationWebhookEvents = sqliteTable(
+  'donation_webhook_events',
+  {
+    eventId: text('event_id').primaryKey(),
+    eventType: text('event_type').notNull(),
+    processedAt: integer('processed_at').notNull(),
+  },
+  table => [index('donation_webhook_events_processed_idx').on(table.processedAt)],
 );

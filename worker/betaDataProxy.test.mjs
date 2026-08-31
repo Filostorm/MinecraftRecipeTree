@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {proxyBetaDatasetRequest} from './betaDataProxy.ts';
+import {
+  betaCatalogIncludesPublication,
+  proxyBetaDatasetRequest,
+} from './betaDataProxy.ts';
 
 const PRODUCTION_ORIGIN = 'https://minecraftrecipetree.craftsmannsoftware.com';
 const CANDIDATE = {
@@ -138,6 +141,28 @@ test('beta catalog can expose an immutable candidate without activating producti
     previewAssetSetId: CANDIDATE.BETA_CANDIDATE_PREVIEW_ASSET_SET_ID,
   });
   assert.equal(response.headers.get('x-mrt-beta-data-origin'), PRODUCTION_ORIGIN);
+});
+
+test('beta catalog publication validation uses the same candidate override', async () => {
+  let forwarded;
+  const included = await betaCatalogIncludesPublication(
+    {BETA_DATA_ORIGIN: PRODUCTION_ORIGIN, ...CANDIDATE},
+    CANDIDATE.BETA_CANDIDATE_DATASET_SLUG,
+    CANDIDATE.BETA_CANDIDATE_PUBLICATION_ID,
+    async request => {
+      forwarded = request;
+      return Response.json({datasets: [{
+        slug: CANDIDATE.BETA_CANDIDATE_DATASET_SLUG,
+        publicationId: 'a'.repeat(64),
+        previewAssetSetId: 'b'.repeat(64),
+        packVersion: 'old',
+      }]});
+    },
+  );
+
+  assert.equal(included, true);
+  assert.equal(forwarded.headers.get('authorization'), null);
+  assert.equal(forwarded.headers.get('cookie'), null);
 });
 
 test('beta catalog candidate override fails closed when partially configured', async () => {

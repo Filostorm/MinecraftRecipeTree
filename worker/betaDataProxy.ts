@@ -114,6 +114,10 @@ function forwardedHeaders(request: Request): Headers {
   return headers;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
 /**
  * Gives the isolated beta Site read-only access to the public production dataset corpus.
  * Authentication, cookies, mutation methods, administration, and feedback are never forwarded.
@@ -188,4 +192,43 @@ export async function proxyBetaDatasetRequest(
     statusText: upstreamResponse.statusText,
     headers: responseHeaders,
   });
+}
+
+/**
+ * Validates a publication against the exact public catalog exposed by beta. This deliberately
+ * creates a new anonymous request, so account credentials can never leave the beta Worker.
+ */
+export async function betaCatalogIncludesPublication(
+  runtime: DatasetRuntime,
+  slug: string,
+  publicationId: string,
+  fetchUpstream: UpstreamFetch = fetch,
+): Promise<boolean | null> {
+  if (!runtime.BETA_DATA_ORIGIN) return null;
+  const catalogUrl = new URL('https://beta-catalog-validation.invalid/api/datasets');
+  const response = await proxyBetaDatasetRequest(
+    new Request(catalogUrl, {headers: {Accept: 'application/json'}}),
+    runtime,
+    catalogUrl,
+    fetchUpstream,
+  );
+  if (!response?.ok) {
+    throw new Error(`The beta dataset catalog returned HTTP ${response?.status ?? 'unknown'}.`);
+  }
+  const value = await response.json() as unknown;
+  if (!isRecord(value) || !Array.isArray(value.datasets)) {
+    throw new Error('The beta dataset catalog is not an object with a datasets array.');
+  }
+  for (const dataset of value.datasets) {
+    if (
+      !isRecord(dataset) ||
+      typeof dataset.slug !== 'string' ||
+      typeof dataset.publicationId !== 'string'
+    ) {
+      throw new Error('The beta dataset catalog contains an invalid descriptor.');
+    }
+  }
+  return value.datasets.some(dataset =>
+    dataset.slug === slug && dataset.publicationId === publicationId,
+  );
 }

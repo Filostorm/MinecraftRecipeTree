@@ -1,6 +1,6 @@
 import type {DatasetDescriptor} from '../data/datasetCatalog.ts';
 import type {IngredientSelections} from '../data/ingredientAlternativeSelection.ts';
-import type {RecipeRef} from '../types.ts';
+import type {Recipe, RecipeRef, SlotEntry} from '../types.ts';
 import type {
   GraphSession,
   StoredGraphSelection,
@@ -44,6 +44,92 @@ export interface PortableRecipeTree {
   direction: GraphSession['direction'];
   productionPlan?: GraphSession['productionPlan'];
   selections: PortableTreeSelection[];
+}
+
+export interface ConnectedPortableSelectionSkip {
+  selection: PortableTreeSelection;
+  reason: 'unavailable' | 'dependent' | 'duplicate';
+  error?: unknown;
+}
+
+export interface ConnectedPortableSelectionResolution {
+  selections: StoredGraphSelection[];
+  skipped: ConnectedPortableSelectionSkip[];
+}
+
+function plainDecimal(value: number): string {
+  if (!Number.isFinite(value)) {
+    throw new Error(`Recipe quantity ${String(value)} cannot be used in a stable recipe identity.`);
+  }
+  const raw = String(value);
+  if (!/[eE]/u.test(raw)) return raw;
+  const [coefficient, exponentText] = raw.toLowerCase().split('e');
+  const exponent = Number(exponentText);
+  const negative = coefficient.startsWith('-');
+  const unsigned = negative ? coefficient.slice(1) : coefficient;
+  const [integer, fraction = ''] = unsigned.split('.');
+  const digits = integer + fraction;
+  const decimalIndex = integer.length + exponent;
+  const expanded =
+    decimalIndex <= 0
+      ? `0.${'0'.repeat(-decimalIndex)}${digits}`
+      : decimalIndex >= digits.length
+        ? `${digits}${'0'.repeat(decimalIndex - digits.length)}`
+        : `${digits.slice(0, decimalIndex)}.${digits.slice(decimalIndex)}`;
+  return negative ? `-${expanded}` : expanded;
+}
+
+function appendIdentityField(target: string[], value: string): void {
+  // Java String.length() and JavaScript string.length both count UTF-16 code units.
+  target.push(`${value.length}:${value};`);
+}
+
+function appendIdentitySlots(
+  target: string[],
+  role: 'inputs' | 'outputs',
+  slots: readonly (readonly SlotEntry[])[],
+): void {
+  appendIdentityField(target, role);
+  target.push(`${slots.length};`);
+  for (const slot of slots) {
+    if (slot.length === 0) {
+      throw new Error(`Stable recipe identity cannot encode an empty ${role} slot.`);
+    }
+    const alternatives = slot
+      .map(entry => `${entry[0]}\0${plainDecimal(entry[1])}`)
+      .sort();
+    target.push(`${alternatives.length};`);
+    for (const alternative of alternatives) appendIdentityField(target, alternative);
+  }
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const cryptoApi = globalThis.crypto;
+  if (!cryptoApi?.subtle) {
+    throw new Error('Web Crypto is required to resolve semantic recipe identities.');
+  }
+  const digest = await cryptoApi.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  return [...new Uint8Array(digest)]
+    .map(byte => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+/**
+ * Reconstruct the exact identity emitted by the 1.12 in-game recipe viewer.
+ * Older hosted publications do not carry recipe.id for every JEI wrapper, so
+ * matching their ordered input/output semantics is the only stable option.
+ */
+export async function portableRecipeKey(
+  categoryId: string,
+  recipe: Recipe,
+): Promise<string | null> {
+  if (recipe.id) return `${categoryId}|${recipe.id}`;
+  if (!recipe.out?.length) return null;
+  const canonical = ['recipe-tree-semantic-v1;'];
+  appendIdentityField(canonical, categoryId);
+  appendIdentitySlots(canonical, 'inputs', recipe.in ?? []);
+  appendIdentitySlots(canonical, 'outputs', recipe.out);
+  return `${categoryId}|semantic-v1:${await sha256Hex(canonical.join(''))}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -304,4 +390,48 @@ export function portableSelectionAsStored(
     },
     ...(selection.deferred ? {deferred: true as const} : {}),
   };
+}
+
+/**
+ * Resolve only selections whose expanded parent was successfully retained.
+ * A missing recipe therefore removes its dependent branch without dropping
+ * valid sibling branches or leaving selections that cannot be reconstructed.
+ */
+export async function resolveConnectedPortableSelections(
+  selections: readonly PortableTreeSelection[],
+  resolveSelection: (
+    selection: PortableTreeSelection,
+  ) => Promise<StoredGraphSelection>,
+): Promise<ConnectedPortableSelectionResolution> {
+  const resolved: StoredGraphSelection[] = [];
+  const skipped: ConnectedPortableSelectionSkip[] = [];
+  const selectedPaths = new Set<string>();
+  const expandedPaths = new Set<string>();
+
+  for (const selection of selections) {
+    const pathKey = selection.path.join('.');
+    if (selectedPaths.has(pathKey)) {
+      skipped.push({selection, reason: 'duplicate'});
+      continue;
+    }
+    selectedPaths.add(pathKey);
+
+    if (selection.path.length > 0) {
+      const parentPath = selection.path.slice(0, -1).join('.');
+      if (!expandedPaths.has(parentPath)) {
+        skipped.push({selection, reason: 'dependent'});
+        continue;
+      }
+    }
+
+    try {
+      const stored = await resolveSelection(selection);
+      resolved.push(stored);
+      if (!stored.deferred) expandedPaths.add(pathKey);
+    } catch (error) {
+      skipped.push({selection, reason: 'unavailable', error});
+    }
+  }
+
+  return {selections: resolved, skipped};
 }

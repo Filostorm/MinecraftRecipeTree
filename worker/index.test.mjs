@@ -556,6 +556,7 @@ function environment() {
     PREVIEW_ASSETS: new MemoryR2(),
     DATASET_ADMIN_ENABLED: 'true',
     CORE_DATASET_UPLOAD_TOKEN: TOKEN,
+    SUPABASE_URL: 'https://example-project.supabase.co',
     ASSETS: {async fetch() { return new Response('app not found', {status: 404}); }},
   };
 }
@@ -587,6 +588,10 @@ function assertSecurityHeaders(response) {
   assert.match(
     response.headers.get('content-security-policy') ?? '',
     /connect-src 'self' https:\/\/metrics\.craftsmannsoftware\.com/,
+  );
+  assert.match(
+    response.headers.get('content-security-policy') ?? '',
+    /https:\/\/example-project\.supabase\.co/,
   );
   assert.match(response.headers.get('content-security-policy') ?? '', /frame-ancestors 'none'/);
   assert.match(response.headers.get('permissions-policy') ?? '', /camera=\(\)/);

@@ -1,7 +1,8 @@
 import React, {useCallback, useEffect, useRef} from 'react';
 import {Platform, StyleSheet, View} from 'react-native';
 import {useData} from '../data/DataContext';
-import {theme} from '../theme';
+import {projecteEmcIconItemKey} from '../data/projecteEmc';
+import {resolvedThemeColor} from '../theme';
 import type {LaidNode} from './layout';
 import {lowDetailRasterGeometry} from './lowDetailRaster';
 import type {GraphTransform} from './panGesture';
@@ -116,17 +117,18 @@ export const LowDetailGraphCanvas = React.memo(function LowDetailGraphCanvas({
       const isRoot = node.item.id === 'root';
       const expanded = node.kind === 'source';
       context.globalAlpha = isRoot ? 1 : 0.78;
-      context.fillStyle = expanded ? theme.panelAlt : theme.panel;
+      context.fillStyle = resolvedThemeColor(expanded ? 'panelAlt' : 'panel');
       context.fillRect(geometry.left, geometry.top, geometry.width, geometry.height);
       context.strokeStyle = isRoot
-        ? theme.radialRoot
+        ? resolvedThemeColor('radialRoot')
         : expanded
-          ? theme.accent
-          : theme.borderLight;
+          ? resolvedThemeColor('accent')
+          : resolvedThemeColor('borderLight');
       context.lineWidth = Math.max(1, (isRoot ? 4 : 2) * state.transform.scale);
       context.strokeRect(geometry.left, geometry.top, geometry.width, geometry.height);
 
-      const item = data.itemsByKey.get(node.item.key);
+      const iconItemKey = projecteEmcIconItemKey(node.item.key);
+      const item = data.itemsByKey.get(iconItemKey);
       const uri = data.imageUrl(item?.icon);
       let icon = uri ? iconsRef.current.get(uri) : undefined;
       if (uri && !icon) {
@@ -165,7 +167,7 @@ export const LowDetailGraphCanvas = React.memo(function LowDetailGraphCanvas({
           geometry.iconSize,
         );
       } else {
-        context.fillStyle = fallbackColor(node.item.key);
+        context.fillStyle = fallbackColor(iconItemKey);
         context.fillRect(
           geometry.iconLeft,
           geometry.iconTop,

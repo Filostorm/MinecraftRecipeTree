@@ -12,7 +12,14 @@ export const metadata: Metadata = {
 
 export default function RootLayout({children}: Readonly<{children: React.ReactNode}>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var theme=localStorage.getItem('minecraft-recipe-tree-theme');var font=localStorage.getItem('minecraft-recipe-tree-font');if(theme==='minecraft'){document.documentElement.dataset.mrtTheme='dark';document.documentElement.dataset.mrtFont='minecraft';}else{if(theme==='dark'||theme==='light'){document.documentElement.dataset.mrtTheme=theme;}if(font==='minecraft'){document.documentElement.dataset.mrtFont='minecraft';}}}catch(error){console.error('Theme preference could not be restored before rendering.',error);}})();`,
+          }}
+        />
+      </head>
       <body>{children}</body>
     </html>
   );

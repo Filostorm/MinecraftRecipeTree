@@ -1,14 +1,21 @@
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 import test from 'node:test';
+import {
+  TEST_ORIGIN as ORIGIN,
+  TEST_USER_ID,
+  supabaseTestAuthentication,
+} from './testSupabaseAuth.mjs';
 
 const {RECIPE_FAVORITES_ROUTE, handleRecipeFavorites} = await import('./recipeFavorites.ts');
 
-const ORIGIN = 'https://minecraftrecipetree.craftsmannsoftware.com';
 const PACK = 'meatballcraft';
 const PUBLICATION = 'a'.repeat(64);
 const CLIENT_ID = '123e4567-e89b-12d3-a456-426614174000';
+const CLIENT_HASH = createHash('sha256').update(CLIENT_ID).digest('hex');
+const authentication = await supabaseTestAuthentication();
 
-function database(favoriteRows = [], session = null) {
+function database(favoriteRows = [], currentPackAvailable = true) {
   const calls = [];
   return {
     calls,
@@ -24,8 +31,9 @@ function database(favoriteRows = [], session = null) {
           return this;
         },
         async first() {
-          if (call.sql.includes('FROM dataset_channels')) return {slug: PACK};
-          if (call.sql.includes('FROM user_sessions')) return session;
+          if (call.sql.includes('FROM dataset_channels')) {
+            return currentPackAvailable ? {slug: PACK} : null;
+          }
           throw new Error(`Unexpected first query: ${call.sql}`);
         },
         async all() {
@@ -46,13 +54,13 @@ function getRequest(search = `packSlug=${PACK}&publicationId=${PUBLICATION}`, su
   return new Request(`${ORIGIN}${RECIPE_FAVORITES_ROUTE}${suffix}?${search}`);
 }
 
-function putRequest(recipeRef, cookie) {
+function putRequest(recipeRef, authorization) {
   return new Request(`${ORIGIN}${RECIPE_FAVORITES_ROUTE}`, {
     method: 'PUT',
     headers: {
       'Content-Type': 'application/json',
       Origin: ORIGIN,
-      ...(cookie ? {Cookie: cookie} : {}),
+      ...(authorization ? {Authorization: authorization} : {}),
     },
     body: JSON.stringify({
       packSlug: PACK,
@@ -64,6 +72,25 @@ function putRequest(recipeRef, cookie) {
   });
 }
 
+function claimRequest(favorites) {
+  return new Request(`${ORIGIN}${RECIPE_FAVORITES_ROUTE}/claim`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Origin: ORIGIN,
+      Authorization: authentication.authorization,
+    },
+    body: JSON.stringify({
+      clientId: CLIENT_ID,
+      packSlug: PACK,
+      publicationId: PUBLICATION,
+      favorites,
+    }),
+  });
+}
+
+test.after(() => authentication.restoreFetch());
+
 test('returns the highest-count recipe for each item and requires at least one favorite', async () => {
   const DB = database([
     {item_key: 'item|a', recipe_category: 2, recipe_index: 8, favorite_count: 4},
@@ -72,7 +99,7 @@ test('returns the highest-count recipe for each item and requires at least one f
   ]);
   const response = await handleRecipeFavorites(
     getRequest(),
-    {DB},
+    {...authentication.runtime, DB},
     new URL(getRequest().url),
   );
 
@@ -85,41 +112,168 @@ test('returns the highest-count recipe for each item and requires at least one f
   });
 });
 
-test('leaderboard ranks authenticated-user favorites by count', async () => {
+test('leaderboard ranks account and unknown users and identifies the signed-out browser', async () => {
   const DB = database([
-    {item_key: 'item|b', recipe_category: 1, recipe_index: 9, favorite_count: 2},
-    {item_key: 'item|a', recipe_category: 2, recipe_index: 8, favorite_count: 7},
+    {
+      identity_type: 'account',
+      identity_key: '11111111-1111-4111-8111-111111111111',
+      display_name: 'Alex',
+      favorite_count: 7,
+    },
+    {
+      identity_type: 'anonymous',
+      identity_key: CLIENT_HASH,
+      display_name: 'Unknown user',
+      favorite_count: 5,
+    },
+    {
+      identity_type: 'account',
+      identity_key: '22222222-2222-4222-8222-222222222222',
+      display_name: 'Builder Bee',
+      favorite_count: 2,
+    },
   ]);
   const request = getRequest(undefined, '/leaderboard');
-  const response = await handleRecipeFavorites(request, {DB}, new URL(request.url));
+  request.headers.set('X-MRT-Favorite-Client', CLIENT_ID);
+  const response = await handleRecipeFavorites(
+    request,
+    {...authentication.runtime, DB},
+    new URL(request.url),
+  );
 
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), {
     entries: [
-      {itemKey: 'item|b', recipeRef: [1, 9], count: 2},
-      {itemKey: 'item|a', recipeRef: [2, 8], count: 7},
+      {displayName: 'Alex', count: 7, isAnonymous: false, isCurrent: false},
+      {displayName: 'Unknown user', count: 5, isAnonymous: true, isCurrent: true},
+      {displayName: 'Builder Bee', count: 2, isAnonymous: false, isCurrent: false},
     ],
   });
   const query = DB.calls.find(call => call.sql.includes('FROM account_recipe_favorites'));
   assert.ok(query);
+  assert.match(query.sql, /INNER JOIN users ON users\.id = account_recipe_favorites\.user_id/u);
+  assert.match(query.sql, /FROM recipe_favorites/u);
+  assert.match(query.sql, /GROUP BY account_recipe_favorites\.user_id, users\.display_name/u);
+  assert.match(query.sql, /GROUP BY recipe_favorites\.client_hash/u);
   assert.match(query.sql, /ORDER BY favorite_count DESC/u);
+  assert.deepEqual(query.values, [PACK, PUBLICATION, PACK, PUBLICATION, 100]);
+});
+
+test('leaderboard identifies the signed-in account without exposing its id', async () => {
+  const DB = database([
+    {
+      identity_type: 'account',
+      identity_key: TEST_USER_ID,
+      display_name: 'Recipe Builder',
+      favorite_count: 9,
+    },
+  ]);
+  const request = getRequest(undefined, '/leaderboard');
+  request.headers.set('Authorization', authentication.authorization);
+  request.headers.set('X-MRT-Favorite-Client', CLIENT_ID);
+  const response = await handleRecipeFavorites(
+    request,
+    {...authentication.runtime, DB},
+    new URL(request.url),
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    entries: [
+      {displayName: 'Recipe Builder', count: 9, isAnonymous: false, isCurrent: true},
+    ],
+  });
+});
+
+test('beta favorites accept the production-backed pack exposed by the beta catalog', async () => {
+  const DB = database([], false);
+  const previousFetch = globalThis.fetch;
+  let catalogRequest;
+  globalThis.fetch = async request => {
+    catalogRequest = request;
+    return Response.json({
+      datasets: [{slug: PACK, publicationId: PUBLICATION}],
+    });
+  };
+  try {
+    const request = getRequest(undefined, '/leaderboard');
+    const response = await handleRecipeFavorites(
+      request,
+      {DB, BETA_DATA_ORIGIN: 'https://production.example'},
+      new URL(request.url),
+    );
+
+    assert.equal(response.status, 200);
+    assert.ok(catalogRequest instanceof Request);
+    assert.equal(catalogRequest.url, 'https://production.example/api/datasets');
+    assert.equal(catalogRequest.headers.get('authorization'), null);
+    assert.equal(catalogRequest.headers.get('cookie'), null);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
 });
 
 test('signed-in favorite writes use the account identity instead of the anonymous client hash', async () => {
-  const session = {id: 'user-1', display_name: 'Builder', expires_at: Date.now() + 60_000};
-  const DB = database([], session);
-  const request = putRequest([4, 5], `${'__Host-mrt-session'}=${'a'.repeat(64)}`);
-  const response = await handleRecipeFavorites(request, {DB}, new URL(request.url));
+  const DB = database();
+  const request = putRequest([4, 5], authentication.authorization);
+  const response = await handleRecipeFavorites(
+    request,
+    {...authentication.runtime, DB},
+    new URL(request.url),
+  );
 
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), {saved: true, synced: true});
   const write = DB.calls.find(call => call.sql.startsWith('INSERT INTO account_recipe_favorites'));
   assert.ok(write);
   assert.deepEqual(write.values.slice(0, 4), [
-    'user-1',
+    TEST_USER_ID,
     PACK,
     PUBLICATION,
     'item|minecraft:iron_ingot',
+  ]);
+});
+
+test('an invalid account token is rejected instead of silently becoming an anonymous vote', async () => {
+  const DB = database();
+  const request = putRequest([4, 5], `Bearer ${'a'.repeat(120)}`);
+  const response = await handleRecipeFavorites(
+    request,
+    {...authentication.runtime, DB},
+    new URL(request.url),
+  );
+
+  assert.equal(response.status, 401);
+  assert.equal(
+    DB.calls.some(call => call.sql.startsWith('INSERT INTO recipe_favorites')),
+    false,
+  );
+});
+
+test('sign-in claims server votes and imports current browser-only favorites', async () => {
+  const DB = database();
+  const request = claimRequest([
+    {itemKey: 'item|minecraft:iron_ingot', recipeRef: [4, 5]},
+    {itemKey: 'item|minecraft:gold_ingot', recipeRef: [6, 7]},
+  ]);
+  const response = await handleRecipeFavorites(
+    request,
+    {...authentication.runtime, DB},
+    new URL(request.url),
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {claimed: 0, imported: 2});
+  assert.ok(DB.calls.some(call => call.sql.startsWith('DELETE FROM recipe_favorites')));
+  const imports = DB.calls.filter(call => call.sql.startsWith('INSERT INTO account_recipe_favorites'));
+  assert.equal(imports.length, 3);
+  assert.deepEqual(imports[1].values.slice(0, 6), [
+    TEST_USER_ID,
+    PACK,
+    PUBLICATION,
+    'item|minecraft:iron_ingot',
+    4,
+    5,
   ]);
 });
 

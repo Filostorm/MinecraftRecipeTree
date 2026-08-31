@@ -33,6 +33,7 @@ import {
 } from '../data/ingredientAlternativeSelection';
 import {signalTarget, useSignalSurface} from '../analytics/signal';
 import {RecipePreviewImage} from '../components/RecipePreviewImage';
+import {ProjecteEmcPreview} from '../components/ProjecteEmcPreview';
 import {recipeImagePath, useData} from '../data/DataContext';
 import {
   formatIngredientQuantity,
@@ -50,6 +51,7 @@ import {isRecipeVisibleForStages} from '../data/recipeStages';
 import {isFluidContainerTransferRecipe} from '../data/recipeVisibility';
 import {recipeDisplayTitle} from '../data/recipeTitles';
 import {recipeNeedsLayoutPreviewUnavailableNotice} from '../data/recipePresentation';
+import {projecteEmcTransmutation} from '../data/projecteEmc';
 import {
   claimAnonymousRecipeFavorites,
   loadCommunityRecipeFavorites,
@@ -127,7 +129,9 @@ import {
   assertPortableTreePackMatches,
   buildPortableTree,
   parsePortableTree,
+  portableRecipeKey,
   portableSelectionAsStored,
+  resolveConnectedPortableSelections,
   type PortableTreeSelection,
 } from './portableTree';
 import {
@@ -135,6 +139,10 @@ import {
   sharePortableTree,
 } from './portableTreeTransfer';
 import {TreeShareModal} from './TreeShareModal';
+import {
+  RecipeImportDetailsModal,
+  type RecipeImportReport,
+} from './RecipeImportDetailsModal';
 import {
   AutoExpandSummaryModal,
   type AutoExpandSummaryEntry,
@@ -517,6 +525,10 @@ export function GraphScreen({
   showGraphControls,
   onToggleGraphControls,
   controlsToggleInHeader = false,
+  recipeImportRequestId = 0,
+  onRecipeImportRequestHandled,
+  recipeImportNotice = null,
+  onRecipeImportNoticeChange,
 }: {
   interfaceZoom?: number;
   contentZoom?: number;
@@ -525,6 +537,10 @@ export function GraphScreen({
   showGraphControls: boolean;
   onToggleGraphControls(): void;
   controlsToggleInHeader?: boolean;
+  recipeImportRequestId?: number;
+  onRecipeImportRequestHandled?: () => void;
+  recipeImportNotice?: string | null;
+  onRecipeImportNoticeChange?: React.Dispatch<React.SetStateAction<string | null>>;
 }) {
   const data = useData();
   const account = useUser();
@@ -560,10 +576,21 @@ export function GraphScreen({
   pickerRef.current = picker;
   const [showRootActions, setShowRootActions] = useState(false);
   const [showTreeShare, setShowTreeShare] = useState(false);
+  const [treeTransferMode, setTreeTransferMode] = useState<'share' | 'import'>('share');
   const [nodeMenu, setNodeMenu] = useState<NodeMenuState | null>(null);
   const [autoExpandSummary, setAutoExpandSummary] =
     useState<AutoExpandSummaryEntry[] | null>(null);
+  const [recipeImportReport, setRecipeImportReport] =
+    useState<RecipeImportReport | null>(null);
+  const [showRecipeImportDetails, setShowRecipeImportDetails] = useState(false);
   useEffect(() => setShowRootActions(false), [graphRequestId]);
+  useEffect(() => {
+    if (recipeImportRequestId <= 0) return;
+    setRecipeImportReport(null);
+    setShowRecipeImportDetails(false);
+    setTreeTransferMode('import');
+    setShowTreeShare(true);
+  }, [recipeImportRequestId]);
   useEffect(() => {
     if (tab !== 'graph') setShowRootActions(false);
   }, [tab]);
@@ -621,7 +648,13 @@ export function GraphScreen({
     personalFavoriteSyncRequestRef.current = requestId;
     void (async () => {
       try {
-        await claimAnonymousRecipeFavorites();
+        const browserFavorites = Object.entries(preferredSourcesRef.current)
+          .filter(
+            (entry): entry is [string, Extract<PreferredSource, {t: 'recipe'}>] =>
+              entry[1].t === 'recipe' && !!data.index[entry[0]],
+          )
+          .map(([itemKey, source]) => ({itemKey, recipeRef: source.ref}));
+        await claimAnonymousRecipeFavorites(data.descriptor, browserFavorites);
         const favorites = await loadPersonalRecipeFavorites(data.descriptor);
         if (personalFavoriteSyncRequestRef.current !== requestId) return;
         const next: PreferredSources = {};
@@ -1092,59 +1125,108 @@ export function GraphScreen({
           );
         }
         const restoredNodesByPath = new Map<string, ItemTreeNode>();
+        const reconstructionFailures: Array<{
+          path: number[];
+          itemKey: string;
+          error: string;
+        }> = [];
+        let dependentSelectionCount = 0;
+        let restoredSelectionCount = 0;
         newRoot.productionPlan = session.productionPlan
           ? {...session.productionPlan}
           : undefined;
         for (const selection of session.selections) {
-          const node = nodeForStoredSelection(
-            newRoot,
-            selection,
-            restoredNodesByPath,
-          );
-          restoredNodesByPath.set(selection.path.join('.'), node);
-          if (isRecursiveItemNode(node)) {
-            throw new Error(
-              `Saved graph tries to expand recursive item ${JSON.stringify(node.key)}.`,
-            );
-          }
-          if (selection.source.kind === 'recipe') {
-            if (selection.deferred) {
-              node.deferredRecipeExpansion = {
-                ref: [...selection.source.ref],
-                ...(selection.source.allowFluidTransfer
-                  ? {allowFluidTransfer: true as const}
-                  : {}),
-                ...(selection.source.ingredientSelections
-                  ? {ingredientSelections: {...selection.source.ingredientSelections}}
-                  : {}),
-              };
-              continue;
-            }
-            const expanded = await expandRecipe(node, selection.source.ref, {
-              allowFluidTransfer: selection.source.allowFluidTransfer === true,
-              ingredientSelections: selection.source.ingredientSelections,
-              expandPreferredChildren: false,
-              recordHistory: false,
-            });
-            if (!expanded) {
-              throw new Error(
-                `Saved recipe ${selection.source.ref.join(':')} could not be reconstructed.`,
-              );
-            }
+          const pathKey = selection.path.join('.');
+          if (
+            selection.path.length > 0 &&
+            !restoredNodesByPath.has(selection.path.slice(0, -1).join('.'))
+          ) {
+            dependentSelectionCount += 1;
             continue;
           }
-          const storedSource = selection.source;
-          const sourceChoice = choicesFor(node.key, session.direction).find(choice =>
-            storedSource.kind === 'mob'
-              ? choice.t === 'mob' && choice.mob.id === storedSource.mobId
-              : choice.t === 'block' && choice.blockKey === storedSource.blockKey,
-          );
-          if (!sourceChoice) {
-            throw new Error(
-              `Saved ${selection.source.kind} source for ${JSON.stringify(node.key)} is unavailable.`,
+          try {
+            const node = nodeForStoredSelection(
+              newRoot,
+              selection,
+              restoredNodesByPath,
             );
+            if (isRecursiveItemNode(node)) {
+              throw new Error(
+                `Saved graph tries to expand recursive item ${JSON.stringify(node.key)}.`,
+              );
+            }
+            if (selection.source.kind === 'recipe') {
+              if (selection.deferred) {
+                node.deferredRecipeExpansion = {
+                  ref: [...selection.source.ref],
+                  ...(selection.source.allowFluidTransfer
+                    ? {allowFluidTransfer: true as const}
+                    : {}),
+                  ...(selection.source.ingredientSelections
+                    ? {ingredientSelections: {...selection.source.ingredientSelections}}
+                    : {}),
+                };
+                restoredNodesByPath.set(pathKey, node);
+                restoredSelectionCount += 1;
+                continue;
+              }
+              const expanded = await expandRecipe(node, selection.source.ref, {
+                allowFluidTransfer: selection.source.allowFluidTransfer === true,
+                ingredientSelections: selection.source.ingredientSelections,
+                expandPreferredChildren: false,
+                recordHistory: false,
+              });
+              if (!expanded) {
+                throw new Error(
+                  `Saved recipe ${selection.source.ref.join(':')} could not be reconstructed.`,
+                );
+              }
+            } else {
+              const storedSource = selection.source;
+              const sourceChoice = choicesFor(node.key, session.direction).find(choice =>
+                storedSource.kind === 'mob'
+                  ? choice.t === 'mob' && choice.mob.id === storedSource.mobId
+                  : choice.t === 'block' && choice.blockKey === storedSource.blockKey,
+              );
+              if (!sourceChoice) {
+                throw new Error(
+                  `Saved ${selection.source.kind} source for ${JSON.stringify(node.key)} is unavailable.`,
+                );
+              }
+              applyChoice(node, sourceChoice);
+            }
+            restoredNodesByPath.set(pathKey, node);
+            restoredSelectionCount += 1;
+          } catch (error) {
+            reconstructionFailures.push({
+              path: selection.path,
+              itemKey: selection.itemKey,
+              error:
+                error instanceof Error
+                  ? error.message
+                  : 'Unknown graph reconstruction failure.',
+            });
           }
-          applyChoice(node, sourceChoice);
+        }
+        const skippedSelectionCount =
+          reconstructionFailures.length + dependentSelectionCount;
+        if (skippedSelectionCount > 0) {
+          console.warn('A saved graph was reconstructed partially.', {
+            restoredSelectionCount,
+            reconstructionFailures,
+            dependentSelectionCount,
+          });
+          const reconstructionMessage =
+            `Reconstruction kept ${restoredSelectionCount} selections and skipped ` +
+            `${skippedSelectionCount} invalid or dependent selections.`;
+          onRecipeImportNoticeChange?.(current =>
+            current ? `${current} ${reconstructionMessage}` : reconstructionMessage,
+          );
+          setExportMessage(current =>
+            current?.startsWith('Opened partial tree:')
+              ? `${current} ${reconstructionMessage}`
+              : `Opened partial tree: ${reconstructionMessage}`,
+          );
         }
         needsFitRef.current = true;
       } catch (error) {
@@ -1160,7 +1242,15 @@ export function GraphScreen({
         bump();
       }
     },
-    [applyChoice, bump, choicesFor, data.descriptor, expandRecipe, graphDirection],
+    [
+      applyChoice,
+      bump,
+      choicesFor,
+      data.descriptor,
+      expandRecipe,
+      graphDirection,
+      onRecipeImportNoticeChange,
+    ],
   );
 
   const pickerEntryFor = useCallback(
@@ -2285,11 +2375,9 @@ export function GraphScreen({
           const candidate = ordered[index];
           const category = data.categories[candidate.ref[0]];
           const recipe = recipes[index];
-          if (
-            category &&
-            recipe?.id &&
-            `${category.id}|${recipe.id}` === recipeSource.recipeKey
-          ) {
+          if (!category || !recipe) continue;
+          const candidateKey = await portableRecipeKey(category.id, recipe);
+          if (candidateKey === recipeSource.recipeKey) {
             recipeRefCache.set(cacheKey, candidate.ref);
             return [...candidate.ref];
           }
@@ -2299,32 +2387,142 @@ export function GraphScreen({
         );
       };
 
-      const selections: StoredGraphSelection[] = [];
-      for (const selection of share.selections) {
-        selections.push(
-          portableSelectionAsStored(
-            selection,
-            selection.source.kind === 'recipe'
-              ? await resolveRecipeRef(selection)
-              : undefined,
-          ),
-        );
+      const resolution = await resolveConnectedPortableSelections(
+        share.selections,
+        async selection => {
+          if (selection.source.kind === 'recipe') {
+            return portableSelectionAsStored(
+              selection,
+              await resolveRecipeRef(selection),
+            );
+          }
+          const source = selection.source;
+          const available = choicesFor(selection.itemKey, share.direction).some(choice =>
+            source.kind === 'mob'
+              ? choice.t === 'mob' && choice.mob.id === source.mobId
+              : choice.t === 'block' && choice.blockKey === source.blockKey,
+          );
+          if (!available) {
+            throw new Error(
+              `${source.kind === 'mob' ? 'Mob' : 'Block'} source for ${selection.itemKey} is unavailable in this pack.`,
+            );
+          }
+          return portableSelectionAsStored(selection);
+        },
+      );
+      const unavailableSelections = resolution.skipped.filter(
+        skipped => skipped.reason === 'unavailable',
+      );
+      const dependentSelections = resolution.skipped.filter(
+        skipped => skipped.reason === 'dependent',
+      );
+      const duplicateSelections = resolution.skipped.filter(
+        skipped => skipped.reason === 'duplicate',
+      );
+      if (resolution.skipped.length > 0) {
+        console.warn('A shared recipe tree was opened partially.', {
+          restoredSelections: resolution.selections.length,
+          unavailableSelections: unavailableSelections.map(skipped => ({
+            path: skipped.selection.path,
+            itemKey: skipped.selection.itemKey,
+            source: skipped.selection.source,
+            error:
+              skipped.error instanceof Error
+                ? skipped.error.message
+                : String(skipped.error),
+          })),
+          dependentSelectionCount: dependentSelections.length,
+          duplicateSelectionCount: duplicateSelections.length,
+        });
       }
+      setRecipeImportReport(
+        resolution.skipped.length === 0
+          ? null
+          : {
+              restoredCount: resolution.selections.length,
+              details: resolution.skipped.map(skipped => {
+                const source = skipped.selection.source;
+                const unavailableMessage =
+                  skipped.error instanceof Error
+                    ? skipped.error.message
+                    : skipped.error === undefined
+                      ? null
+                      : String(skipped.error);
+                return {
+                  path: [...skipped.selection.path],
+                  itemKey: skipped.selection.itemKey,
+                  itemName:
+                    data.itemsByKey.get(skipped.selection.itemKey)?.n ??
+                    skipped.selection.itemKey,
+                  ...(source.kind === 'recipe' ? {recipeKey: source.recipeKey} : {}),
+                  reason: skipped.reason,
+                  message:
+                    unavailableMessage ??
+                    (skipped.reason === 'dependent'
+                      ? 'This selection depends on a parent recipe that could not be restored.'
+                      : 'Another selection already uses this exact tree path.'),
+                };
+              }),
+            },
+      );
+      setShowRecipeImportDetails(false);
       const session = parseGraphSession(JSON.stringify({
         version: 2,
         rootKey: share.rootKey,
         direction: share.direction,
         ...(share.productionPlan ? {productionPlan: share.productionPlan} : {}),
-        selections,
+        selections: resolution.selections,
       }));
       pendingGraphSessionRef.current = session;
       restoringGraphSessionRef.current = true;
       setShowTreeShare(false);
-      setExportMessage('Shared tree history opened.');
+      onRecipeImportRequestHandled?.();
+      setExportMessage(
+        resolution.skipped.length === 0
+          ? 'Shared tree history opened.'
+          : `Opened partial tree: ${resolution.selections.length} selections restored; ` +
+              `${unavailableSelections.length} unavailable and ` +
+              `${dependentSelections.length + duplicateSelections.length} disconnected selections skipped.`,
+      );
+      onRecipeImportNoticeChange?.(
+        resolution.skipped.length === 0
+          ? null
+          : `${resolution.selections.length} selections were restored. ` +
+              `${unavailableSelections.length} unavailable and ` +
+              `${dependentSelections.length + duplicateSelections.length} dependent selections were skipped.`,
+      );
       restoreGraph(session.rootKey, session.direction);
     },
-    [choicesFor, data, restoreGraph],
+    [
+      choicesFor,
+      data,
+      onRecipeImportNoticeChange,
+      onRecipeImportRequestHandled,
+      restoreGraph,
+    ],
   );
+
+  const closeTreeShare = useCallback(() => {
+    setShowTreeShare(false);
+    if (treeTransferMode === 'import') onRecipeImportRequestHandled?.();
+  }, [onRecipeImportRequestHandled, treeTransferMode]);
+
+  const inspectPortableTreeImport = useCallback((raw: string) => {
+    try {
+      const share = parsePortableTree(raw);
+      assertPortableTreePackMatches(share, data.descriptor);
+      const rootItem = data.itemsByKey.get(share.rootKey);
+      if (!rootItem) return null;
+      const packName = share.pack.name ?? data.descriptor.displayName;
+      const packVersion = share.pack.version ?? data.descriptor.packVersion;
+      return {
+        title: rootItem.n,
+        detail: `${packName} ${packVersion} · ${share.direction === 'inputs' ? 'ingredients' : 'used by'}`,
+      };
+    } catch {
+      return null;
+    }
+  }, [data.descriptor, data.itemsByKey]);
 
   const exportTotals = useCallback(() => {
     try {
@@ -3209,7 +3407,10 @@ export function GraphScreen({
             <CtrlBtn
               label="Share"
               metricsId="graph.control.share"
-              onPress={() => setShowTreeShare(true)}
+              onPress={() => {
+                setTreeTransferMode('share');
+                setShowTreeShare(true);
+              }}
             />
           </View>
         )}
@@ -3257,6 +3458,42 @@ export function GraphScreen({
             onPress={() => setShowLargeTreeUniqueNotice(false)}>
             <Text style={styles.uniqueModeNoticeDismissText}>Got it</Text>
           </TouchableOpacity>
+        </View>
+      )}
+      {recipeImportNotice && (
+        <View
+          style={[
+            styles.uniqueModeNotice,
+            showLargeTreeUniqueNotice && styles.treeImportNoticeStacked,
+            graphMenuScaleStyle,
+          ]}
+          accessibilityRole="alert">
+          <Text style={[styles.uniqueModeNoticeText, noSelect]}>
+            <Text style={styles.treeImportNoticeTitle}>Partial import. </Text>
+            {recipeImportNotice}
+          </Text>
+          <View style={styles.treeImportNoticeActions}>
+            {recipeImportReport ? (
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Open partial import details"
+                style={styles.treeImportNoticeDetails}
+                onPress={() => setShowRecipeImportDetails(true)}>
+                <Text style={styles.treeImportNoticeDetailsText}>Open details</Text>
+              </TouchableOpacity>
+            ) : null}
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Dismiss partial import notice"
+              style={styles.uniqueModeNoticeDismiss}
+              onPress={() => {
+                setRecipeImportReport(null);
+                setShowRecipeImportDetails(false);
+                onRecipeImportNoticeChange?.(null);
+              }}>
+              <Text style={styles.uniqueModeNoticeDismissText}>Got it</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       )}
       <TouchableOpacity
@@ -3560,11 +3797,18 @@ export function GraphScreen({
       )}
       <TreeShareModal
         visible={showTreeShare}
+        mode={treeTransferMode}
         interfaceZoom={interfaceZoom}
-        onClose={() => setShowTreeShare(false)}
+        onClose={closeTreeShare}
         onShare={shareCurrentTree}
         onImport={importPortableTree}
+        onInspectImport={inspectPortableTreeImport}
         onChooseFile={pickPortableTreeFile}
+      />
+      <RecipeImportDetailsModal
+        report={showRecipeImportDetails ? recipeImportReport : null}
+        interfaceZoom={interfaceZoom}
+        onClose={() => setShowRecipeImportDetails(false)}
       />
       <AutoExpandSummaryModal
         entries={autoExpandSummary}
@@ -4535,6 +4779,10 @@ function SourceNodeView({
         )
       : null;
   const machineKey = category?.catalysts[0];
+  const emcTransmutation =
+    source.kind === 'recipe' && source.recipe
+      ? projecteEmcTransmutation(source.recipe)
+      : null;
   const machineName = machineKey
     ? data.itemsByKey.get(machineKey)?.n ?? machineKey
     : 'machine';
@@ -4542,29 +4790,33 @@ function SourceNodeView({
     isRoot && rootActions ? w - ROOT_SOURCE_ACTIONS_WIDTH : w;
   const headerCopy = (
     <View style={styles.sourceHeaderCopy}>
-      <Text style={[styles.sourceHeaderName, noSelect]} numberOfLines={1}>
-        {name}
-      </Text>
-      {showAmounts && (
-        <Text style={[styles.sourceHeaderAmount, noSelect]} numberOfLines={1}>
-          {' '}{amountText}
+      <View style={styles.sourceHeaderPrimaryRow}>
+        <Text style={[styles.sourceHeaderName, noSelect]} numberOfLines={1}>
+          {name}
         </Text>
-      )}
-      <Text style={[styles.sourceHeaderContext, noSelect]} numberOfLines={1}>
-        {' · '}{context}
-      </Text>
-      {byproductCoverage && (
-        <Text style={[styles.sourceHeaderByproduct, noSelect]} numberOfLines={1}>
-          {' · '}
-          {showAmounts
-            ? `${formatIngredientQuantity(item.key, byproductCoverage.creditedAmount)} byproduct`
-            : 'byproduct'}
-        </Text>
-      )}
-      {showAmounts && machineEstimate && (
-        <Text style={[styles.sourceHeaderParallel, noSelect]} numberOfLines={1}>
-          {' · '}
-          {machineEstimate.machines}× {machineName}
+        {showAmounts && (
+          <Text style={[styles.sourceHeaderAmount, noSelect]} numberOfLines={1}>
+            {' '}{amountText}
+          </Text>
+        )}
+        {byproductCoverage && (
+          <Text style={[styles.sourceHeaderByproduct, noSelect]} numberOfLines={1}>
+            {' · '}
+            {showAmounts
+              ? `${formatIngredientQuantity(item.key, byproductCoverage.creditedAmount)} byproduct`
+              : 'byproduct'}
+          </Text>
+        )}
+        {showAmounts && machineEstimate && (
+          <Text style={[styles.sourceHeaderParallel, noSelect]} numberOfLines={1}>
+            {' · '}
+            {machineEstimate.machines}× {machineName}
+          </Text>
+        )}
+      </View>
+      {context && (
+        <Text style={[styles.sourceHeaderContext, noSelect]} numberOfLines={1}>
+          {context}
         </Text>
       )}
     </View>
@@ -4670,6 +4922,13 @@ function SourceNodeView({
       {source.kind === 'recipe' &&
         source.recipe &&
         !source.recipe.structure &&
+        emcTransmutation && (
+          <ProjecteEmcPreview {...emcTransmutation} />
+        )}
+      {source.kind === 'recipe' &&
+        source.recipe &&
+        !source.recipe.structure &&
+        !emcTransmutation &&
         (!source.recipe.img || !source.dir) && (
           <Text style={[styles.dropStat, noSelect]}>
             Structured recipe · layout preview unavailable
@@ -5089,6 +5348,11 @@ const styles = StyleSheet.create({
   sourceHeaderCopy: {
     flex: 1,
     minWidth: 0,
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  sourceHeaderPrimaryRow: {
+    minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
     overflow: 'hidden',
@@ -5108,9 +5372,9 @@ const styles = StyleSheet.create({
   },
   sourceHeaderContext: {
     minWidth: 0,
-    flexShrink: 1,
     color: theme.textDim,
-    fontSize: 11,
+    fontSize: 9,
+    lineHeight: 10,
     fontWeight: '400',
   },
   sourceHeaderByproduct: {
@@ -5308,6 +5572,18 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   uniqueModeNoticeDismissText: {color: theme.text, fontSize: 10, fontWeight: '800'},
+  treeImportNoticeStacked: {bottom: 76},
+  treeImportNoticeTitle: {color: theme.warn, fontWeight: '900'},
+  treeImportNoticeActions: {flexDirection: 'row', alignItems: 'center', gap: 6},
+  treeImportNoticeDetails: {
+    minHeight: 30,
+    justifyContent: 'center',
+    paddingHorizontal: 9,
+    borderRadius: 6,
+    borderColor: theme.warn,
+    borderWidth: 1,
+  },
+  treeImportNoticeDetailsText: {color: theme.warn, fontSize: 10, fontWeight: '800'},
   totalsPanel: {
     position: 'absolute',
     top: 54,

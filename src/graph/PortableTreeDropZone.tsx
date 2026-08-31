@@ -61,7 +61,7 @@ export function PortableTreeDropZone({
         fontWeight: 700,
         textAlign: 'center',
       }}>
-      {error || (active ? 'Release to open this history' : 'Drop a .mrtree.json history file here')}
+      {error || (active ? 'Release to import this recipe tree' : 'Drop a .mrtree.json recipe tree here')}
     </div>
   );
 }
