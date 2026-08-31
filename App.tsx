@@ -14,20 +14,12 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import {SafeAreaProvider, SafeAreaView, initialWindowMetrics} from './src/ui/safeArea';
-import {ItemDetailModal} from './src/components/ItemDetailModal';
 import {ContentZoomControl} from './src/components/ContentZoomControl';
-import {DatasetPicker} from './src/components/DatasetPicker';
 import {DatasetSwitcher} from './src/components/DatasetSwitcher';
-import {GraphGuideModal} from './src/components/GraphGuideModal';
 import {BugIcon} from './src/components/BugIcon';
 import {DisclosureChevron} from './src/components/DisclosureChevron';
-import {IssueReportModal} from './src/components/IssueReportModal';
 import type {GitHubIssueKind, IssueReportContext} from './src/components/githubIssues';
 import {ItemsScreen} from './src/components/ItemsScreen';
-import {MobsScreen} from './src/components/MobsScreen';
-import {MobileUploadGuide} from './src/components/MobileUploadGuide';
-import {RecipeStageModal} from './src/components/RecipeStageModal';
-import {RecipeHistoryModal} from './src/components/RecipeHistoryModal';
 import {DataProvider, useData, useLoadState} from './src/data/DataContext';
 import {DatasetReadinessMarker} from './src/data/DatasetReadinessMarker';
 import {
@@ -72,6 +64,46 @@ import {ThemePreferenceProvider, useThemePreference} from './src/ui/themePrefere
 const LazyGraphScreen = React.lazy(async () => {
   const module = await import('./src/graph/GraphScreen');
   return {default: module.GraphScreen};
+});
+
+const LazyItemDetailModal = React.lazy(async () => {
+  const module = await import('./src/components/ItemDetailModal');
+  return {default: module.ItemDetailModal};
+});
+
+const LazyDatasetPicker = React.lazy(async () => {
+  const module = await import('./src/components/DatasetPicker');
+  return {default: module.DatasetPicker};
+});
+
+const LazyGraphGuideModal = React.lazy(async () => {
+  const module = await import('./src/components/GraphGuideModal');
+  return {default: module.GraphGuideModal};
+});
+
+const LazyIssueReportModal = React.lazy(async () => {
+  const module = await import('./src/components/IssueReportModal');
+  return {default: module.IssueReportModal};
+});
+
+const LazyMobsScreen = React.lazy(async () => {
+  const module = await import('./src/components/MobsScreen');
+  return {default: module.MobsScreen};
+});
+
+const LazyMobileUploadGuide = React.lazy(async () => {
+  const module = await import('./src/components/MobileUploadGuide');
+  return {default: module.MobileUploadGuide};
+});
+
+const LazyRecipeStageModal = React.lazy(async () => {
+  const module = await import('./src/components/RecipeStageModal');
+  return {default: module.RecipeStageModal};
+});
+
+const LazyRecipeHistoryModal = React.lazy(async () => {
+  const module = await import('./src/components/RecipeHistoryModal');
+  return {default: module.RecipeHistoryModal};
 });
 
 class GraphErrorBoundary extends React.Component<
@@ -194,26 +226,30 @@ function DatasetRoot() {
         onCompactMenuExpandedChange={onCompactMenuExpandedChange}
       />
       {showDatasetPicker && (
-        <DatasetPicker
-          visible
-          datasets={datasets}
-          selectedSlug={selectedSlug}
-          onSelect={slug => {
-            catalog.select(slug);
-            setShowDatasetPicker(false);
-          }}
-          onDeleteLocal={catalog.removeLocal}
-          onClose={() => setShowDatasetPicker(false)}
-        />
+        <Suspense fallback={null}>
+          <LazyDatasetPicker
+            visible
+            datasets={datasets}
+            selectedSlug={selectedSlug}
+            onSelect={slug => {
+              catalog.select(slug);
+              setShowDatasetPicker(false);
+            }}
+            onDeleteLocal={catalog.removeLocal}
+            onClose={() => setShowDatasetPicker(false)}
+          />
+        </Suspense>
       )}
-      <MobileUploadGuide
-        visible={showMobileUploadGuide}
-        onClose={() => setShowMobileUploadGuide(false)}
-        onInstalled={slug => {
-          setShowMobileUploadGuide(false);
-          catalog.refreshLocal(slug);
-        }}
-      />
+      <Suspense fallback={null}>
+        <LazyMobileUploadGuide
+          visible={showMobileUploadGuide}
+          onClose={() => setShowMobileUploadGuide(false)}
+          onInstalled={slug => {
+            setShowMobileUploadGuide(false);
+            catalog.refreshLocal(slug);
+          }}
+        />
+      </Suspense>
     </>
   );
 
@@ -1004,7 +1040,9 @@ function Shell({
               importantForAccessibility={
                 Platform.OS !== 'web' && tab !== 'mobs' ? 'no-hide-descendants' : 'auto'
               }>
-              <MobsScreen />
+              <Suspense fallback={null}>
+                <LazyMobsScreen />
+              </Suspense>
             </View>
           )}
         </View>
@@ -1012,25 +1050,31 @@ function Shell({
       {Platform.OS !== 'web' && (
         <MobileBottomNavigation hasMobs={data.capabilities.mobs} />
       )}
-      <ItemDetailModal
-        interfaceZoom={interfaceZoom}
-        contentZoom={contentZoom}
-        onContentZoomChange={previewContentZoom}
-        onContentZoomComplete={saveContentZoom}
-      />
-      {showRecipeStages && (
-        <RecipeStageModal
-          visible
+      <Suspense fallback={null}>
+        <LazyItemDetailModal
           interfaceZoom={interfaceZoom}
-          onClose={() => setShowRecipeStages(false)}
+          contentZoom={contentZoom}
+          onContentZoomChange={previewContentZoom}
+          onContentZoomComplete={saveContentZoom}
         />
+      </Suspense>
+      {showRecipeStages && (
+        <Suspense fallback={null}>
+          <LazyRecipeStageModal
+            visible
+            interfaceZoom={interfaceZoom}
+            onClose={() => setShowRecipeStages(false)}
+          />
+        </Suspense>
       )}
       {showRecipeHistory && (
-        <RecipeHistoryModal
-          visible
-          interfaceZoom={interfaceZoom}
-          onClose={() => setShowRecipeHistory(false)}
-        />
+        <Suspense fallback={null}>
+          <LazyRecipeHistoryModal
+            visible
+            interfaceZoom={interfaceZoom}
+            onClose={() => setShowRecipeHistory(false)}
+          />
+        </Suspense>
       )}
       {showFavorites && (
         <FavoritesModal
@@ -1073,25 +1117,29 @@ function Shell({
         />
       )}
       {showGraphGuide && (
-        <GraphGuideModal
-          visible
-          interfaceZoom={interfaceZoom}
-          onClose={() => setShowGraphGuide(false)}
-          onOpenIssueReport={kind => {
-            setShowGraphGuide(false);
-            setIssueReportKind(kind);
-            setShowIssueReport(true);
-          }}
-        />
+        <Suspense fallback={null}>
+          <LazyGraphGuideModal
+            visible
+            interfaceZoom={interfaceZoom}
+            onClose={() => setShowGraphGuide(false)}
+            onOpenIssueReport={kind => {
+              setShowGraphGuide(false);
+              setIssueReportKind(kind);
+              setShowIssueReport(true);
+            }}
+          />
+        </Suspense>
       )}
       {showIssueReport && (
-        <IssueReportModal
-          visible
-          interfaceZoom={interfaceZoom}
-          initialKind={issueReportKind}
-          context={issueReportContext}
-          onClose={() => setShowIssueReport(false)}
-        />
+        <Suspense fallback={null}>
+          <LazyIssueReportModal
+            visible
+            interfaceZoom={interfaceZoom}
+            initialKind={issueReportKind}
+            context={issueReportContext}
+            onClose={() => setShowIssueReport(false)}
+          />
+        </Suspense>
       )}
     </View>
   );
