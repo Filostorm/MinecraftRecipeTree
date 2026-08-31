@@ -7,7 +7,7 @@ import {
   noStoreJson,
   sha256Hex,
 } from './datasetRuntime.ts';
-import {currentUser, ensureUserAccountSchema} from './userAccounts.ts';
+import {AUTH_ROUTE_PREFIX, currentUser, ensureUserAccountSchema} from './userAccounts.ts';
 import {betaCatalogIncludesPublication} from './betaDataProxy.ts';
 
 export const RECIPE_FAVORITES_ROUTE = '/api/recipe-favorites';
@@ -15,6 +15,9 @@ export const RECIPE_FAVORITES_ROUTE = '/api/recipe-favorites';
 const MAX_BODY_BYTES = 4 * 1024;
 const MAX_CLAIM_BODY_BYTES = 96 * 1024;
 const MAX_CLAIM_FAVORITES = 100;
+// Free-tier D1 Workers allow 50 queries per invocation. Leave room for account,
+// pack, and schema checks around the exact-reference delete batch.
+const MAX_CLEANUP_FAVORITES = 25;
 const MAX_ITEM_KEY_LENGTH = 512;
 const MAX_CLIENT_ID_LENGTH = 128;
 const MAX_DISPLAY_NAME_LENGTH = 80;
@@ -177,6 +180,7 @@ interface LeaderboardRow {
   identity_type: 'account' | 'anonymous';
   identity_key: string;
   display_name: string;
+  avatar_key: string | null;
   favorite_count: number;
 }
 
@@ -234,13 +238,28 @@ async function getCommunityFavorites(
   const result = await db
     .prepare(
       `SELECT item_key, recipe_category, recipe_index, COUNT(*) AS favorite_count
-       FROM account_recipe_favorites
-       WHERE pack_slug = ? AND publication_id = ?
+       FROM (
+         SELECT item_key, recipe_category, recipe_index
+         FROM account_recipe_favorites
+         WHERE pack_slug = ? AND publication_id = ?
+
+         UNION ALL
+
+         SELECT item_key, recipe_category, recipe_index
+         FROM recipe_favorites
+         WHERE pack_slug = ? AND publication_id = ?
+       ) AS community_favorites
        GROUP BY item_key, recipe_category, recipe_index
        ORDER BY item_key ASC, favorite_count DESC, recipe_category ASC, recipe_index ASC
        LIMIT ?`,
     )
-    .bind(pack.packSlug, pack.publicationId, MAX_GROUPED_FAVORITES)
+    .bind(
+      pack.packSlug,
+      pack.publicationId,
+      pack.packSlug,
+      pack.publicationId,
+      MAX_GROUPED_FAVORITES,
+    )
     .all<FavoriteRow>();
   if (!result.success) throw new Error('D1 reported an unsuccessful community-favorites query.');
 
@@ -248,7 +267,7 @@ async function getCommunityFavorites(
   const selectedItems = new Set<string>();
   for (const row of result.results ?? []) {
     if (!validFavoriteRow(row)) {
-      throw new Error('Account recipe-favorites storage contains invalid aggregate data.');
+      throw new Error('Community recipe-favorites storage contains invalid aggregate data.');
     }
     if (selectedItems.has(row.item_key)) continue;
     selectedItems.add(row.item_key);
@@ -279,25 +298,27 @@ async function getLeaderboard(
          SELECT 'account' AS identity_type,
                 account_recipe_favorites.user_id AS identity_key,
                 users.display_name AS display_name,
+                users.avatar_key AS avatar_key,
                 COUNT(*) AS favorite_count
          FROM account_recipe_favorites
          INNER JOIN users ON users.id = account_recipe_favorites.user_id
          WHERE account_recipe_favorites.pack_slug = ?
            AND account_recipe_favorites.publication_id = ?
-         GROUP BY account_recipe_favorites.user_id, users.display_name
+         GROUP BY account_recipe_favorites.user_id, users.display_name, users.avatar_key
 
          UNION ALL
 
          SELECT 'anonymous' AS identity_type,
                 recipe_favorites.client_hash AS identity_key,
                 'Unknown user' AS display_name,
+                NULL AS avatar_key,
                 COUNT(*) AS favorite_count
          FROM recipe_favorites
          WHERE recipe_favorites.pack_slug = ?
            AND recipe_favorites.publication_id = ?
          GROUP BY recipe_favorites.client_hash
        )
-       SELECT identity_type, identity_key, display_name, favorite_count
+       SELECT identity_type, identity_key, display_name, avatar_key, favorite_count
        FROM favorite_users
        ORDER BY favorite_count DESC,
                 display_name COLLATE NOCASE ASC,
@@ -318,6 +339,7 @@ async function getLeaderboard(
       !boundedText(row.display_name, MAX_DISPLAY_NAME_LENGTH) ||
       (row.identity_type !== 'account' && row.identity_type !== 'anonymous') ||
       !boundedText(row.identity_key, MAX_CLIENT_ID_LENGTH) ||
+      (row.avatar_key !== null && !/^[a-f0-9]{64}$/u.test(row.avatar_key)) ||
       !Number.isSafeInteger(row.favorite_count) ||
       row.favorite_count < 1
     ) {
@@ -327,6 +349,7 @@ async function getLeaderboard(
       displayName: row.display_name,
       count: row.favorite_count,
       isAnonymous: row.identity_type === 'anonymous',
+      avatarUrl: row.avatar_key ? `${AUTH_ROUTE_PREFIX}avatar/${row.avatar_key}` : null,
       isCurrent:
         (row.identity_type === 'account' && row.identity_key === user?.id) ||
         (row.identity_type === 'anonymous' && row.identity_key === anonymousClientHash),
@@ -575,6 +598,85 @@ async function claimAnonymousFavorites(
   });
 }
 
+async function cleanupPersonalFavorites(
+  request: Request,
+  runtime: DatasetRuntime,
+  db: D1Database,
+  url: URL,
+): Promise<Response> {
+  if (!requestOriginAllowed(request, url)) {
+    console.warn('A cross-origin favorite cleanup was refused.', {
+      origin: request.headers.get('origin'),
+    });
+    return noStoreJson({error: 'Cross-origin favorite updates are not allowed.'}, 403);
+  }
+  const user = await currentUser(request, runtime);
+  if (!user) return noStoreJson({error: 'Sign in to sync favorites.'}, 401);
+  const parsed = await parseJsonBody(request, MAX_CLAIM_BODY_BYTES);
+  if (
+    parsed instanceof Response ||
+    !isRecord(parsed) ||
+    !hasExactKeys(parsed, ['favorites', 'packSlug', 'publicationId']) ||
+    !boundedText(parsed.packSlug, 80) ||
+    !DATASET_SLUG_PATTERN.test(parsed.packSlug) ||
+    typeof parsed.publicationId !== 'string' ||
+    !CORE_DATASET_PUBLICATION_ID_PATTERN.test(parsed.publicationId) ||
+    !Array.isArray(parsed.favorites) ||
+    parsed.favorites.length < 1 ||
+    parsed.favorites.length > MAX_CLEANUP_FAVORITES
+  ) {
+    return parsed instanceof Response
+      ? parsed
+      : noStoreJson({error: 'Favorite cleanup contains invalid values.'}, 400);
+  }
+  const favorites: Array<{itemKey: string; recipeRef: [number, number]}> = [];
+  const seen = new Set<string>();
+  for (const [index, value] of parsed.favorites.entries()) {
+    if (!isRecord(value) || !hasExactKeys(value, ['itemKey', 'recipeRef'])) {
+      console.warn('A favorite cleanup had an invalid entry shape.', {index});
+      return noStoreJson({error: 'Favorite cleanup contains invalid values.'}, 400);
+    }
+    const ref = recipeRef(value.recipeRef);
+    const identity = `${String(value.itemKey)}\u0000${ref?.join(':') ?? ''}`;
+    if (!boundedText(value.itemKey, MAX_ITEM_KEY_LENGTH) || !ref || seen.has(identity)) {
+      console.warn('A favorite cleanup had invalid or duplicate entry values.', {index});
+      return noStoreJson({error: 'Favorite cleanup contains invalid values.'}, 400);
+    }
+    seen.add(identity);
+    favorites.push({itemKey: value.itemKey, recipeRef: ref});
+  }
+  if (!(await requireCurrentPack(runtime, db, parsed.packSlug, parsed.publicationId))) {
+    return noStoreJson({error: 'That saved pack version is not available.'}, 404);
+  }
+  const results = await db.batch(favorites.map(favorite =>
+    db
+      .prepare(
+        `DELETE FROM account_recipe_favorites
+         WHERE user_id = ? AND pack_slug = ? AND publication_id = ?
+           AND item_key = ? AND recipe_category = ? AND recipe_index = ?`,
+      )
+      .bind(
+        user.id,
+        parsed.packSlug,
+        parsed.publicationId,
+        favorite.itemKey,
+        favorite.recipeRef[0],
+        favorite.recipeRef[1],
+      ),
+  ));
+  if (results.some(result => !result.success)) {
+    throw new Error('D1 reported an unsuccessful personal favorite cleanup.');
+  }
+  const removed = results.reduce((sum, result) => sum + (result.meta?.changes ?? 0), 0);
+  console.info('Unavailable personal recipe favorites were cleaned up.', {
+    packSlug: parsed.packSlug,
+    publicationId: parsed.publicationId,
+    requested: favorites.length,
+    removed,
+  });
+  return noStoreJson({removed});
+}
+
 export async function handleRecipeFavorites(
   request: Request,
   runtime: DatasetRuntime,
@@ -600,6 +702,10 @@ export async function handleRecipeFavorites(
     if (url.pathname === `${RECIPE_FAVORITES_ROUTE}/claim`) {
       if (request.method !== 'POST') return methodNotAllowed('POST');
       return claimAnonymousFavorites(request, runtime, db, url);
+    }
+    if (url.pathname === `${RECIPE_FAVORITES_ROUTE}/cleanup`) {
+      if (request.method !== 'POST') return methodNotAllowed('POST');
+      return cleanupPersonalFavorites(request, runtime, db, url);
     }
     return noStoreJson({error: 'Not found.'}, 404);
   } catch (error) {

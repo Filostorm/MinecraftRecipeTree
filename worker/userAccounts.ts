@@ -4,6 +4,7 @@ import {
   type DatasetRuntime,
   methodNotAllowed,
   noStoreJson,
+  sha256Hex,
 } from './datasetRuntime.ts';
 
 export const AUTH_ROUTE_PREFIX = '/api/auth/';
@@ -11,6 +12,8 @@ const initializedDatabases = new WeakMap<object, Promise<void>>();
 const jwksByOrigin = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
 const USER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const UNSAFE_DISPLAY_NAME_PATTERN = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/u;
+const AVATAR_KEY_PATTERN = /^[a-f0-9]{64}$/u;
+const DISCORD_AVATAR_PATH_PATTERN = /^\/(?:avatars\/[0-9]{1,24}\/[A-Za-z0-9_-]{2,128}\.(?:png|jpe?g|webp|gif)|embed\/avatars\/[0-5]\.png)$/u;
 
 const schemaStatements = [
   `CREATE TABLE IF NOT EXISTS users (
@@ -18,11 +21,15 @@ const schemaStatements = [
     provider TEXT NOT NULL,
     provider_user_id TEXT NOT NULL,
     display_name TEXT NOT NULL,
+    avatar_url TEXT,
+    avatar_key TEXT,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
   )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS users_provider_identity_idx
    ON users (provider, provider_user_id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS users_avatar_key_idx
+   ON users (avatar_key)`,
   `CREATE TABLE IF NOT EXISTS account_recipe_favorites (
     user_id TEXT NOT NULL,
     pack_slug TEXT NOT NULL,
@@ -124,6 +131,41 @@ function displayNameFor(payload: JWTPayload): string {
   return normalized;
 }
 
+function metadataRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+export function discordAvatarUrlFor(payload: JWTPayload): string | null {
+  const appMetadata = metadataRecord(payload.app_metadata);
+  const providers = Array.isArray(appMetadata.providers) ? appMetadata.providers : [];
+  const isDiscord = appMetadata.provider === 'discord' || providers.includes('discord');
+  if (!isDiscord) return null;
+  const userMetadata = metadataRecord(payload.user_metadata);
+  const candidate = [userMetadata.avatar_url, userMetadata.picture]
+    .find(value => typeof value === 'string' && value.trim()) as string | undefined;
+  if (!candidate) return null;
+  try {
+    const parsed = new URL(candidate);
+    if (
+      parsed.protocol !== 'https:' ||
+      parsed.hostname !== 'cdn.discordapp.com' ||
+      parsed.port ||
+      parsed.username ||
+      parsed.password ||
+      !DISCORD_AVATAR_PATH_PATTERN.test(parsed.pathname)
+    ) {
+      console.warn('Discord supplied an avatar URL outside the allowed CDN path.');
+      return null;
+    }
+    return `https://cdn.discordapp.com${parsed.pathname}`;
+  } catch {
+    console.warn('Discord supplied an invalid avatar URL.');
+    return null;
+  }
+}
+
 function projectJwks(projectUrl: string) {
   const cached = jwksByOrigin.get(projectUrl);
   if (cached) return cached;
@@ -183,21 +225,71 @@ export async function currentUser(
     return null;
   }
   const displayName = displayNameFor(payload);
+  const avatarUrl = discordAvatarUrlFor(payload);
+  const avatarKey = avatarUrl
+    ? await sha256Hex(new TextEncoder().encode(avatarUrl))
+    : null;
   const now = Date.now();
   const saved = await db
     .prepare(
       `INSERT INTO users
-         (id, provider, provider_user_id, display_name, created_at, updated_at)
-       VALUES (?, 'supabase', ?, ?, ?, ?)
+         (id, provider, provider_user_id, display_name, avatar_url, avatar_key, created_at, updated_at)
+       VALUES (?, 'supabase', ?, ?, ?, ?, ?, ?)
        ON CONFLICT (id)
        DO UPDATE SET display_name = excluded.display_name,
+                     avatar_url = excluded.avatar_url,
+                     avatar_key = excluded.avatar_key,
                      updated_at = excluded.updated_at
-       WHERE users.display_name <> excluded.display_name`,
+       WHERE users.display_name <> excluded.display_name
+          OR users.avatar_url IS NOT excluded.avatar_url
+          OR users.avatar_key IS NOT excluded.avatar_key`,
     )
-    .bind(payload.sub, payload.sub, displayName, now, now)
+    .bind(payload.sub, payload.sub, displayName, avatarUrl, avatarKey, now, now)
     .run();
   if (!saved.success) throw new Error('D1 could not save the Supabase user profile.');
   return {id: payload.sub, displayName};
+}
+
+async function avatarResponse(
+  request: Request,
+  db: D1Database,
+  url: URL,
+): Promise<Response> {
+  if (request.method !== 'GET') return methodNotAllowed('GET');
+  const avatarKey = url.pathname.slice(`${AUTH_ROUTE_PREFIX}avatar/`.length);
+  if (!AVATAR_KEY_PATTERN.test(avatarKey)) return noStoreJson({error: 'Not found.'}, 404);
+  const row = await db
+    .prepare('SELECT avatar_url FROM users WHERE avatar_key = ? LIMIT 1')
+    .bind(avatarKey)
+    .first<{avatar_url: string}>();
+  if (!row?.avatar_url) return noStoreJson({error: 'Not found.'}, 404);
+  const verifiedUrl = discordAvatarUrlFor({
+    app_metadata: {provider: 'discord'},
+    user_metadata: {avatar_url: row.avatar_url},
+  });
+  if (!verifiedUrl) {
+    console.error('A stored Discord avatar URL failed validation.', {avatarKey});
+    return noStoreJson({error: 'Avatar unavailable.'}, 502);
+  }
+  const upstream = await fetch(verifiedUrl, {
+    headers: {Accept: 'image/avif,image/webp,image/png,image/jpeg,image/gif'},
+  });
+  if (!upstream.ok || !upstream.body) {
+    console.warn('Discord avatar delivery failed.', {avatarKey, status: upstream.status});
+    return noStoreJson({error: 'Avatar unavailable.'}, 502);
+  }
+  const contentType = upstream.headers.get('content-type')?.split(';', 1)[0]?.trim() ?? '';
+  if (!/^image\/(?:avif|gif|jpeg|png|webp)$/u.test(contentType)) {
+    console.error('Discord returned an unexpected avatar content type.', {avatarKey, contentType});
+    return noStoreJson({error: 'Avatar unavailable.'}, 502);
+  }
+  return new Response(upstream.body, {
+    headers: {
+      'Cache-Control': 'public, max-age=31536000, immutable',
+      'Content-Type': contentType,
+      'X-Content-Type-Options': 'nosniff',
+    },
+  });
 }
 
 async function sessionResponse(request: Request, runtime: DatasetRuntime): Promise<Response> {
@@ -277,6 +369,9 @@ export async function handleUserAccounts(
   if (!db) return noStoreJson({error: 'User accounts are unavailable.'}, 503);
   try {
     await ensureUserAccountSchema(db);
+    if (url.pathname.startsWith(`${AUTH_ROUTE_PREFIX}avatar/`)) {
+      return await avatarResponse(request, db, url);
+    }
     if (url.pathname === `${AUTH_ROUTE_PREFIX}session`) {
       if (request.method !== 'GET') return methodNotAllowed('GET');
       return await sessionResponse(request, runtime);

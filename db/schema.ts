@@ -116,10 +116,15 @@ export const users = sqliteTable(
     provider: text('provider').notNull(),
     providerUserId: text('provider_user_id').notNull(),
     displayName: text('display_name').notNull(),
+    avatarUrl: text('avatar_url'),
+    avatarKey: text('avatar_key'),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),
   },
-  table => [uniqueIndex('users_provider_identity_idx').on(table.provider, table.providerUserId)],
+  table => [
+    uniqueIndex('users_provider_identity_idx').on(table.provider, table.providerUserId),
+    uniqueIndex('users_avatar_key_idx').on(table.avatarKey),
+  ],
 );
 
 export const accountRecipeFavorites = sqliteTable(

@@ -8,6 +8,7 @@ const FAVORITES_ENDPOINT = Platform.OS === 'web'
   ? '/api/recipe-favorites'
   : 'https://minecraftrecipetree.craftsmannsoftware.com/api/recipe-favorites';
 const MAX_FAVORITES = 50_000;
+const CLEANUP_BATCH_SIZE = 25;
 
 export interface CommunityRecipeFavorite {
   itemKey: string;
@@ -23,6 +24,7 @@ export interface PersonalRecipeFavorite {
 
 export interface RecipeFavoriteLeaderboardEntry {
   displayName: string;
+  avatarUrl: string | null;
   count: number;
   isAnonymous: boolean;
   isCurrent: boolean;
@@ -128,11 +130,14 @@ export async function loadRecipeFavoriteLeaderboard(
     }
     const rankedUser = entry as Record<string, unknown>;
     if (
-      Object.keys(rankedUser).length !== 4 ||
+      Object.keys(rankedUser).length !== 5 ||
       typeof rankedUser.displayName !== 'string' ||
       rankedUser.displayName.length === 0 ||
       rankedUser.displayName.length > 80 ||
       rankedUser.displayName.trim() !== rankedUser.displayName ||
+      (rankedUser.avatarUrl !== null &&
+        (typeof rankedUser.avatarUrl !== 'string' ||
+          !/^\/api\/auth\/avatar\/[a-f0-9]{64}$/u.test(rankedUser.avatarUrl))) ||
       !Number.isSafeInteger(rankedUser.count) ||
       (rankedUser.count as number) < 1 ||
       typeof rankedUser.isAnonymous !== 'boolean' ||
@@ -142,6 +147,11 @@ export async function loadRecipeFavoriteLeaderboard(
     }
     return {
       displayName: rankedUser.displayName,
+      avatarUrl: rankedUser.avatarUrl === null
+        ? null
+        : Platform.OS === 'web'
+          ? rankedUser.avatarUrl as string
+          : new URL(rankedUser.avatarUrl as string, FAVORITES_ENDPOINT).href,
       count: rankedUser.count as number,
       isAnonymous: rankedUser.isAnonymous,
       isCurrent: rankedUser.isCurrent,
@@ -199,6 +209,45 @@ export async function loadPersonalRecipeFavorites(
       updatedAt: favorite.updatedAt as number,
     };
   });
+}
+
+export async function cleanupInvalidPersonalRecipeFavorites(
+  descriptor: DatasetDescriptor,
+  favorites: ReadonlyArray<Pick<PersonalRecipeFavorite, 'itemKey' | 'recipeRef'>>,
+): Promise<number> {
+  if (isLocalOnlyPack(descriptor) || favorites.length === 0) return 0;
+  let removed = 0;
+  for (let offset = 0; offset < favorites.length; offset += CLEANUP_BATCH_SIZE) {
+    const chunk = favorites.slice(offset, offset + CLEANUP_BATCH_SIZE);
+    const response = await accountFetch(`${FAVORITES_ENDPOINT}/cleanup`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', Accept: 'application/json'},
+      credentials: 'include',
+      body: JSON.stringify({
+        packSlug: descriptor.slug,
+        publicationId: descriptor.publicationId,
+        favorites: chunk.map(({itemKey, recipeRef}) => ({itemKey, recipeRef})),
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(`Recipe favorite cleanup returned HTTP ${response.status}.`);
+    }
+    const value = await response.json() as unknown;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error('Recipe favorite cleanup response is not an object.');
+    }
+    const record = value as Record<string, unknown>;
+    if (
+      Object.keys(record).length !== 1 ||
+      !Number.isSafeInteger(record.removed) ||
+      (record.removed as number) < 0 ||
+      (record.removed as number) > chunk.length
+    ) {
+      throw new Error('Recipe favorite cleanup response has an invalid shape.');
+    }
+    removed += record.removed as number;
+  }
+  return removed;
 }
 
 export async function claimAnonymousRecipeFavorites(

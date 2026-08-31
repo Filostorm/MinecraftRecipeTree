@@ -103,13 +103,33 @@ const TABLES = Object.freeze({
       'updated_at',
     ]),
   }),
+  recipe_retention_reports: Object.freeze({
+    key: 'reporter_hash',
+    cursor:
+      "pack_slug || X'1F' || publication_id || X'1F' || recipe_category || X'1F' || " +
+      "recipe_index || X'1F' || item_key || X'1F' || reporter_hash",
+    columns: Object.freeze([
+      'pack_slug',
+      'publication_id',
+      'recipe_category',
+      'recipe_index',
+      'item_key',
+      'reporter_hash',
+      'reusable',
+      'updated_at',
+    ]),
+  }),
 });
 
 type MigrationTable = keyof typeof TABLES;
 
 function missingOptionalTable(error: unknown, table: MigrationTable): boolean {
   return (
-    (table === 'export_failure_reports' || table === 'recipe_favorites') &&
+    (
+      table === 'export_failure_reports' ||
+      table === 'recipe_favorites' ||
+      table === 'recipe_retention_reports'
+    ) &&
     error instanceof Error &&
     new RegExp(`no such table:\\s*${table}`, 'iu').test(error.message)
   );

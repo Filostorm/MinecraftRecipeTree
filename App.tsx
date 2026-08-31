@@ -20,7 +20,6 @@ import {DatasetPicker} from './src/components/DatasetPicker';
 import {DatasetSwitcher} from './src/components/DatasetSwitcher';
 import {GraphGuideModal} from './src/components/GraphGuideModal';
 import {BugIcon} from './src/components/BugIcon';
-import {DisclosureChevron} from './src/components/DisclosureChevron';
 import {IssueReportModal} from './src/components/IssueReportModal';
 import type {GitHubIssueKind, IssueReportContext} from './src/components/githubIssues';
 import {ItemsScreen} from './src/components/ItemsScreen';
@@ -61,7 +60,8 @@ import {
   graphRenderRecovery,
   type GraphRenderRecovery,
 } from './src/graph/graphRenderError';
-import {clearGraphSession} from './src/graph/graphSession';
+import {clearGraphSession, loadGraphSession} from './src/graph/graphSession';
+import type {RecipeImportReport} from './src/graph/RecipeImportDetailsModal';
 import {UserProvider, useUser} from './src/account/UserContext';
 import {AccountModal} from './src/account/AccountModal';
 import {FavoritesModal} from './src/account/FavoritesModal';
@@ -176,6 +176,7 @@ function DatasetRoot() {
     trailingAction?: React.ReactNode,
     compactMenuExpanded?: boolean,
     onCompactMenuExpandedChange?: (expanded: boolean) => void,
+    onImportTree?: () => void,
   ) => (
     <>
       <DatasetSwitcher
@@ -185,6 +186,7 @@ function DatasetRoot() {
         loadedManifest={loadedManifest}
         onOpenPicker={() => setShowDatasetPicker(true)}
         onImportPack={openLocalPackImport}
+        onImportTree={onImportTree}
         leadingAction={leadingAction}
         menuAction={menuAction}
         trailingAction={trailingAction}
@@ -282,6 +284,7 @@ function LoadedDatasetLayout({
     trailingAction?: React.ReactNode,
     compactMenuExpanded?: boolean,
     onCompactMenuExpandedChange?: (expanded: boolean) => void,
+    onImportTree?: () => void,
   ): React.ReactNode;
 }) {
   return (
@@ -310,6 +313,7 @@ function Root({
     trailingAction?: React.ReactNode,
     compactMenuExpanded?: boolean,
     onCompactMenuExpandedChange?: (expanded: boolean) => void,
+    onImportTree?: () => void,
   ): React.ReactNode;
 }) {
   const state = useLoadState();
@@ -390,6 +394,7 @@ function Shell({
     trailingAction?: React.ReactNode,
     compactMenuExpanded?: boolean,
     onCompactMenuExpandedChange?: (expanded: boolean) => void,
+    onImportTree?: () => void,
   ): React.ReactNode;
 }) {
   const data = useData();
@@ -412,10 +417,15 @@ function Shell({
   const [showInfoMenu, setShowInfoMenu] = useState(false);
   const [showAppMenu, setShowAppMenu] = useState(false);
   const [recipeImportRequestId, setRecipeImportRequestId] = useState(0);
+  const [recipeImportJob, setRecipeImportJob] = useState<{
+    id: number;
+    raw: string;
+  } | null>(null);
+  const recipeImportJobIdRef = useRef(0);
   const [recipeImportNotice, setRecipeImportNotice] = useState<string | null>(null);
+  const [recipeImportReport, setRecipeImportReport] = useState<RecipeImportReport | null>(null);
   const [issueReportKind, setIssueReportKind] = useState<GitHubIssueKind>('bug');
   const [showGraphControls, setShowGraphControls] = useState(false);
-  const [showDatasetDetails, setShowDatasetDetails] = useState(false);
   const [interfaceZoom, setInterfaceZoom] = useState(1);
   const [contentZoom, setContentZoom] = useState(1);
   const shellSurface = showSignIn
@@ -467,6 +477,20 @@ function Shell({
   useEffect(() => {
     if (account.user) setShowSignIn(false);
   }, [account.user]);
+  useEffect(() => {
+    if (recipeImportJob || ui.graphRootKey || ui.graphRecipeRef) return;
+    const session = loadGraphSession(data.descriptor);
+    if (!session) return;
+    ui.restoreGraph(session.rootKey, session.direction);
+    setTab('graph');
+  }, [
+    data.descriptor,
+    recipeImportJob,
+    setTab,
+    ui.graphRecipeRef,
+    ui.graphRootKey,
+    ui.restoreGraph,
+  ]);
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
     const url = new URL(window.location.href);
@@ -534,18 +558,6 @@ function Shell({
   const compactHeaderNavigation = compactHeader && headerTabs ? (
     <View style={styles.compactHeaderNavigation}>{headerTabs}</View>
   ) : null;
-  const datasetMetadata = (
-    <Text style={styles.subtitle}>
-      Minecraft {data.descriptor.minecraftVersion} · pack {data.descriptor.packVersion} ·{' '}
-      {Object.keys(data.manifest.mods ?? {}).length} mods · {data.items.length} items ·{' '}
-      {data.manifest.counts?.recipes ?? '?'} recipes
-      {data.capabilities.mobs ? ` · ${data.mobs.length} mobs` : ' · mob catalog unavailable'}
-      {!data.capabilities.blockDrops ? ' · block-drop catalog unavailable' : ''}
-      {data.capabilities.recipePreviews
-        ? ' · JEI layout previews available'
-        : ' · JEI layout previews unavailable'}
-    </Text>
-  );
   const interfaceZoomControls = Platform.OS === 'web' ? (
     <View style={styles.zoomControlGroup}>
       <View
@@ -593,12 +605,7 @@ function Shell({
     </View>
   ) : null;
   const headerDetails = compactHeader ? (
-    <View style={styles.headerDetails}>
-      {showDatasetDetails && datasetMetadata}
-      {interfaceZoomControls}
-    </View>
-  ) : showDatasetDetails ? (
-    datasetMetadata
+    <View style={styles.headerDetails}>{interfaceZoomControls}</View>
   ) : null;
   const fullWidthHeaderControls = !compactHeader ? (
     <View style={styles.fullWidthHeaderControls}>
@@ -607,6 +614,10 @@ function Shell({
     </View>
   ) : null;
   const closeInfoMenu = () => setShowInfoMenu(false);
+  const openCraftingTreeImport = () => {
+    setTab('graph');
+    setRecipeImportRequestId(value => value + 1);
+  };
   const infoMenu = (
     <View
       style={styles.infoMenuAnchor}
@@ -662,22 +673,6 @@ function Shell({
           )}
           {Platform.OS === 'web' && (
             <TouchableOpacity
-              {...signalTarget('header.import-recipe')}
-              style={styles.infoMenuItem}
-              onPress={() => {
-                lightImpactFeedback();
-                closeInfoMenu();
-                setTab('graph');
-                setRecipeImportRequestId(value => value + 1);
-              }}
-              accessibilityRole="button"
-              accessibilityLabel="Import a recipe tree from JSON">
-              <Text style={styles.infoMenuItemIcon}>⇩</Text>
-              <Text style={styles.infoMenuItemText}>Import recipe</Text>
-            </TouchableOpacity>
-          )}
-          {Platform.OS === 'web' && (
-            <TouchableOpacity
               {...signalTarget('header.donations')}
               style={styles.infoMenuItem}
               onPress={() => {
@@ -707,32 +702,6 @@ function Shell({
               <Text style={styles.infoMenuItemText}>Favorites</Text>
             </TouchableOpacity>
           )}
-          <TouchableOpacity
-            {...signalTarget('header.dataset-details')}
-            style={[styles.infoMenuItem, showDatasetDetails && styles.infoMenuItemActive]}
-            onPress={() => {
-              lightImpactFeedback();
-              setShowDatasetDetails(value => !value);
-              closeInfoMenu();
-            }}
-            accessibilityRole="button"
-            accessibilityState={{expanded: showDatasetDetails}}
-            accessibilityLabel="Dataset details">
-            <Text
-              style={[
-                styles.infoMenuItemIcon,
-                showDatasetDetails && styles.infoMenuItemTextActive,
-              ]}>
-              ⓘ
-            </Text>
-            <Text
-              style={[
-                styles.infoMenuItemText,
-                showDatasetDetails && styles.infoMenuItemTextActive,
-              ]}>
-              Details
-            </Text>
-          </TouchableOpacity>
           <TouchableOpacity
             {...signalTarget('header.graph-guide')}
             style={styles.infoMenuItem}
@@ -838,43 +807,7 @@ function Shell({
     </View>
   );
   const headerMenuAction = Platform.OS !== 'web' ? infoMenu : null;
-  const graphControlsHeaderAction =
-    compactHeader && tab === 'graph' && data.indexStatus === 'ready' ? (
-      <TouchableOpacity
-        {...signalTarget('graph.control.menu')}
-        accessibilityRole="button"
-        accessibilityLabel={
-          showGraphControls ? 'Collapse graph controls' : 'Expand graph controls'
-        }
-        accessibilityState={{expanded: showGraphControls}}
-        style={[
-          styles.graphControlsHeaderButton,
-          !showGraphControls && styles.graphControlsHeaderButtonCollapsed,
-          showGraphControls && styles.headerUtilityButtonActive,
-        ]}
-        onPress={() => {
-          lightImpactFeedback();
-          setShowGraphControls(value => !value);
-        }}>
-        <View style={styles.graphControlsHeaderContent}>
-          {!showGraphControls && (
-            <Text style={styles.graphControlsHeaderText}>Graph controls</Text>
-          )}
-          <DisclosureChevron
-            expanded={showGraphControls}
-            color={showGraphControls ? theme.accent : theme.textDim}
-            size={20}
-            strokeWidth={2.4}
-          />
-        </View>
-      </TouchableOpacity>
-    ) : null;
-  const headerTrailingAction = accountHeaderAction || graphControlsHeaderAction ? (
-    <View style={styles.headerTrailingActions}>
-      {accountHeaderAction}
-      {graphControlsHeaderAction}
-    </View>
-  ) : null;
+  const headerTrailingAction = accountHeaderAction;
   return (
     <View
       style={styles.shell}
@@ -893,6 +826,7 @@ function Shell({
             setShowAppMenu(next);
             if (next) setShowInfoMenu(false);
           },
+          openCraftingTreeImport,
         )}
       </View>
       <View style={styles.workspaceViewport}>
@@ -958,11 +892,21 @@ function Shell({
                     onToggleGraphControls={() =>
                       setShowGraphControls(value => !value)
                     }
-                    controlsToggleInHeader={compactHeader}
                     recipeImportRequestId={recipeImportRequestId}
                     onRecipeImportRequestHandled={() => setRecipeImportRequestId(0)}
+                    recipeImportJob={recipeImportJob}
+                    onRecipeImportStart={raw => {
+                      recipeImportJobIdRef.current += 1;
+                      setRecipeImportJob({
+                        id: recipeImportJobIdRef.current,
+                        raw,
+                      });
+                    }}
+                    onRecipeImportComplete={() => setRecipeImportJob(null)}
                     recipeImportNotice={recipeImportNotice}
                     onRecipeImportNoticeChange={setRecipeImportNotice}
+                    recipeImportReport={recipeImportReport}
+                    onRecipeImportReportChange={setRecipeImportReport}
                   />
                 </Suspense>
               </GraphErrorBoundary>
@@ -1257,12 +1201,6 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 6,
   },
-  headerTrailingActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexShrink: 1,
-    gap: 6,
-  },
   subtitle: {color: theme.textDim, fontSize: 11, lineHeight: 16},
   tabBtn: {
     paddingHorizontal: 14,
@@ -1330,24 +1268,6 @@ const styles = StyleSheet.create({
   accountHeaderStatus: {color: theme.textDim, fontSize: 11},
   accountHeaderStatusSignedIn: {color: theme.accent},
   accountHeaderText: {minWidth: 0, flexShrink: 1, color: theme.text, fontSize: 11, fontWeight: '800'},
-  graphControlsHeaderButton: {
-    width: 44,
-    minHeight: 44,
-    flexShrink: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: theme.borderLight,
-    backgroundColor: theme.panelAlt,
-  },
-  graphControlsHeaderButtonCollapsed: {
-    width: 'auto',
-    minWidth: 118,
-    paddingHorizontal: 10,
-  },
-  graphControlsHeaderContent: {flexDirection: 'row', alignItems: 'center', gap: 6},
-  graphControlsHeaderText: {color: theme.text, fontSize: 13},
   recipeStagesHeaderButton: {width: 'auto', minWidth: 72, paddingHorizontal: 8},
   recipeStagesHeaderText: {color: theme.text, fontSize: 11, fontWeight: '800'},
   recipeStagesHeaderTextActive: {color: theme.accent},

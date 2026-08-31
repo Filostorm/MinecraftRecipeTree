@@ -380,6 +380,13 @@ export function persistGraphSession(
   root: ItemTreeNode,
   direction: GraphDirection,
 ): void {
+  persistGraphSessionSnapshot(descriptor, serializeGraphSession(root, direction));
+}
+
+export function persistGraphSessionSnapshot(
+  descriptor: Pick<DatasetDescriptor, 'slug' | 'publicationId'>,
+  session: GraphSession,
+): void {
   try {
     const storage = globalThis.localStorage;
     if (!storage) {
@@ -391,7 +398,7 @@ export function persistGraphSession(
     }
     storage.setItem(
       graphSessionStorageKey(descriptor),
-      JSON.stringify(serializeGraphSession(root, direction)),
+      JSON.stringify(session),
     );
   } catch (error) {
     console.error('The current graph could not be saved to localStorage.', error);
