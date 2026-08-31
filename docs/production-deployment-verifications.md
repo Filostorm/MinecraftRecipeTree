@@ -1,5 +1,189 @@
 # Production deployment verifications
 
+## 2026-08-30 — accounts, donations, EMC, and portable recipe imports
+
+- Application commit: `27d818bfe3df07ed4b7d71b73e2af73911352573`
+- Standalone Worker: `minecraft-recipe-tree-production`
+- Standalone Worker version: `8286e0d0-7db6-4254-b1c1-dadae6a218de`
+- Canonical URL: `https://minecraftrecipetree.craftsmannsoftware.com/`
+- D1 migrations: `0006_lumpy_ricochet.sql`, `0007_simple_madrox.sql`, and
+  `0008_lucky_lord_hawal.sql`
+
+Passed:
+
+- All 64 focused graph, session, import, account, and donation tests passed. TypeScript validation
+  and the repository diff check also passed.
+- The three pending D1 migrations completed before the production Worker was deployed.
+- Fresh canonical and direct-Worker requests returned `200`, the canonical interface hydrated in a
+  fresh browser tab, and a hashed application asset loaded successfully.
+- Importing a deliberately unavailable root recipe restored the usable portion of the tree, showed
+  the partial-import notice, skipped the unavailable selection, and produced no orphan nodes or
+  generic tree-open failure.
+- `/api/datasets`, `/api/modpacks`, `/api/auth/session`, and `/api/donations` returned `200`.
+  Dataset upload authorization, feedback, and failure-report routes rejected unauthenticated,
+  unsupported, or invalid requests without persisting test data.
+- The canonical router retained its application-origin, Worker-origin, and signal-edge headers.
+
+Open data diagnostic:
+
+- One existing JEI recipe did not include an exporter-generated layout preview. The structured
+  recipe remained visible and functional, and the missing preview was reported in the browser
+  console rather than silently concealed.
+
+## 2026-08-27 — static far-zoom canvas rendering
+
+- Application commit: `1ea570a31ee94b4766b957db67a83eeb3f0ca65f`
+- Beta Worker version: `e6784b48-b257-478c-9bd2-4d6b5e1f560e`
+- Production Worker: `minecraft-recipe-tree-production`
+- Production Worker version: `d5a04c11-5529-4ffc-903d-f9bcf552d67a`
+- Canonical URL: `https://minecraftrecipetree.craftsmannsoftware.com/`
+
+Passed:
+
+- The exact seven-file beta-validated graph change was promoted onto the latest production branch
+  without modifying the unrelated work in the primary checkout. The complete release suite passed
+  722/722 tests, TypeScript validation passed, and both Worker bundles built cleanly.
+- A generated 161-item local exporter fixture exercised the real dense-tree threshold through the
+  released beta and production interfaces. Fitting its 161-node graph mounted exactly one
+  viewport-sized canvas with `pointer-events: none` and zero interactive graph-node buttons.
+- Fresh beta and canonical production browser tabs hydrated MeatballCraft with 189,137 searchable
+  items. The beta catalog retained its required production data-origin header.
+- The canonical homepage, Vinext bootstrap import, serialized RSC stylesheet, lazy graph bundle,
+  local-pack service worker, `/publish`, `/api/datasets`, and `/api/modpacks` returned `200` with
+  their expected content types. The canonical router retained the signal-edge compatibility header
+  and identified the standalone production Worker as the active application origin.
+- Upload administration and feedback inbox reads returned `401`; unsupported failure-report reads
+  returned `405`; deliberately invalid same-origin feedback and failure reports returned `400`;
+  and legacy modpack mutation remained forbidden with `403`.
+- Remote D1 readback retained four dataset channels, two legacy modpacks, three feedback reports,
+  and zero exporter-failure reports. The verification query reported zero rows written.
+
+## 2026-08-26 — large-tree rendering and required Unique mode
+
+- Application commit: `82bc5bfe8e7f4566dcf11386a27c820176299ae9`
+- Standalone Worker: `minecraft-recipe-tree-production`
+- Standalone Worker version: `56635931-edbc-4159-90bb-ddf6464cb795`
+- Canonical URL: `https://minecraftrecipetree.craftsmannsoftware.com/`
+
+Passed:
+
+- The three beta-validated large-tree commits were promoted onto the latest production branch
+  without modifying the unrelated work in the primary checkout. The complete release suite passed
+  720/720 tests, TypeScript validation passed, and the production Worker bundle built cleanly.
+- A fresh canonical browser tab hydrated MeatballCraft with 189,137 searchable items. The publish
+  page also hydrated and exposed its local exporter ZIP drop zone.
+- The canonical homepage, Vinext bootstrap import, serialized RSC stylesheet, lazy graph bundle,
+  local-pack service worker, `/api/datasets`, `/api/modpacks`, and `/publish` returned `200` with
+  their expected content types. The graph bundle contains the required Unique-mode lock and its
+  large-tree performance explanation.
+- The canonical router retained the signal-edge compatibility header and identified the standalone
+  production Worker as the active application origin.
+- Upload administration and feedback inbox reads returned `401`; unsupported failure-report reads
+  returned `405`; and deliberately invalid same-origin feedback and failure reports returned `400`.
+  Remote D1 readback retained four dataset channels, two legacy modpacks, three feedback reports,
+  and zero exporter-failure reports with zero rows written.
+
+## 2026-08-26 — Worker request reduction release
+
+- Application commit: `303fdcfa0e07fc7f7f1324e7f9b795ede1a5affa`
+- Standalone Worker: `minecraft-recipe-tree-production`
+- Standalone Worker version: `d7b0ea5c-1ff1-45c0-8906-359ec6735a43`
+- Canonical URL: `https://minecraftrecipetree.craftsmannsoftware.com/`
+
+Passed:
+
+- The exact beta release was promoted onto the latest production branch. The complete data suite
+  passed 545/545 tests, TypeScript validation passed, and the production build promoted a validated
+  prerendered root shell before deployment with the existing native D1 and R2 bindings.
+- The direct production hostname returned the static homepage with HTTP `200`. Its Vinext bootstrap
+  import, serialized RSC stylesheet, hashed application bundle, lazy graph bundle, and versioned
+  local-pack service worker all returned `200` with their expected content types.
+- A fresh direct-production browser tab hydrated the application and explicitly rendered the
+  catalog HTTP `429` error. This confirms the static viewer shell runs without a Worker invocation
+  and does not silently conceal the unavailable Worker-backed catalog.
+
+Production verification failure:
+
+- Cloudflare's account-wide Free-plan Worker limit remains exhausted. The canonical hostname still
+  requires the app-router Worker and returned HTTP `429` for the homepage, hashed assets, and the
+  local-pack service worker. Both the direct and canonical hostnames returned `429` for
+  `/api/datasets`, `/api/modpacks`, upload authorization, feedback, and failure-report routing.
+- The new coalesced whole-pack endpoints therefore could not be exercised against production data;
+  their authorization, integrity, range, and service-worker behavior passed in the 545-test release
+  suite. No synthetic production data or mutation request was created.
+- The release is deployed, but the canonical application and every Worker-backed API remain
+  unavailable until Cloudflare resets the account quota or the account is upgraded.
+
+## 2026-08-26 — large-tree graph performance release
+
+- Application commit: `e868cfdccf046c86427bfea1db6fc2ad19eac625`
+- Standalone Worker: `minecraft-recipe-tree-production`
+- Standalone Worker version: `beb494c3-4656-474b-8b92-ca3e85d594a1`
+- Canonical URL: `https://minecraftrecipetree.craftsmannsoftware.com/`
+
+Passed:
+
+- The exact beta source was promoted onto the latest production branch without modifying the
+  unrelated local EMC-preview work in the primary checkout.
+- The focused graph suite passed 24/24 tests, TypeScript validation passed, and the production
+  bundle deployed successfully with the existing native D1 and R2 bindings.
+- Before the provider limit was reached, a fresh canonical browser session hydrated the current
+  MeatballCraft release and loaded the release's hashed application assets.
+
+Production verification failure:
+
+- Cloudflare began returning HTTP `429` with Error 1027 immediately after deployment, stating that
+  the account owner had reached plan limits. The failure affects both the canonical hostname and
+  the direct `minecraft-recipe-tree-production.gtjoe51.workers.dev` hostname.
+- The already-hydrated browser session subsequently logged explicit reverse-index shard load
+  failures, and a fresh `/publish` session rendered Cloudflare's temporary rate-limit page.
+- Because the provider rejected every subsequent request, `/api/datasets`, `/api/modpacks`, the
+  hashed bootstrap, stylesheet, and lazy graph bundle, upload authorization, feedback, and failure
+  reporting could not complete their required post-deployment checks. No synthetic production
+  data was created.
+
+## 2026-08-26 — graph planning fixes and GTNH 2.8.4 refresh
+
+- Application commit: `a194471f140d869947868f86653632f32ca66b43`
+- Standalone Worker: `minecraft-recipe-tree-production`
+- Standalone Worker version: `fccbfaa4-1e99-4b42-9822-37116643da7b`
+- Canonical URL: `https://minecraftrecipetree.craftsmannsoftware.com/`
+- GTNH core publication: `645b42d21ecb44a6e844cdbd02a88266b6123039557cf7aa49321c06d35c0b0f`
+- GTNH preview set: `75a9410ccc9c90813140ce8d22b6380a4f441e2a23f989182de92e31dc13487d`
+
+Passed:
+
+- The beta Worker hydrated first and exposed Auto expand, hid `thermaldynamics:cover`, displayed
+  deterministic selected-output surplus in Byproducts remaining, loaded a hashed application
+  asset, and retained the required production data-origin header.
+- The production build and TypeScript validation passed. The complete data suite passed 541/541
+  tests after the sandbox-blocked loopback suite was rerun with local-network permission; 32
+  focused Auto expand, byproduct, catalog, EMC, and recipe-favorite tests also passed.
+- A fresh canonical browser session hydrated MeatballCraft, showed Auto expand, hid the Thermal
+  Dynamics cover carrier, and listed the overproduced TARDIS Structure Controller in Byproducts
+  remaining. A fresh GTNH session hydrated version 2.8.4 without browser errors, and `/publish`
+  rendered the local exporter ZIP drop zone.
+- The GTNH channel moved from its prior publication with an exact compare-and-swap guard. The
+  public catalog now exposes the new core and preview identities, while retaining four channels
+  and exactly one default.
+- The canonical homepage, Vinext bootstrap import, serialized RSC stylesheet, lazy graph bundle,
+  `/api/datasets`, `/api/modpacks`, GTNH core manifest, and GTNH preview manifest returned `200`.
+  The GTNH manifests report 143,882 items, 568,820 recipes, 287 categories, zero failures, and
+  1,063 preview packs.
+- Unauthenticated dataset upload and feedback-inbox requests returned `401`; invalid same-origin
+  feedback and failure-report submissions returned `400`; unsupported failure-report reads
+  returned `405`; and legacy modpack mutation remained forbidden with `403`. No verification row,
+  feedback report, failure report, GitHub issue, or upload object was created.
+
+Verification notes:
+
+- The first immutable-manifest probes omitted the routes' required content-addressed query and
+  correctly returned `400`. Repeating both probes with the canonical query returned `200` with
+  immutable caching and exact GTNH identities.
+- Opening the saved MeatballCraft TARDIS graph logged its existing explicit diagnostic that one
+  legacy JEI layout preview is unavailable; the structured recipe remained visible and the graph
+  stayed functional. Fresh GTNH and publish sessions logged no browser errors.
+
 ## 2026-08-05 — local-only imports and large-tree stabilization
 
 - Application commit: `fa766d6dc7e2eab40e6645d95578b3267da07cde`
