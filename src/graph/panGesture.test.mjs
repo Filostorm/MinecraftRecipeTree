@@ -132,12 +132,13 @@ test('node actions use an anchored state-aware menu instead of a modal', () => {
   assert.match(graphScreenSource, /hasSelectedRecipe && \(/u);
 });
 
-test('compact nodes do not reveal hidden quantities on hover', () => {
+test('compact nodes render wide item and fluid quantities when amounts are enabled', () => {
   assert.doesNotMatch(graphScreenSource, /onHoverIn=.*Quantity|quantityTooltipVisible/u);
   assert.match(
     graphScreenSource,
-    /countBadgeText === '✓' \|\| \(showAmounts && quantityPlacement === 'badge'\)/u,
+    /const showCountBadge = countBadgeText === '✓' \|\| showAmounts/u,
   );
+  assert.doesNotMatch(graphScreenSource, /compactQuantityPlacement/u);
 });
 
 test('node alternative previews stay aligned to the item icon pixel grid', () => {

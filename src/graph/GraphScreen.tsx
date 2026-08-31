@@ -77,7 +77,6 @@ import {
   type ByproductSupplyEdge,
   attachedRootVisualX,
   byproductSupplyEdges,
-  compactQuantityPlacement,
   layoutTree,
   recipeImageDisplay,
 } from './layout';
@@ -4432,15 +4431,7 @@ function CompactItemNodeView({
     byproductCoverage?.remainingAmount ?? requiredAmount,
   );
   const countBadgeText = byproductCoverage?.remainingAmount === 0 ? '✓' : amount;
-  const quantityPlacement =
-    countBadgeText === '✓'
-      ? 'badge'
-      : compactQuantityPlacement(
-          countBadgeText,
-          radialRoot ? RADIAL_ROOT_ITEM_ICON_SIZE : 32,
-        );
-  const showCountBadge =
-    countBadgeText === '✓' || (showAmounts && quantityPlacement === 'badge');
+  const showCountBadge = countBadgeText === '✓' || showAmounts;
   const byproductLabel = byproductCoverage
     ? byproductCoverage.remainingAmount === 0
       ? `completed by byproduct ${formatIngredientQuantity(node.key, byproductCoverage.creditedAmount)}`

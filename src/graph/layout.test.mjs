@@ -13,9 +13,7 @@ import {
   SOURCE_STRUCTURE_PREVIEW_WIDTH,
   attachedRootVisualX,
   byproductSupplyEdges,
-  compactQuantityPlacement,
   layoutTree,
-  shouldShowCompactQuantity,
   sourceNodeSize,
 } from './layout.ts';
 
@@ -71,26 +69,6 @@ test('connects byproduct ingredients to their exact producing recipe once', () =
     }]).length,
     0,
   );
-});
-
-test('hides compact quantities wider than half of the item icon', () => {
-  assert.equal(shouldShowCompactQuantity('×1'), true);
-  assert.equal(shouldShowCompactQuantity('×12'), true);
-  assert.equal(shouldShowCompactQuantity('×123'), false);
-  assert.equal(shouldShowCompactQuantity('1 mB'), false);
-  assert.equal(shouldShowCompactQuantity('×123', 48), true);
-  assert.throws(
-    () => shouldShowCompactQuantity('×1', 0),
-    /positive finite number/,
-  );
-});
-
-test('moves every wide compact quantity into a tooltip', () => {
-  assert.equal(compactQuantityPlacement('×12'), 'badge');
-  assert.equal(compactQuantityPlacement('×123'), 'tooltip');
-  assert.equal(compactQuantityPlacement('1 mB'), 'tooltip');
-  assert.equal(compactQuantityPlacement('20k mB'), 'tooltip');
-  assert.equal(compactQuantityPlacement('8192 EMC'), 'tooltip');
 });
 
 function deepChain(nodeCount) {
