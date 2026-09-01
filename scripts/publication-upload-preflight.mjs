@@ -167,7 +167,9 @@ export async function fetchPublishingCatalog({
   try {
     response = await fetchImpl(`${origin}/api/datasets`, {
       method: 'GET',
-      headers: {Accept: 'application/json'},
+      // The Worker's edge cache for this endpoint is per-data-center; this header makes it read
+      // D1 directly regardless of which data center this request lands on.
+      headers: {Accept: 'application/json', 'Cache-Control': 'no-cache'},
       cache: 'no-store',
       redirect: 'error',
       signal: AbortSignal.timeout(boundedTimeout),

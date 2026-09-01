@@ -272,7 +272,13 @@ async function verifyCommittedMutationInCatalog({
       }
       const catalogValue = await verifiedFetch({
         url: catalogUrl(baseUrl),
-        init: {method: 'GET', headers: {Accept: 'application/json'}},
+        init: {
+          method: 'GET',
+          // The Worker's edge cache for this endpoint is per-data-center; this header makes it
+          // read D1 directly regardless of which data center this request lands on, so the tight
+          // retry budget below never races a not-yet-invalidated cache entry on another one.
+          headers: {Accept: 'application/json', 'Cache-Control': 'no-cache'},
+        },
         token,
         timeoutMs,
         fetchImpl,

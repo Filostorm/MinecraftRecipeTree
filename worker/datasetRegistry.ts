@@ -148,6 +148,36 @@ function secondsUntilNextUtcMidnight(now: Date = new Date()): number {
   return Math.max(1, Math.ceil((next - now.getTime()) / 1000));
 }
 
+/**
+ * scripts/publication-upload-preflight.mjs and scripts/dataset-channel-admin.mjs need a
+ * guaranteed-fresh D1 read: the edge cache is per-data-center, so a purge on activation/deletion
+ * only ever clears the data center that handled the mutation, and these scripts cannot assume
+ * their verification request lands on that same one. They send this to always bypass the cache
+ * rather than race it within their (sub-2-second) retry budget.
+ */
+function bypassesCatalogCache(request: Request): boolean {
+  const directive = (request.headers.get('cache-control') ?? '').toLowerCase();
+  return directive.includes('no-store') || directive.includes('no-cache');
+}
+
+/** The Cache API is a best-effort optimization; any failure here must fall through to D1. */
+async function matchCatalogCache(cacheKey: Request): Promise<Response | null> {
+  try {
+    return (await caches.default.match(cacheKey)) ?? null;
+  } catch (error) {
+    console.warn('Dataset catalog cache read failed; reading D1 directly.', error);
+    return null;
+  }
+}
+
+async function putCatalogCache(cacheKey: Request, cacheableResponse: Response): Promise<void> {
+  try {
+    await caches.default.put(cacheKey, cacheableResponse);
+  } catch (error) {
+    console.warn('Dataset catalog cache write failed; the D1 response was still served.', error);
+  }
+}
+
 /** Best-effort: a failed cache purge must never fail the mutation that already committed to D1. */
 async function invalidateCatalogCache(request: Request, context: string): Promise<void> {
   try {
@@ -163,8 +193,10 @@ export async function handleDatasetCatalog(
 ): Promise<Response> {
   if (request.method !== 'GET') return methodNotAllowed('GET');
   const cacheKey = catalogCacheKey(request);
-  const cached = await caches.default.match(cacheKey);
-  if (cached) return cached;
+  if (!bypassesCatalogCache(request)) {
+    const cached = await matchCatalogCache(cacheKey);
+    if (cached) return cached;
+  }
   const db = runtime.DB;
   if (!db) {
     console.error('Dataset catalog cannot read because the DB binding is unavailable.');
@@ -191,10 +223,13 @@ export async function handleDatasetCatalog(
       });
       return noStoreJson({error: 'Dataset catalog is not configured.'}, 503);
     }
-    // Published channels change only through the admin activation/deletion routes below, both of
-    // which purge this cache entry immediately, so a day-long TTL only bounds D1 read volume for
-    // the (overwhelmingly common) unchanged case without ever serving stale data after a mutation.
-    const response = new Response(`${JSON.stringify({datasets})}\n`, {
+    // Every caller always gets Cache-Control: no-store on the response it actually receives --
+    // the publish preflight and post-activation verification scripts require that literal
+    // directive, and this must stay true whether the read came from D1 or the edge cache. The
+    // day-long max-age below governs only the internal edge cache entry, which no caller ever
+    // sees directly.
+    const body = `${JSON.stringify({datasets})}\n`;
+    const cacheableResponse = new Response(body, {
       status: 200,
       headers: {
         'Cache-Control': `public, max-age=${secondsUntilNextUtcMidnight()}`,
@@ -202,8 +237,8 @@ export async function handleDatasetCatalog(
         'X-Content-Type-Options': 'nosniff',
       },
     });
-    await caches.default.put(cacheKey, response.clone());
-    return response;
+    await putCatalogCache(cacheKey, cacheableResponse);
+    return noStoreJson({datasets});
   } catch (error) {
     console.error('Dataset catalog query failed.', error);
     return noStoreJson({error: 'Dataset catalog is unavailable.'}, 503);
