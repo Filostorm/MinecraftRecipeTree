@@ -8,7 +8,9 @@ import {
   ACTIVATION_THRESHOLDS,
   MIN_ACTIVATION_BENCHMARK_RUNS,
   MonotonicDeadline,
+  authorizePackedAssetRead,
   assertAllowedApplicationUpstreamResponse,
+  applicationUpstreamHeaders,
   assertOwnedChromeCommandLine,
   assertProfileSlugBinding,
   assertRuntimeRootRemovable,
@@ -22,6 +24,7 @@ import {
   digestBuildTree,
   isolatedProcessEnvironment,
   isolatedRuntimePaths,
+  packedAssetHeaders,
   parseBenchmarkArguments,
   prepareChromeUserDataDirectory,
   proxyUpstream,
@@ -33,6 +36,49 @@ import {
 } from './benchmark-cold-dataset.mjs';
 
 const MIB = 1024 * 1024;
+
+test('packed asset authorization accepts exact whole blobs and MRPI coordinates only', () => {
+  const packs = [{bytes: 12, sha256: 'a'.repeat(64), coordinates: new Set(['2:4', '6:6'])}];
+  assert.deepEqual(authorizePackedAssetRead(packs, 'assets/pack-000.bin'), {
+    pack: packs[0],
+    offset: 0,
+    length: 12,
+    contentType: 'application/octet-stream',
+    wholePack: true,
+  });
+  assert.deepEqual(authorizePackedAssetRead(packs, 'assets/s/000-2-4.webp'), {
+    pack: packs[0],
+    offset: 2,
+    length: 4,
+    contentType: 'image/webp',
+    wholePack: false,
+  });
+  assert.throws(
+    () => authorizePackedAssetRead(packs, 'assets/pack-001.bin'),
+    /unknown packed asset blob/,
+  );
+  assert.throws(
+    () => authorizePackedAssetRead(packs, 'assets/s/000-0-12.webp'),
+    /not an exact MRPI-authorized coordinate/,
+  );
+});
+
+test('whole packed assets carry the integrity headers required by the image service worker', () => {
+  const pack = {sha256: 'a'.repeat(64)};
+  assert.deepEqual(packedAssetHeaders(pack, 12, 'application/octet-stream', true), {
+    'content-type': 'application/octet-stream',
+    'content-length': '12',
+    'cache-control': 'public, max-age=31536000, immutable, no-transform',
+    'x-mrt-pack-sha256': 'a'.repeat(64),
+    'x-mrt-stored-bytes': '12',
+    'x-content-type-options': 'nosniff',
+  });
+  assert.equal(packedAssetHeaders(pack, 4, 'image/webp', false)['x-mrt-pack-sha256'], undefined);
+  assert.throws(
+    () => packedAssetHeaders({sha256: 'invalid'}, 12, 'application/octet-stream', true),
+    /missing its canonical SHA-256 identity/,
+  );
+});
 
 test('output target is canonically isolated from every immutable input tree', async () => {
   const root = await mkdtemp(resolve(tmpdir(), 'mrt-cold-output-test-'));
@@ -366,6 +412,14 @@ test('upstream forwarding allows only typed application shell assets and rejects
   );
 });
 
+test('upstream application requests retain the validated proxy origin', () => {
+  assert.deepEqual(
+    applicationUpstreamHeaders({host: '127.0.0.1:48123', accept: 'text/html'}),
+    {host: '127.0.0.1:48123', accept: 'text/html'},
+  );
+  assert.throws(() => applicationUpstreamHeaders({accept: 'text/html'}), /without its validated external Host/);
+});
+
 test('HTTP cleanup stops accepts before force-closing and independently bounds a stuck close', async () => {
   const events = [];
   await closeHttpServer({
@@ -517,13 +571,13 @@ test('activation thresholds use exact eligible/review boundaries and a hard peak
   const staticMetrics = {
     combinedDatasetBootstrapBytes: 72 * MIB,
     indexBootstrapBytes: 40 * MIB,
-    bootstrapDocumentCount: 12,
+    bootstrapDocumentCount: 13,
   };
   const run = {
     readyMs: 8_000,
     peakHeapBytes: 400 * MIB,
     settledHeapBytes: 300 * MIB,
-    proxyTraffic: {bootstrapDocumentCount: 12},
+    proxyTraffic: {bootstrapDocumentCount: 13},
   };
   assert.equal(classifyActivationGate(staticMetrics, [run]).decision, 'current-storage-eligible');
   assert.equal(
@@ -537,7 +591,7 @@ test('activation thresholds use exact eligible/review boundaries and a hard peak
   assert.equal(
     classifyActivationGate({...staticMetrics, bootstrapDocumentCount: 1}, [{
       ...run,
-      proxyTraffic: {bootstrapDocumentCount: 13},
+      proxyTraffic: {bootstrapDocumentCount: 14},
     }]).decision,
     'operator-review-required',
   );

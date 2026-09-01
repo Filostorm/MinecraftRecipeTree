@@ -108,6 +108,41 @@ function rectanglesOverlap(left, right) {
   );
 }
 
+function edgeIntersectsNodeInterior(edge, node, inset = 2) {
+  const centerX = edge.x + edge.w / 2;
+  const centerY = edge.y + edge.h / 2;
+  const halfDx = Math.cos(edge.angle) * edge.w / 2;
+  const halfDy = Math.sin(edge.angle) * edge.w / 2;
+  const start = {x: centerX - halfDx, y: centerY - halfDy};
+  const end = {x: centerX + halfDx, y: centerY + halfDy};
+  const rectangle = {
+    minX: node.x + inset,
+    minY: node.y + inset,
+    maxX: node.x + node.w - inset,
+    maxY: node.y + node.h - inset,
+  };
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  let minimumT = 0;
+  let maximumT = 1;
+  for (const [direction, distance] of [
+    [-dx, start.x - rectangle.minX],
+    [dx, rectangle.maxX - start.x],
+    [-dy, start.y - rectangle.minY],
+    [dy, rectangle.maxY - start.y],
+  ]) {
+    if (Math.abs(direction) <= 1e-9) {
+      if (distance < 0) return false;
+      continue;
+    }
+    const ratio = distance / direction;
+    if (direction < 0) minimumT = Math.max(minimumT, ratio);
+    else maximumT = Math.min(maximumT, ratio);
+    if (minimumT > maximumT) return false;
+  }
+  return true;
+}
+
 function nodeCenter(node) {
   return {x: node.x + node.w / 2, y: node.y + node.h / 2};
 }
@@ -454,6 +489,48 @@ test('keeps multiple labeled ingredient fans local to their recipes', () => {
     distances.reduce((sum, distance) => sum + distance, 0) / distances.length < 600,
   );
   assertNoCompactLabelOverlaps(graph);
+});
+
+test('routes neighboring branch connectors around large expanded recipe cards', () => {
+  const largeSource = (id, inputs) => {
+    const node = sourceNode(id, inputs);
+    node.source.recipe = {
+      w: 160,
+      h: 180,
+      out: [[[`item|test:${id}`, 1]]],
+    };
+    return node;
+  };
+  const rootInputs = Array.from({length: 28}, (_, index) => item(`root-leaf-${index}`));
+  rootInputs.splice(
+    8,
+    0,
+    largeSource('branch-a', [
+      largeSource('deep-a', Array.from({length: 8}, (_, index) => item(`a-${index}`))),
+      ...Array.from({length: 6}, (_, index) => item(`a-side-${index}`)),
+    ]),
+  );
+  rootInputs.splice(
+    20,
+    0,
+    largeSource('branch-b', [
+      largeSource('deep-b', Array.from({length: 8}, (_, index) => item(`b-${index}`))),
+      ...Array.from({length: 6}, (_, index) => item(`b-side-${index}`)),
+    ]),
+  );
+  const graph = layoutRadialTree(largeSource('root', rootInputs), false, () => false, true);
+  const largeCards = graph.nodes.filter(node => node.kind === 'source' && node.h >= 128);
+
+  assert.ok(graph.edges.length > graph.nodes.length - 1, 'expected at least one routed connector');
+  for (const edge of graph.edges) {
+    for (const card of largeCards) {
+      assert.equal(
+        edgeIntersectsNodeInterior(edge, card),
+        false,
+        `connector crosses ${card.id}`,
+      );
+    }
+  }
 });
 
 test('keeps a deep, broadly branching labeled tree compact', () => {

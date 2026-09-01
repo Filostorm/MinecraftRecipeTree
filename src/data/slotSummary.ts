@@ -119,7 +119,12 @@ function summarizeSlots(
     const probability = slotProbability(slot);
     const alternatives = [...new Set(slot.map(([entryKey]) => entryKey))];
     const tag = inferIngredientTag(slot);
-    const logicalKey = tag ? `#${tag}` : key;
+    // A singleton is an exact positional ingredient even when the exporter records an
+    // OreDictionary identity that the item belongs to. Only a slot with multiple concrete
+    // candidates proves that the logical identity is replaceable. Grouping singleton slots by
+    // their shared tag turns shaped recipes such as Avaritia's Ultimate Stew into dozens of one
+    // arbitrarily selected food, hiding the exact ingredients shown in the recipe grid.
+    const logicalKey = tag && alternatives.length > 1 ? `#${tag}` : key;
     const existing = out.get(logicalKey);
     const current =
       existing ??

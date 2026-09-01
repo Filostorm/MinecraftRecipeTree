@@ -89,6 +89,22 @@ function claimRequest(favorites) {
   });
 }
 
+function cleanupRequest(favorites, authorization = authentication.authorization) {
+  return new Request(`${ORIGIN}${RECIPE_FAVORITES_ROUTE}/cleanup`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Origin: ORIGIN,
+      Authorization: authorization,
+    },
+    body: JSON.stringify({
+      packSlug: PACK,
+      publicationId: PUBLICATION,
+      favorites,
+    }),
+  });
+}
+
 test.after(() => authentication.restoreFetch());
 
 test('returns the highest-count recipe for each item and requires at least one favorite', async () => {
@@ -110,6 +126,11 @@ test('returns the highest-count recipe for each item and requires at least one f
       {itemKey: 'item|b', recipeRef: [1, 9], count: 1},
     ],
   });
+  const query = DB.calls.find(call => call.sql.includes('AS community_favorites'));
+  assert.ok(query);
+  assert.match(query.sql, /FROM account_recipe_favorites/u);
+  assert.match(query.sql, /UNION ALL SELECT item_key, recipe_category, recipe_index FROM recipe_favorites/u);
+  assert.deepEqual(query.values, [PACK, PUBLICATION, PACK, PUBLICATION, 50_000]);
 });
 
 test('leaderboard ranks account and unknown users and identifies the signed-out browser', async () => {
@@ -118,18 +139,21 @@ test('leaderboard ranks account and unknown users and identifies the signed-out 
       identity_type: 'account',
       identity_key: '11111111-1111-4111-8111-111111111111',
       display_name: 'Alex',
+      avatar_key: 'b'.repeat(64),
       favorite_count: 7,
     },
     {
       identity_type: 'anonymous',
       identity_key: CLIENT_HASH,
       display_name: 'Unknown user',
+      avatar_key: null,
       favorite_count: 5,
     },
     {
       identity_type: 'account',
       identity_key: '22222222-2222-4222-8222-222222222222',
       display_name: 'Builder Bee',
+      avatar_key: null,
       favorite_count: 2,
     },
   ]);
@@ -144,16 +168,16 @@ test('leaderboard ranks account and unknown users and identifies the signed-out 
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), {
     entries: [
-      {displayName: 'Alex', count: 7, isAnonymous: false, isCurrent: false},
-      {displayName: 'Unknown user', count: 5, isAnonymous: true, isCurrent: true},
-      {displayName: 'Builder Bee', count: 2, isAnonymous: false, isCurrent: false},
+      {displayName: 'Alex', count: 7, isAnonymous: false, avatarUrl: `/api/auth/avatar/${'b'.repeat(64)}`, isCurrent: false},
+      {displayName: 'Unknown user', count: 5, isAnonymous: true, avatarUrl: null, isCurrent: true},
+      {displayName: 'Builder Bee', count: 2, isAnonymous: false, avatarUrl: null, isCurrent: false},
     ],
   });
   const query = DB.calls.find(call => call.sql.includes('FROM account_recipe_favorites'));
   assert.ok(query);
   assert.match(query.sql, /INNER JOIN users ON users\.id = account_recipe_favorites\.user_id/u);
   assert.match(query.sql, /FROM recipe_favorites/u);
-  assert.match(query.sql, /GROUP BY account_recipe_favorites\.user_id, users\.display_name/u);
+  assert.match(query.sql, /GROUP BY account_recipe_favorites\.user_id, users\.display_name, users\.avatar_key/u);
   assert.match(query.sql, /GROUP BY recipe_favorites\.client_hash/u);
   assert.match(query.sql, /ORDER BY favorite_count DESC/u);
   assert.deepEqual(query.values, [PACK, PUBLICATION, PACK, PUBLICATION, 100]);
@@ -165,6 +189,7 @@ test('leaderboard identifies the signed-in account without exposing its id', asy
       identity_type: 'account',
       identity_key: TEST_USER_ID,
       display_name: 'Recipe Builder',
+      avatar_key: null,
       favorite_count: 9,
     },
   ]);
@@ -180,7 +205,7 @@ test('leaderboard identifies the signed-in account without exposing its id', asy
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), {
     entries: [
-      {displayName: 'Recipe Builder', count: 9, isAnonymous: false, isCurrent: true},
+      {displayName: 'Recipe Builder', count: 9, isAnonymous: false, avatarUrl: null, isCurrent: true},
     ],
   });
 });
@@ -275,6 +300,80 @@ test('sign-in claims server votes and imports current browser-only favorites', a
     4,
     5,
   ]);
+});
+
+test('signed-in users can batch-clean exact stale favorite references', async () => {
+  const DB = database();
+  DB.batch = statements => Promise.resolve(statements.map(() => ({
+    success: true,
+    meta: {changes: 1},
+  })));
+  const stale = [
+    {itemKey: 'item|minecraft:iron_ingot', recipeRef: [4, 5]},
+    {itemKey: 'item|minecraft:gold_ingot', recipeRef: [6, 7]},
+  ];
+  const request = cleanupRequest(stale);
+  const response = await handleRecipeFavorites(
+    request,
+    {...authentication.runtime, DB},
+    new URL(request.url),
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {removed: 2});
+  const deletions = DB.calls.filter(call =>
+    call.sql.startsWith('DELETE FROM account_recipe_favorites') &&
+    call.sql.includes('recipe_category = ?'),
+  );
+  assert.equal(deletions.length, 2);
+  assert.deepEqual(deletions[0].values, [
+    TEST_USER_ID,
+    PACK,
+    PUBLICATION,
+    stale[0].itemKey,
+    ...stale[0].recipeRef,
+  ]);
+});
+
+test('favorite cleanup requires authentication and rejects duplicate rows', async () => {
+  const unauthenticated = cleanupRequest([
+    {itemKey: 'item|minecraft:iron_ingot', recipeRef: [4, 5]},
+  ], '');
+  assert.equal(
+    (await handleRecipeFavorites(
+      unauthenticated,
+      {DB: database()},
+      new URL(unauthenticated.url),
+    )).status,
+    401,
+  );
+
+  const favorite = {itemKey: 'item|minecraft:iron_ingot', recipeRef: [4, 5]};
+  const duplicate = cleanupRequest([favorite, favorite]);
+  assert.equal(
+    (await handleRecipeFavorites(
+      duplicate,
+      {...authentication.runtime, DB: database()},
+      new URL(duplicate.url),
+    )).status,
+    400,
+  );
+});
+
+test('favorite cleanup stays below the free-tier D1 query budget', async () => {
+  const tooMany = Array.from({length: 26}, (_, index) => ({
+    itemKey: `item|fixture:${index}`,
+    recipeRef: [index, 0],
+  }));
+  const request = cleanupRequest(tooMany);
+  assert.equal(
+    (await handleRecipeFavorites(
+      request,
+      {...authentication.runtime, DB: database()},
+      new URL(request.url),
+    )).status,
+    400,
+  );
 });
 
 test('stores one anonymous recipe vote per pack version and item', async () => {

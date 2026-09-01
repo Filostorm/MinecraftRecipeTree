@@ -30,9 +30,6 @@ export default defineConfig(async ({command}) => {
   process.env.WRANGLER_LOG_PATH ??= '.wrangler/logs';
   process.env.MINIFLARE_REGISTRY_PATH ??= '.wrangler/registry';
 
-  // Only `vinext dev` (never any `vinext build`, including the Sites and cloudflare-beta/
-  // production builds) gets read-only production data via the same beta proxy the beta Worker
-  // uses, so a contributor without a local export can still browse a real catalog.
   const isLocalDev = command === 'serve' && !isCloudflareBeta && !isCloudflareProduction;
 
   const {cloudflare} = await import('@cloudflare/vite-plugin');

@@ -23,6 +23,7 @@ export function DatasetSwitcher({
   loadedManifest,
   onOpenPicker,
   onImportPack,
+  onImportTree,
   leadingAction,
   menuAction,
   trailingAction,
@@ -37,6 +38,7 @@ export function DatasetSwitcher({
   loadedManifest: Manifest | null;
   onOpenPicker(): void;
   onImportPack(): void;
+  onImportTree?(): void;
   leadingAction?: React.ReactNode;
   menuAction?: React.ReactNode;
   trailingAction?: React.ReactNode;
@@ -50,6 +52,7 @@ export function DatasetSwitcher({
   const [hasHydrated, setHasHydrated] = useState(nativeHeader);
   const compact = hasHydrated && width < 720;
   const [internalExpanded, setInternalExpanded] = useState(!compact);
+  const [showImportMenu, setShowImportMenu] = useState(false);
   const expanded = compactMenuExpanded ?? internalExpanded;
   const setExpanded = (next: boolean) => {
     if (compactMenuExpanded === undefined) setInternalExpanded(next);
@@ -64,6 +67,19 @@ export function DatasetSwitcher({
     priorCompact.current = compact;
     setExpanded(!compact);
   }, [compact]);
+  useEffect(() => {
+    if (!showImportMenu || Platform.OS !== 'web' || typeof document === 'undefined') return;
+    const closeOnOutsidePress = (event: MouseEvent) => {
+      const anchor = document.getElementById('dataset-import-menu');
+      if (event.target instanceof Node && anchor?.contains(event.target)) return;
+      setShowImportMenu(false);
+    };
+    document.addEventListener('click', closeOnOutsidePress);
+    return () => document.removeEventListener('click', closeOnOutsidePress);
+  }, [showImportMenu]);
+  useEffect(() => {
+    if (compact || nativeHeader) setShowImportMenu(false);
+  }, [compact, nativeHeader]);
   const selectedIndex = datasets.findIndex(dataset => dataset.slug === selectedSlug);
   const selected = selectedIndex >= 0 ? datasets[selectedIndex] : null;
   const loadedAttribution = loadedDatasetAttribution(loadedManifest);
@@ -126,31 +142,54 @@ export function DatasetSwitcher({
       </Text>
     </TouchableOpacity>
   ) : null;
-  const uploadButton = (
-    <TouchableOpacity
-      style={[
-        styles.uploadButton,
-        compact && !nativeHeader && styles.compactUploadButton,
-        nativeHeader && styles.nativeUploadButton,
-      ]}
-      onPress={
-        () => {
-          if (compact || nativeHeader) setExpanded(false);
-          onImportPack();
-        }
-      }
-      accessibilityRole={nativeHeader ? 'button' : 'link'}
-      accessibilityLabel={nativeHeader ? 'Import a local modpack exporter ZIP' : 'Import a local modpack exporter ZIP'}
-      accessibilityHint={
-        nativeHeader
-          ? 'Opens the on-device local pack importer'
-          : 'Opens the local pack import page'
-      }
-      focusable>
-      <Text style={[styles.uploadButtonText, nativeHeader && styles.nativeUploadButtonText]}>
-        {nativeHeader ? '⇧  Import local pack' : compact ? 'Import pack' : 'Import local pack'}
-      </Text>
-    </TouchableOpacity>
+  const importMenu = (
+    <View
+      nativeID="dataset-import-menu"
+      style={styles.importMenuAnchor}
+      onPointerDown={event => event.stopPropagation()}>
+      <TouchableOpacity
+        style={[styles.importButton, showImportMenu && styles.importButtonActive]}
+        onPress={() => setShowImportMenu(current => !current)}
+        accessibilityRole="button"
+        accessibilityLabel={showImportMenu ? 'Close import menu' : 'Open import menu'}
+        accessibilityState={{expanded: showImportMenu}}
+        focusable>
+        <Text style={[styles.importButtonText, showImportMenu && styles.importButtonTextActive]}>
+          Import
+        </Text>
+        <DisclosureChevron
+          expanded={showImportMenu}
+          color={showImportMenu ? theme.bg : theme.accent}
+          size={14}
+        />
+      </TouchableOpacity>
+      {showImportMenu && (
+        <View style={styles.importDropdown} accessibilityRole="menu">
+          <TouchableOpacity
+            style={styles.importDropdownItem}
+            onPress={() => {
+              setShowImportMenu(false);
+              onImportPack();
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Import a local modpack exporter ZIP">
+            <Text style={styles.importDropdownText}>Import pack</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.importDropdownItem, !onImportTree && styles.disabled]}
+            disabled={!onImportTree}
+            onPress={() => {
+              setShowImportMenu(false);
+              onImportTree?.();
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Import a crafting tree from JSON"
+            accessibilityState={{disabled: !onImportTree}}>
+            <Text style={styles.importDropdownText}>Import crafting tree</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </View>
   );
 
   return (
@@ -197,9 +236,9 @@ export function DatasetSwitcher({
           <View style={styles.fullRows}>
             <View style={styles.fullTitleRow}>
               {brand}
-              {datasetButton}
-              {uploadButton}
               {trailingAction}
+              {datasetButton}
+              {importMenu}
             </View>
             <View style={styles.fullControlRow}>
               {leadingAction}
@@ -309,33 +348,54 @@ const styles = StyleSheet.create({
   },
   compactMenuDetails: {width: '100%', gap: 8},
   expandedContent: {gap: 8, paddingTop: 8},
-  uploadButton: {
+  importMenuAnchor: {position: 'relative', zIndex: 104, flexShrink: 0},
+  importButton: {
     minHeight: 34,
-    flexShrink: 0,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 6,
     paddingHorizontal: 13,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: theme.accent,
-    backgroundColor: theme.accent,
+    backgroundColor: 'transparent',
   },
-  uploadButtonText: {
-    color: theme.bg,
+  importButtonActive: {backgroundColor: theme.accent},
+  importButtonText: {
+    color: theme.accent,
     fontSize: 12,
     lineHeight: 16,
     fontWeight: '900',
   },
-  compactUploadButton: {width: '100%', alignItems: 'flex-start', paddingHorizontal: 12},
-  nativeUploadButton: {
-    width: '100%',
-    minHeight: 44,
-    alignItems: 'flex-start',
-    paddingHorizontal: 12,
+  importButtonTextActive: {color: theme.bg},
+  importDropdown: {
+    position: 'absolute',
+    top: '100%',
+    right: 0,
+    zIndex: 105,
+    minWidth: 210,
+    marginTop: 6,
+    padding: 6,
+    gap: 2,
+    borderRadius: 10,
+    borderWidth: 1,
     borderColor: theme.borderLight,
     backgroundColor: theme.panelAlt,
+    shadowColor: '#000',
+    shadowOpacity: 0.34,
+    shadowRadius: 16,
+    shadowOffset: {width: 0, height: 8},
   },
-  nativeUploadButtonText: {color: theme.text, fontSize: 12},
+  importDropdownItem: {
+    minHeight: 38,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 10,
+    borderRadius: 7,
+  },
+  importDropdownText: {color: theme.text, fontSize: 12, fontWeight: '800'},
   compactDatasetButton: {
     minWidth: 0,
     maxWidth: 220,

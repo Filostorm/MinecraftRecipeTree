@@ -1,12 +1,27 @@
 import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
 import test from 'node:test';
 import {
   graphSessionStorageKey,
   parseGraphSession,
+  persistGraphSessionSnapshot,
   serializeGraphSession,
 } from './graphSession.ts';
 
 const scope = {slug: 'meatballcraft', publicationId: 'a'.repeat(64)};
+const appSource = await readFile(new URL('../../App.tsx', import.meta.url), 'utf8');
+const graphScreenSource = await readFile(new URL('./GraphScreen.tsx', import.meta.url), 'utf8');
+
+test('reopens the graph workspace when a saved tree is restored', () => {
+  assert.match(
+    appSource,
+    /const session = loadGraphSession\(data\.descriptor\);[\s\S]*?ui\.restoreGraph\(session\.rootKey, session\.direction\);\s*setTab\('graph'\);/u,
+  );
+  assert.match(
+    graphScreenSource,
+    /const session = loadGraphSession\(data\.descriptor\);[\s\S]*?setTab\('graph'\);[\s\S]*?restoreGraph\(session\.rootKey, session\.direction\);/u,
+  );
+});
 
 test('isolates the saved graph by immutable modpack publication', () => {
   assert.equal(
@@ -17,6 +32,36 @@ test('isolates the saved graph by immutable modpack publication', () => {
     graphSessionStorageKey(scope),
     graphSessionStorageKey({...scope, publicationId: 'b'.repeat(64)}),
   );
+});
+
+test('persists an already resolved import session for hydration after remount', () => {
+  const originalStorage = globalThis.localStorage;
+  const values = new Map();
+  globalThis.localStorage = {
+    getItem: key => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: key => values.delete(key),
+  };
+  try {
+    const session = parseGraphSession(JSON.stringify({
+      version: 2,
+      rootKey: 'item|example:root',
+      direction: 'inputs',
+      selections: [{
+        path: [],
+        itemKey: 'item|example:root',
+        source: {kind: 'recipe', ref: [1, 2]},
+      }],
+    }));
+    persistGraphSessionSnapshot(scope, session);
+    assert.equal(
+      values.get(graphSessionStorageKey(scope)),
+      JSON.stringify(session),
+    );
+  } finally {
+    if (originalStorage === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = originalStorage;
+  }
 });
 
 test('serializes only expanded source identities and tree paths', () => {

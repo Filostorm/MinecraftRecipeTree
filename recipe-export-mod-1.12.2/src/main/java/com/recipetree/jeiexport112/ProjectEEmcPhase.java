@@ -4,10 +4,8 @@ import com.google.gson.stream.JsonWriter;
 import mezz.jei.api.ingredients.IIngredientRegistry;
 import mezz.jei.api.ingredients.VanillaTypes;
 import net.minecraft.item.ItemStack;
-import net.minecraftforge.fml.common.Loader;
 
 import java.io.IOException;
-import java.lang.reflect.Method;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -16,14 +14,12 @@ import java.util.Set;
 /** Adds a synthetic EMC source for every unique exported item with a positive ProjectE value. */
 final class ProjectEEmcPhase implements ExportPhase {
     static final String EMC_KEY = "emc|projecte:emc";
-    private static final long MAX_SAFE_JSON_INTEGER = 9_007_199_254_740_991L;
-
     private final ExportContext context;
     private final ItemCatalog catalog;
     private final Iterator<ItemStack> stacks;
     private final int total;
     private final Set<String> seen = new HashSet<String>();
-    private final EmcProxy emc;
+    private final ProjectEEmcSupport emc;
     private JsonWriter recipesWriter;
     private ExportContext.CategoryMeta category;
     private int categoryIndex = -1;
@@ -37,9 +33,9 @@ final class ProjectEEmcPhase implements ExportPhase {
         Collection<ItemStack> allStacks = registry.getAllIngredients(VanillaTypes.ITEM);
         this.stacks = allStacks.iterator();
         this.total = allStacks.size();
-        EmcProxy loaded = null;
+        ProjectEEmcSupport loaded = null;
         try {
-            loaded = EmcProxy.load();
+            loaded = ProjectEEmcSupport.load();
         } catch (IOException exception) {
             context.failure("ProjectE EMC sources were skipped because its optional API could not be opened: "
                     + exception);
@@ -51,11 +47,11 @@ final class ProjectEEmcPhase implements ExportPhase {
     }
 
     static boolean isAvailable() {
-        return Loader.isModLoaded("projecte");
+        return ProjectEEmcSupport.isAvailable();
     }
 
     static boolean shouldExport(boolean hasValue, long value) {
-        return hasValue && value > 0 && value <= MAX_SAFE_JSON_INTEGER;
+        return ProjectEEmcSupport.isUsableValue(hasValue, value);
     }
 
     @Override
@@ -77,7 +73,7 @@ final class ProjectEEmcPhase implements ExportPhase {
             }
             long value = emc.value(stack);
             if (!shouldExport(true, value)) {
-                if (value > MAX_SAFE_JSON_INTEGER) {
+                if (value > ProjectEEmcSupport.MAX_SAFE_INTEGER) {
                     context.warning("EMC_VALUE_TOO_LARGE ingredient " + key + " has " + value
                             + " EMC, above the viewer's exact integer limit; source omitted");
                 }
@@ -158,47 +154,4 @@ final class ProjectEEmcPhase implements ExportPhase {
                 done, exported);
     }
 
-    private static final class EmcProxy {
-        private final Object proxy;
-        private final Method hasValue;
-        private final Method getValue;
-
-        private EmcProxy(Object proxy, Method hasValue, Method getValue) {
-            this.proxy = proxy;
-            this.hasValue = hasValue;
-            this.getValue = getValue;
-        }
-
-        static EmcProxy load() throws IOException {
-            try {
-                Class<?> api = Class.forName("moze_intel.projecte.api.ProjectEAPI");
-                Method getProxy = api.getMethod("getEMCProxy");
-                Object proxy = getProxy.invoke(null);
-                if (proxy == null) {
-                    throw new ReflectiveOperationException("ProjectEAPI.getEMCProxy() returned null");
-                }
-                Class<?> proxyApi = getProxy.getReturnType();
-                Method hasValue = proxyApi.getMethod("hasValue", ItemStack.class);
-                Method getValue = proxyApi.getMethod("getValue", ItemStack.class);
-                return new EmcProxy(proxy, hasValue, getValue);
-            } catch (ReflectiveOperationException exception) {
-                throw new IOException("ProjectE is loaded but its EMC API could not be opened", exception);
-            }
-        }
-
-        boolean hasValue(ItemStack stack) throws ReflectiveOperationException {
-            return Boolean.TRUE.equals(hasValue.invoke(proxy, normalized(stack)));
-        }
-
-        long value(ItemStack stack) throws ReflectiveOperationException {
-            Object value = getValue.invoke(proxy, normalized(stack));
-            return value instanceof Number ? ((Number) value).longValue() : 0L;
-        }
-
-        private static ItemStack normalized(ItemStack stack) {
-            ItemStack copy = stack.copy();
-            copy.setCount(1);
-            return copy;
-        }
-    }
 }

@@ -1,6 +1,7 @@
 import React, {useEffect, useMemo, useState} from 'react';
 import {
   ActivityIndicator,
+  Image,
   Modal,
   Platform,
   ScrollView,
@@ -20,6 +21,7 @@ import {
   type PersonalRecipeFavorite,
   type RecipeFavoriteLeaderboardEntry,
   claimAnonymousRecipeFavorites,
+  cleanupInvalidPersonalRecipeFavorites,
   loadPersonalRecipeFavorites,
   loadRecipeFavoriteLeaderboard,
   updateCommunityRecipeFavorite,
@@ -28,6 +30,7 @@ import {recipeDisplayTitle} from '../data/recipeTitles';
 import {slotSummary} from '../data/slotSummary';
 import {materialInputSummary} from '../graph/direction';
 import {
+  type PreferredSource,
   loadPreferredSources,
   persistPreferredSources,
 } from '../graph/preferredSources';
@@ -78,12 +81,30 @@ export function FavoritesModal({
   const [loading, setLoading] = useState(false);
   const [personalError, setPersonalError] = useState<string | null>(null);
   const [leaderboardError, setLeaderboardError] = useState<string | null>(null);
+  const [cleanupError, setCleanupError] = useState<string | null>(null);
   const [favoriteSearch, setFavoriteSearch] = useState('');
   const [expandedItemKey, setExpandedItemKey] = useState<string | null>(null);
   const [choiceState, setChoiceState] = useState<FavoriteChoiceState>({status: 'idle'});
   const [pendingItemKey, setPendingItemKey] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [pickerItemKey, setPickerItemKey] = useState<string | null>(null);
+  const [collapsedPickerGroupKeys, setCollapsedPickerGroupKeys] = useState<Set<string>>(
+    () => new Set(),
+  );
+
+  const closeRecipePicker = () => {
+    setPickerItemKey(null);
+    setCollapsedPickerGroupKeys(new Set());
+  };
+
+  const toggleRecipePickerGroup = (groupKey: string) => {
+    setCollapsedPickerGroupKeys(current => {
+      const next = new Set(current);
+      if (next.has(groupKey)) next.delete(groupKey);
+      else next.add(groupKey);
+      return next;
+    });
+  };
 
   useEffect(() => {
     if (!visible) return;
@@ -91,6 +112,7 @@ export function FavoritesModal({
     setLoading(true);
     setPersonalError(null);
     setLeaderboardError(null);
+    setCleanupError(null);
     if (data.indexStatus !== 'ready') {
       if (data.indexStatus === 'error') {
         setPersonalError('Favorites could not load the recipe index.');
@@ -107,26 +129,21 @@ export function FavoritesModal({
     }
     const browserSyncRequest = account.user
       ? (async () => {
-          const staleBrowserFavorites: string[] = [];
-          const browserFavorites = Object.entries(loadPreferredSources()).flatMap(
+          const currentSource = (itemKey: string, source: PreferredSource) => {
+            const indexed = data.index[itemKey];
+            if (!indexed) return false;
+            if (source.t !== 'recipe') return true;
+            const sourceKey = recipeRefKey(source.ref);
+            return (indexed.p ?? []).some(ref => recipeRefKey(ref) === sourceKey);
+          };
+          const browserFavorites = Object.entries(
+            loadPreferredSources(data.descriptor, currentSource),
+          ).flatMap(
             ([itemKey, source]) => {
               if (source.t !== 'recipe') return [];
-              const sourceKey = recipeRefKey(source.ref);
-              const isCurrentRecipe = (data.index[itemKey]?.p ?? [])
-                .some(ref => recipeRefKey(ref) === sourceKey);
-              if (!isCurrentRecipe) {
-                staleBrowserFavorites.push(itemKey);
-                return [];
-              }
               return [{itemKey, recipeRef: source.ref}];
             },
           );
-          if (staleBrowserFavorites.length > 0) {
-            console.warn('Stale browser favorites were not imported into this pack publication.', {
-              count: staleBrowserFavorites.length,
-              examples: staleBrowserFavorites.slice(0, 5),
-            });
-          }
           try {
             await claimAnonymousRecipeFavorites(data.descriptor, browserFavorites);
           } catch (cause) {
@@ -134,22 +151,41 @@ export function FavoritesModal({
           }
         })()
       : Promise.resolve();
-    const leaderboardRequest = browserSyncRequest
-      .then(() => loadRecipeFavoriteLeaderboard(data.descriptor))
-      .then(entries => {
-        if (alive) setLeaderboard(entries);
-      })
-      .catch(cause => {
-        console.error('Favorite leaderboard could not be loaded.', cause);
-        if (!alive) return;
-        setLeaderboard([]);
-        setLeaderboardError(account.user ? 'Leaderboard could not be loaded.' : null);
-      });
     const personalRequest = account.user
       ? browserSyncRequest
           .then(() => loadPersonalRecipeFavorites(data.descriptor))
-          .then(entries => {
-            if (alive) setPersonal(entries);
+          .then(async entries => {
+            const staleEntries = entries.filter(entry => {
+              const favoriteKey = recipeRefKey(entry.recipeRef);
+              return !(data.index[entry.itemKey]?.p ?? [])
+                .some(ref => recipeRefKey(ref) === favoriteKey);
+            });
+            if (staleEntries.length === 0) {
+              if (alive) setPersonal(entries);
+              return;
+            }
+            try {
+              const removed = await cleanupInvalidPersonalRecipeFavorites(
+                data.descriptor,
+                staleEntries,
+              );
+              if (removed !== staleEntries.length) {
+                console.warn('Some stale favorites changed before cleanup completed.', {
+                  requested: staleEntries.length,
+                  removed,
+                });
+              }
+              const refreshed = await loadPersonalRecipeFavorites(data.descriptor);
+              if (alive) setPersonal(refreshed);
+            } catch (cause) {
+              console.error('Unavailable personal favorites could not be cleaned up.', {
+                count: staleEntries.length,
+                cause,
+              });
+              if (!alive) return;
+              setPersonal(entries);
+              setCleanupError('Some unavailable favorites could not be removed. Try reopening this list.');
+            }
           })
           .catch(cause => {
             console.error('Personal favorites could not be loaded.', cause);
@@ -160,6 +196,17 @@ export function FavoritesModal({
       : Promise.resolve().then(() => {
           if (alive) setPersonal([]);
         });
+    const leaderboardRequest = Promise.all([browserSyncRequest, personalRequest])
+      .then(() => loadRecipeFavoriteLeaderboard(data.descriptor))
+      .then(entries => {
+        if (alive) setLeaderboard(entries);
+      })
+      .catch(cause => {
+        console.error('Favorite leaderboard could not be loaded.', cause);
+        if (!alive) return;
+        setLeaderboard([]);
+        setLeaderboardError(account.user ? 'Leaderboard could not be loaded.' : null);
+      });
     Promise.allSettled([leaderboardRequest, personalRequest])
       .finally(() => {
         if (alive) setLoading(false);
@@ -299,7 +346,16 @@ export function FavoritesModal({
     setActionError(null);
     try {
       await updateCommunityRecipeFavorite(data.descriptor, itemKey, recipeRef);
-      const preferredSources = loadPreferredSources();
+      const preferredSources = loadPreferredSources(
+        data.descriptor,
+        (candidateItemKey, source) => {
+          const indexed = data.index[candidateItemKey];
+          if (!indexed) return false;
+          if (source.t !== 'recipe') return true;
+          const sourceKey = recipeRefKey(source.ref);
+          return (indexed.p ?? []).some(ref => recipeRefKey(ref) === sourceKey);
+        },
+      );
       if (recipeRef) {
         preferredSources[itemKey] = {t: 'recipe', ref: recipeRef};
         setPersonal(current => current.map(entry =>
@@ -311,7 +367,7 @@ export function FavoritesModal({
         delete preferredSources[itemKey];
         setPersonal(current => current.filter(entry => entry.itemKey !== itemKey));
       }
-      persistPreferredSources(preferredSources);
+      persistPreferredSources(data.descriptor, preferredSources);
       setExpandedItemKey(null);
       void refreshLeaderboard();
     } catch (cause) {
@@ -397,6 +453,9 @@ export function FavoritesModal({
               onChangeText={setFavoriteSearch}
             />
           )}
+          {selectedTab === 'mine' && cleanupError ? (
+            <Text accessibilityRole="alert" style={styles.cleanupError}>{cleanupError}</Text>
+          ) : null}
           <ScrollView
             keyboardShouldPersistTaps="handled"
             style={styles.scroll}
@@ -486,7 +545,10 @@ export function FavoritesModal({
                                   actionSubject={itemName}
                                   actionAccessibilityLabel={`Choose a different favorite recipe for ${itemName}`}
                                   actionHint="Tap to change favorite recipe"
-                                  onPress={() => setPickerItemKey(entry.itemKey)}
+                                  onPress={() => {
+                                    setCollapsedPickerGroupKeys(new Set());
+                                    setPickerItemKey(entry.itemKey);
+                                  }}
                                 />
                               );
                             })()}
@@ -509,6 +571,21 @@ export function FavoritesModal({
                   <Text style={[styles.rank, entry.isCurrent && styles.currentUserText]}>
                     {index + 1}
                   </Text>
+                  <View style={styles.userAvatar}>
+                    <Text style={styles.userAvatarFallback}>
+                      {entry.isAnonymous ? '?' : entry.displayName.slice(0, 1).toUpperCase()}
+                    </Text>
+                    {entry.avatarUrl && (
+                      <Image
+                        accessibilityLabel={`${entry.displayName}'s Discord avatar`}
+                        onError={() => console.warn('A Discord leaderboard avatar could not be displayed.', {
+                          displayName: entry.displayName,
+                        })}
+                        source={{uri: entry.avatarUrl}}
+                        style={styles.userAvatarImage}
+                      />
+                    )}
+                  </View>
                   <View style={styles.rowCopy}>
                     <View style={styles.userNameRow}>
                       <Text
@@ -547,6 +624,8 @@ export function FavoritesModal({
           onContentZoomComplete={onContentZoomComplete}
           title={`Choose favorite recipe for ${data.itemsByKey.get(pickerFavorite.itemKey)?.n ?? pickerFavorite.itemKey}`}
           options={pickerChoices.map(choice => choice.option)}
+          collapsedGroupKeys={collapsedPickerGroupKeys}
+          onToggleGroup={toggleRecipePickerGroup}
           onSelect={index => {
             const choice = pickerChoices[index];
             if (!choice) {
@@ -556,10 +635,10 @@ export function FavoritesModal({
               });
               return;
             }
-            setPickerItemKey(null);
+            closeRecipePicker();
             void updateFavorite(pickerFavorite.itemKey, choice.ref);
           }}
-          onClose={() => setPickerItemKey(null)}
+          onClose={closeRecipePicker}
         />
       )}
     </>
@@ -582,12 +661,16 @@ const styles = StyleSheet.create({
   tabTextActive: {color: theme.accent},
   sectionTitle: {marginTop: 16, color: theme.textDim, fontSize: 10, fontWeight: '800', letterSpacing: 0.7, textTransform: 'uppercase'},
   searchInput: {height: 38, marginTop: 10, paddingHorizontal: 11, borderRadius: 7, borderWidth: 1, borderColor: theme.border, color: theme.text, backgroundColor: theme.bg, fontSize: 12},
+  cleanupError: {color: theme.danger, fontSize: 10, lineHeight: 14, marginTop: 8},
   scroll: {marginTop: 6},
   list: {paddingBottom: 4},
   favoriteGroup: {borderBottomWidth: 1, borderBottomColor: theme.border},
   row: {minHeight: 54, flexDirection: 'row', alignItems: 'center', gap: 10, borderBottomWidth: 1, borderBottomColor: theme.border},
   currentUserRow: {borderLeftWidth: 3, borderLeftColor: theme.accent, backgroundColor: 'rgba(88, 196, 123, 0.12)'},
   rank: {width: 24, color: theme.textDim, fontSize: 11, fontWeight: '800', textAlign: 'center'},
+  userAvatar: {width: 32, height: 32, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', borderRadius: 16, borderWidth: 1, borderColor: theme.border, backgroundColor: theme.panelAlt},
+  userAvatarFallback: {color: theme.textDim, fontSize: 12, fontWeight: '800'},
+  userAvatarImage: {position: 'absolute', inset: 0, width: 32, height: 32},
   rowCopy: {flex: 1, minWidth: 0},
   userNameRow: {flexDirection: 'row', alignItems: 'center', gap: 7},
   itemName: {color: theme.text, fontSize: 12, fontWeight: '700'},

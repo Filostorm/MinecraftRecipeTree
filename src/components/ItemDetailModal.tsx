@@ -26,7 +26,10 @@ import {
 } from '../data/recipeCategoryPreferences';
 import {useRecipeStages} from '../data/RecipeStageContext';
 import {isRecipeVisibleForStages, recipeStageLabel} from '../data/recipeStages';
-import {isFluidContainerTransferRecipe} from '../data/recipeVisibility';
+import {
+  isFluidContainerTransferRecipe,
+  isRedundantFluidContainerRecipe,
+} from '../data/recipeVisibility';
 import {
   PROJECTE_EMC_CATEGORY_ID,
   projecteEmcValue,
@@ -533,11 +536,6 @@ function RefsList({
       return compareRecipeCategories(a, b) || aRecipe - bRecipe;
     });
   }, [eligibleRefs, data.categories, collapsedCategoryIds]);
-  const sectionGroups = useMemo(() => {
-    return visibleCategoryGroups.filter(
-      group => !collapsedCategoryIds.has(group.category!.id),
-    );
-  }, [visibleCategoryGroups, collapsedCategoryIds]);
   const refsToLoad = useMemo(
     () =>
       filteredRefs.slice(
@@ -563,6 +561,7 @@ function RefsList({
         const recipe = recipeForRef(ref);
         return (
           isRecipeVisibleForStages(recipe, hiddenRecipeStages) &&
+          !isRedundantFluidContainerRecipe(recipe, data.itemsByKey) &&
           (informational ||
             showFluidTransfers ||
             !isFluidContainerTransferRecipe(
@@ -592,11 +591,21 @@ function RefsList({
     }
     return grouped;
   }, [shown]);
+  const sectionGroups = useMemo(
+    () =>
+      visibleCategoryGroups.filter(
+        group =>
+          !collapsedCategoryIds.has(group.category!.id) &&
+          shownByCategory.has(group.catIdx),
+      ),
+    [visibleCategoryGroups, collapsedCategoryIds, shownByCategory],
+  );
   const hiddenFluidTransferCount = refsToLoad.reduce((count, ref) => {
     const recipe = recipeForRef(ref);
     return count +
       (!informational &&
         recipe &&
+        !isRedundantFluidContainerRecipe(recipe, data.itemsByKey) &&
         isFluidContainerTransferRecipe(recipe, data.itemsByKey, data.categories[ref[0]])
         ? 1
         : 0);
@@ -867,7 +876,9 @@ function RefsList({
             ? 'No informational pages could be displayed.'
             : hiddenRecipeStageCount > 0
               ? 'All loaded recipes are hidden by the selected recipe-stage visibility toggles.'
-              : 'No standard recipes match. Enable fluid container transfers to view hidden conversions.'}
+              : hiddenFluidTransferCount > 0
+                ? 'No standard recipes match. Enable fluid container transfers to view hidden conversions.'
+                : 'No recipes are available for this item.'}
         </Text>
       ) : null}
       {scanCapped ? (

@@ -1,0 +1,51 @@
+package com.recipetree.jeiexport112;
+
+import java.util.List;
+
+/** Pure history mutation policy shared by the planner screen and unit tests. */
+final class RecipeHistoryEdits {
+    private RecipeHistoryEdits() {
+    }
+
+    static <T> int commit(
+            List<T> entries,
+            int currentIndex,
+            T editedEntry,
+            boolean preserveCurrentSnapshot) {
+        if (currentIndex < 0 || currentIndex >= entries.size()) {
+            entries.add(editedEntry);
+            return entries.size() - 1;
+        }
+        if (currentIndex + 1 < entries.size()) {
+            entries.subList(currentIndex + 1, entries.size()).clear();
+        }
+        if (preserveCurrentSnapshot) {
+            entries.add(editedEntry);
+            return entries.size() - 1;
+        }
+        entries.set(currentIndex, editedEntry);
+        return currentIndex;
+    }
+
+    /**
+     * Saves the selected state as an immutable version and leaves an identical working version
+     * selected. Subsequent edits replace only that working version, so a snapshot immediately
+     * creates a useful two-version history without retaining the old unsaved duplicate.
+     */
+    static <T> int saveSnapshot(
+            List<T> entries,
+            int currentIndex,
+            T savedEntry,
+            T workingEntry) {
+        if (currentIndex < 0 || currentIndex >= entries.size()) {
+            entries.add(savedEntry);
+        } else {
+            if (currentIndex + 1 < entries.size()) {
+                entries.subList(currentIndex + 1, entries.size()).clear();
+            }
+            entries.set(currentIndex, savedEntry);
+        }
+        entries.add(workingEntry);
+        return entries.size() - 1;
+    }
+}

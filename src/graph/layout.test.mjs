@@ -9,6 +9,8 @@ import {
   ROOT_ATTACHED_ACTIONS_HEIGHT,
   ROOT_ATTACHED_ACTIONS_WIDTH,
   SOURCE_HEADER,
+  SOURCE_EMC_PREVIEW_HEIGHT,
+  SOURCE_EMC_PREVIEW_WIDTH,
   SOURCE_STRUCTURE_PREVIEW_HEIGHT,
   SOURCE_STRUCTURE_PREVIEW_WIDTH,
   attachedRootVisualX,
@@ -176,6 +178,25 @@ test('reserves a placed-block canvas for structure recipes instead of their lega
   assert.deepEqual(size, {
     w: SOURCE_STRUCTURE_PREVIEW_WIDTH + 12,
     h: SOURCE_STRUCTURE_PREVIEW_HEIGHT + SOURCE_HEADER + 12,
+  });
+});
+
+test('reserves a structured recipe canvas for ProjectE EMC transmutation', () => {
+  const size = sourceNodeSize({
+    id: 'emc.source',
+    kind: 'recipe',
+    catTitle: 'EMC Transmutation',
+    recipe: {
+      id: 'projecte:emc/abc12345',
+      in: [[['emc|projecte:emc', 1]]],
+      out: [[['item|minecraft:cobblestone', 1]]],
+    },
+    inputs: [],
+  });
+
+  assert.deepEqual(size, {
+    w: SOURCE_EMC_PREVIEW_WIDTH + 12,
+    h: SOURCE_EMC_PREVIEW_HEIGHT + SOURCE_HEADER + 12,
   });
 });
 

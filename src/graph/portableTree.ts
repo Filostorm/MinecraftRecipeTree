@@ -132,6 +132,24 @@ export async function portableRecipeKey(
   return `${categoryId}|semantic-v1:${await sha256Hex(canonical.join(''))}`;
 }
 
+/**
+ * ProjectE recipes were synthesized outside JEI by the 1.12 viewer and use
+ * their exported recipe id directly. Keep that one documented legacy shape
+ * compatible while retaining category-qualified ids for normal recipes.
+ */
+export async function portableRecipeMatchesKey(
+  categoryId: string,
+  recipe: Recipe,
+  expectedKey: string,
+): Promise<boolean> {
+  if ((await portableRecipeKey(categoryId, recipe)) === expectedKey) return true;
+  return (
+    categoryId === 'projecte:emc_transmutation' &&
+    recipe.id?.startsWith('projecte:emc/') === true &&
+    recipe.id === expectedKey
+  );
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }

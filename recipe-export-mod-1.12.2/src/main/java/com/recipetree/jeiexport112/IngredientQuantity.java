@@ -56,12 +56,39 @@ final class IngredientQuantity {
     private IngredientQuantity() {
     }
 
+    interface UnknownQuantityReporter {
+        void report(Class<?> ingredientClass);
+    }
+
     /**
      * Returns the represented quantity. Exact zero is a deliberate sentinel for an absent
      * optional resource slot; RecipePhase records and omits that slot. Negative and non-finite
      * values remain hard failures because they cannot describe a consumable ingredient.
      */
     static BigDecimal amount(Object ingredient, ExportContext context) {
+        if (context == null) {
+            throw new IllegalArgumentException("ingredient quantity export context must not be null");
+        }
+        return amount(ingredient, new UnknownQuantityReporter() {
+            @Override
+            public void report(Class<?> ingredientClass) {
+                context.warnAmountFallback(ingredientClass);
+            }
+        });
+    }
+
+    /**
+     * Runtime-neutral quantity entry point for clients such as the in-game planner. The caller
+     * decides whether an unknown ingredient class is unit-valued or unsupported; this helper does
+     * not need an export job merely to apply the established legacy quantity adapters.
+     */
+    static BigDecimal amount(Object ingredient, UnknownQuantityReporter unknownReporter) {
+        if (ingredient == null) {
+            throw new IllegalArgumentException("ingredient quantity value must not be null");
+        }
+        if (unknownReporter == null) {
+            throw new IllegalArgumentException("unknown quantity reporter must not be null");
+        }
         if (ingredient instanceof ItemStack) {
             return nonNegative(((ItemStack) ingredient).getCount(), ingredient, "ItemStack#getCount");
         }
@@ -97,7 +124,7 @@ final class IngredientQuantity {
             return reflected;
         }
 
-        context.warnAmountFallback(ingredient.getClass());
+        unknownReporter.report(ingredient.getClass());
         return BigDecimal.ONE;
     }
 

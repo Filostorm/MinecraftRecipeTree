@@ -35,6 +35,7 @@ const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const SAFE_DOCUMENT_PATH = /^[A-Za-z0-9._/-]+\.json$/;
 const PACKED_IMAGE_PATH = /^assets\/s\/(\d+)-(\d+)-(\d+)\.webp$/;
+const PACKED_ASSET_BLOB_PATH = /^assets\/pack-(\d{3})\.bin$/;
 const DATASET_READY_MARK = 'mrt:dataset-ready';
 const DATASET_STATE_ATTRIBUTE = 'data-mrt-dataset-state';
 const DATASET_PUBLICATION_ATTRIBUTE = 'data-mrt-dataset-publication-id';
@@ -74,7 +75,7 @@ export const ACTIVATION_THRESHOLDS = Object.freeze({
   eligible: Object.freeze({
     combinedDatasetBootstrapBytes: 72 * MIB,
     indexBootstrapBytes: 40 * MIB,
-    bootstrapDocumentCount: 12,
+    bootstrapDocumentCount: 13,
     settledHeapBytes: 300 * MIB,
     peakHeapBytes: 400 * MIB,
     readyMs: 8_000,
@@ -1251,6 +1252,7 @@ function buildCoreAuthorization(core) {
     return {
       path: record.localPath,
       bytes: pack.bytes,
+      sha256: pack.sha256,
       coordinates: new Set(parsed.entries.map(([offset, length]) => coordinateKey(offset, length))),
     };
   });
@@ -1261,10 +1263,61 @@ function buildPreviewAuthorization(preview) {
   return preview.manifest.packs.map((pack, packNumber) => ({
     path: resolve(preview.root, ...pack.path.split('/')),
     bytes: pack.bytes,
+    sha256: pack.sha256,
     coordinates: new Set(
       preview.coordinatesByPack[packNumber].map(({offset, length}) => coordinateKey(offset, length)),
     ),
   }));
+}
+
+export function authorizePackedAssetRead(packs, path) {
+  const blobMatch = PACKED_ASSET_BLOB_PATH.exec(path);
+  if (blobMatch) {
+    const packNumber = Number(blobMatch[1]);
+    const pack = packs[packNumber];
+    if (!pack || String(packNumber).padStart(3, '0') !== blobMatch[1]) {
+      throw new Error(`Dataset request names an unknown packed asset blob: ${path}.`);
+    }
+    return {pack, offset: 0, length: pack.bytes, contentType: 'application/octet-stream', wholePack: true};
+  }
+
+  const match = PACKED_IMAGE_PATH.exec(path);
+  if (!match) throw new Error(`Unknown immutable dataset object ${path}.`);
+  const packNumber = Number(match[1]);
+  const offset = Number(match[2]);
+  const length = Number(match[3]);
+  const pack = packs[packNumber];
+  if (
+    !pack ||
+    String(packNumber).padStart(3, '0') !== match[1] ||
+    !Number.isSafeInteger(offset) ||
+    String(offset) !== match[2] ||
+    !Number.isSafeInteger(length) ||
+    length <= 0 ||
+    String(length) !== match[3] ||
+    !pack.coordinates.has(coordinateKey(offset, length))
+  ) {
+    throw new Error(`Dataset request is not an exact MRPI-authorized coordinate: ${path}.`);
+  }
+  return {pack, offset, length, contentType: 'image/webp', wholePack: false};
+}
+
+export function packedAssetHeaders(pack, length, contentType, wholePack) {
+  const headers = {
+    'content-type': contentType,
+    'content-length': String(length),
+    'cache-control': 'public, max-age=31536000, immutable, no-transform',
+  };
+  if (!wholePack) return headers;
+  if (!SHA256_PATTERN.test(pack.sha256)) {
+    throw new Error('Validated packed asset is missing its canonical SHA-256 identity.');
+  }
+  return {
+    ...headers,
+    'x-mrt-pack-sha256': pack.sha256,
+    'x-mrt-stored-bytes': String(length),
+    'x-content-type-options': 'nosniff',
+  };
 }
 
 async function readExactSlice(path, offset, length, expectedPackBytes) {
@@ -1437,11 +1490,20 @@ export function assertAllowedApplicationUpstreamResponse(pathname, headers = {})
   }
 }
 
+export function applicationUpstreamHeaders(headers = {}) {
+  const externalHost = headers.host;
+  if (typeof externalHost !== 'string' || externalHost.length === 0) {
+    throw new Error('Benchmark proxy refuses an application request without its validated external Host.');
+  }
+  return {...headers, host: externalHost};
+}
+
 export async function proxyUpstream(request, response, upstreamPort, pathname) {
   // Only the HTML shell and Vite's typed immutable assets may pass through. Dataset routes are
   // handled above, while APIs, RSC documents, JSON, and untyped extensionless responses fail
   // before they can escape bootstrap accounting.
   allowedApplicationUpstreamMediaTypes(pathname);
+  const upstreamHeaders = applicationUpstreamHeaders(request.headers);
   await new Promise((resolveRequest, rejectRequest) => {
     const upstream = httpRequest(
       {
@@ -1449,7 +1511,10 @@ export async function proxyUpstream(request, response, upstreamPort, pathname) {
         port: upstreamPort,
         method: request.method,
         path: request.url,
-        headers: {...request.headers, host: `127.0.0.1:${upstreamPort}`},
+        // Connect directly to the owned Wrangler port, but retain the proxy origin in the
+        // Request URL seen by the Worker. Vinext derives immutable dataset URLs from that origin;
+        // rewriting Host to Wrangler would let those reads bypass the measured publication.
+        headers: upstreamHeaders,
       },
       upstreamResponse => {
         try {
@@ -1503,35 +1568,14 @@ function createPublicationProxy({core, preview, descriptor, upstreamPort}) {
     );
   }
 
-  async function serveCoordinate(response, request, packs, path, keyPrefix) {
-    const match = PACKED_IMAGE_PATH.exec(path);
-    if (!match) throw new Error(`Unknown immutable dataset object ${path}.`);
-    const packNumber = Number(match[1]);
-    const offset = Number(match[2]);
-    const length = Number(match[3]);
-    const pack = packs[packNumber];
-    if (
-      !pack ||
-      String(packNumber).padStart(3, '0') !== match[1] ||
-      !Number.isSafeInteger(offset) ||
-      String(offset) !== match[2] ||
-      !Number.isSafeInteger(length) ||
-      length <= 0 ||
-      String(length) !== match[3] ||
-      !pack.coordinates.has(coordinateKey(offset, length))
-    ) {
-      throw new Error(`Dataset request is not an exact MRPI-authorized coordinate: ${path}.`);
-    }
+  async function servePackedAsset(response, request, packs, path, keyPrefix) {
+    const {pack, offset, length, contentType, wholePack} = authorizePackedAssetRead(packs, path);
     const body = await readExactSlice(pack.path, offset, length, pack.bytes);
     recordServed(stats, `${keyPrefix}:${path}`, 'image', body.length, request.method);
     writeNodeResponse(
       response,
       200,
-      {
-        'content-type': 'image/webp',
-        'content-length': body.length,
-        'cache-control': 'public, max-age=31536000, immutable, no-transform',
-      },
+      packedAssetHeaders(pack, body.length, contentType, wholePack),
       body,
       request.method,
     );
@@ -1569,7 +1613,7 @@ function createPublicationProxy({core, preview, descriptor, upstreamPort}) {
         const path = requireCanonicalRequestPath(url.pathname.slice(corePrefix.length));
         const record = coreRecords.get(path);
         if (record) return await serveDocument(response, request, record, `core:${path}`);
-        return await serveCoordinate(response, request, corePacks, path, 'core');
+        return await servePackedAsset(response, request, corePacks, path, 'core');
       }
       const previewPrefix = `/dataset/preview-sets/${descriptor.previewAssetSetId}/`;
       if (url.pathname.startsWith(previewPrefix)) {
@@ -1584,7 +1628,7 @@ function createPublicationProxy({core, preview, descriptor, upstreamPort}) {
         const path = requireCanonicalRequestPath(url.pathname.slice(previewPrefix.length));
         const record = previewRecords.get(path);
         if (record) return await serveDocument(response, request, record, `preview:${path}`);
-        return await serveCoordinate(response, request, previewPacks, path, 'preview');
+        return await servePackedAsset(response, request, previewPacks, path, 'preview');
       }
       await proxyUpstream(request, response, upstreamPort, url.pathname);
     })().catch(error => {

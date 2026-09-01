@@ -58,6 +58,8 @@ test('the compact donation sheet uses concise service context and public names b
 
 test('donation milestone lines stay anchored to their cumulative meter thresholds', () => {
   assert.match(modalSource, /mark\.cumulativeCents \/ status\.goalCents \* 100/u);
+  assert.match(modalSource, /const METER_TRACK_HEIGHT = 300;/u);
+  assert.match(modalSource, /meterPanel: \{width: 210, minHeight: 373,/u);
   assert.match(
     modalSource,
     /meterLevel: \{position: 'absolute', right: 0, left: 0, height: 3, flexDirection: 'row', alignItems: 'center'\}/u,
