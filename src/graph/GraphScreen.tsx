@@ -49,7 +49,10 @@ import {
 } from '../data/recipeCategoryPreferences';
 import {useRecipeStages} from '../data/RecipeStageContext';
 import {isRecipeVisibleForStages} from '../data/recipeStages';
-import {isFluidContainerTransferRecipe} from '../data/recipeVisibility';
+import {
+  isFluidContainerTransferRecipe,
+  isRedundantFluidContainerRecipe,
+} from '../data/recipeVisibility';
 import {recipeDisplayTitle} from '../data/recipeTitles';
 import {recipeNeedsLayoutPreviewUnavailableNotice} from '../data/recipePresentation';
 import {projecteEmcTransmutation} from '../data/projecteEmc';
@@ -984,6 +987,21 @@ export function GraphScreen({
           return false;
         }
         const selectedRecipe = applyIngredientSelections(recipe, ingredientSelections);
+        if (isRedundantFluidContainerRecipe(selectedRecipe, data.itemsByKey)) {
+          console.info('A redundant fluid-container recipe was excluded from the graph.', {
+            itemKey: node.key,
+            recipeRef: ref,
+          });
+          const stored = preferredSourcesRef.current[node.key];
+          if (
+            stored?.t === 'recipe' &&
+            stored.ref[0] === ref[0] &&
+            stored.ref[1] === ref[1]
+          ) {
+            setPreferredSource(node.key, null);
+          }
+          return false;
+        }
         if (
           !allowFluidTransfer &&
           isFluidContainerTransferRecipe(selectedRecipe, data.itemsByKey, cat)
@@ -1498,6 +1516,7 @@ export function GraphScreen({
       const fluidTransferChoices: RecipeSourceChoice[] = [];
       const loadedRefKeys = new Set<string>();
       let identifiedFluidTransferCount = 0;
+      let excludedRedundantContainerCount = 0;
       const initialRecipes = await data.getRecipes(
         plan.initialChoices.map(choice => choice.ref),
       );
@@ -1506,6 +1525,10 @@ export function GraphScreen({
         const refKey = recipeRefKey(choice.ref);
         recipesByRef.set(refKey, recipe);
         loadedRefKeys.add(refKey);
+        if (isRedundantFluidContainerRecipe(recipe, data.itemsByKey)) {
+          excludedRedundantContainerCount += 1;
+          return;
+        }
         if (
           isFluidContainerTransferRecipe(
             recipe,
@@ -1530,7 +1553,9 @@ export function GraphScreen({
           const preferredRefKey = recipeRefKey(preferredChoice.ref);
           recipesByRef.set(preferredRefKey, recipe);
           loadedRefKeys.add(preferredRefKey);
-          if (
+          if (isRedundantFluidContainerRecipe(recipe, data.itemsByKey)) {
+            excludedRedundantContainerCount += 1;
+          } else if (
             isFluidContainerTransferRecipe(
               recipe,
               data.itemsByKey,
@@ -1544,6 +1569,13 @@ export function GraphScreen({
             standardRecipeChoices.push(preferredChoice);
           }
         }
+      }
+
+      if (excludedRedundantContainerCount > 0) {
+        console.info('Redundant fluid-container recipes were excluded from the source picker.', {
+          itemKey: target.key,
+          excludedRecipes: excludedRedundantContainerCount,
+        });
       }
 
       const remainingRecipeChoices: Record<string, RecipeSourceChoice[]> = {};
@@ -1663,8 +1695,13 @@ export function GraphScreen({
         const standardEntries: PickerEntry[] = [];
         const fluidTransferEntries: PickerEntry[] = [];
         let identifiedFluidTransferCount = 0;
+        let excludedRedundantContainerCount = 0;
         batch.forEach((choice, index) => {
           const recipe = recipes[index];
+          if (isRedundantFluidContainerRecipe(recipe, data.itemsByKey)) {
+            excludedRedundantContainerCount += 1;
+            return;
+          }
           if (
             isFluidContainerTransferRecipe(
               recipe,
@@ -1693,6 +1730,13 @@ export function GraphScreen({
             );
           }
         });
+        if (excludedRedundantContainerCount > 0) {
+          console.info('Redundant fluid-container recipes were excluded from a picker page.', {
+            itemKey: snapshot.target.key,
+            groupKey,
+            excludedRecipes: excludedRedundantContainerCount,
+          });
+        }
         setPicker(current => {
           if (!current || current.requestId !== snapshot.requestId) return current;
           const currentRemaining = current.remainingRecipeChoices[groupKey] ?? [];
@@ -1828,6 +1872,7 @@ export function GraphScreen({
       if (choice.t === 'recipe') {
         const [recipe] = await data.getRecipes([choice.ref]);
         if (
+          isRedundantFluidContainerRecipe(recipe, data.itemsByKey) ||
           isFluidContainerTransferRecipe(
             recipe,
             data.itemsByKey,

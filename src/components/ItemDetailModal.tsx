@@ -26,7 +26,10 @@ import {
 } from '../data/recipeCategoryPreferences';
 import {useRecipeStages} from '../data/RecipeStageContext';
 import {isRecipeVisibleForStages, recipeStageLabel} from '../data/recipeStages';
-import {isFluidContainerTransferRecipe} from '../data/recipeVisibility';
+import {
+  isFluidContainerTransferRecipe,
+  isRedundantFluidContainerRecipe,
+} from '../data/recipeVisibility';
 import {
   PROJECTE_EMC_CATEGORY_ID,
   projecteEmcValue,
@@ -563,6 +566,7 @@ function RefsList({
         const recipe = recipeForRef(ref);
         return (
           isRecipeVisibleForStages(recipe, hiddenRecipeStages) &&
+          !isRedundantFluidContainerRecipe(recipe, data.itemsByKey) &&
           (informational ||
             showFluidTransfers ||
             !isFluidContainerTransferRecipe(
@@ -597,6 +601,7 @@ function RefsList({
     return count +
       (!informational &&
         recipe &&
+        !isRedundantFluidContainerRecipe(recipe, data.itemsByKey) &&
         isFluidContainerTransferRecipe(recipe, data.itemsByKey, data.categories[ref[0]])
         ? 1
         : 0);

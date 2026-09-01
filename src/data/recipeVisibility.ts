@@ -3,6 +3,16 @@ import type {CatalogItem, Category, Recipe, SlotEntry} from '../types';
 const CONTAINER_TOKEN =
   /(?:^|[\s_:.\-/])(bucket|bottle|bowl|can|cell|capsule|container|flask|jar|tank|reservoir|drum|canteen|vial|feeder|sponge)(?:$|[\s_:.\-/])/i;
 
+const REDUNDANT_FLUID_CONTAINER_IDS = new Set([
+  'extracells:certustank',
+  'extracells:pattern.fluid',
+  'forestry:capsule',
+  'forestry:refractory',
+  'randomthings:enderbucket',
+  'randomthings:reinforcedenderbucket',
+  'thermalexpansion:florb',
+]);
+
 function entryType(
   key: string,
   itemsByKey?: ReadonlyMap<string, CatalogItem>,
@@ -39,6 +49,27 @@ function partitionSlots(
     byType.set(type, entries);
   }
   return byType;
+}
+
+function slotsContainFluid(
+  slots: SlotEntry[][] | undefined,
+  itemsByKey?: ReadonlyMap<string, CatalogItem>,
+): boolean {
+  return (slots ?? []).some(slot =>
+    slot.some(([key]) => entryType(key, itemsByKey) === 'fluid'),
+  );
+}
+
+function slotsContainRedundantFluidContainer(
+  slots: SlotEntry[][] | undefined,
+  itemsByKey?: ReadonlyMap<string, CatalogItem>,
+): boolean {
+  return (slots ?? []).some(slot =>
+    slot.some(([key]) => {
+      const item = itemsByKey?.get(key);
+      return item ? REDUNDANT_FLUID_CONTAINER_IDS.has(item.id.toLocaleLowerCase()) : false;
+    }),
+  );
 }
 
 function itemIdentityText(
@@ -154,4 +185,24 @@ export function isFluidContainerTransferRecipe(
   if (!filling && !emptying) return false;
 
   return looksLikeContainerTransition(inputItems[0], outputItems[0], itemsByKey);
+}
+
+/**
+ * Hide generated fill/empty conversions for container formats that are useful
+ * as JEI representations but add noise to recipe planning. Unlike the general
+ * transfer filter, these recipes are never user-selectable. A recipe must move
+ * fluid into or out of one of the named container families, so ordinary
+ * crafting recipes that happen to accept a filled container remain available.
+ */
+export function isRedundantFluidContainerRecipe(
+  recipe: Recipe | undefined,
+  itemsByKey?: ReadonlyMap<string, CatalogItem>,
+): boolean {
+  if (!recipe || recipe.err) return false;
+  return (
+    (slotsContainFluid(recipe.in, itemsByKey) &&
+      slotsContainRedundantFluidContainer(recipe.out, itemsByKey)) ||
+    (slotsContainRedundantFluidContainer(recipe.in, itemsByKey) &&
+      slotsContainFluid(recipe.out, itemsByKey))
+  );
 }

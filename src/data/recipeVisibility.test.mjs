@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {isFluidContainerTransferRecipe} from './recipeVisibility.ts';
+import {
+  isFluidContainerTransferRecipe,
+  isRedundantFluidContainerRecipe,
+} from './recipeVisibility.ts';
 
 const items = new Map([
   ['item|test:tank:empty', {k: 'item|test:tank:empty', id: 'test:tank', n: 'Empty Tank', m: 'test'}],
@@ -20,6 +23,10 @@ const items = new Map([
   ['item|test:cell_product', {k: 'item|test:cell_product', id: 'test:cell_product', n: 'Living Cell', m: 'test'}],
   ['item|test:spent_product', {k: 'item|test:spent_product', id: 'test:spent_product', n: 'Spent Material', m: 'test'}],
   ['custom_test.hybridfluid_12345678|water', {k: 'custom_test.hybridfluid_12345678|water', id: 'test:water', n: 'Water', m: 'test', t: 'custom_test.hybridfluid_12345678'}],
+  ['item|forestry:capsule:empty;', {k: 'item|forestry:capsule:empty;', id: 'forestry:capsule', n: 'Capsule', m: 'forestry'}],
+  ['item|forestry:capsule:water;', {k: 'item|forestry:capsule:water;', id: 'forestry:capsule', n: 'Water Capsule', m: 'forestry'}],
+  ['item|forestry:beeswax', {k: 'item|forestry:beeswax', id: 'forestry:beeswax', n: 'Beeswax', m: 'forestry'}],
+  ['item|test:machine', {k: 'item|test:machine', id: 'test:machine', n: 'Machine', m: 'test'}],
 ]);
 
 test('classifies filling and emptying of fluid containers', () => {
@@ -144,4 +151,79 @@ test('rejects multi-material, gas, and failed recipes', () => {
     false,
   );
   assert.equal(isFluidContainerTransferRecipe({err: true}, items), false);
+});
+
+test('always excludes generated fill and empty recipes for redundant container families', () => {
+  assert.equal(
+    isRedundantFluidContainerRecipe(
+      {
+        in: [[['item|forestry:capsule:empty;', 1]], [['fluid|fluid:water', 1000]]],
+        out: [[['item|forestry:capsule:water;', 1]]],
+      },
+      items,
+    ),
+    true,
+  );
+  assert.equal(
+    isRedundantFluidContainerRecipe(
+      {
+        in: [[['item|forestry:capsule:water;', 1]]],
+        out: [[['item|forestry:beeswax', 1]], [['fluid|fluid:water', 1000]]],
+      },
+      items,
+    ),
+    true,
+  );
+
+  for (const id of [
+    'extracells:certustank',
+    'extracells:pattern.fluid',
+    'forestry:capsule',
+    'forestry:refractory',
+    'randomthings:enderbucket',
+    'randomthings:reinforcedenderbucket',
+    'thermalexpansion:florb',
+  ]) {
+    const key = `item|${id}:water`;
+    const familyItems = new Map(items).set(key, {
+      k: key,
+      id,
+      n: `${id} filled with water`,
+      m: id.split(':')[0],
+    });
+    assert.equal(
+      isRedundantFluidContainerRecipe(
+        {
+          in: [[['fluid|fluid:water', 1000]]],
+          out: [[[key, 1]]],
+        },
+        familyItems,
+      ),
+      true,
+      `${id} should be excluded`,
+    );
+  }
+});
+
+test('keeps non-fluid crafting recipes that use a redundant container family', () => {
+  assert.equal(
+    isRedundantFluidContainerRecipe(
+      {
+        in: [[['item|forestry:capsule:water;', 1]]],
+        out: [[['item|test:machine', 1]]],
+      },
+      items,
+    ),
+    false,
+  );
+  assert.equal(
+    isRedundantFluidContainerRecipe(
+      {
+        in: [[['item|minecraft:bucket', 1]], [['fluid|fluid:water', 1000]]],
+        out: [[['item|minecraft:water_bucket', 1]]],
+      },
+      items,
+    ),
+    false,
+  );
 });
