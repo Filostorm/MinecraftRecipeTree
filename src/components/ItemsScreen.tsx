@@ -49,29 +49,32 @@ export function ItemsScreen({
     () => data.items.filter(isItemCatalogEligible),
     [data.items],
   );
-  const searchableItems = useMemo(
-    () =>
-      catalogItems.map(item => {
-        const fields = [
-          normalizeSearchText(item.n),
-          normalizeSearchText(item.id),
-          normalizeSearchText(catalogTypePresentation(item.t)?.label ?? ''),
-        ];
-        return {
-          item,
-          fields,
-          words: fields.flatMap(field => field.split(' ').filter(Boolean)),
-        };
-      }),
-    [catalogItems],
-  );
+  // Browsing without a query only ever needs `catalogItems`; the per-item normalized
+  // text/words below are for search matching only, so building them eagerly for the whole
+  // catalog on every mount wastes main-thread time before the user has typed anything.
+  const hasQuery = normalizeSearchText(query).length > 0;
+  const searchableItems = useMemo(() => {
+    if (!hasQuery) return null;
+    return catalogItems.map(item => {
+      const fields = [
+        normalizeSearchText(item.n),
+        normalizeSearchText(item.id),
+        normalizeSearchText(catalogTypePresentation(item.t)?.label ?? ''),
+      ];
+      return {
+        item,
+        fields,
+        words: fields.flatMap(field => field.split(' ').filter(Boolean)),
+      };
+    });
+  }, [catalogItems, hasQuery]);
   const fuzzyIndexCache = useRef<{
-    source: typeof searchableItems;
+    source: NonNullable<typeof searchableItems>;
     index: ReturnType<typeof buildFuzzyCandidateIndex>;
   } | null>(null);
   const fuzzyEnabled = normalizeSearchText(query).length >= 3;
   const fuzzyIndex = useMemo(() => {
-    if (!fuzzyEnabled) return null;
+    if (!fuzzyEnabled || !searchableItems) return null;
     if (fuzzyIndexCache.current?.source === searchableItems) {
       return fuzzyIndexCache.current.index;
     }
@@ -123,8 +126,8 @@ export function ItemsScreen({
       }
     };
 
-    if (!q) {
-      for (const {item} of searchableItems) {
+    if (!q || !searchableItems) {
+      for (const item of catalogItems) {
         if (!eligible(item)) continue;
         out.push(item);
         if (out.length >= MAX_RESULTS + 1) break;
@@ -167,6 +170,7 @@ export function ItemsScreen({
     }
     return out;
   }, [
+    catalogItems,
     searchableItems,
     fuzzyIndex,
     query,
