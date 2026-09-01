@@ -536,11 +536,6 @@ function RefsList({
       return compareRecipeCategories(a, b) || aRecipe - bRecipe;
     });
   }, [eligibleRefs, data.categories, collapsedCategoryIds]);
-  const sectionGroups = useMemo(() => {
-    return visibleCategoryGroups.filter(
-      group => !collapsedCategoryIds.has(group.category!.id),
-    );
-  }, [visibleCategoryGroups, collapsedCategoryIds]);
   const refsToLoad = useMemo(
     () =>
       filteredRefs.slice(
@@ -596,6 +591,15 @@ function RefsList({
     }
     return grouped;
   }, [shown]);
+  const sectionGroups = useMemo(
+    () =>
+      visibleCategoryGroups.filter(
+        group =>
+          !collapsedCategoryIds.has(group.category!.id) &&
+          shownByCategory.has(group.catIdx),
+      ),
+    [visibleCategoryGroups, collapsedCategoryIds, shownByCategory],
+  );
   const hiddenFluidTransferCount = refsToLoad.reduce((count, ref) => {
     const recipe = recipeForRef(ref);
     return count +
@@ -872,7 +876,9 @@ function RefsList({
             ? 'No informational pages could be displayed.'
             : hiddenRecipeStageCount > 0
               ? 'All loaded recipes are hidden by the selected recipe-stage visibility toggles.'
-              : 'No standard recipes match. Enable fluid container transfers to view hidden conversions.'}
+              : hiddenFluidTransferCount > 0
+                ? 'No standard recipes match. Enable fluid container transfers to view hidden conversions.'
+                : 'No recipes are available for this item.'}
         </Text>
       ) : null}
       {scanCapped ? (
