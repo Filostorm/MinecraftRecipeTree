@@ -135,11 +135,36 @@ function descriptorFromRow(row: DatasetChannelRow): DatasetDescriptor {
   };
 }
 
+/**
+ * A fixed, query-string-free key so every request for the catalog reads/writes the same edge
+ * cache entry, regardless of the caller's own URL (host aside).
+ */
+function catalogCacheKey(request: Request): Request {
+  return new Request(new URL('/api/datasets', request.url).toString(), {method: 'GET'});
+}
+
+function secondsUntilNextUtcMidnight(now: Date = new Date()): number {
+  const next = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0, 0);
+  return Math.max(1, Math.ceil((next - now.getTime()) / 1000));
+}
+
+/** Best-effort: a failed cache purge must never fail the mutation that already committed to D1. */
+async function invalidateCatalogCache(request: Request, context: string): Promise<void> {
+  try {
+    await caches.default.delete(catalogCacheKey(request));
+  } catch (error) {
+    console.warn('Could not invalidate the cached dataset catalog.', {context, error});
+  }
+}
+
 export async function handleDatasetCatalog(
   request: Request,
   runtime: DatasetRuntime,
 ): Promise<Response> {
   if (request.method !== 'GET') return methodNotAllowed('GET');
+  const cacheKey = catalogCacheKey(request);
+  const cached = await caches.default.match(cacheKey);
+  if (cached) return cached;
   const db = runtime.DB;
   if (!db) {
     console.error('Dataset catalog cannot read because the DB binding is unavailable.');
@@ -166,7 +191,19 @@ export async function handleDatasetCatalog(
       });
       return noStoreJson({error: 'Dataset catalog is not configured.'}, 503);
     }
-    return noStoreJson({datasets});
+    // Published channels change only through the admin activation/deletion routes below, both of
+    // which purge this cache entry immediately, so a day-long TTL only bounds D1 read volume for
+    // the (overwhelmingly common) unchanged case without ever serving stale data after a mutation.
+    const response = new Response(`${JSON.stringify({datasets})}\n`, {
+      status: 200,
+      headers: {
+        'Cache-Control': `public, max-age=${secondsUntilNextUtcMidnight()}`,
+        'Content-Type': 'application/json; charset=utf-8',
+        'X-Content-Type-Options': 'nosniff',
+      },
+    });
+    await caches.default.put(cacheKey, response.clone());
+    return response;
   } catch (error) {
     console.error('Dataset catalog query failed.', error);
     return noStoreJson({error: 'Dataset catalog is unavailable.'}, 503);
@@ -400,6 +437,7 @@ export async function handleDatasetChannelActivation(
     }
     const {expectedPreviousPublicationId: _expectedPreviousPublicationId, ...descriptorInput} = input;
     const descriptor: DatasetDescriptor = {slug, ...descriptorInput};
+    await invalidateCatalogCache(request, 'channel activation');
     return noStoreJson({dataset: descriptor}, 200);
   } catch (error) {
     console.error('Dataset channel activation failed closed.', {
@@ -544,6 +582,7 @@ export async function handleDatasetChannelDeletion(
       publicationId: expectedPublicationId,
       previewAssetSetId: expectedPreviewAssetSetId,
     });
+    await invalidateCatalogCache(request, 'channel deletion');
     return noStoreJson(
       {
         deleted: {
