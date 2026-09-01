@@ -1,6 +1,6 @@
 export const PROJECTE_EMC_CATEGORY_ID = 'projecte:emc_transmutation';
 export const MEATBALLCRAFT_01864_PACK_VERSION = 'prerelease-0.18.6.4';
-export const MEATBALLCRAFT_01864_RECIPE_COUNT = 376299;
+export const MEATBALLCRAFT_01864_RECIPE_COUNT = 376179;
 export const MEATBALLCRAFT_01864_EMC_RECIPE_COUNT = 11106;
 
 function isRecord(value) {

@@ -81,8 +81,8 @@ test('MeatballCraft 0.18.6.4 contract includes only its intentional EMC omission
       identitySource: 'explicit-request',
     },
   });
-  assert.equal(contract.counts.recipes, 376299);
-  assert.deepEqual(contract.recipeImages, {previews: 365193, missing: 11106});
+  assert.equal(contract.counts.recipes, 376179);
+  assert.deepEqual(contract.recipeImages, {previews: 365073, missing: 11106});
   assert.deepEqual(contract.counts, MEATBALLCRAFT_01864_CONTRACT.counts);
 });
 

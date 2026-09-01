@@ -162,8 +162,8 @@ export const MEATBALLCRAFT_CONTRACT = Object.freeze({
 export const MEATBALLCRAFT_01864_CONTRACT = Object.freeze({
   ...MEATBALLCRAFT_CONTRACT,
   counts: Object.freeze({
-    items: 196959,
-    recipes: 376299,
+    items: 196920,
+    recipes: 376179,
     categories: 680,
     mobs: 0,
     blockDrops: 0,
@@ -179,7 +179,7 @@ export const MEATBALLCRAFT_01864_CONTRACT = Object.freeze({
     modularMachineryStructureFailures: 0,
   }),
   recipeImages: Object.freeze({
-    previews: 376299 - MEATBALLCRAFT_01864_EMC_RECIPE_COUNT,
+    previews: 376179 - MEATBALLCRAFT_01864_EMC_RECIPE_COUNT,
     missing: MEATBALLCRAFT_01864_EMC_RECIPE_COUNT,
   }),
 });

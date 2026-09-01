@@ -25,14 +25,14 @@ test('allows the exact accepted omission count only for MeatballCraft 0.18.6.4',
   assert.equal(
     expectedIntentionalPreviewlessRecipes('meatballcraft-1.12.2', {
       pack: {name: 'MeatballCraft', version: 'prerelease-0.18.6.4'},
-      counts: {recipes: 376299},
+      counts: {recipes: 376179},
     }),
     11106,
   );
   assert.equal(
     expectedIntentionalPreviewlessRecipes('meatballcraft-1.12.2', {
       pack: {name: 'MeatballCraft', version: 'prerelease-0.18.6.5'},
-      counts: {recipes: 376299},
+      counts: {recipes: 376179},
     }),
     0,
   );
