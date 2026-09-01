@@ -67,6 +67,10 @@ public final class RecipeTreeViewerBridge {
     private static final String THERMAL_TRANSPOSER_MULTI_WRAPPER =
             "cofh.thermalexpansion.plugins.jei.machine.transposer." +
                     "TransposerRecipeWrapperMulti";
+    private static final String VANILLA_BREWING_WRAPPER =
+            "mezz.jei.plugins.vanilla.brewing.BrewingRecipeWrapper";
+    private static final String CRAFTTWEAKER_BREWING_WRAPPER =
+            "crafttweaker.mods.jei.recipeWrappers.BrewingRecipeCWrapper";
 
     private final IIngredientRegistry ingredientRegistry;
     private final IRecipeRegistry recipeRegistry;
@@ -316,13 +320,15 @@ public final class RecipeTreeViewerBridge {
                 try {
                     RecordingIngredients recording = new RecordingIngredients(ingredientRegistry);
                     wrapper.getIngredients(recording);
-                    List<Slot> inputs = slots(recording.allInputs());
+                    String wrapperClass = wrapper.getClass().getName();
+                    List<Slot> inputs = normalizeBrewingInputs(
+                            wrapperClass, slots(recording.allInputs()));
                     List<Slot> outputs = slots(recording.allOutputs());
                     if (outputs.isEmpty()) {
                         throw new IllegalArgumentException("recipe has no semantic output slots");
                     }
                     CorrelatedSlots correlated = correlateAlternatives(
-                            wrapper.getClass().getName(), focusIngredient.key, inputs, outputs);
+                            wrapperClass, focusIngredient.key, inputs, outputs);
                     inputs = correlated.inputs;
                     outputs = correlated.outputs;
                     if (correlated.failure != null) {
@@ -332,9 +338,12 @@ public final class RecipeTreeViewerBridge {
                                         correlated.failure + "; recipe rejected instead of " +
                                         "substituting the wrong fluid");
                     }
+                    IFocus<?> nativeFocus = nativeLayoutFocus(
+                            wrapperClass, correlated, focus);
                     String recipeKey = recipeKey(categoryUid, wrapper, inputs, outputs);
                     recipes.add(new Recipe(recipeKey, categoryUid, categoryTitle, catalyst,
-                            inputs, outputs, dimensions[0], dimensions[1], category, wrapper, focus));
+                            inputs, outputs, dimensions[0], dimensions[1], category, wrapper,
+                            nativeFocus));
                 } catch (Throwable throwable) {
                     FatalErrors.rethrowIfFatal(throwable);
                     logSemanticRecordingFailure(categoryUid, wrapper, throwable);
@@ -1176,6 +1185,82 @@ public final class RecipeTreeViewerBridge {
                 narrowParallelSlots(inputs, cardinality, selectedIndex),
                 narrowParallelSlots(outputs, cardinality, selectedIndex),
                 selectedIndex);
+    }
+
+    /**
+     * JEI's brewing wrapper records the three visual brewing-stand bottle positions as three
+     * identical inputs. One recipe result is still one bottle, so planner quantities must model
+     * one potion input plus the brewing ingredient instead of multiplying every brewing step by
+     * three.
+     */
+    static List<Slot> normalizeBrewingInputs(String wrapperClass, List<Slot> inputs) {
+        if (!VANILLA_BREWING_WRAPPER.equals(wrapperClass)
+                && !CRAFTTWEAKER_BREWING_WRAPPER.equals(wrapperClass)) {
+            return inputs;
+        }
+        if (inputs == null || inputs.size() != 4
+                || !sameSemanticSlot(inputs.get(0), inputs.get(1))
+                || !sameSemanticSlot(inputs.get(0), inputs.get(2))) {
+            throw new IllegalArgumentException(
+                    "recognized brewing wrapper no longer exposes three identical bottle slots " +
+                            "followed by one brewing ingredient slot");
+        }
+        List<Slot> normalized = new ArrayList<Slot>(2);
+        normalized.add(inputs.get(0));
+        normalized.add(inputs.get(3));
+        return Collections.unmodifiableList(normalized);
+    }
+
+    private static boolean sameSemanticSlot(Slot left, Slot right) {
+        if (left == null || right == null
+                || left.alternatives.size() != right.alternatives.size()) {
+            return false;
+        }
+        for (int index = 0; index < left.alternatives.size(); index++) {
+            Ingredient leftIngredient = left.alternatives.get(index);
+            Ingredient rightIngredient = right.alternatives.get(index);
+            if (!leftIngredient.key.equals(rightIngredient.key)
+                    || leftIngredient.amount.compareTo(rightIngredient.amount) != 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private IFocus<?> nativeLayoutFocus(
+            String wrapperClass,
+            CorrelatedSlots correlated,
+            IFocus<?> originalFocus) {
+        if (!isThermalTransposerParallelWrapper(wrapperClass)
+                || correlated.selectedIndex < 0) {
+            return originalFocus;
+        }
+        for (Slot input : correlated.inputs) {
+            for (Ingredient ingredient : input.alternatives) {
+                if (ingredient.type == VanillaTypes.FLUID) {
+                    JeiExportMod.LOGGER.debug(
+                            "[jeiexport] Recipe Tree focused Thermal Transposer native layout on " +
+                                    "correlated fluid input {} so its tank and item variant agree",
+                            ingredient.key);
+                    return recipeRegistry.createFocus(IFocus.Mode.INPUT, ingredient.value);
+                }
+            }
+        }
+        for (Slot output : correlated.outputs) {
+            for (Ingredient ingredient : output.alternatives) {
+                if (ingredient.type == VanillaTypes.FLUID) {
+                    JeiExportMod.LOGGER.debug(
+                            "[jeiexport] Recipe Tree focused Thermal Transposer native layout on " +
+                                    "correlated fluid output {} so its tank and item variant agree",
+                            ingredient.key);
+                    return recipeRegistry.createFocus(IFocus.Mode.OUTPUT, ingredient.value);
+                }
+            }
+        }
+        throw new IllegalArgumentException(
+                "correlated Thermal Transposer recipe contains no fluid ingredient for its " +
+                        "native tank focus");
     }
 
     static boolean isThermalTransposerParallelWrapper(String wrapperClass) {

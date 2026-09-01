@@ -5,6 +5,21 @@ manifest remains the source of truth for downloadable filenames, checksums, and 
 
 ## 2026-08-31
 
+### Brewing quantities and Fluid Transposer tanks
+
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.109**
+
+#### Fixed
+
+- Count JEI's three visual brewing-stand bottle positions as one consumed potion per one produced
+  potion, preventing every brewing step from tripling the planner's required amounts.
+- Focus Thermal Expansion's parallel Fluid Transposer layouts on the already-correlated fluid
+  variant so potion and other container recipes display their actual fluid in the native tank.
+- Reject and log changed brewing or transposer wrapper structures instead of silently guessing an
+  amount or substituting the wrong fluid.
+
+## 2026-08-31
+
 ### In-game tree import and export
 
 - Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.108**
