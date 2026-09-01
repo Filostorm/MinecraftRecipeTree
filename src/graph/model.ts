@@ -51,6 +51,14 @@ export interface SourceTreeNode {
   inputs: ItemTreeNode[];
 }
 
+/** Synthetic ProjectE recipes use structured data instead of a JEI screenshot. */
+export function isEmcTransmutationSource(source: SourceTreeNode): boolean {
+  return (
+    source.kind === 'recipe' &&
+    source.recipe?.id?.startsWith('projecte:emc/') === true
+  );
+}
+
 export interface ItemTreeNode {
   id: string;
   /** Catalog key */

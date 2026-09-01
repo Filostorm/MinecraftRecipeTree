@@ -18,7 +18,6 @@ export function TreeShareModal({
   onClose,
   onShare,
   onImport,
-  onInspectImport,
   onChooseFile,
 }: {
   visible: boolean;
@@ -27,44 +26,18 @@ export function TreeShareModal({
   onClose: () => void;
   onShare: () => Promise<string>;
   onImport: (raw: string) => Promise<void>;
-  onInspectImport: (raw: string) => {title: string; detail: string} | null;
   onChooseFile: () => Promise<string | null>;
 }) {
   const [raw, setRaw] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
-  const [clipboardCandidate, setClipboardCandidate] = useState<{
-    raw: string;
-    title: string;
-    detail: string;
-  } | null>(null);
   useEffect(() => {
     if (!visible) {
       setRaw('');
       setMessage('');
       setBusy(false);
-      setClipboardCandidate(null);
     }
   }, [visible]);
-
-  useEffect(() => {
-    if (!visible || mode !== 'import' || Platform.OS !== 'web') return;
-    let canceled = false;
-    const clipboard = globalThis.navigator?.clipboard;
-    if (!clipboard?.readText) return;
-    void clipboard.readText()
-      .then(value => {
-        if (canceled || !value.trim()) return;
-        const preview = onInspectImport(value);
-        if (preview) setClipboardCandidate({raw: value, ...preview});
-      })
-      .catch(error => {
-        console.info('Clipboard recipe import suggestion was unavailable.', error);
-      });
-    return () => {
-      canceled = true;
-    };
-  }, [mode, onInspectImport, visible]);
 
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
@@ -95,10 +68,10 @@ export function TreeShareModal({
           ]}>
           <View style={styles.header}>
             <View style={{flex: 1}}>
-              <Text style={styles.title}>{mode === 'import' ? 'Import recipe tree' : 'Share or open tree history'}</Text>
+              <Text style={styles.title}>{mode === 'import' ? 'Import crafting tree' : 'Share or open tree history'}</Text>
               <Text style={styles.subtitle}>
                 {mode === 'import'
-                  ? 'Drop or paste a .mrtree.json recipe tree for this modpack version.'
+                  ? 'Drop or paste a .mrtree.json crafting tree for this modpack version.'
                   : 'A .mrtree.json history opens against its matching modpack version.'}
               </Text>
             </View>
@@ -117,27 +90,7 @@ export function TreeShareModal({
             </TouchableOpacity>
           )}
 
-          {clipboardCandidate && (
-            <View style={styles.clipboardSuggestion}>
-              <View style={styles.clipboardCopy}>
-                <Text style={styles.clipboardLabel}>RECIPE TREE FOUND IN CLIPBOARD</Text>
-                <Text style={styles.clipboardTitle} numberOfLines={1}>{clipboardCandidate.title}</Text>
-                <Text style={styles.clipboardDetail} numberOfLines={1}>{clipboardCandidate.detail}</Text>
-              </View>
-              <TouchableOpacity
-                accessibilityRole="button"
-                disabled={busy}
-                style={styles.clipboardButton}
-                onPress={() => void run(async () => {
-                  setRaw(clipboardCandidate.raw);
-                  await onImport(clipboardCandidate.raw);
-                })}>
-                <Text style={styles.clipboardButtonText}>Import</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-
-          <Text style={styles.label}>{mode === 'import' ? 'IMPORT RECIPE TREE' : 'OPEN SHARED TREE HISTORY'}</Text>
+          <Text style={styles.label}>{mode === 'import' ? 'IMPORT CRAFTING TREE' : 'OPEN SHARED TREE HISTORY'}</Text>
           <PortableTreeDropZone
             disabled={busy}
             onDropTree={async dropped => {
@@ -179,7 +132,7 @@ export function TreeShareModal({
               disabled={busy || raw.trim().length === 0}
               style={[styles.primary, styles.importButton, (busy || !raw.trim()) && styles.disabled]}
               onPress={() => void run(() => onImport(raw.trim()))}>
-              <Text style={styles.primaryText}>{busy ? 'Working…' : mode === 'import' ? 'Import recipe' : 'Open history'}</Text>
+              <Text style={styles.primaryText}>{busy ? 'Working…' : mode === 'import' ? 'Import tree' : 'Open history'}</Text>
             </TouchableOpacity>
           </View>
           {!!message && <Text style={styles.message}>{message}</Text>}
@@ -214,13 +167,6 @@ const styles = StyleSheet.create({
   close: {width: 32, height: 32, alignItems: 'center', justifyContent: 'center'},
   closeText: {color: theme.textDim, fontSize: 24, lineHeight: 26},
   label: {color: theme.textDim, fontSize: 9, fontWeight: '800', letterSpacing: 0.8},
-  clipboardSuggestion: {minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: 12, padding: 10, borderRadius: 9, borderWidth: 1, borderColor: theme.accent, backgroundColor: theme.panelAlt},
-  clipboardCopy: {flex: 1, minWidth: 0},
-  clipboardLabel: {color: theme.accent, fontSize: 9, fontWeight: '900', letterSpacing: 0.6},
-  clipboardTitle: {marginTop: 4, color: theme.text, fontSize: 13, fontWeight: '800'},
-  clipboardDetail: {marginTop: 1, color: theme.textDim, fontSize: 10},
-  clipboardButton: {minHeight: 34, minWidth: 72, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12, borderRadius: 7, backgroundColor: theme.accent},
-  clipboardButtonText: {color: '#07120a', fontSize: 11, fontWeight: '900'},
   input: {
     minHeight: 150,
     maxHeight: 260,

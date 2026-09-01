@@ -26,6 +26,7 @@ import {
   registerLocalPackServiceWorker,
   removeLocalPack as removeStoredLocalPack,
 } from './localPackStorage';
+import {loadPublishedDatasetCatalogOnce} from './publishedDatasetCatalog';
 
 const PRODUCTION_ORIGIN = 'https://minecraftrecipetree.craftsmannsoftware.com';
 
@@ -140,9 +141,6 @@ export function DatasetCatalogProvider({children}: {children: React.ReactNode}) 
   const selectedSlugRef = useRef<string | null>(null);
   const localPublicationIdsRef = useRef(new Set<string>());
   const preferredLocalSlugRef = useRef<string | null>(null);
-  // The `focus`/`pageshow` listeners below exist to pick up local packs saved from another tab,
-  // not to refresh the published catalog. Caching it here keeps a tab focus/blur cycle from
-  // re-fetching the entire remote catalog over the network on every window focus.
   const publishedDatasetsRef = useRef<readonly DatasetDescriptor[] | null>(null);
 
   const sourceFor = useCallback(
@@ -165,26 +163,27 @@ export function DatasetCatalogProvider({children}: {children: React.ReactNode}) 
             workerError,
           );
         });
-        let publishedDatasets = publishedDatasetsRef.current;
-        if (!publishedDatasets) {
-          const response = await fetch(configuration.catalogUrl, {
-            cache: 'no-store',
-            signal: controller.signal,
-          });
-          if (!response.ok) {
-            throw new Error(
-              `Dataset catalog request failed with HTTP ${response.status} at ${configuration.catalogUrl}.`,
-            );
-          }
-          let value: unknown;
-          try {
-            value = await response.json();
-          } catch (cause) {
-            throw new Error(`Dataset catalog returned invalid JSON: ${errorMessage(cause)}`);
-          }
-          publishedDatasets = requireDatasetCatalog(value);
-          publishedDatasetsRef.current = publishedDatasets;
-        }
+        const publishedDatasets = await loadPublishedDatasetCatalogOnce(
+          publishedDatasetsRef,
+          async () => {
+            const response = await fetch(configuration.catalogUrl, {
+              cache: 'no-store',
+              signal: controller.signal,
+            });
+            if (!response.ok) {
+              throw new Error(
+                `Dataset catalog request failed with HTTP ${response.status} at ${configuration.catalogUrl}.`,
+              );
+            }
+            let value: unknown;
+            try {
+              value = await response.json();
+            } catch (cause) {
+              throw new Error(`Dataset catalog returned invalid JSON: ${errorMessage(cause)}`);
+            }
+            return requireDatasetCatalog(value);
+          },
+        );
         const defaultDataset = selectDataset(publishedDatasets, null);
         sourceFor(defaultDataset, configuration.assetOrigin);
         const requestedSlug = preferredLocalSlugRef.current ?? currentWebRequestSlug();

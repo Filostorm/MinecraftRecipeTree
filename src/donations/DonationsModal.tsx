@@ -25,6 +25,7 @@ import {theme} from '../theme';
 
 const PRESETS = [5, 10, 25, 50] as const;
 const LEADERBOARD_ROW_HEIGHT = 46;
+const METER_TRACK_HEIGHT = 300;
 const MILESTONE_STORAGE_PREFIX = 'mrt-donation-milestone:';
 const SERVICE_REASON: Record<DonationMark['id'], string> = {
   'github-actions': 'Automated updates',
@@ -424,11 +425,11 @@ const styles = StyleSheet.create({
   accountName: {marginTop: 2, color: theme.text, fontSize: 15, fontWeight: '800'},
   providerBadge: {paddingHorizontal: 9, paddingVertical: 5, overflow: 'hidden', borderRadius: 999, color: theme.accentAlt, backgroundColor: 'rgba(126,97,255,0.14)', fontSize: 12, fontWeight: '800'},
   supportGrid: {flexDirection: 'row', flexWrap: 'wrap', alignItems: 'stretch', gap: 14},
-  meterPanel: {width: 210, minHeight: 318, padding: 12, borderRadius: 9, borderWidth: 1, borderColor: theme.border, backgroundColor: theme.panelAlt},
+  meterPanel: {width: 210, minHeight: 373, padding: 12, borderRadius: 9, borderWidth: 1, borderColor: theme.border, backgroundColor: theme.panelAlt},
   meterHeading: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'},
   sectionTitle: {color: theme.text, fontSize: 14, fontWeight: '800'},
   meterAmount: {color: theme.accent, fontSize: 14, fontWeight: '800'},
-  verticalMeter: {position: 'relative', height: 245, marginTop: 13},
+  verticalMeter: {position: 'relative', height: METER_TRACK_HEIGHT, marginTop: 13},
   verticalTrack: {position: 'absolute', top: 0, bottom: 0, left: 5, width: 16, overflow: 'hidden', borderRadius: 8, borderWidth: 1, borderColor: theme.borderLight, backgroundColor: theme.bg},
   verticalFill: {position: 'absolute', right: 0, bottom: 0, left: 0, minHeight: 2, backgroundColor: theme.accent},
   meterLevel: {position: 'absolute', right: 0, left: 0, height: 3, flexDirection: 'row', alignItems: 'center'},

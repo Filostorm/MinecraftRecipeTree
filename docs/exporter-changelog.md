@@ -3,6 +3,332 @@
 This file contains release-ready notes for the Minecraft exporter builds. The generated exporter
 manifest remains the source of truth for downloadable filenames, checksums, and compatibility.
 
+## 2026-08-31
+
+### Brewing quantities and Fluid Transposer tanks
+
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.109**
+
+#### Fixed
+
+- Count JEI's three visual brewing-stand bottle positions as one consumed potion per one produced
+  potion, preventing every brewing step from tripling the planner's required amounts.
+- Focus Thermal Expansion's parallel Fluid Transposer layouts on the already-correlated fluid
+  variant so potion and other container recipes display their actual fluid in the native tank.
+- Reject and log changed brewing or transposer wrapper structures instead of silently guessing an
+  amount or substituting the wrong fluid.
+
+## 2026-08-31
+
+### In-game tree import and export
+
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.108**
+
+#### Changed
+
+- Replace the separate save-plan, snapshot, and share actions with a single in-game Import/Export
+  screen for history, clipboard JSON, portable tree files, and command-style recipe export.
+- Move the byproduct usage toggle into the Byproducts tab and keep reusable inputs expanded so
+  their recipe subtrees remain visible.
+- Reserve recipe-type color for selection tinting instead of drawing an outline around every
+  recipe card.
+
+## 2026-08-30
+
+### Compact recipe-tree share confirmation
+
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.107**
+
+#### Fixed
+
+- Replace the oversized share-folder control with a compact centered confirmation panel and three
+  native-width actions for copying the tree, opening its folder, and closing the screen.
+- Cap every share action at Minecraft 1.12's 200-pixel button-texture limit so the control cannot
+  split into white texture fragments at large GUI scales.
+
+## 2026-08-30
+
+### Primary-tree JSON sharing and snapshot versions
+
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.106**
+
+#### Changed
+
+- Copy the actual site-compatible `.mrtree.json` recipe-tree JSON to the clipboard while continuing
+  to save the same JSON under `config/recipe-tree-shares`.
+- Export only the graph's main starting node and its recipe selections when a graph has multiple
+  starters.
+- Make the share-folder location an in-game button that opens the containing desktop folder, with
+  visible status and logging when the platform cannot open it.
+- Save snapshots as an immutable baseline plus a selected working version so subsequent changes can
+  be compared as versions of the same starting tree.
+
+## 2026-08-30
+
+### Native recipes at every zoom level
+
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.105**
+
+#### Changed
+
+- Always render the actual native recipe layout for every visible recipe node, including at the
+  minimum tree zoom, instead of replacing small recipes with a flat item overview card.
+- Preserve viewport culling so recipes entirely outside the graph viewport still do not consume
+  rendering work.
+
+## 2026-08-30
+
+### Scrollable requested amount
+
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.104**
+
+#### Added
+
+- Scroll up or down while hovering the amount field to increase or decrease the requested output by
+  one, clamped to the existing 1–999 editable range.
+- Consume amount-field wheel input before graph handling so changing the amount never zooms the tree
+  underneath it.
+
+## 2026-08-30
+
+### Large-tree panning overview
+
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.103**
+
+#### Added
+
+- Show a temporary top-left minimap while dragging a tree whose scaled bounds exceed the graph
+  viewport. The minimap preserves the complete tree shape and outlines the currently visible area.
+- Keep the viewport marker visible at the nearest minimap edge when the graph is dragged beyond its
+  content bounds.
+
+#### Optimized
+
+- Batch all minimap edges and nodes into two draw calls so the overview remains inexpensive for the
+  maximum 2,048-node tree.
+
+## 2026-08-30
+
+### Large-tree performance and restore stability
+
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.102**
+
+#### Fixed
+
+- Cache successful recipe results even when another legacy wrapper in the same query is malformed,
+  and log a full stack trace only once per distinct failure shape instead of once per frame.
+- Treat empty optional GUI slots from legacy machine wrappers as absent while continuing to reject
+  and log recipes that have no semantic output.
+- Restore saved trees without recursively replaying favorite auto-expansion for every restored
+  node, eliminating the largest history-load query multiplier.
+- Use a lightweight, bounded recipe-availability cache for node colors and clickability instead of
+  constructing every semantic recipe while drawing the tree.
+
+#### Optimized
+
+- Memoize material/byproduct summaries until the graph changes, align the availability cache with
+  the 2,048-node graph limit, and cap new availability probes per rendered frame.
+- Render lightweight live-output cards for recipes below readable zoom levels instead of invoking
+  every native HEI layout renderer every frame.
+
+## 2026-08-30
+
+### Correlated Transposer fluids
+
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.101**
+
+#### Fixed
+
+- Preserve Thermal Expansion's parallel container/fluid variant indexes in generic and merged
+  Transposer recipes, so a focused fluid selects its matching container instead of index zero
+  (water).
+- Log ambiguous or structurally changed Transposer alternatives without silently substituting a
+  different fluid. Unrelated JEI tag alternatives remain independent.
+
+## 2026-08-30
+
+### Exact recipe-picker cards
+
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.100**
+
+#### Fixed
+
+- Size recipe cards on the add-to-current/start-new page to their exact scaled native recipe
+  bounds, removing the extra flat canvas and its oversized click target.
+
+## 2026-08-30
+
+### EMC orbit crop and item-only interaction
+
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.99**
+
+#### Fixed
+
+- Remove additional pixels from the top and right of ProjectE's left transmutation orbit and align
+  the live output item with the orbit's exact focal point.
+- Stop the EMC recipe background from producing the output tooltip. Only the overlaid 16x16 live
+  item now owns its native tooltip and right-click Recipe Tree action.
+
+## 2026-08-29
+
+### Live EMC output and recipe-picker cleanup
+
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.98**
+
+#### Changed
+
+- Crop ProjectE's left transmutation orbit more tightly, center the output on its focal point, and
+  make that output a live ingredient with its native tooltip and right-click Recipe Tree action.
+- Label recipe-viewer actions `Open in XEI`, omit the redundant `Change item 1 / 1` control, and
+  provide an explicit `Done` button on the recipe picker.
+- Show manually reusable inputs as requiring exactly one item, independent of parent craft count,
+  while continuing to exclude them from consumed-material totals.
+
+## 2026-08-29
+
+### Focused EMC recipe card
+
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.97**
+
+#### Changed
+
+- Reduce ProjectE EMC recipes to the left transmutation orbit with the live output item centered
+  over it and the exact EMC cost immediately below. Omit the second orbit, learned-item slots,
+  inventory, fuel controls, arrow, and synthetic EMC icon from Recipe Tree's recipe card.
+
+## 2026-08-29
+
+### Vanilla inventory-key behavior
+
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.96**
+
+#### Fixed
+
+- Forward the inventory binding from Recipe Tree through Minecraft's normal inventory action:
+  open the mounted horse inventory when applicable, otherwise notify the vanilla tutorial and open
+  the player's inventory. This replaces the unconditional direct inventory-screen construction.
+
+## 2026-08-29
+
+### Recipe-picker reusable toggle and inventory access
+
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.95**
+
+#### Changed
+
+- Show an explicit persisted `Reusable: ON/OFF` button in the input recipe-picker header for every
+  non-root ingredient, using the same state as the tree hover-panel toggle.
+- Open the player's inventory when its configured key binding is pressed from Recipe Tree or any
+  nested recipe, alternative, history, or snapshot screen.
+
+## 2026-08-29
+
+### Unified machine recipe choice screen
+
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.94**
+
+#### Changed
+
+- Open a type machine with the same actionable recipe-choice screen used for other items, including
+  the options to add it to the current tree or start a new tree.
+- Keep the choice screen's Cancel and tree-action buttons inside its panel, center partially filled
+  recipe rows, and center each native recipe horizontally and vertically within its selection card.
+
+## 2026-08-29
+
+### Forge 1.12.2 scissor-state crash hotfix
+
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.93**
+
+#### Fixed
+
+- Allocate the 16-element integer query buffer required by LWJGL 2 when preserving OpenGL scissor
+  state around native recipe cards. This fixes the immediate crash when opening Recipe Tree with
+  beta.92 while retaining zoom-safe clipping for mob recipe layouts.
+
+## 2026-08-29
+
+### ProjectE EMC recipes and zoom-safe legacy cards
+
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.92**
+
+#### Added
+
+- Add live ProjectE EMC Transmutation as an in-game Recipe Tree input recipe for every item with
+  a positive EMC value. Render the recipe with ProjectE's installed Transmutation Table texture
+  and show the table as its crafting machine without adding a hard ProjectE dependency.
+
+#### Fixed
+
+- Correct Just Enough Resources' fixed-pixel mob scissor while Recipe Tree cards are zoomed, so
+  tall mob renders no longer disappear from the top. Restore the caller's scissor afterward so
+  native integrations cannot disable Recipe Tree's viewport clipping.
+- Reserve the rendered font height plus a clear gap below both item and recipe cards, keeping
+  detached required amounts out of their boxes at every supported zoom level.
+
+## 2026-08-28
+
+### Forge HEI/JEI 1.12.2 Recipe Tree book and recipe-picker layout
+
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.91**
+
+#### Added
+
+- Show each HEI category's live catalyst machine in the recipe-picker header. Clicking it opens a
+  read-only grid of every recipe that crafts that machine, and Back returns to the unchanged picker.
+- Mark a hovered non-root input reusable with the explicit right-panel toggle or the `R` shortcut.
+  The choice applies to every matching node and persists in local progress, snapshots, and shared
+  tree history.
+- Add `recipe_tree.spawnBookInNewWorlds` to `config/jeiexport.cfg`, enabled by default, so pack
+  authors and players can disable the one-time new-world guide-book grant.
+- Give the first player a named Recipe Tree guide book when a new singleplayer world is created.
+- Right-click the book to reopen the latest saved tree, or show the embedded control guide before
+  the first tree exists.
+- Persist the grant in world data so reloads and respawns never create duplicate books. Existing
+  worlds are not retroactively given one.
+
+#### Fixed
+
+- Scope recent-tree history and the last-viewed tree to each singleplayer save or multiplayer
+  server, so pressing `G` after changing worlds never opens another world's graph. Favorites,
+  collapsed recipe categories, discoveries, and reusable-input preferences remain global.
+- Keep manually reusable inputs visible as distinct terminal nodes while excluding them from
+  material totals, and remove the previous Shift-click toggle to prevent accidental changes.
+- Draw each parent branch as one pixel-snapped neutral connector bus, preventing overlapping
+  category-colored segments from appearing bent at fractional zoom levels.
+- Keep graph connectors neutral and apply a category's color only as a border and subtle shading
+  on recipe nodes when that type is selected.
+- Disable left-click recipe selection for terminal items that have no producing recipes.
+- Treat Immersive Engineering metal-press molds and Tinkers' Construct reusable casts as retained
+  tooling, keeping them in native recipes while omitting them from the tree and material totals.
+- Scale item backgrounds, icons, and detached counts together at the exact tree zoom, and stop
+  painting Recipe Tree's own fill behind native HEI recipe renders.
+- Scale detached counts identically for recipe and ingredient nodes at every tree zoom level.
+- Size detailed recipe nodes to the native HEI recipe render itself, removing the flat gray side
+  bands that Recipe Tree previously added outside the recipe.
+- Credit Filostorm as the author of the written Recipe Tree guide book.
+- Draw required counts below item and recipe cards on the transparent graph instead of extending
+  each node's colored or gray background around the count.
+- Move Recipe Tree's required amount, discovery state, and mouse-action hints out of native item
+  tooltips and into the right-side hover panel beside the recipe preview.
+- Render fluid ingredients as full 16x16 icons in Recipe Tree's custom nodes, lists, and headers
+  while preserving exact quantities and native recipe-card rendering.
+- Render nested recipe and item-choice screens with the active Minecraft client context even when
+  their parent tree has not been displayed yet. This prevents the Faraday Suit Boots picker from
+  crashing while it tries to draw the header ingredient.
+- Keep the ingredient renderer's explicit error marker null-safe so a failed native render remains
+  logged instead of causing a second rendering exception.
+- Center partially filled recipe rows within the picker instead of pinning their cards to the left.
+- Fit picker selection outlines and hitboxes to each native recipe layout, removing the oversized
+  flat card background around JEI/HEI's own recipe panel.
+- Keep Ender IO Micro Infinity and fully returned inputs such as molds in native recipe cards, but
+  omit them from the visible planning tree and material/byproduct totals.
+
+#### Compatibility
+
+- Use a marked vanilla written book instead of a custom registry item, preserving the viewer's
+  client-only multiplayer compatibility contract.
+
 ## 2026-08-26 — GTNH reproducible MobsInfo corpus
 
 - GTNH NEI 1.7.10: **1.0.154**
@@ -51,7 +377,7 @@ manifest remains the source of truth for downloadable filenames, checksums, and 
 
 ### Retained crafting ingredients, durability tools, and EMC sources
 
-- Forge HEI/JEI 1.12.2: **1.1.6**
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.73**
 - Forge JEI/REI 1.20.1 beta: **1.2.0-beta.72**
 - NeoForge JEI 1.21.1: **1.0.3**
 
@@ -141,7 +467,7 @@ These builds are unchanged by the 2026-08-08 release:
 | 1.21.1 | JEI 19 | NeoForge 21.1 | 1.0.0 | Current |
 | 1.20.1 | JEI 15 | Forge 47 | 1.1.0 | Current public release; 1.2.0 beta remains in testing |
 | 1.18.2 | REI 8 | Forge 40 | 1.0.52 | Current |
-| 1.7.10 | NEI 2.8.44-GTNH | Forge 10.13.4 | 1.0.154 | Current |
+| 1.7.10 | NEI 2.8.44-GTNH | Forge 10.13.4 | 1.0.150 | Current |
 
 ## Copy-ready release summary
 

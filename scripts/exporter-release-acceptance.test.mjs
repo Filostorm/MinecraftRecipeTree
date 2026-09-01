@@ -359,8 +359,8 @@ test('acceptance permits only the exact configured synthetic EMC preview omissio
   );
   assert.doesNotThrow(() =>
     requireAcceptedRecipeImageInventory(
-      {previews: 365193, missing: 11106},
-      376299,
+      {previews: 365073, missing: 11106},
+      376179,
       intentional,
     ),
   );
@@ -368,7 +368,7 @@ test('acceptance permits only the exact configured synthetic EMC preview omissio
     () =>
       requireAcceptedRecipeImageInventory(
         {previews: 365192, missing: 11107},
-        376299,
+        376179,
         intentional,
       ),
     /365192\/11107\/11106/,

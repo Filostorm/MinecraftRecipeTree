@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
 import test from 'node:test';
 import {autoExpandPreferredNodes} from './autoExpandTree.ts';
+
+const graphScreenSource = await readFile(new URL('./GraphScreen.tsx', import.meta.url), 'utf8');
 
 function item(id, key, options = {}) {
   return {id, key, ancestors: [], ...options};
@@ -132,4 +135,22 @@ test('stops between paced batches when the active run is cancelled', async () =>
   );
 
   assert.equal(expanded.length, 2);
+});
+
+test('community auto expand stays enabled after a completed run until toggled off', () => {
+  const toggleStart = graphScreenSource.indexOf('const toggleCommunityAutoExpand = useCallback');
+  const toggleEnd = graphScreenSource.indexOf('const updateUseByproducts', toggleStart);
+  const toggleSource = graphScreenSource.slice(toggleStart, toggleEnd);
+
+  assert.ok(toggleStart >= 0 && toggleEnd > toggleStart);
+  assert.match(
+    toggleSource,
+    /if \(communityAutoExpandRef\.current\) \{[\s\S]*communityPreferredSourcesRef\.current = \{\};[\s\S]*setCommunityAutoExpand\(false\);[\s\S]*?return;\n    \}\n\n    const requestId/u,
+  );
+  assert.match(
+    toggleSource,
+    /finally \{[\s\S]*setCommunityAutoExpandLoading\(false\);/u,
+  );
+  assert.doesNotMatch(toggleSource, /finally \{[\s\S]*setCommunityAutoExpand\(false\);/u);
+  assert.match(graphScreenSource, /communityAutoExpand\s*\? 'Auto expand on'/u);
 });

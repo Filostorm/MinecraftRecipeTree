@@ -2,7 +2,7 @@
   {
     "modid": "jeiexport",
     "name": "Recipe Tree JEI/HEI Exporter",
-    "description": "Exports Just Enough Items or Had Enough Items ingredients and recipes in Recipe Tree viewer format v1.",
+    "description": "Exports JEI/HEI recipes and adds the live, in-game Recipe Tree planner.",
     "version": "${version}",
     "mcversion": "1.12.2",
     "url": "",

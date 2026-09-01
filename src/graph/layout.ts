@@ -1,5 +1,6 @@
 import type {Recipe} from '../types.ts';
 import {pixelArtDisplaySize} from '../data/pixelArtSizing.ts';
+import {isEmcTransmutationSource} from './model.ts';
 import type {ItemTreeNode, SourceTreeNode} from './model.ts';
 import type {NodeByproductCoverage} from './treeTotals.ts';
 
@@ -17,6 +18,9 @@ export const SOURCE_HEADER = 34;
 /** Fixed placed-block canvas used for structure recipes inside the graph. */
 export const SOURCE_STRUCTURE_PREVIEW_WIDTH = 280;
 export const SOURCE_STRUCTURE_PREVIEW_HEIGHT = 220;
+/** Structured ProjectE recipe canvas containing the compact EMC → item flow. */
+export const SOURCE_EMC_PREVIEW_WIDTH = 260;
+export const SOURCE_EMC_PREVIEW_HEIGHT = 54;
 /** Extra space inside an expanded root recipe while its inline controls are open. */
 export const ROOT_SOURCE_ACTIONS_WIDTH = 44;
 export const ROOT_SOURCE_ACTIONS_HEIGHT = 46;
@@ -172,6 +176,12 @@ export function sourceNodeSize(
   const actionWidth = showRootActions ? ROOT_SOURCE_ACTIONS_WIDTH : 0;
   const actionHeight = showRootActions ? ROOT_SOURCE_ACTIONS_HEIGHT : 0;
   if (source.kind === 'recipe' && source.recipe) {
+    if (isEmcTransmutationSource(source)) {
+      return {
+        w: SOURCE_EMC_PREVIEW_WIDTH + 12 + actionWidth,
+        h: SOURCE_EMC_PREVIEW_HEIGHT + SOURCE_HEADER + 12 + actionHeight,
+      };
+    }
     if (source.recipe.structure) {
       return {
         w: SOURCE_STRUCTURE_PREVIEW_WIDTH + 12 + actionWidth,

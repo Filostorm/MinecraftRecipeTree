@@ -12,6 +12,9 @@ import type {ItemTreeNode} from './model.ts';
 
 const FULL_TURN = Math.PI * 2;
 const EDGE_THICKNESS = 2;
+const EDGE_ROUTING_GAP = 10;
+const EDGE_ROUTING_MIN_OBSTACLE_HEIGHT = 128;
+const EDGE_ROUTING_MIN_OBSTACLE_WIDTH = 260;
 const RADIAL_DEPTH_GAP = 64;
 export const RADIAL_NODE_GAP = 20;
 const RADIAL_TERMINAL_GAP = RADIAL_NODE_GAP;
@@ -224,6 +227,7 @@ interface RadialUnit {
   item: ItemTreeNode;
   children: number[];
   parentIndex: number | null;
+  rootBranchIndex: number;
   depth: number;
   visualW: number;
   visualH: number;
@@ -244,6 +248,7 @@ function makeRadialUnit(
   item: ItemTreeNode,
   depth: number,
   parentIndex: number | null,
+  rootBranchIndex: number,
   terminal: boolean,
 ): RadialUnit {
   const visualSize = item.source
@@ -256,6 +261,7 @@ function makeRadialUnit(
     item,
     children: [],
     parentIndex,
+    rootBranchIndex,
     depth,
     visualW: visualSize.w,
     visualH: visualSize.h,
@@ -280,7 +286,7 @@ function flattenRadialTree(
   showLabels: boolean,
   showRootActions: boolean,
 ): RadialUnit[] {
-  const rootUnit = makeRadialUnit(root, 0, null, false);
+  const rootUnit = makeRadialUnit(root, 0, null, -1, false);
   if (compact) {
     rootUnit.visualW = RADIAL_ROOT_SIZE;
     rootUnit.visualH = RADIAL_ROOT_SIZE;
@@ -334,6 +340,7 @@ function flattenRadialTree(
         input,
         parent.depth + 1,
         parentIndex,
+        parent.depth === 0 ? units.length : parent.rootBranchIndex,
         input.source === undefined && isTerminal(input),
       );
       if (compact) {
@@ -671,7 +678,272 @@ function clipDistanceToRect(width: number, height: number, ux: number, uy: numbe
   return Math.min(horizontal, vertical);
 }
 
-function addRadialEdge(edges: EdgeRect[], parent: RadialUnit, child: RadialUnit): void {
+interface RoutingPoint {
+  x: number;
+  y: number;
+}
+
+interface RoutingObstacle {
+  index: number;
+  rootBranchIndex: number;
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
+function segmentIntersectsRect(
+  start: RoutingPoint,
+  end: RoutingPoint,
+  obstacle: Omit<RoutingObstacle, 'index' | 'rootBranchIndex'>,
+): boolean {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  let minimumT = 0;
+  let maximumT = 1;
+  for (const [direction, distance] of [
+    [-dx, start.x - obstacle.minX],
+    [dx, obstacle.maxX - start.x],
+    [-dy, start.y - obstacle.minY],
+    [dy, obstacle.maxY - start.y],
+  ] as const) {
+    if (Math.abs(direction) <= 1e-9) {
+      if (distance < 0) return false;
+      continue;
+    }
+    const ratio = distance / direction;
+    if (direction < 0) minimumT = Math.max(minimumT, ratio);
+    else maximumT = Math.min(maximumT, ratio);
+    if (minimumT > maximumT) return false;
+  }
+  return true;
+}
+
+class RadialEdgeObstacleIndex {
+  private readonly cellSize: number;
+  private readonly cells = new Map<string, Set<number>>();
+  private readonly obstacles = new Map<number, RoutingObstacle>();
+
+  get empty(): boolean {
+    return this.obstacles.size === 0;
+  }
+
+  constructor(units: RadialUnit[]) {
+    const isLargeSource = (unit: RadialUnit) =>
+      !!unit.item.source &&
+      (unit.visualH >= EDGE_ROUTING_MIN_OBSTACLE_HEIGHT ||
+        unit.visualW >= EDGE_ROUTING_MIN_OBSTACLE_WIDTH);
+    let maximumDiameter = 0;
+    for (const unit of units) {
+      if (!isLargeSource(unit)) continue;
+      maximumDiameter = Math.max(maximumDiameter, unit.collisionDiameter);
+    }
+    this.cellSize = Math.max(128, maximumDiameter + EDGE_ROUTING_GAP * 2);
+    units.forEach((unit, index) => {
+      if (!isLargeSource(unit)) return;
+      const obstacle = {
+        index,
+        rootBranchIndex: unit.rootBranchIndex,
+        minX: unit.centerX - unit.visualW / 2 - EDGE_ROUTING_GAP,
+        minY: unit.centerY - unit.visualH / 2 - EDGE_ROUTING_GAP,
+        maxX: unit.centerX + unit.visualW / 2 + EDGE_ROUTING_GAP,
+        maxY: unit.centerY + unit.visualH / 2 + EDGE_ROUTING_GAP,
+      };
+      this.obstacles.set(index, obstacle);
+      for (const key of this.cellKeys(obstacle.minX, obstacle.minY, obstacle.maxX, obstacle.maxY)) {
+        const entries = this.cells.get(key) ?? new Set<number>();
+        entries.add(index);
+        this.cells.set(key, entries);
+      }
+    });
+  }
+
+  private cellKeys(minX: number, minY: number, maxX: number, maxY: number): string[] {
+    const keys: string[] = [];
+    const minColumn = Math.floor(minX / this.cellSize);
+    const maxColumn = Math.floor(maxX / this.cellSize);
+    const minRow = Math.floor(minY / this.cellSize);
+    const maxRow = Math.floor(maxY / this.cellSize);
+    for (let column = minColumn; column <= maxColumn; column += 1) {
+      for (let row = minRow; row <= maxRow; row += 1) keys.push(`${column}:${row}`);
+    }
+    return keys;
+  }
+
+  intersecting(
+    start: RoutingPoint,
+    end: RoutingPoint,
+    excluded: ReadonlySet<number>,
+    edgeRootBranchIndex: number,
+  ): RoutingObstacle[] {
+    if (this.obstacles.size === 0) return [];
+    const candidates = new Set<number>();
+    for (const key of this.cellKeys(
+      Math.min(start.x, end.x),
+      Math.min(start.y, end.y),
+      Math.max(start.x, end.x),
+      Math.max(start.y, end.y),
+    )) {
+      for (const index of this.cells.get(key) ?? []) candidates.add(index);
+    }
+    return [...candidates]
+      .filter(index => !excluded.has(index))
+      .map(index => this.obstacles.get(index))
+      .filter((obstacle): obstacle is RoutingObstacle => !!obstacle)
+      .filter(obstacle => obstacle.rootBranchIndex !== edgeRootBranchIndex)
+      .filter(obstacle => segmentIntersectsRect(start, end, obstacle))
+      .sort((left, right) => left.index - right.index);
+  }
+}
+
+function pathLength(points: RoutingPoint[]): number {
+  let length = 0;
+  for (let index = 1; index < points.length; index += 1) {
+    length += Math.hypot(
+      points[index].x - points[index - 1].x,
+      points[index].y - points[index - 1].y,
+    );
+  }
+  return length;
+}
+
+function routeAroundExpandedSources(
+  start: RoutingPoint,
+  end: RoutingPoint,
+  parentIndex: number,
+  childIndex: number,
+  edgeRootBranchIndex: number,
+  obstacleIndex: RadialEdgeObstacleIndex,
+): RoutingPoint[] {
+  let points = [start, end];
+  const excluded = new Set([parentIndex, childIndex]);
+  const routed = new Set<number>();
+
+  while (true) {
+    let blockedSegment = -1;
+    let blocker: RoutingObstacle | undefined;
+    for (let index = 1; index < points.length; index += 1) {
+      blocker = obstacleIndex.intersecting(
+        points[index - 1],
+        points[index],
+        new Set([...excluded, ...routed]),
+        edgeRootBranchIndex,
+      )[0];
+      if (blocker) {
+        blockedSegment = index;
+        break;
+      }
+    }
+    if (!blocker || blockedSegment < 0) return points;
+
+    const before = points[blockedSegment - 1];
+    const after = points[blockedSegment];
+    const corners = [
+      {x: blocker.minX, y: blocker.minY},
+      {x: blocker.maxX, y: blocker.minY},
+      {x: blocker.maxX, y: blocker.maxY},
+      {x: blocker.minX, y: blocker.maxY},
+    ];
+    const innerObstacle = {
+      minX: blocker.minX + EDGE_ROUTING_GAP / 2,
+      minY: blocker.minY + EDGE_ROUTING_GAP / 2,
+      maxX: blocker.maxX - EDGE_ROUTING_GAP / 2,
+      maxY: blocker.maxY - EDGE_ROUTING_GAP / 2,
+    };
+    const candidates: RoutingPoint[][] = [];
+    for (let side = 0; side < corners.length; side += 1) {
+      const first = corners[side];
+      const second = corners[(side + 1) % corners.length];
+      for (const detour of [[first, second], [second, first]]) {
+        const candidate = [before, ...detour, after];
+        if (
+          candidate.slice(1).some((point, index) =>
+            segmentIntersectsRect(candidate[index], point, innerObstacle),
+          )
+        ) {
+          continue;
+        }
+        candidates.push(detour);
+      }
+    }
+    if (candidates.length === 0) {
+      throw new Error(`Radial connector could not route around source node ${blocker.index}.`);
+    }
+
+    const alreadyExcluded = new Set([...excluded, ...routed, blocker.index]);
+    candidates.sort((left, right) => {
+      const score = (detour: RoutingPoint[]) => {
+        const candidate = [before, ...detour, after];
+        let intersections = 0;
+        for (let index = 1; index < candidate.length; index += 1) {
+          intersections += obstacleIndex.intersecting(
+            candidate[index - 1],
+            candidate[index],
+            alreadyExcluded,
+            edgeRootBranchIndex,
+          ).length;
+        }
+        return [intersections, pathLength(candidate)] as const;
+      };
+      const leftScore = score(left);
+      const rightScore = score(right);
+      return leftScore[0] - rightScore[0] || leftScore[1] - rightScore[1];
+    });
+    points.splice(blockedSegment, 0, ...candidates[0]);
+    routed.add(blocker.index);
+  }
+}
+
+function addRadialSegment(edges: EdgeRect[], start: RoutingPoint, end: RoutingPoint): void {
+  const length = Math.hypot(end.x - start.x, end.y - start.y);
+  if (!(length > 0) || !Number.isFinite(length)) {
+    throw new Error('Radial graph edge segment does not have positive finite clearance.');
+  }
+  edges.push({
+    x: (start.x + end.x) / 2 - length / 2,
+    y: (start.y + end.y) / 2 - EDGE_THICKNESS / 2,
+    w: length,
+    h: EDGE_THICKNESS,
+    angle: Math.atan2(end.y - start.y, end.x - start.x),
+  });
+}
+
+function addDirectRadialEdge(
+  edges: EdgeRect[],
+  parent: RadialUnit,
+  child: RadialUnit,
+): void {
+  const dx = child.centerX - parent.centerX;
+  const dy = child.centerY - parent.centerY;
+  const centerDistance = Math.hypot(dx, dy);
+  if (!(centerDistance > 0) || !Number.isFinite(centerDistance)) {
+    throw new Error('Radial graph edge endpoints must have distinct finite centers.');
+  }
+  const ux = dx / centerDistance;
+  const uy = dy / centerDistance;
+  const parentClip = clipDistanceToRect(parent.visualW, parent.visualH, ux, uy);
+  const childClip = clipDistanceToRect(child.visualW, child.visualH, ux, uy);
+  addRadialSegment(
+    edges,
+    {
+      x: parent.centerX + ux * parentClip,
+      y: parent.centerY + uy * parentClip,
+    },
+    {
+      x: child.centerX - ux * childClip,
+      y: child.centerY - uy * childClip,
+    },
+  );
+}
+
+function addRoutedRadialEdge(
+  edges: EdgeRect[],
+  parent: RadialUnit,
+  child: RadialUnit,
+  parentIndex: number,
+  childIndex: number,
+  obstacleIndex: RadialEdgeObstacleIndex,
+): void {
   const dx = child.centerX - parent.centerX;
   const dy = child.centerY - parent.centerY;
   const centerDistance = Math.hypot(dx, dy);
@@ -686,17 +958,17 @@ function addRadialEdge(edges: EdgeRect[], parent: RadialUnit, child: RadialUnit)
   const startY = parent.centerY + uy * parentClip;
   const endX = child.centerX - ux * childClip;
   const endY = child.centerY - uy * childClip;
-  const length = Math.hypot(endX - startX, endY - startY);
-  if (!(length > 0) || !Number.isFinite(length)) {
-    throw new Error('Radial graph edge does not have positive finite clearance.');
+  const points = routeAroundExpandedSources(
+    {x: startX, y: startY},
+    {x: endX, y: endY},
+    parentIndex,
+    childIndex,
+    child.rootBranchIndex,
+    obstacleIndex,
+  );
+  for (let index = 1; index < points.length; index += 1) {
+    addRadialSegment(edges, points[index - 1], points[index]);
   }
-  edges.push({
-    x: (startX + endX) / 2 - length / 2,
-    y: (startY + endY) / 2 - EDGE_THICKNESS / 2,
-    w: length,
-    h: EDGE_THICKNESS,
-    angle: Math.atan2(endY - startY, endX - startX),
-  });
 }
 
 /**
@@ -747,9 +1019,27 @@ export function layoutRadialTree(
   }));
 
   const edges: EdgeRect[] = [];
-  units.forEach(unit => {
-    unit.children.forEach(childIndex => addRadialEdge(edges, unit, units[childIndex]));
-  });
+  const obstacleIndex = new RadialEdgeObstacleIndex(units);
+  if (obstacleIndex.empty) {
+    units.forEach(unit => {
+      unit.children.forEach(childIndex =>
+        addDirectRadialEdge(edges, unit, units[childIndex]),
+      );
+    });
+  } else {
+    units.forEach((unit, parentIndex) => {
+      unit.children.forEach(childIndex =>
+        addRoutedRadialEdge(
+          edges,
+          unit,
+          units[childIndex],
+          parentIndex,
+          childIndex,
+          obstacleIndex,
+        ),
+      );
+    });
+  }
 
   let minX = Infinity;
   let minY = Infinity;

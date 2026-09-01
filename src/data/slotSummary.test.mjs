@@ -43,6 +43,34 @@ test('preserves one exact quantity when every slot alternative agrees', () => {
   );
 });
 
+test('does not merge distinct singleton positions that only share tag provenance', () => {
+  assert.deepEqual(
+    slotSummary([
+      [['item|example:first_food', 1, 'ore:listAllFood']],
+      [['item|example:second_food', 1, 'ore:listAllFood']],
+      [['item|example:first_food', 1, 'ore:listAllFood']],
+    ]),
+    [
+      {
+        key: 'item|example:first_food',
+        amount: 2,
+        variableAmount: false,
+        variants: 1,
+        alternatives: ['item|example:first_food'],
+        tag: 'ore:listAllFood',
+      },
+      {
+        key: 'item|example:second_food',
+        amount: 1,
+        variableAmount: false,
+        variants: 1,
+        alternatives: ['item|example:second_food'],
+        tag: 'ore:listAllFood',
+      },
+    ],
+  );
+});
+
 test('marks heterogeneous alternative quantities unknown and logs the loss of one aggregate', () => {
   const warnings = [];
   const originalWarn = console.warn;

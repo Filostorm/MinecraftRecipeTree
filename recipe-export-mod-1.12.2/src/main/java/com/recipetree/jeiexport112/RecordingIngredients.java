@@ -137,7 +137,15 @@ final class RecordingIngredients implements IIngredients {
         if (values != null) {
             for (T value : values) {
                 if (value != null) {
-                    slots.add(new ArrayList<T>(helper.expandSubtypes(Collections.singletonList(value))));
+                    List<T> expanded = new ArrayList<T>(
+                            helper.expandSubtypes(Collections.singletonList(value)));
+                    expanded.removeAll(Collections.singleton(null));
+                    // Several 1.12 wrappers publish optional GUI slots as empty ingredient
+                    // collections. They are not semantic recipe inputs/outputs and must not turn
+                    // an otherwise valid wrapper into a permanently failing tree query.
+                    if (!expanded.isEmpty()) {
+                        slots.add(expanded);
+                    }
                 }
             }
         }

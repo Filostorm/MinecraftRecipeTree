@@ -4,9 +4,54 @@ import {
   assertPortableTreePackMatches,
   buildPortableTree,
   parsePortableTree,
+  portableRecipeKey,
+  portableRecipeMatchesKey,
   portableSelectionAsStored,
   resolveConnectedPortableSelections,
 } from './portableTree.ts';
+
+test('reconstructs the exact 1.12 semantic identity for legacy hosted recipes', async () => {
+  const recipe = {
+    in: [
+      [['item|thermalfoundation:material:295', 1]],
+      [['item|minecraft:redstone_block', 2]],
+    ],
+    out: [[['item|deepmoblearning:simulation_chamber', 1]]],
+  };
+  assert.equal(
+    await portableRecipeKey('extendedcrafting:table_crafting_5x5', recipe),
+    'extendedcrafting:table_crafting_5x5|semantic-v1:' +
+      '7d9a8c480fa71830f088747e569b15784dcacbaf37a4b063bcef56b379a72c9e',
+  );
+  assert.equal(
+    await portableRecipeKey('minecraft.crafting', {...recipe, id: 'example:registered'}),
+    'minecraft.crafting|example:registered',
+  );
+});
+
+test('matches the raw ProjectE identity emitted by the 1.12 viewer', async () => {
+  const recipe = {
+    id: 'projecte:emc/24f65000',
+    in: [[['emc|projecte:emc', 32]]],
+    out: [[['item|aether_legacy:dungeon_block:4', 1]]],
+  };
+  assert.equal(
+    await portableRecipeMatchesKey(
+      'projecte:emc_transmutation',
+      recipe,
+      'projecte:emc/24f65000',
+    ),
+    true,
+  );
+  assert.equal(
+    await portableRecipeMatchesKey(
+      'projecte:emc_transmutation',
+      recipe,
+      'projecte:emc_transmutation|projecte:emc/24f65000',
+    ),
+    true,
+  );
+});
 
 const descriptor = {
   slug: 'test-pack',

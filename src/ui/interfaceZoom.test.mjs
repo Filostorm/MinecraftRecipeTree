@@ -23,8 +23,9 @@ const switcherSource = await readFile(
   new URL('../components/DatasetSwitcher.tsx', import.meta.url),
   'utf8',
 );
+const graphSource = await readFile(new URL('../graph/GraphScreen.tsx', import.meta.url), 'utf8');
 
-test('secondary information actions share one anchored header menu', () => {
+test('secondary information actions share one anchored header menu without import or details', () => {
   assert.match(
     appSource,
     /accessibilityLabel=\{showInfoMenu \? 'Close information menu' : 'Open information menu'\}/u,
@@ -36,17 +37,22 @@ test('secondary information actions share one anchored header menu', () => {
     appSource,
     /style=\{styles\.infoMenuAnchor\}[\s\S]*?onPointerDown=\{event => event\.stopPropagation\(\)\}/u,
   );
-  assert.match(appSource, />\s*Details\s*</u);
+  const infoMenuSource = appSource.slice(
+    appSource.indexOf('const infoMenu = ('),
+    appSource.indexOf('const headerActions ='),
+  );
+  assert.doesNotMatch(infoMenuSource, />\s*Import crafting tree\s*</u);
+  assert.doesNotMatch(infoMenuSource, />\s*Details\s*</u);
   assert.match(appSource, />\s*Info\s*</u);
   assert.match(appSource, />\s*Bug report\s*</u);
   assert.match(appSource, />\s*History\s*</u);
   assert.match(appSource, /headerSurface: \{position: 'relative', zIndex: 200\}/u);
 });
 
-test('desktop keeps local import on the title row while mobile omits it from the app menu', () => {
+test('desktop keeps the import dropdown on the title row while compact layouts use the app menu', () => {
   assert.match(
     switcherSource,
-    /<View style=\{styles\.fullTitleRow\}>\s*\{brand\}\s*\{datasetButton\}\s*\{uploadButton\}\s*<\/View>/u,
+    /<View style=\{styles\.fullTitleRow\}>\s*\{brand\}\s*\{trailingAction\}\s*\{datasetButton\}\s*\{importMenu\}\s*<\/View>/u,
   );
   assert.match(
     switcherSource,
@@ -60,13 +66,16 @@ test('desktop keeps local import on the title row while mobile omits it from the
     switcherSource.indexOf(') : compact ? ('),
     switcherSource.indexOf(') : (', switcherSource.indexOf(') : compact ? (')),
   );
-  assert.doesNotMatch(compactBranch, /\{uploadButton\}/u);
+  assert.doesNotMatch(compactBranch, /\{importMenu\}/u);
   const nativeBranch = switcherSource.slice(
     switcherSource.indexOf('{nativeHeader ? ('),
     switcherSource.indexOf(') : compact ? ('),
   );
-  assert.doesNotMatch(nativeBranch, /\{uploadButton\}/u);
+  assert.doesNotMatch(nativeBranch, /\{importMenu\}/u);
   assert.match(appSource, />\s*Import pack\s*</u);
+  assert.match(switcherSource, />\s*Import pack\s*</u);
+  assert.match(switcherSource, />\s*Import crafting tree\s*</u);
+  assert.doesNotMatch(switcherSource, /importDropdownIcon/u);
   assert.match(appSource, /\(compactHeader \|\| Platform\.OS !== 'web'\)/u);
 });
 
@@ -119,13 +128,13 @@ test('compact web keeps the Items and Graph picker outside the collapsible detai
   assert.doesNotMatch(compactDetails, /headerTabs|compactHeaderNavigation/u);
 });
 
-test('compact graph header labels the collapsed chevron button', () => {
+test('graph controls remain in the graph surface at compact widths', () => {
+  assert.doesNotMatch(appSource, /graphControlsHeaderAction|controlsToggleInHeader/u);
+  assert.doesNotMatch(graphSource, /controlsToggleInHeader/u);
   assert.match(
-    appSource,
-    /!showGraphControls && \([\s\S]*?<Text style=\{styles\.graphControlsHeaderText\}>Graph controls<\/Text>[\s\S]*?<DisclosureChevron/u,
+    graphSource,
+    /styles\.controlMenuBtn[\s\S]*?!showGraphControls && \([\s\S]*?>Graph controls<\/Text>[\s\S]*?<DisclosureChevron/u,
   );
-  assert.match(appSource, /graphControlsHeaderButtonCollapsed:/u);
-  assert.match(appSource, /graphControlsHeaderText: \{color: theme\.text, fontSize: 13\}/u);
 });
 
 test('interface zoom accepts every bounded twenty-five-percent step', () => {
@@ -160,7 +169,7 @@ test('every recipe browsing surface exposes the shared recipe and item zoom cont
   assert.match(appSource, /<ContentZoomControl[\s\S]*?appearance="toolbar"/u);
   assert.match(
     appSource,
-    /<ItemDetailModal[\s\S]*?onContentZoomChange=\{previewContentZoom\}[\s\S]*?onContentZoomComplete=\{saveContentZoom\}/u,
+    /<LazyItemDetailModal[\s\S]*?onContentZoomChange=\{previewContentZoom\}[\s\S]*?onContentZoomComplete=\{saveContentZoom\}/u,
   );
   assert.match(
     itemDetailSource,

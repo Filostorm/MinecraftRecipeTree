@@ -24,6 +24,10 @@ import {FEEDBACK_ROUTE, handleFeedback} from './feedback.ts';
 import {EXPORT_FAILURE_ROUTE, handleExportFailureIssue} from './exportFailureIssue.ts';
 import {MIGRATION_BASE_PATH, handleStorageMigration} from './migration.ts';
 import {RECIPE_FAVORITES_ROUTE, handleRecipeFavorites} from './recipeFavorites.ts';
+import {
+  RECIPE_RETENTION_REPORTS_ROUTE,
+  handleRecipeRetentionReports,
+} from './recipeRetentionReports.ts';
 import {AUTH_ROUTE_PREFIX, handleUserAccounts, supabaseProjectUrl} from './userAccounts.ts';
 import {DONATIONS_ROUTE, handleDonations} from './donations.ts';
 
@@ -180,6 +184,9 @@ async function dispatchRequest(
     url.pathname.startsWith(`${RECIPE_FAVORITES_ROUTE}/`)
   ) {
     return handleRecipeFavorites(request, runtime, url);
+  }
+  if (url.pathname === RECIPE_RETENTION_REPORTS_ROUTE) {
+    return handleRecipeRetentionReports(request, runtime, url);
   }
   if (url.pathname.startsWith(AUTH_ROUTE_PREFIX)) {
     return handleUserAccounts(request, runtime, url);
