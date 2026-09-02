@@ -18,6 +18,13 @@ export interface D1Database {
   batch(statements: D1PreparedStatement[]): Promise<D1Result[]>;
 }
 
+declare global {
+  interface CacheStorage {
+    /** The Workers runtime's shared, edge-local cache; not part of the standard DOM lib types. */
+    default: Cache;
+  }
+}
+
 export interface DatasetR2Range {
   offset?: number;
   length?: number;
