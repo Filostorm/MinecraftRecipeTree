@@ -19,6 +19,8 @@ export const DATASET_CHANNEL_DELETION_ROUTE =
 const EXPECTED_PUBLICATION_HEADER = 'x-mrt-expected-dataset-publication-id';
 const EXPECTED_PREVIEW_HEADER = 'x-mrt-expected-preview-asset-set-id';
 const UNSAFE_IDENTITY_TEXT_PATTERN = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/u;
+export const DATASET_CATALOG_EDGE_TTL_SECONDS = 60;
+let catalogCacheUnavailableReported = false;
 
 const createPublicationsTableSql = `
   CREATE TABLE IF NOT EXISTS dataset_publications (
@@ -135,11 +137,84 @@ function descriptorFromRow(row: DatasetChannelRow): DatasetDescriptor {
   };
 }
 
+/** A fixed, query-string-free key for this hostname's edge-local catalog entry. */
+function catalogCacheKey(request: Request): Request {
+  return new Request(new URL('/api/datasets', request.url).toString(), {method: 'GET'});
+}
+
+function defaultCatalogCache(context: string): Cache | null {
+  try {
+    const cache = caches.default;
+    catalogCacheUnavailableReported = false;
+    return cache;
+  } catch (error) {
+    if (!catalogCacheUnavailableReported) {
+      catalogCacheUnavailableReported = true;
+      console.warn('Dataset catalog edge cache is unavailable; continuing against D1.', {
+        context,
+        error,
+      });
+    }
+    return null;
+  }
+}
+
+async function invalidateCatalogCache(request: Request, context: string): Promise<void> {
+  const cache = defaultCatalogCache(context);
+  if (!cache) return;
+  try {
+    await cache.delete(catalogCacheKey(request));
+  } catch (error) {
+    console.warn(
+      'Could not invalidate the local dataset catalog edge entry; other entries remain bounded by the configured TTL.',
+      {context, ttlSeconds: DATASET_CATALOG_EDGE_TTL_SECONDS, error},
+    );
+  }
+}
+
+async function readCachedCatalog(request: Request, cache: Cache | null): Promise<Response | null> {
+  if (!cache) return null;
+  try {
+    const cached = await cache.match(catalogCacheKey(request));
+    if (!cached) return null;
+    const headers = new Headers(cached.headers);
+    headers.set('Cache-Control', 'no-store');
+    return new Response(cached.body, {
+      status: cached.status,
+      statusText: cached.statusText,
+      headers,
+    });
+  } catch (error) {
+    console.warn('Dataset catalog edge-cache lookup failed; continuing against D1.', {error});
+    return null;
+  }
+}
+
+async function cacheCatalog(request: Request, body: string, cache: Cache | null): Promise<void> {
+  if (!cache) return;
+  const cachedResponse = new Response(body, {
+    status: 200,
+    headers: {
+      'Cache-Control': `public, max-age=${DATASET_CATALOG_EDGE_TTL_SECONDS}`,
+      'Content-Type': 'application/json; charset=utf-8',
+      'X-Content-Type-Options': 'nosniff',
+    },
+  });
+  try {
+    await cache.put(catalogCacheKey(request), cachedResponse);
+  } catch (error) {
+    console.warn('Dataset catalog edge-cache fill failed; returning the fresh D1 result.', {error});
+  }
+}
+
 export async function handleDatasetCatalog(
   request: Request,
   runtime: DatasetRuntime,
 ): Promise<Response> {
   if (request.method !== 'GET') return methodNotAllowed('GET');
+  const cache = defaultCatalogCache('catalog request');
+  const cached = await readCachedCatalog(request, cache);
+  if (cached) return cached;
   const db = runtime.DB;
   if (!db) {
     console.error('Dataset catalog cannot read because the DB binding is unavailable.');
@@ -166,7 +241,19 @@ export async function handleDatasetCatalog(
       });
       return noStoreJson({error: 'Dataset catalog is not configured.'}, 503);
     }
-    return noStoreJson({datasets});
+    // Cache API entries are edge-local, so mutations eagerly clear their local entry while this
+    // short TTL bounds visibility elsewhere. Callers always receive no-store because publishing
+    // and channel-verification clients must independently observe the public Worker response.
+    const body = `${JSON.stringify({datasets})}\n`;
+    await cacheCatalog(request, body, cache);
+    return new Response(body, {
+      status: 200,
+      headers: {
+        'Cache-Control': 'no-store',
+        'Content-Type': 'application/json; charset=utf-8',
+        'X-Content-Type-Options': 'nosniff',
+      },
+    });
   } catch (error) {
     console.error('Dataset catalog query failed.', error);
     return noStoreJson({error: 'Dataset catalog is unavailable.'}, 503);
@@ -400,6 +487,7 @@ export async function handleDatasetChannelActivation(
     }
     const {expectedPreviousPublicationId: _expectedPreviousPublicationId, ...descriptorInput} = input;
     const descriptor: DatasetDescriptor = {slug, ...descriptorInput};
+    await invalidateCatalogCache(request, 'channel activation');
     return noStoreJson({dataset: descriptor}, 200);
   } catch (error) {
     console.error('Dataset channel activation failed closed.', {
@@ -544,6 +632,7 @@ export async function handleDatasetChannelDeletion(
       publicationId: expectedPublicationId,
       previewAssetSetId: expectedPreviewAssetSetId,
     });
+    await invalidateCatalogCache(request, 'channel deletion');
     return noStoreJson(
       {
         deleted: {
