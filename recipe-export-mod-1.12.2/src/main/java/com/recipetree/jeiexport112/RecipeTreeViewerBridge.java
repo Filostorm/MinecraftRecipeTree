@@ -1802,13 +1802,29 @@ public final class RecipeTreeViewerBridge {
                 }
             }
             if (!found) return null;
+            // ThaumicJEI reports the aspect value on each selectable item input. In the
+            // planner that value is the recipe yield, not the number of items consumed.
+            // One selected item therefore produces source.amount aspects.
+            Ingredient selectedInput = withAmount(source, BigDecimal.ONE);
+            Ingredient aspectOutput = withAmount(
+                    outputs.get(0).alternatives.get(0), source.amount);
             List<Slot> selectedInputs = Collections.singletonList(
-                    new Slot(Collections.singletonList(source)));
-            String selectedKey = aspectSourceKey(selectedInputs);
+                    new Slot(Collections.singletonList(selectedInput)));
+            List<Slot> selectedOutputs = Collections.singletonList(
+                    new Slot(Collections.singletonList(aspectOutput)));
+            // Keep the stable key based on ThaumicJEI's original semantic values so histories
+            // written before this quantity correction continue to resolve.
+            String selectedKey = aspectSourceKey(Collections.singletonList(
+                    new Slot(Collections.singletonList(source))));
             return new Recipe(selectedKey, categoryUid, categoryTitle, catalystMachine,
-                    selectedInputs, outputs, THAUMIC_ASPECT_SOURCE_RECIPE_WIDTH,
+                    selectedInputs, selectedOutputs, THAUMIC_ASPECT_SOURCE_RECIPE_WIDTH,
                     THAUMIC_ASPECT_SOURCE_RECIPE_HEIGHT, category, wrapper, focus, false,
                     Collections.<Ingredient>emptyList(), true);
+        }
+
+        private static Ingredient withAmount(Ingredient ingredient, BigDecimal amount) {
+            return new Ingredient(ingredient.type, ingredient.value, ingredient.key,
+                    ingredient.displayName, amount);
         }
 
         public Recipe resolveAspectSource(String selectedKey) {

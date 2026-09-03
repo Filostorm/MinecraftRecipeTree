@@ -15,7 +15,7 @@ import static org.junit.Assert.assertTrue;
 
 public final class ThaumicAspectSourceRecipeTest {
     @Test
-    public void selectingOneSourceCreatesOneInputRecipeWithItsExactAmount() {
+    public void selectingOneSourceConsumesOneItemAndProducesItsExactAspectAmount() {
         RecipeTreeViewerBridge.Ingredient first = ingredient("item|example:first", "First", 500);
         RecipeTreeViewerBridge.Ingredient second = ingredient("item|example:second", "Second", 142);
         RecipeTreeViewerBridge.Ingredient aspect = ingredient("aspect|metallum", "Metallum", 1);
@@ -30,8 +30,10 @@ public final class ThaumicAspectSourceRecipeTest {
         assertEquals(1, selected.getInputs().get(0).getAlternatives().size());
         assertEquals("item|example:second",
                 selected.getInputs().get(0).getAlternatives().get(0).getKey());
-        assertEquals(new BigDecimal("142"),
+        assertEquals(BigDecimal.ONE,
                 selected.getInputs().get(0).getAlternatives().get(0).getAmount());
+        assertEquals(new BigDecimal("142"),
+                selected.getOutputs().get(0).getAlternatives().get(0).getAmount());
         assertEquals(RecipeTreeViewerBridge.THAUMIC_ASPECT_SOURCE_RECIPE_WIDTH,
                 selected.getWidth());
         assertEquals(RecipeTreeViewerBridge.THAUMIC_ASPECT_SOURCE_RECIPE_HEIGHT,

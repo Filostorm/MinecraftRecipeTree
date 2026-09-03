@@ -5,6 +5,17 @@ manifest remains the source of truth for downloadable filenames, checksums, and 
 
 ## 2026-09-03
 
+### Correct aspect-source scaling
+
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.119**
+
+#### Fixed
+
+- Treat an item's displayed aspect amount as the aspects produced by one item, so aspect demand is
+  divided by that yield and rounded up instead of multiplying the required item count by it.
+
+## 2026-09-03
+
 ### Cleaner aspect-source grids
 
 - Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.118**

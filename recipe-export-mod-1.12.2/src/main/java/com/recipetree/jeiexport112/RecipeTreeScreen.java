@@ -1649,7 +1649,7 @@ public final class RecipeTreeScreen extends GuiScreen {
             safeRenderIngredient(input, 7, 7, "thaumic-aspect-source-input");
             safeRenderIngredient(output, 55, 7, "thaumic-aspect-source-output");
             fontRenderer.drawString(">", 36, 10, 0xFF777777);
-            String amount = RecipeTreeModel.formatAmount(input.getAmount());
+            String amount = RecipeTreeModel.formatAmount(output.getAmount());
             fontRenderer.drawString(amount, 15 - fontRenderer.getStringWidth(amount) / 2,
                     27, 0xFF4A4A4A);
         } finally {
@@ -1732,8 +1732,9 @@ public final class RecipeTreeScreen extends GuiScreen {
             RecipeTreeViewerBridge.Ingredient source) {
         if (recipe == null || source == null || !recipe.isSelectedAspectSource()) return false;
         RecipeTreeViewerBridge.Ingredient selected = firstIngredient(recipe.getInputs());
+        RecipeTreeViewerBridge.Ingredient output = firstIngredient(recipe.getOutputs());
         return selected != null && selected.getKey().equals(source.getKey())
-                && selected.getAmount().compareTo(source.getAmount()) == 0;
+                && output != null && output.getAmount().compareTo(source.getAmount()) == 0;
     }
 
     private void drawSemanticRecipeFallback(

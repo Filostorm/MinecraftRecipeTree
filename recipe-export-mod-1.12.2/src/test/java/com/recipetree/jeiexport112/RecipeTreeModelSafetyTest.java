@@ -30,6 +30,35 @@ import static org.junit.Assert.assertTrue;
 
 public class RecipeTreeModelSafetyTest {
     @Test
+    public void aspectSourceYieldDividesDemandInsteadOfMultiplyingIt() throws Exception {
+        RecipeTreeViewerBridge.Ingredient source = ingredient("item|example:opal_block", 27);
+        RecipeTreeViewerBridge.Ingredient aspect = ingredient("aspect|luna", 1);
+        RecipeTreeViewerBridge.Recipe page = RecipeTreeViewerBridge.Recipe.aspectSourcePage(
+                "aspect-page", RecipeTreeViewerBridge.THAUMIC_ASPECT_SOURCE_CATEGORY_UID,
+                "Aspect from ItemStack", null, Collections.singletonList(slot(source)),
+                Collections.singletonList(slot(aspect)), 220, 140, null, null, null,
+                Collections.singletonList(source));
+        RecipeTreeViewerBridge.Recipe selected = page.selectAspectSource(source);
+        RecipeTreeViewerBridge.Ingredient masterSpell = ingredient("item|example:master_spell", 1);
+        RecipeTreeModel model = model(masterSpell, 1);
+        assertTrue(model.setRecipe(
+                model.getPrimaryRoot(),
+                recipe("master-spell", Collections.singletonList(slot(
+                                ingredient("aspect|luna", 4096))),
+                        Collections.singletonList(slot(masterSpell))),
+                false));
+        RecipeTreeModel.Node aspectNode = model.getPrimaryRoot().getChildren().get(0);
+
+        assertTrue(model.setRecipe(aspectNode, selected, false));
+
+        assertAmount("4096", aspectNode.getDemand());
+        assertAmount("27", aspectNode.getOutputPerCraft());
+        assertAmount("152", aspectNode.crafts());
+        assertEquals(1, aspectNode.getChildren().size());
+        assertAmount("152", aspectNode.getChildren().get(0).getDemand());
+    }
+
+    @Test
     public void clearingAnIngredientClearsEveryMatchingNodeAndItsFavorite() throws Exception {
         RecipeTreeViewerBridge.Ingredient item = ingredient("item|example:shared", 1);
         RecipeTreeViewerBridge.Ingredient firstInput = ingredient("item|example:first", 2);
