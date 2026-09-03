@@ -3,6 +3,18 @@
 This file contains release-ready notes for the Minecraft exporter builds. The generated exporter
 manifest remains the source of truth for downloadable filenames, checksums, and compatibility.
 
+## 2026-09-03
+
+### Grouped starter-recipe selection
+
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.117**
+
+#### Improved
+
+- Group recipes by their HEI/JEI category on the add/start-tree chooser, with collapsible headers,
+  category machines, and per-category recipe counts matching the input-recipe picker.
+- Tint the selected recipe across its exact native render bounds so the pending choice is clear.
+
 ## 2026-09-02
 
 ### Item-wide `No recipe` selection
