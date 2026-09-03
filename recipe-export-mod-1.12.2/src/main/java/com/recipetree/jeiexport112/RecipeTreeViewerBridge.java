@@ -15,6 +15,7 @@ import mezz.jei.api.recipe.IRecipeWrapper;
 import mezz.jei.api.recipe.wrapper.ICraftingRecipeWrapper;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Gui;
+import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.client.util.ITooltipFlag;
 import net.minecraft.enchantment.EnchantmentData;
 import net.minecraft.block.Block;
@@ -74,6 +75,7 @@ public final class RecipeTreeViewerBridge {
 
     private final IIngredientRegistry ingredientRegistry;
     private final IRecipeRegistry recipeRegistry;
+    private final Object recipesGui;
     private final ProjectEEmcSupport emcSupport;
     private final Ingredient emcCatalyst;
     private final Map<String, Ingredient> ingredientsByKey =
@@ -124,6 +126,7 @@ public final class RecipeTreeViewerBridge {
         }
         this.ingredientRegistry = ingredientRegistry;
         this.recipeRegistry = registry;
+        this.recipesGui = runtime.getRecipesGui();
         ProjectEEmcSupport loadedEmc = null;
         Ingredient loadedCatalyst = null;
         if (ProjectEEmcSupport.isAvailable()) {
@@ -489,6 +492,109 @@ public final class RecipeTreeViewerBridge {
                 nativeLayouts.put(recipe, new LayoutResult(null));
                 return null;
             }
+        }
+    }
+
+    /**
+     * Lets Modular Machinery render its live structure preview inside Recipe Tree. Its 1.12
+     * wrapper refuses to draw unless HEI's concrete recipe GUI is reported as the current screen,
+     * even when the wrapper is being rendered through JEI's public drawable API. The substitution
+     * is limited to that category and to the synchronous native draw call.
+     */
+    NativeRenderScope beginNativeRender(Recipe recipe, Minecraft client) {
+        if (recipe == null || !ModularMachineryStructure.isPreviewCategory(recipe.categoryUid)) {
+            return NativeRenderScope.noOp();
+        }
+        return NativeRenderScope.enter(client, recipesGui, recipe.key);
+    }
+
+    static final class NativeRenderScope {
+        private static final String HEI_RECIPES_GUI = "mezz.jei.gui.recipes.RecipesGui";
+        private static final NativeRenderScope NO_OP =
+                new NativeRenderScope(null, null, null, 0, 0, false);
+
+        private final Minecraft client;
+        private final GuiScreen previousScreen;
+        private final GuiScreen recipesScreen;
+        private final int previousWidth;
+        private final int previousHeight;
+        private final boolean active;
+        private boolean closed;
+
+        private NativeRenderScope(Minecraft client, GuiScreen previousScreen,
+                                  GuiScreen recipesScreen, int previousWidth,
+                                  int previousHeight, boolean active) {
+            this.client = client;
+            this.previousScreen = previousScreen;
+            this.recipesScreen = recipesScreen;
+            this.previousWidth = previousWidth;
+            this.previousHeight = previousHeight;
+            this.active = active;
+        }
+
+        static NativeRenderScope noOp() {
+            return NO_OP;
+        }
+
+        static NativeRenderScope enter(Minecraft client, Object recipesGui, String recipeKey) {
+            if (client == null) {
+                throw new IllegalArgumentException(
+                        "Minecraft client is required for Modular Machinery structure preview " +
+                                recipeKey);
+            }
+            if (!(recipesGui instanceof GuiScreen)) {
+                throw new IllegalStateException(
+                        "HEI returned no GuiScreen for Modular Machinery structure preview " +
+                                recipeKey);
+            }
+            if (!hasClassNamed(recipesGui.getClass(), HEI_RECIPES_GUI)) {
+                throw new IllegalStateException(
+                        "HEI recipe screen " + recipesGui.getClass().getName() +
+                                " does not satisfy Modular Machinery's required " +
+                                HEI_RECIPES_GUI + " contract for " + recipeKey);
+            }
+            GuiScreen previous = client.currentScreen;
+            GuiScreen target = (GuiScreen) recipesGui;
+            if (previous == null) {
+                throw new IllegalStateException(
+                        "Minecraft has no active screen while drawing Modular Machinery preview " +
+                                recipeKey);
+            }
+            if (previous == target) {
+                return noOp();
+            }
+            int oldWidth = target.width;
+            int oldHeight = target.height;
+            target.width = previous.width;
+            target.height = previous.height;
+            client.currentScreen = target;
+            return new NativeRenderScope(client, previous, target, oldWidth, oldHeight, true);
+        }
+
+        private static boolean hasClassNamed(Class<?> type, String expectedName) {
+            Class<?> current = type;
+            while (current != null) {
+                if (expectedName.equals(current.getName())) {
+                    return true;
+                }
+                current = current.getSuperclass();
+            }
+            return false;
+        }
+
+        void close() {
+            if (!active || closed) {
+                return;
+            }
+            closed = true;
+            if (client.currentScreen != recipesScreen) {
+                JeiExportMod.LOGGER.error(
+                        "[jeiexport] Modular Machinery changed the active screen while Recipe " +
+                                "Tree was drawing its structure preview; restoring Recipe Tree");
+            }
+            client.currentScreen = previousScreen;
+            recipesScreen.width = previousWidth;
+            recipesScreen.height = previousHeight;
         }
     }
 

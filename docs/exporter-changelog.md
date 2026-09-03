@@ -3,6 +3,42 @@
 This file contains release-ready notes for the Minecraft exporter builds. The generated exporter
 manifest remains the source of truth for downloadable filenames, checksums, and compatibility.
 
+## 2026-09-02
+
+### Live Modular Machinery structure previews
+
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.112**
+
+#### Fixed
+
+- Show Modular Machinery's live, interactive multiblock scene in the Machine Blueprint recipe
+  chooser instead of displaying only the empty Structure Preview frame.
+- Limit the HEI screen-context compatibility scope to the preview's native draw call and restore
+  Recipe Tree immediately afterward so normal navigation and input remain unchanged.
+
+## 2026-09-02
+
+### JEI dataset export confirmation
+
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.111**
+
+#### Changed
+
+- Require an explicit confirmation before a full JEI dataset export started from the in-game GUI.
+- Warn that the export scans every registered recipe and may temporarily freeze the client, while
+  preserving the chosen output directory when the player cancels.
+
+## 2026-09-02
+
+### Sidebar at large Minecraft GUI scales
+
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.110**
+
+#### Fixed
+
+- Keep the Types, Materials, and Byproducts sidebar visible when Minecraft GUI scale 4 reduces the
+  logical screen width, while letting the pannable graph viewport use the remaining space.
+
 ## 2026-08-31
 
 ### Brewing quantities and Fluid Transposer tanks

@@ -12,6 +12,8 @@ import net.minecraft.client.gui.Gui;
 import net.minecraft.client.gui.GuiButton;
 import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.client.gui.GuiTextField;
+import net.minecraft.client.gui.GuiYesNo;
+import net.minecraft.client.gui.GuiYesNoCallback;
 import net.minecraft.client.gui.ScaledResolution;
 import net.minecraft.client.gui.inventory.GuiInventory;
 import net.minecraft.client.renderer.BufferBuilder;
@@ -68,7 +70,6 @@ public final class RecipeTreeScreen extends GuiScreen {
     private static final int PAN_OVERVIEW_WIDTH = 144;
     private static final int PAN_OVERVIEW_HEIGHT = 96;
     private static final int PAN_OVERVIEW_PADDING = 5;
-    private static final int MIN_SUMMARY_SCREEN_WIDTH = 680;
     private static final int MAX_NO_RECIPE_CACHE = RecipeTreeModel.MAX_NODES;
     private static final int MAX_LAYOUT_NODES = 2048;
     private static final int GRAPH_CONNECTOR_COLOR = 0xFF718171;
@@ -106,7 +107,6 @@ public final class RecipeTreeScreen extends GuiScreen {
     private int treeRight;
     private int treeBottom;
     private int summaryLeft;
-    private boolean showSummary;
     private boolean compactMode;
     private boolean useByproducts = true;
     private boolean recipeBookMode;
@@ -145,7 +145,6 @@ public final class RecipeTreeScreen extends GuiScreen {
     private ReusableToggleHitbox reusableToggleHitbox;
     private Hitbox byproductsToggleHitbox;
     private RecipeTreeViewerBridge.Recipe previewRecipe;
-    private ScreenRect floatingPreviewRect;
     private final LinkedHashMap<String, Boolean> noRecipeCache =
             new LinkedHashMap<String, Boolean>(128, 0.75F, true) {
                 @Override
@@ -240,8 +239,7 @@ public final class RecipeTreeScreen extends GuiScreen {
         panelTop = PANEL_MARGIN;
         panelRight = width - PANEL_MARGIN;
         panelBottom = height - PANEL_MARGIN;
-        showSummary = width >= MIN_SUMMARY_SCREEN_WIDTH;
-        summaryLeft = showSummary ? panelRight - SUMMARY_WIDTH : panelRight;
+        summaryLeft = panelRight - SUMMARY_WIDTH;
 
         int toolbarLeft = panelLeft + 12;
         int toolbarRight = panelRight - 12;
@@ -272,7 +270,7 @@ public final class RecipeTreeScreen extends GuiScreen {
 
         treeLeft = panelLeft + 10;
         treeTop = flow.getBottom() + 8;
-        treeRight = (showSummary ? summaryLeft - 6 : panelRight - 10);
+        treeRight = summaryLeft - 6;
         treeBottom = panelBottom - 10;
         if (!centered) centerTree();
     }
@@ -359,7 +357,7 @@ public final class RecipeTreeScreen extends GuiScreen {
         }
 
         drawTree(mouseX, mouseY);
-        if (showSummary) drawSummary(mouseX, mouseY);
+        drawSummary(mouseX, mouseY);
         drawPanOverview();
         super.drawScreen(mouseX, mouseY, partialTicks);
         amountField.drawTextBox();
@@ -382,7 +380,6 @@ public final class RecipeTreeScreen extends GuiScreen {
         rootRemoveHitboxes.clear();
         hoveredNode = null;
         previewRecipe = null;
-        floatingPreviewRect = null;
         reusableToggleHitbox = null;
 
         enableScissor(treeLeft, treeTop, treeRight, treeBottom);
@@ -397,12 +394,6 @@ public final class RecipeTreeScreen extends GuiScreen {
         }
 
         drawRootRemoveButtons(mouseX, mouseY);
-
-        if (shouldDrawFloatingPreview(showSummary)) drawFloatingPreview(mouseX, mouseY);
-    }
-
-    static boolean shouldDrawFloatingPreview(boolean showSummary) {
-        return !showSummary;
     }
 
     private void drawPanOverview() {
@@ -721,33 +712,6 @@ public final class RecipeTreeScreen extends GuiScreen {
         return button;
     }
 
-    private void drawFloatingPreview(int mouseX, int mouseY) {
-        if (hoveredNode == null) return;
-        int maximumWidth = Math.min(220, Math.max(120, (treeRight - treeLeft) / 3));
-        int left = treeRight - maximumWidth - 8;
-        int top = treeTop + 8;
-        if (previewRecipe == null) {
-            Gui.drawRect(left, top, treeRight - 8, top + 44, 0xB0222928);
-            floatingPreviewRect = new ScreenRect(left, top, treeRight - 8 - left, 44);
-            String text = hasRecipes(hoveredNode.getIngredient())
-                    ? "Left click: select a recipe" : "No recipes";
-            fontRenderer.drawString(text, left + 10, top + 17, 0xFFCED8CC);
-            return;
-        }
-        RecipeTreeViewerBridge.Recipe recipe = previewRecipe;
-        float scale = Math.min((maximumWidth - 12F) / recipe.getWidth(),
-                132F / recipe.getHeight());
-        scale = Math.min(1F, Math.max(0.25F, scale));
-        int cardWidth = Math.round(recipe.getWidth() * scale) + 12;
-        int cardHeight = Math.round(recipe.getHeight() * scale) + 12;
-        left = treeRight - cardWidth - 8;
-        Gui.drawRect(left, top, left + cardWidth, top + cardHeight, 0xB0222928);
-        floatingPreviewRect = new ScreenRect(left, top, cardWidth, cardHeight);
-        drawNativeRecipe(recipe, left + 6, top + 6, scale,
-                (int) ((mouseX - left - 6) / scale),
-                (int) ((mouseY - top - 6) / scale));
-    }
-
     private void drawSummary(int mouseX, int mouseY) {
         Gui.drawRect(summaryLeft, treeTop, panelRight - 10, treeBottom, 0xCC1C2721);
         tabHitboxes.clear();
@@ -981,10 +945,6 @@ public final class RecipeTreeScreen extends GuiScreen {
         if (mouseButton == 1 && pointInsideViewport(mouseX, mouseY,
                 treeLeft, treeTop, panelRight - 10, treeBottom)
                 && openNativeIngredientAt(mouseX, mouseY)) return;
-        if (floatingPreviewRect != null && contains(
-                floatingPreviewRect.left, floatingPreviewRect.top,
-                floatingPreviewRect.width, floatingPreviewRect.height, mouseX, mouseY)) return;
-
         for (RootRemoveHitbox remove : rootRemoveHitboxes) {
             if (pointInsideViewport(mouseX, mouseY,
                     treeLeft, treeTop, treeRight, treeBottom)
@@ -1075,9 +1035,6 @@ public final class RecipeTreeScreen extends GuiScreen {
             adjustAmountFromWheel(wheel);
             return;
         }
-        if (floatingPreviewRect != null && contains(
-                floatingPreviewRect.left, floatingPreviewRect.top,
-                floatingPreviewRect.width, floatingPreviewRect.height, mouseX, mouseY)) return;
         for (NodeHitbox hitbox : nodeHitboxes) {
             if (hitbox.contains(mouseX, mouseY) && hitbox.node.getAlternatives().size() > 1) {
                 if (model.cycleAlternative(hitbox.node, wheel < 0 ? 1 : -1)) {
@@ -1621,8 +1578,10 @@ public final class RecipeTreeScreen extends GuiScreen {
         ScissorState scissorState = ScissorState.capture();
         JerMobRenderCompat.ScopeToken jerScope =
                 JerMobRenderCompat.begin(recipe.getCategoryUid(), left, top, scale);
+        RecipeTreeViewerBridge.NativeRenderScope nativeRenderScope = null;
         GlStateManager.pushMatrix();
         try {
+            nativeRenderScope = bridge.beginNativeRender(recipe, client);
             GlStateManager.translate(left, top, 0);
             GlStateManager.scale(scale, scale, 1F);
             drawable.setPosition(0, 0);
@@ -1634,6 +1593,9 @@ public final class RecipeTreeScreen extends GuiScreen {
             logRenderFailure("recipe:" + recipe.getKey(), error);
             nativeRecipeDrawFailures.add(recipe.getKey());
         } finally {
+            if (nativeRenderScope != null) {
+                nativeRenderScope.close();
+            }
             jerScope.close();
             GlStateManager.popMatrix();
             restoreGuiRenderState();
@@ -2818,7 +2780,7 @@ public final class RecipeTreeScreen extends GuiScreen {
         public boolean doesGuiPauseGame() { return false; }
     }
 
-    private final class TreeTransferScreen extends GuiScreen {
+    private final class TreeTransferScreen extends GuiScreen implements GuiYesNoCallback {
         private static final int BUTTON_IMPORT_TREE = 701;
         private static final int BUTTON_EXPORT_TREE = 702;
         private static final int BUTTON_COPY_TREE = 703;
@@ -2828,6 +2790,8 @@ public final class RecipeTreeScreen extends GuiScreen {
 
         private final GuiScreen returnScreen;
         private GuiTextField outputField;
+        private String outputDirectory = "jei-exports";
+        private ExportRequest pendingExportRequest;
         private String message = "";
         private int panelLeft;
         private int panelRight;
@@ -2861,7 +2825,7 @@ public final class RecipeTreeScreen extends GuiScreen {
             outputField = new GuiTextField(707, fontRenderer,
                     contentLeft, 174, contentRight - contentLeft, 20);
             outputField.setMaxStringLength(512);
-            outputField.setText("jei-exports");
+            outputField.setText(outputDirectory);
             buttonList.add(new GuiButton(BUTTON_START_EXPORTER,
                     contentLeft, 202, Math.min(200, contentRight - contentLeft), 20,
                     "Start JEI data export"));
@@ -2893,7 +2857,7 @@ public final class RecipeTreeScreen extends GuiScreen {
                     openShareDirectory();
                     break;
                 case BUTTON_START_EXPORTER:
-                    startDatasetExport();
+                    requestDatasetExportConfirmation();
                     break;
                 case BUTTON_DONE:
                     mc.displayGuiScreen(returnScreen);
@@ -2903,19 +2867,56 @@ public final class RecipeTreeScreen extends GuiScreen {
             }
         }
 
-        private void startDatasetExport() {
-            String output = outputField.getText() == null ? "" : outputField.getText().trim();
+        private void requestDatasetExportConfirmation() {
+            outputDirectory = outputField.getText() == null
+                    ? "" : outputField.getText().trim();
             try {
-                ExportRequest request = ExportRequest.fromCommand(
-                        output.isEmpty() ? null : output, mc);
-                JeiExportMod.COORDINATOR.enqueue(request, "Recipe Tree import/export screen");
-                message = "JEI data export queued: " + request.output;
+                pendingExportRequest = ExportRequest.fromCommand(
+                        outputDirectory.isEmpty() ? null : outputDirectory, mc);
+                mc.displayGuiScreen(new GuiYesNo(
+                        this,
+                        "Start the full JEI data export?",
+                        "Warning: this scans every registered recipe and may temporarily " +
+                                "freeze the client. Continue?",
+                        "Start export",
+                        "Cancel",
+                        BUTTON_START_EXPORTER));
             } catch (IOException error) {
+                pendingExportRequest = null;
                 JeiExportMod.LOGGER.error(
                         "[jeiexport] Invalid data export requested from the Recipe Tree screen",
                         error);
                 message = "Invalid export location: " + error.getMessage();
             }
+        }
+
+        @Override
+        public void confirmClicked(boolean confirmed, int id) {
+            if (id != BUTTON_START_EXPORTER) {
+                pendingExportRequest = null;
+                JeiExportMod.LOGGER.error(
+                        "[jeiexport] Recipe Tree received an unknown confirmation id {}", id);
+                message = "Could not confirm export; see the log";
+                mc.displayGuiScreen(this);
+                return;
+            }
+            ExportRequest request = pendingExportRequest;
+            pendingExportRequest = null;
+            if (!confirmed) {
+                message = "JEI data export canceled";
+                mc.displayGuiScreen(this);
+                return;
+            }
+            if (request == null) {
+                JeiExportMod.LOGGER.error(
+                        "[jeiexport] Recipe Tree export was confirmed without a validated request");
+                message = "Could not start export; see the log";
+                mc.displayGuiScreen(this);
+                return;
+            }
+            JeiExportMod.COORDINATOR.enqueue(request, "Recipe Tree import/export screen");
+            message = "JEI data export queued: " + request.output;
+            mc.displayGuiScreen(this);
         }
 
         @Override

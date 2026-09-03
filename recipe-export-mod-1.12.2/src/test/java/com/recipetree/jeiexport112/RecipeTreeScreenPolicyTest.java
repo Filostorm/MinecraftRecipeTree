@@ -18,12 +18,6 @@ import static org.junit.Assert.assertTrue;
 
 public class RecipeTreeScreenPolicyTest {
     @Test
-    public void floatingPreviewOnlyFillsInForAHiddenSummaryPanel() {
-        assertFalse(RecipeTreeScreen.shouldDrawFloatingPreview(true));
-        assertTrue(RecipeTreeScreen.shouldDrawFloatingPreview(false));
-    }
-
-    @Test
     public void lwjglIntegerQueriesReserveTheRequiredBufferCapacity() {
         assertEquals(16, RecipeTreeScreen.OPENGL_INTEGER_QUERY_BUFFER_SIZE);
     }
