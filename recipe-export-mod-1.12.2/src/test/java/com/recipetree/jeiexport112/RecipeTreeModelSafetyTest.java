@@ -24,10 +24,43 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNotSame;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 public class RecipeTreeModelSafetyTest {
+    @Test
+    public void clearingOneRecipePreservesOtherNodesAndClearsItsFavorite() throws Exception {
+        RecipeTreeViewerBridge.Ingredient item = ingredient("item|example:shared", 1);
+        RecipeTreeViewerBridge.Ingredient firstInput = ingredient("item|example:first", 2);
+        RecipeTreeViewerBridge.Ingredient secondInput = ingredient("item|example:second", 3);
+        RecipeTreeViewerBridge.Recipe firstRecipe = recipe(
+                "first-recipe",
+                Collections.singletonList(slot(firstInput)),
+                Collections.singletonList(slot(item)));
+        RecipeTreeViewerBridge.Recipe secondRecipe = recipe(
+                "second-recipe",
+                Collections.singletonList(slot(secondInput)),
+                Collections.singletonList(slot(item)));
+        RecipeTreeProgress progress = progress();
+        RecipeTreeModel model = new RecipeTreeModel(bridge(), progress, item, 1);
+        assertTrue(model.addRoot(item, 1));
+        RecipeTreeModel.Node cleared = model.getRoots().get(0);
+        RecipeTreeModel.Node untouched = model.getRoots().get(1);
+        assertTrue(model.setRecipe(cleared, firstRecipe, false));
+        assertTrue(model.setRecipe(untouched, secondRecipe, false));
+        progress.saveFavoriteRecipe(item.getKey(), firstRecipe.getKey());
+
+        model.clearRecipe(cleared, true);
+
+        assertNull(cleared.getRecipe());
+        assertTrue(cleared.getChildren().isEmpty());
+        assertSame(secondRecipe, untouched.getRecipe());
+        assertEquals(1, untouched.getChildren().size());
+        assertEquals(secondInput.getKey(), untouched.getChildren().get(0).getIngredient().getKey());
+        assertNull(progress.favoriteRecipe(item.getKey()));
+    }
+
     @Test
     public void largeTreeSummaryIsReusedUntilTheModelChanges() throws Exception {
         RecipeTreeViewerBridge.Ingredient root = ingredient("item|example:summary_root", 1);

@@ -5,6 +5,19 @@ manifest remains the source of truth for downloadable filenames, checksums, and 
 
 ## 2026-09-02
 
+### Isolated recipe-tree history edits
+
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.115**
+
+#### Fixed
+
+- Keep every unrelated recipe-tree history entry when editing an older tree instead of deleting
+  all entries that followed it.
+- Preserve the intended `No recipe` behavior: clear the selected node and its ingredient-wide
+  favorite without clearing sibling nodes or unrelated saved trees.
+
+## 2026-09-02
+
 ### Reliable inventory key in Recipe Tree screens
 
 - Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.114**

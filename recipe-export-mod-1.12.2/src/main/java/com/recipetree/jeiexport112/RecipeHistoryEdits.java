@@ -16,12 +16,9 @@ final class RecipeHistoryEdits {
             entries.add(editedEntry);
             return entries.size() - 1;
         }
-        if (currentIndex + 1 < entries.size()) {
-            entries.subList(currentIndex + 1, entries.size()).clear();
-        }
         if (preserveCurrentSnapshot) {
-            entries.add(editedEntry);
-            return entries.size() - 1;
+            entries.add(currentIndex + 1, editedEntry);
+            return currentIndex + 1;
         }
         entries.set(currentIndex, editedEntry);
         return currentIndex;
