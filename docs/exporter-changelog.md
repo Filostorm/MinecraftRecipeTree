@@ -5,6 +5,17 @@ manifest remains the source of truth for downloadable filenames, checksums, and 
 
 ## 2026-09-03
 
+### Cleaner aspect-source grids
+
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.118**
+
+#### Improved
+
+- Remove the redundant aspect-source selection reminder from recipe choosers and move the item
+  grid up into the reclaimed space.
+
+## 2026-09-03
+
 ### Grouped starter-recipe selection
 
 - Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.117**

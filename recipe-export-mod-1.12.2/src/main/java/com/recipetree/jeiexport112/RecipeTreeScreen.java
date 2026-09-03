@@ -2477,12 +2477,7 @@ public final class RecipeTreeScreen extends GuiScreen {
             int columns = Math.max(1, (available + gap) / (cellWidth + gap));
             int choiceCount = selectableRecipeCount(pages);
             int rows = (choiceCount + columns - 1) / columns;
-            String instruction = "Select one item; the shown amount becomes the recipe input.";
-            if (intersectsViewport(gridLeft, y, available, 12,
-                    10, viewTop, width - 10, viewBottom)) {
-                fontRenderer.drawString(instruction, gridLeft, y, 0xFFBFCABC);
-            }
-            int gridTop = y + 15;
+            int gridTop = y;
             int firstVisibleRow = Math.max(0,
                     Math.floorDiv(viewTop - gridTop - cellHeight, cellHeight + gap));
             int lastVisibleRow = Math.min(rows - 1,
@@ -3020,9 +3015,7 @@ public final class RecipeTreeScreen extends GuiScreen {
             if (choiceCount <= 0) return y;
             int columns = Math.max(1, (available + gap) / (cellWidth + gap));
             int rows = (choiceCount + columns - 1) / columns;
-            fontRenderer.drawString("Select one item; amount shown is the recipe input.",
-                    gridLeft, y, 0xFFBFCABC);
-            int gridTop = y + 15;
+            int gridTop = y;
             int firstVisibleRow = Math.max(0,
                     Math.floorDiv(viewTop - gridTop - cellHeight, cellHeight + gap));
             int lastVisibleRow = Math.min(rows - 1,
