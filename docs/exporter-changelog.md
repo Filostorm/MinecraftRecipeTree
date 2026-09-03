@@ -5,6 +5,18 @@ manifest remains the source of truth for downloadable filenames, checksums, and 
 
 ## 2026-09-02
 
+### Reliable inventory key in Recipe Tree screens
+
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.114**
+
+#### Fixed
+
+- Honor the configured inventory key directly throughout Recipe Tree instead of depending on
+  transient modifier/context state maintained by Forge and Key Binding Patch.
+- Always open the normal player inventory from Recipe Tree, including while mounted.
+
+## 2026-09-02
+
 ### Lightweight ThaumicJEI aspect-source selection
 
 - Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.113**

@@ -4,6 +4,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.junit.Test;
+import org.lwjgl.input.Keyboard;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -17,6 +18,14 @@ import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 public class RecipeTreeScreenPolicyTest {
+    @Test
+    public void inventoryKeyMatchesTheConfiguredKeyWithoutTransientModifierState() {
+        assertTrue(RecipeTreeScreen.matchesConfiguredInventoryKey(Keyboard.KEY_E, Keyboard.KEY_E));
+        assertTrue(RecipeTreeScreen.matchesConfiguredInventoryKey(Keyboard.KEY_I, Keyboard.KEY_I));
+        assertFalse(RecipeTreeScreen.matchesConfiguredInventoryKey(Keyboard.KEY_E, Keyboard.KEY_I));
+        assertFalse(RecipeTreeScreen.matchesConfiguredInventoryKey(Keyboard.KEY_NONE, Keyboard.KEY_NONE));
+    }
+
     @Test
     public void lwjglIntegerQueriesReserveTheRequiredBufferCapacity() {
         assertEquals(16, RecipeTreeScreen.OPENGL_INTEGER_QUERY_BUFFER_SIZE);

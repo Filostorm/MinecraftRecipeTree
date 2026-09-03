@@ -1070,17 +1070,24 @@ public final class RecipeTreeScreen extends GuiScreen {
     }
 
     private boolean openInventoryIfPressed(int keyCode) {
-        if (mc == null || mc.player == null || mc.gameSettings == null
-                || !mc.gameSettings.keyBindInventory.isActiveAndMatches(keyCode)) {
+        Minecraft client = Minecraft.getMinecraft();
+        if (client == null || client.gameSettings == null
+                || !matchesConfiguredInventoryKey(
+                        keyCode, client.gameSettings.keyBindInventory.getKeyCode())) {
             return false;
         }
-        if (mc.playerController.isRidingHorse()) {
-            mc.player.sendHorseInventory();
-        } else {
-            mc.getTutorial().openInventory();
-            mc.displayGuiScreen(new GuiInventory(mc.player));
+        if (client.player == null) {
+            JeiExportMod.LOGGER.warn(
+                    "[jeiexport] Inventory key was pressed in Recipe Tree, but no client player was available");
+            return true;
         }
+        client.getTutorial().openInventory();
+        client.displayGuiScreen(new GuiInventory(client.player));
         return true;
+    }
+
+    static boolean matchesConfiguredInventoryKey(int eventKeyCode, int configuredKeyCode) {
+        return eventKeyCode != Keyboard.KEY_NONE && eventKeyCode == configuredKeyCode;
     }
 
     private void toggleReusableNode(RecipeTreeModel.Node node) {
