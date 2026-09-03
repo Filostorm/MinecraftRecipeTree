@@ -5,6 +5,19 @@ manifest remains the source of truth for downloadable filenames, checksums, and 
 
 ## 2026-09-02
 
+### Item-wide `No recipe` selection
+
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.116**
+
+#### Changed
+
+- Make `No recipe` clear the selected ingredient's recipe and expanded inputs everywhere that
+  ingredient appears in the current tree.
+- Continue clearing the ingredient's saved favorite while preserving unrelated ingredients and
+  unrelated recipe-tree history entries.
+
+## 2026-09-02
+
 ### Isolated recipe-tree history edits
 
 - Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.115**

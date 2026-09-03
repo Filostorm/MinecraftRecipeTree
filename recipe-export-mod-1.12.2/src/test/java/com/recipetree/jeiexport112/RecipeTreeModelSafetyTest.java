@@ -30,10 +30,12 @@ import static org.junit.Assert.assertTrue;
 
 public class RecipeTreeModelSafetyTest {
     @Test
-    public void clearingOneRecipePreservesOtherNodesAndClearsItsFavorite() throws Exception {
+    public void clearingAnIngredientClearsEveryMatchingNodeAndItsFavorite() throws Exception {
         RecipeTreeViewerBridge.Ingredient item = ingredient("item|example:shared", 1);
         RecipeTreeViewerBridge.Ingredient firstInput = ingredient("item|example:first", 2);
         RecipeTreeViewerBridge.Ingredient secondInput = ingredient("item|example:second", 3);
+        RecipeTreeViewerBridge.Ingredient unrelated = ingredient("item|example:unrelated", 1);
+        RecipeTreeViewerBridge.Ingredient unrelatedInput = ingredient("item|example:kept", 4);
         RecipeTreeViewerBridge.Recipe firstRecipe = recipe(
                 "first-recipe",
                 Collections.singletonList(slot(firstInput)),
@@ -42,22 +44,32 @@ public class RecipeTreeModelSafetyTest {
                 "second-recipe",
                 Collections.singletonList(slot(secondInput)),
                 Collections.singletonList(slot(item)));
+        RecipeTreeViewerBridge.Recipe unrelatedRecipe = recipe(
+                "unrelated-recipe",
+                Collections.singletonList(slot(unrelatedInput)),
+                Collections.singletonList(slot(unrelated)));
         RecipeTreeProgress progress = progress();
         RecipeTreeModel model = new RecipeTreeModel(bridge(), progress, item, 1);
         assertTrue(model.addRoot(item, 1));
+        assertTrue(model.addRoot(unrelated, 1));
         RecipeTreeModel.Node cleared = model.getRoots().get(0);
-        RecipeTreeModel.Node untouched = model.getRoots().get(1);
+        RecipeTreeModel.Node alsoCleared = model.getRoots().get(1);
+        RecipeTreeModel.Node untouched = model.getRoots().get(2);
         assertTrue(model.setRecipe(cleared, firstRecipe, false));
-        assertTrue(model.setRecipe(untouched, secondRecipe, false));
+        assertTrue(model.setRecipe(alsoCleared, secondRecipe, false));
+        assertTrue(model.setRecipe(untouched, unrelatedRecipe, false));
         progress.saveFavoriteRecipe(item.getKey(), firstRecipe.getKey());
 
-        model.clearRecipe(cleared, true);
+        model.clearRecipesForIngredient(cleared, true);
 
         assertNull(cleared.getRecipe());
         assertTrue(cleared.getChildren().isEmpty());
-        assertSame(secondRecipe, untouched.getRecipe());
+        assertNull(alsoCleared.getRecipe());
+        assertTrue(alsoCleared.getChildren().isEmpty());
+        assertSame(unrelatedRecipe, untouched.getRecipe());
         assertEquals(1, untouched.getChildren().size());
-        assertEquals(secondInput.getKey(), untouched.getChildren().get(0).getIngredient().getKey());
+        assertEquals(unrelatedInput.getKey(),
+                untouched.getChildren().get(0).getIngredient().getKey());
         assertNull(progress.favoriteRecipe(item.getKey()));
     }
 

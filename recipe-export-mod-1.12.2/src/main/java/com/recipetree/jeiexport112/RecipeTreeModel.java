@@ -166,12 +166,26 @@ final class RecipeTreeModel {
 
     void clearRecipe(Node node, boolean clearFavorite) {
         if (node == null) return;
+        clearRecipeSelection(node);
+        invalidateSummary();
+        if (clearFavorite) progress.clearFavoriteRecipe(node.ingredient.getKey());
+    }
+
+    void clearRecipesForIngredient(Node node, boolean clearFavorite) {
+        if (node == null) return;
+        String ingredientKey = node.ingredient.getKey();
+        List<Node> matches = new ArrayList<Node>();
+        for (Node root : roots) collectMatching(root, ingredientKey, matches);
+        for (Node match : matches) clearRecipeSelection(match);
+        invalidateSummary();
+        if (clearFavorite) progress.clearFavoriteRecipe(ingredientKey);
+    }
+
+    private static void clearRecipeSelection(Node node) {
         node.recipe = null;
         node.outputPerCraft = BigDecimal.ONE;
         node.children.clear();
         node.truncatedDemands.clear();
-        invalidateSummary();
-        if (clearFavorite) progress.clearFavoriteRecipe(node.ingredient.getKey());
     }
 
     void applyFavoriteEverywhere(String ingredientKey, String recipeKey) {

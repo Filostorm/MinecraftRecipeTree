@@ -2306,7 +2306,7 @@ public final class RecipeTreeScreen extends GuiScreen {
             } else if (button.id == PICKER_ALTERNATIVES) {
                 mc.displayGuiScreen(new AlternativePickerScreen(this, node));
             } else if (button.id == PICKER_NO_RECIPE) {
-                parent.model.clearRecipe(node, true);
+                parent.model.clearRecipesForIngredient(node, true);
                 parent.invalidateLayout();
                 parent.commitHistory(false);
                 mc.displayGuiScreen(parent);
