@@ -115,7 +115,9 @@ final class RecipeTreeModel {
         if (ingredient == null || recipeKey == null) return null;
         for (RecipeTreeViewerBridge.Recipe recipe :
                 flattenedRecipes(ingredient, IFocus.Mode.OUTPUT)) {
-            if (recipeKey.equals(recipe.getKey())) return recipe;
+            if (!recipe.isAspectSourcePage() && recipeKey.equals(recipe.getKey())) return recipe;
+            RecipeTreeViewerBridge.Recipe selected = recipe.resolveAspectSource(recipeKey);
+            if (selected != null) return selected;
         }
         return null;
     }

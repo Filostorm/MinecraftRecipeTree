@@ -62,6 +62,13 @@ public final class RecipeTreeViewerBridge {
     static final String EMC_CATEGORY_TITLE = "EMC Transmutation";
     static final int EMC_RECIPE_WIDTH = 86;
     static final int EMC_RECIPE_HEIGHT = 78;
+    static final String THAUMIC_ASPECT_SOURCE_CATEGORY_UID =
+            "THAUMCRAFT_ASPECT_FROM_ITEMSTACK";
+    static final int THAUMIC_ASPECT_SOURCE_RECIPE_WIDTH = 78;
+    static final int THAUMIC_ASPECT_SOURCE_RECIPE_HEIGHT = 38;
+    private static final String THAUMIC_ASPECT_SOURCE_WRAPPER =
+            "com.buuz135.thaumicjei.category.AspectFromItemStackCategory$" +
+                    "AspectFromItemStackWrapper";
     private static final String THERMAL_TRANSPOSER_CONTAINER_WRAPPER =
             "cofh.thermalexpansion.plugins.jei.machine.transposer." +
                     "TransposerRecipeWrapperContainer";
@@ -330,6 +337,12 @@ public final class RecipeTreeViewerBridge {
                     if (outputs.isEmpty()) {
                         throw new IllegalArgumentException("recipe has no semantic output slots");
                     }
+                    if (THAUMIC_ASPECT_SOURCE_CATEGORY_UID.equals(categoryUid)) {
+                        recipes.add(aspectSourcePage(categoryUid, categoryTitle, catalyst,
+                                wrapperClass, inputs, outputs, dimensions, category, wrapper,
+                                focus));
+                        continue;
+                    }
                     CorrelatedSlots correlated = correlateAlternatives(
                             wrapperClass, focusIngredient.key, inputs, outputs);
                     inputs = correlated.inputs;
@@ -375,6 +388,44 @@ public final class RecipeTreeViewerBridge {
             }
         }
         return result;
+    }
+
+    private static Recipe aspectSourcePage(
+            String categoryUid,
+            String categoryTitle,
+            Ingredient catalyst,
+            String wrapperClass,
+            List<Slot> inputs,
+            List<Slot> outputs,
+            int[] dimensions,
+            IRecipeCategory<?> category,
+            IRecipeWrapper wrapper,
+            IFocus<?> focus) {
+        if (!THAUMIC_ASPECT_SOURCE_WRAPPER.equals(wrapperClass)) {
+            throw new IllegalArgumentException("recognized ThaumicJEI aspect-source category " +
+                    "uses unexpected wrapper " + wrapperClass);
+        }
+        if (outputs.size() != 1 || outputs.get(0).alternatives.size() != 1) {
+            throw new IllegalArgumentException("recognized ThaumicJEI aspect-source wrapper no " +
+                    "longer exposes exactly one aspect output");
+        }
+        if (inputs.isEmpty()) {
+            throw new IllegalArgumentException("recognized ThaumicJEI aspect-source wrapper has " +
+                    "no selectable item sources");
+        }
+        List<Ingredient> sources = new ArrayList<Ingredient>(inputs.size());
+        for (Slot input : inputs) {
+            if (input.alternatives.size() != 1
+                    || input.alternatives.get(0).type != VanillaTypes.ITEM) {
+                throw new IllegalArgumentException("recognized ThaumicJEI aspect-source wrapper " +
+                        "no longer exposes one item per selectable source");
+            }
+            sources.add(input.alternatives.get(0));
+        }
+        String recipeKey = recipeKey(categoryUid, wrapper, inputs, outputs);
+        return Recipe.aspectSourcePage(recipeKey, categoryUid, categoryTitle, catalyst,
+                inputs, outputs, dimensions[0], dimensions[1], category, wrapper, focus,
+                sources);
     }
 
     /**
@@ -1688,19 +1739,23 @@ public final class RecipeTreeViewerBridge {
         private final IRecipeWrapper wrapper;
         private final IFocus<?> focus;
         private final boolean emcTransmutation;
+        private final List<Ingredient> selectableAspectSources;
+        private final boolean selectedAspectSource;
 
         Recipe(String key, String categoryUid, String categoryTitle,
                Ingredient catalystMachine, List<Slot> inputs, List<Slot> outputs,
                int width, int height, IRecipeCategory<?> category,
                IRecipeWrapper wrapper, IFocus<?> focus) {
             this(key, categoryUid, categoryTitle, catalystMachine, inputs, outputs,
-                    width, height, category, wrapper, focus, false);
+                    width, height, category, wrapper, focus, false,
+                    Collections.<Ingredient>emptyList(), false);
         }
 
         private Recipe(String key, String categoryUid, String categoryTitle,
                Ingredient catalystMachine, List<Slot> inputs, List<Slot> outputs,
                int width, int height, IRecipeCategory<?> category,
-               IRecipeWrapper wrapper, IFocus<?> focus, boolean emcTransmutation) {
+               IRecipeWrapper wrapper, IFocus<?> focus, boolean emcTransmutation,
+               List<Ingredient> selectableAspectSources, boolean selectedAspectSource) {
             this.key = key;
             this.categoryUid = categoryUid;
             this.categoryTitle = categoryTitle;
@@ -1713,6 +1768,9 @@ public final class RecipeTreeViewerBridge {
             this.wrapper = wrapper;
             this.focus = focus;
             this.emcTransmutation = emcTransmutation;
+            this.selectableAspectSources = Collections.unmodifiableList(
+                    new ArrayList<Ingredient>(selectableAspectSources));
+            this.selectedAspectSource = selectedAspectSource;
         }
 
         static Recipe emc(String outputKey, Ingredient catalystMachine,
@@ -1720,7 +1778,54 @@ public final class RecipeTreeViewerBridge {
             return new Recipe("projecte:emc/" + Naming.hash8(outputKey),
                     EMC_CATEGORY_UID, EMC_CATEGORY_TITLE, catalystMachine,
                     inputs, outputs, EMC_RECIPE_WIDTH, EMC_RECIPE_HEIGHT,
-                    null, null, null, true);
+                    null, null, null, true, Collections.<Ingredient>emptyList(), false);
+        }
+
+        static Recipe aspectSourcePage(
+                String key, String categoryUid, String categoryTitle,
+                Ingredient catalystMachine, List<Slot> inputs, List<Slot> outputs,
+                int width, int height, IRecipeCategory<?> category,
+                IRecipeWrapper wrapper, IFocus<?> focus, List<Ingredient> sources) {
+            return new Recipe(key, categoryUid, categoryTitle, catalystMachine, inputs, outputs,
+                    width, height, category, wrapper, focus, false, sources, false);
+        }
+
+        public Recipe selectAspectSource(Ingredient source) {
+            if (!isAspectSourcePage() || source == null) return null;
+            boolean found = false;
+            for (Ingredient candidate : selectableAspectSources) {
+                if (candidate.key.equals(source.key)
+                        && candidate.amount.compareTo(source.amount) == 0) {
+                    source = candidate;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) return null;
+            List<Slot> selectedInputs = Collections.singletonList(
+                    new Slot(Collections.singletonList(source)));
+            String selectedKey = aspectSourceKey(selectedInputs);
+            return new Recipe(selectedKey, categoryUid, categoryTitle, catalystMachine,
+                    selectedInputs, outputs, THAUMIC_ASPECT_SOURCE_RECIPE_WIDTH,
+                    THAUMIC_ASPECT_SOURCE_RECIPE_HEIGHT, category, wrapper, focus, false,
+                    Collections.<Ingredient>emptyList(), true);
+        }
+
+        public Recipe resolveAspectSource(String selectedKey) {
+            if (!isAspectSourcePage() || selectedKey == null) return null;
+            for (Ingredient source : selectableAspectSources) {
+                List<Slot> selectedInputs = Collections.singletonList(
+                        new Slot(Collections.singletonList(source)));
+                if (selectedKey.equals(aspectSourceKey(selectedInputs))) {
+                    return selectAspectSource(source);
+                }
+            }
+            return null;
+        }
+
+        private String aspectSourceKey(List<Slot> selectedInputs) {
+            return semanticRecipeKey(
+                    categoryUid, semanticSlots(selectedInputs), semanticSlots(outputs));
         }
 
         public String getKey() {
@@ -1757,6 +1862,18 @@ public final class RecipeTreeViewerBridge {
 
         public boolean isEmcTransmutation() {
             return emcTransmutation;
+        }
+
+        public boolean isAspectSourcePage() {
+            return !selectableAspectSources.isEmpty();
+        }
+
+        public boolean isSelectedAspectSource() {
+            return selectedAspectSource;
+        }
+
+        public List<Ingredient> getSelectableAspectSources() {
+            return selectableAspectSources;
         }
     }
 

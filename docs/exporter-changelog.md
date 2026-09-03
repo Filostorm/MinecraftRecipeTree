@@ -5,6 +5,21 @@ manifest remains the source of truth for downloadable filenames, checksums, and 
 
 ## 2026-09-02
 
+### Lightweight ThaumicJEI aspect-source selection
+
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.113**
+
+#### Fixed
+
+- Replace hundreds of heavy `Aspect from ItemStack` recipe canvases with one virtualized item grid
+  that renders only the visible choices.
+- Treat each listed item as an independent recipe choice instead of combining every item on a
+  ThaumicJEI page into one incorrect multi-input recipe.
+- Preserve the selected item's exact displayed aspect amount as the single recipe input and render
+  that compact selection correctly in the tree.
+
+## 2026-09-02
+
 ### Live Modular Machinery structure previews
 
 - Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.112**
