@@ -5,6 +5,17 @@ manifest remains the source of truth for downloadable filenames, checksums, and 
 
 ## 2026-09-03
 
+### Grouped Crucible catalyst alternatives
+
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.121**
+
+#### Fixed
+
+- Show Ore Dictionary variants accepted by one ThaumicJEI Crucible catalyst slot as switchable
+  alternatives in one input node instead of treating every variant as a separately required item.
+
+## 2026-09-03
+
 ### Deletable recipe-tree history
 
 - Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.120**

@@ -69,6 +69,9 @@ public final class RecipeTreeViewerBridge {
     private static final String THAUMIC_ASPECT_SOURCE_WRAPPER =
             "com.buuz135.thaumicjei.category.AspectFromItemStackCategory$" +
                     "AspectFromItemStackWrapper";
+    static final String THAUMIC_CRUCIBLE_CATEGORY_UID = "THAUMCRAFT_CRUCIBLE";
+    private static final String THAUMIC_CRUCIBLE_WRAPPER =
+            "com.buuz135.thaumicjei.category.CrucibleCategory$CrucibleWrapper";
     private static final String THERMAL_TRANSPOSER_CONTAINER_WRAPPER =
             "cofh.thermalexpansion.plugins.jei.machine.transposer." +
                     "TransposerRecipeWrapperContainer";
@@ -331,8 +334,9 @@ public final class RecipeTreeViewerBridge {
                     RecordingIngredients recording = new RecordingIngredients(ingredientRegistry);
                     wrapper.getIngredients(recording);
                     String wrapperClass = wrapper.getClass().getName();
-                    List<Slot> inputs = normalizeBrewingInputs(
-                            wrapperClass, slots(recording.allInputs()));
+                    List<Slot> inputs = normalizeThaumicCrucibleInputs(
+                            categoryUid, wrapperClass, normalizeBrewingInputs(
+                                    wrapperClass, slots(recording.allInputs())));
                     List<Slot> outputs = slots(recording.allOutputs());
                     if (outputs.isEmpty()) {
                         throw new IllegalArgumentException("recipe has no semantic output slots");
@@ -1365,6 +1369,76 @@ public final class RecipeTreeViewerBridge {
         List<Slot> normalized = new ArrayList<Slot>(2);
         normalized.add(inputs.get(0));
         normalized.add(inputs.get(3));
+        return Collections.unmodifiableList(normalized);
+    }
+
+    /**
+     * ThaumicJEI 1.7.0 publishes every stack accepted by a Crucible catalyst Ingredient through
+     * flat {@code setInputs}, even though its native layout consumes only the first HEI slot as
+     * one rotating catalyst. Preserve that actual recipe contract by combining those item slots
+     * into one interchangeable slot; aspect slots remain independent required inputs.
+     */
+    static List<Slot> normalizeThaumicCrucibleInputs(
+            String categoryUid,
+            String wrapperClass,
+            List<Slot> inputs) {
+        boolean categoryMatches = THAUMIC_CRUCIBLE_CATEGORY_UID.equals(categoryUid);
+        boolean wrapperMatches = THAUMIC_CRUCIBLE_WRAPPER.equals(wrapperClass);
+        if (!categoryMatches && !wrapperMatches) {
+            return inputs;
+        }
+        if (!categoryMatches || !wrapperMatches) {
+            throw new IllegalArgumentException(
+                    "recognized ThaumicJEI Crucible category/wrapper pair no longer matches");
+        }
+        if (inputs == null || inputs.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "recognized ThaumicJEI Crucible wrapper has no semantic inputs");
+        }
+
+        int firstItemSlot = -1;
+        int itemSlotCount = 0;
+        List<Ingredient> catalystAlternatives = new ArrayList<Ingredient>();
+        for (int slotIndex = 0; slotIndex < inputs.size(); slotIndex++) {
+            Slot slot = inputs.get(slotIndex);
+            if (slot == null || slot.alternatives.isEmpty()) {
+                throw new IllegalArgumentException(
+                        "recognized ThaumicJEI Crucible wrapper has an empty input slot");
+            }
+            boolean hasItem = false;
+            boolean hasOther = false;
+            for (Ingredient alternative : slot.alternatives) {
+                if (alternative.type == VanillaTypes.ITEM) hasItem = true;
+                else hasOther = true;
+            }
+            if (hasItem && hasOther) {
+                throw new IllegalArgumentException(
+                        "recognized ThaumicJEI Crucible wrapper mixes item and aspect " +
+                                "alternatives in one slot");
+            }
+            if (!hasItem) continue;
+            if (firstItemSlot < 0) firstItemSlot = slotIndex;
+            itemSlotCount++;
+            catalystAlternatives.addAll(slot.alternatives);
+        }
+        if (firstItemSlot < 0) {
+            throw new IllegalArgumentException(
+                    "recognized ThaumicJEI Crucible wrapper has no catalyst item slot");
+        }
+        if (itemSlotCount == 1) {
+            return inputs;
+        }
+
+        List<Slot> normalized = new ArrayList<Slot>(inputs.size() - itemSlotCount + 1);
+        for (int slotIndex = 0; slotIndex < inputs.size(); slotIndex++) {
+            Slot slot = inputs.get(slotIndex);
+            boolean itemSlot = slot.alternatives.get(0).type == VanillaTypes.ITEM;
+            if (slotIndex == firstItemSlot) {
+                normalized.add(new Slot(catalystAlternatives));
+            } else if (!itemSlot) {
+                normalized.add(slot);
+            }
+        }
         return Collections.unmodifiableList(normalized);
     }
 
