@@ -1311,6 +1311,18 @@ public final class RecipeTreeScreen extends GuiScreen {
         openHistoryEntry(next);
     }
 
+    private void deleteHistoryEntry(int index) {
+        if (index < 0 || index >= history.size()) return;
+        historyIndex = RecipeHistoryEdits.delete(history, historyIndex, index);
+        RecipeTreeProgress.RecipeHistoryEntry lastViewed = historyIndex >= 0
+                && historyIndex < history.size()
+                ? history.get(historyIndex)
+                : history.isEmpty() ? null : history.get(history.size() - 1);
+        progress.replaceRecipeHistory(history, lastViewed);
+        updateButtonLabels();
+        status = "Deleted history item";
+    }
+
     private void openHistoryEntry(int index) {
         RecipeTreeProgress.RecipeHistoryEntry entry = history.get(index);
         RecipeTreeModel restored = RecipeTreeModel.restore(bridge, progress, entry);
@@ -3557,6 +3569,7 @@ public final class RecipeTreeScreen extends GuiScreen {
         private final RecipeTreeScreen parent;
         private final GuiScreen returnScreen;
         private final List<HistoryHitbox> cards = new ArrayList<HistoryHitbox>();
+        private final List<HistoryHitbox> deleteButtons = new ArrayList<HistoryHitbox>();
         private Integer comparisonIndex;
         private int scroll;
         private int contentHeight;
@@ -3584,6 +3597,7 @@ public final class RecipeTreeScreen extends GuiScreen {
             Gui.drawRect(6, 6, width - 6, 8, 0xFF55B947);
             fontRenderer.drawString("(L)  Recipe tree history", 18, 20, 0xFFF1F1F1);
             cards.clear();
+            deleteButtons.clear();
             int gap = 8;
             int cardWidth = Math.max(140, Math.min(260, (width - 42) / 3));
             int columns = Math.max(1, (width - 28 + gap) / (cardWidth + gap));
@@ -3612,18 +3626,26 @@ public final class RecipeTreeScreen extends GuiScreen {
                         safeRenderIngredient(ingredient, left + 9, top + 14, "history-card");
                     }
                     String name = historyName(entry);
-                    fontRenderer.drawString(trim(name, cardWidth - 48), left + 34, top + 10,
+                    fontRenderer.drawString(trim(name, cardWidth - 64), left + 34, top + 10,
                             0xFFF0F2EE);
                     String depth = "Tree depth " + entry.getTreeDepth();
                     fontRenderer.drawString(depth, left + 34, top + 27, 0xFFB9C5B7);
                     cards.add(new HistoryHitbox(index, left, top, cardWidth, 46));
+                    int deleteLeft = left + cardWidth - 15;
+                    int deleteTop = top + 4;
+                    HistoryHitbox delete = new HistoryHitbox(
+                            index, deleteLeft, deleteTop, 11, 11);
+                    deleteButtons.add(delete);
+                    Gui.drawRect(deleteLeft, deleteTop, deleteLeft + 11, deleteTop + 11,
+                            delete.contains(mouseX, mouseY) ? 0xFFC85353 : 0xFF793939);
+                    fontRenderer.drawString("x", deleteLeft + 3, deleteTop + 1, 0xFFFFFFFF);
                 }
             } finally {
                 GL11.glDisable(GL11.GL_SCISSOR_TEST);
             }
             fontRenderer.drawString(
                     comparisonIndex == null
-                            ? "Newest first - left click to open; right click to choose a comparison"
+                            ? "Newest first - left click to open; right click to compare; x deletes"
                             : "Right click another tree to compare recipe choices",
                     16, height - 24, 0xFFBFC8BD);
             super.drawScreen(mouseX, mouseY, partialTicks);
@@ -3636,6 +3658,16 @@ public final class RecipeTreeScreen extends GuiScreen {
             if (mc.currentScreen != this) return;
             if (!pointInsideViewport(mouseX, mouseY,
                     10, 42, width - 10, height - 38)) return;
+            for (HistoryHitbox delete : deleteButtons) {
+                if (mouseButton != 0 || !delete.contains(mouseX, mouseY)) continue;
+                int deletedIndex = delete.index;
+                parent.deleteHistoryEntry(deletedIndex);
+                if (comparisonIndex != null) {
+                    if (comparisonIndex == deletedIndex) comparisonIndex = null;
+                    else if (comparisonIndex > deletedIndex) comparisonIndex--;
+                }
+                return;
+            }
             for (HistoryHitbox card : cards) {
                 if (!card.contains(mouseX, mouseY)) continue;
                 if (mouseButton == 0) {

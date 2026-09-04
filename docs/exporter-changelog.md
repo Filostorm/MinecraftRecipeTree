@@ -5,6 +5,17 @@ manifest remains the source of truth for downloadable filenames, checksums, and 
 
 ## 2026-09-03
 
+### Deletable recipe-tree history
+
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.120**
+
+#### Added
+
+- Add an `x` control to every in-game recipe-tree history card for deleting that saved tree without
+  affecting neighboring history entries.
+
+## 2026-09-03
+
 ### Correct aspect-source scaling
 
 - Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.119**
