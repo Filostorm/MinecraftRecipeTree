@@ -6,6 +6,7 @@ import com.google.gson.JsonParser;
 import org.junit.Test;
 import org.lwjgl.input.Keyboard;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -138,6 +139,18 @@ public class RecipeTreeScreenPolicyTest {
         RecipeTreeLayout.Size scaledSize = RecipeTreeScreen.pickerRecipeCardSize(156, 84, 0.5F);
         assertEquals(78, scaledSize.width);
         assertEquals(42, scaledSize.height);
+    }
+
+    @Test
+    public void recipePickerSearchMatchesDisplayNamesAndStableIngredientKeys() {
+        RecipeTreeViewerBridge.Ingredient ingredient =
+                new RecipeTreeViewerBridge.Ingredient(
+                        null, "item|thaumcraft:quicksilver", "item|thaumcraft:quicksilver",
+                        "Quicksilver Drop", BigDecimal.ONE);
+
+        assertTrue(RecipeTreeScreen.pickerIngredientMatchesSearch(ingredient, "quicksilver"));
+        assertTrue(RecipeTreeScreen.pickerIngredientMatchesSearch(ingredient, "thaumcraft"));
+        assertFalse(RecipeTreeScreen.pickerIngredientMatchesSearch(ingredient, "aer crystal"));
     }
 
     @Test

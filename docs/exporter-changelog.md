@@ -3,6 +3,24 @@
 This file contains release-ready notes for the Minecraft exporter builds. The generated exporter
 manifest remains the source of truth for downloadable filenames, checksums, and compatibility.
 
+## 2026-09-04
+
+### Searchable recipe picker and aspect byproducts
+
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.122**
+
+#### Added
+
+- Add a live search field to the in-game input-recipe picker that filters recipe categories,
+  machines, ingredients, outputs, and aspect-source items.
+- Mark aspect-source items that contain additional aspects with a corner `+` and list those
+  aspects and amounts on hover.
+
+#### Changed
+
+- Treat every non-selected aspect on a chosen aspect-source item as a recipe byproduct so it is
+  included in the tree's existing byproduct totals and reuse calculations.
+
 ## 2026-09-03
 
 ### Grouped Crucible catalyst alternatives

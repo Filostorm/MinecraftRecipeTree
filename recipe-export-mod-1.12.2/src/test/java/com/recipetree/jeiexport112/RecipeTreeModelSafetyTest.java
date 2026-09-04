@@ -37,7 +37,8 @@ public class RecipeTreeModelSafetyTest {
                 "aspect-page", RecipeTreeViewerBridge.THAUMIC_ASPECT_SOURCE_CATEGORY_UID,
                 "Aspect from ItemStack", null, Collections.singletonList(slot(source)),
                 Collections.singletonList(slot(aspect)), 220, 140, null, null, null,
-                Collections.singletonList(source));
+                Collections.singletonList(source),
+                Collections.<String, List<RecipeTreeViewerBridge.Ingredient>>emptyMap());
         RecipeTreeViewerBridge.Recipe selected = page.selectAspectSource(source);
         RecipeTreeViewerBridge.Ingredient masterSpell = ingredient("item|example:master_spell", 1);
         RecipeTreeModel model = model(masterSpell, 1);

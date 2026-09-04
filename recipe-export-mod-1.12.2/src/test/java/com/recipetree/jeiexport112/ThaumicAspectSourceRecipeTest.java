@@ -5,6 +5,9 @@ import org.junit.Test;
 import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -59,6 +62,35 @@ public final class ThaumicAspectSourceRecipeTest {
         assertEquals(2, page.getSelectableAspectSources().size());
     }
 
+    @Test
+    public void selectingOneSourceAddsItsOtherAspectsAsByproducts() {
+        RecipeTreeViewerBridge.Ingredient source =
+                ingredient("item|example:source", "Source", 45);
+        RecipeTreeViewerBridge.Ingredient primary =
+                ingredient("aspect|aer", "Aer", 1);
+        RecipeTreeViewerBridge.Ingredient motus =
+                ingredient("aspect|motus", "Motus", 8);
+        RecipeTreeViewerBridge.Ingredient volatus =
+                ingredient("aspect|volatus", "Volatus", 3);
+        Map<String, List<RecipeTreeViewerBridge.Ingredient>> byproducts =
+                new LinkedHashMap<String, List<RecipeTreeViewerBridge.Ingredient>>();
+        byproducts.put(RecipeTreeViewerBridge.Recipe.aspectSourceIdentity(source),
+                Arrays.asList(motus, volatus));
+        RecipeTreeViewerBridge.Recipe page = RecipeTreeViewerBridge.Recipe.aspectSourcePage(
+                "page", RecipeTreeViewerBridge.THAUMIC_ASPECT_SOURCE_CATEGORY_UID,
+                "Aspect from ItemStack", null,
+                Collections.singletonList(slot(source)), Collections.singletonList(slot(primary)),
+                220, 140, null, null, null, Collections.singletonList(source), byproducts);
+
+        RecipeTreeViewerBridge.Recipe selected = page.selectAspectSource(source);
+
+        assertEquals(Arrays.asList(motus, volatus), page.getAspectSourceByproducts(source));
+        assertEquals(3, selected.getOutputs().size());
+        assertEquals("aspect|aer", selected.getOutputs().get(0).getAlternatives().get(0).getKey());
+        assertEquals("aspect|motus", selected.getOutputs().get(1).getAlternatives().get(0).getKey());
+        assertEquals("aspect|volatus", selected.getOutputs().get(2).getAlternatives().get(0).getKey());
+    }
+
     private static RecipeTreeViewerBridge.Recipe page(
             RecipeTreeViewerBridge.Ingredient first,
             RecipeTreeViewerBridge.Ingredient second,
@@ -67,7 +99,8 @@ public final class ThaumicAspectSourceRecipeTest {
                 "page", RecipeTreeViewerBridge.THAUMIC_ASPECT_SOURCE_CATEGORY_UID,
                 "Aspect from ItemStack", null,
                 Arrays.asList(slot(first), slot(second)), Collections.singletonList(slot(output)),
-                220, 140, null, null, null, Arrays.asList(first, second));
+                220, 140, null, null, null, Arrays.asList(first, second),
+                Collections.<String, List<RecipeTreeViewerBridge.Ingredient>>emptyMap());
     }
 
     private static RecipeTreeViewerBridge.Slot slot(
