@@ -1602,9 +1602,11 @@ public final class RecipeTreeScreen extends GuiScreen {
         JerMobRenderCompat.ScopeToken jerScope =
                 JerMobRenderCompat.begin(recipe.getCategoryUid(), left, top, scale);
         RecipeTreeViewerBridge.NativeRenderScope nativeRenderScope = null;
+        ModularMachineryPreviewScope structurePreviewScope = null;
         GlStateManager.pushMatrix();
         try {
             nativeRenderScope = bridge.beginNativeRender(recipe, client);
+            structurePreviewScope = bridge.beginStructurePreview(recipe, client, left, top, scale);
             GlStateManager.translate(left, top, 0);
             GlStateManager.scale(scale, scale, 1F);
             drawable.setPosition(0, 0);
@@ -1616,6 +1618,7 @@ public final class RecipeTreeScreen extends GuiScreen {
             logRenderFailure("recipe:" + recipe.getKey(), error);
             nativeRecipeDrawFailures.add(recipe.getKey());
         } finally {
+            if (structurePreviewScope != null) structurePreviewScope.close();
             if (nativeRenderScope != null) {
                 nativeRenderScope.close();
             }

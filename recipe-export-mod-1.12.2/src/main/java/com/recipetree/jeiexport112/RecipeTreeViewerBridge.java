@@ -652,6 +652,24 @@ public final class RecipeTreeViewerBridge {
         return NativeRenderScope.enter(client, recipesGui, recipe.key);
     }
 
+    ModularMachineryPreviewScope beginStructurePreview(
+            Recipe recipe, Minecraft client, int left, int top, float scale) {
+        if (!ModularMachineryStructure.isPreviewCategory(recipe.categoryUid)) return null;
+        // Original Modular Machinery uses a different renderer; this adapter is for MMCE.
+        try {
+            recipe.wrapper.getClass().getMethod("getGuiBlueprintScreenJEI");
+        } catch (NoSuchMethodException originalModularMachinery) {
+            return null;
+        }
+        try {
+            return new ModularMachineryPreviewScope(recipe.wrapper, client,
+                    recipe.getWidth(), recipe.getHeight(), left, top, scale);
+        } catch (ReflectiveOperationException error) {
+            throw new IllegalStateException("Could not align MMCE structure preview " + recipe.key,
+                    error);
+        }
+    }
+
     static final class NativeRenderScope {
         private static final String HEI_RECIPES_GUI = "mezz.jei.gui.recipes.RecipesGui";
         private static final NativeRenderScope NO_OP =
