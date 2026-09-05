@@ -5,6 +5,25 @@ manifest remains the source of truth for downloadable filenames, checksums, and 
 
 ## 2026-09-05
 
+### Compact, complete aspect tooltips
+
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.125**
+- Include the selected aspect first in the corner tooltip, followed by its additional aspects.
+- Use the native quantities on the icons without a duplicate amount row underneath.
+- Move the `+` slightly right and down within its shaded corner.
+- Keep the selected aspect as the primary output, not a byproduct.
+
+## 2026-09-05
+
+### Aligned multiblock structure previews
+
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.124**
+- Align Modular Machinery CE's live 3D structure with its recipe panel at every zoom and GUI scale.
+- Clip the structure to its panel and the recipe list viewport while scrolling, and restore
+  native renderer callbacks and graphics state after drawing.
+
+## 2026-09-05
+
 ### Aspect-grid corner tooltips
 
 - Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.123**

@@ -1602,9 +1602,11 @@ public final class RecipeTreeScreen extends GuiScreen {
         JerMobRenderCompat.ScopeToken jerScope =
                 JerMobRenderCompat.begin(recipe.getCategoryUid(), left, top, scale);
         RecipeTreeViewerBridge.NativeRenderScope nativeRenderScope = null;
+        ModularMachineryPreviewScope structurePreviewScope = null;
         GlStateManager.pushMatrix();
         try {
             nativeRenderScope = bridge.beginNativeRender(recipe, client);
+            structurePreviewScope = bridge.beginStructurePreview(recipe, client, left, top, scale);
             GlStateManager.translate(left, top, 0);
             GlStateManager.scale(scale, scale, 1F);
             drawable.setPosition(0, 0);
@@ -1616,6 +1618,7 @@ public final class RecipeTreeScreen extends GuiScreen {
             logRenderFailure("recipe:" + recipe.getKey(), error);
             nativeRecipeDrawFailures.add(recipe.getKey());
         } finally {
+            if (structurePreviewScope != null) structurePreviewScope.close();
             if (nativeRenderScope != null) {
                 nativeRenderScope.close();
             }
@@ -1758,21 +1761,19 @@ public final class RecipeTreeScreen extends GuiScreen {
             Gui.drawRect(right - row - 1, bottom - ASPECT_CORNER_SIZE + row,
                     right, bottom - ASPECT_CORNER_SIZE + row + 1, 0xFF14231F);
         }
-        fontRenderer.drawString("+", right - 8, bottom - 10, 0xFFF2F7EF);
+        fontRenderer.drawString("+", right - 7, bottom - 9, 0xFFF2F7EF);
     }
 
     private void drawAspectSourceByproductTooltip(
             AspectSourceHitbox source, int mouseX, int mouseY,
             int screenWidth, int screenHeight) {
         int cellWidth = 24;
-        for (RecipeTreeViewerBridge.Ingredient byproduct : source.byproducts) {
-            cellWidth = Math.max(cellWidth, fontRenderer.getStringWidth(
-                    RecipeTreeModel.formatAmount(byproduct.getAmount())) + 6);
-        }
-        int rowWidth = source.byproducts.size() * cellWidth + 8;
+        List<RecipeTreeViewerBridge.Ingredient> aspects =
+                source.page.getAspectSourceOutputs(source.ingredient);
+        int rowWidth = aspects.size() * cellWidth + 8;
         float scale = Math.min(1F, (screenWidth - 8F) / rowWidth);
         int tooltipWidth = (int) Math.ceil(rowWidth * scale);
-        int tooltipHeight = (int) Math.ceil(36 * scale);
+        int tooltipHeight = (int) Math.ceil(24 * scale);
         int x = mouseX + 12;
         if (x + tooltipWidth > screenWidth - 4) x = mouseX - tooltipWidth - 12;
         x = Math.max(4, Math.min(x, screenWidth - tooltipWidth - 4));
@@ -1782,17 +1783,14 @@ public final class RecipeTreeScreen extends GuiScreen {
             GlStateManager.translate(x, y, 300F);
             GlStateManager.scale(scale, scale, 1F);
             GlStateManager.disableDepth();
-            Gui.drawRect(0, 0, rowWidth, 36, 0xFF62547A);
-            Gui.drawRect(1, 1, rowWidth - 1, 35, 0xF0100010);
-            for (int index = 0; index < source.byproducts.size(); index++) {
-                RecipeTreeViewerBridge.Ingredient byproduct = source.byproducts.get(index);
+            Gui.drawRect(0, 0, rowWidth, 24, 0xFF62547A);
+            Gui.drawRect(1, 1, rowWidth - 1, 23, 0xF0100010);
+            for (int index = 0; index < aspects.size(); index++) {
+                RecipeTreeViewerBridge.Ingredient aspect = aspects.get(index);
                 int center = 4 + index * cellWidth + cellWidth / 2;
-                safeRenderIngredient(byproduct, center - 8, 4,
+                safeRenderIngredient(aspect, center - 8, 4,
                         "thaumic-aspect-grid-byproduct");
                 GlStateManager.disableDepth();
-                String amount = RecipeTreeModel.formatAmount(byproduct.getAmount());
-                fontRenderer.drawStringWithShadow(amount,
-                        center - fontRenderer.getStringWidth(amount) / 2, 24, 0xFFE8EEE6);
             }
         } finally {
             GlStateManager.popMatrix();
