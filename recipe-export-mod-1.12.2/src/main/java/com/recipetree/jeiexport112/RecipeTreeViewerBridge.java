@@ -429,15 +429,15 @@ public final class RecipeTreeViewerBridge {
             sources.add(input.alternatives.get(0));
         }
         Ingredient primaryAspect = outputs.get(0).alternatives.get(0);
-        Map<String, List<Ingredient>> byproducts =
-                aspectSourceByproducts(sources, primaryAspect);
+        Map<String, List<Ingredient>> sourceOutputs =
+                aspectSourceOutputs(sources, primaryAspect);
         String recipeKey = recipeKey(categoryUid, wrapper, inputs, outputs);
         return Recipe.aspectSourcePage(recipeKey, categoryUid, categoryTitle, catalyst,
                 inputs, outputs, dimensions[0], dimensions[1], category, wrapper, focus,
-                sources, byproducts);
+                sources, sourceOutputs);
     }
 
-    private Map<String, List<Ingredient>> aspectSourceByproducts(
+    private Map<String, List<Ingredient>> aspectSourceOutputs(
             List<Ingredient> sources,
             Ingredient primaryAspect) {
         if (primaryAspect == null || primaryAspect.value == null || primaryAspect.type == null) {
@@ -484,7 +484,6 @@ public final class RecipeTreeViewerBridge {
                                     "Thaumcraft object tags");
                 }
                 for (Map.Entry<?, ?> entry : allAspectMap.entrySet()) {
-                    if (primaryAspectKey.equals(entry.getKey())) continue;
                     if (!(entry.getValue() instanceof Number)
                             || ((Number) entry.getValue()).intValue() <= 0) {
                         throw new IllegalArgumentException(
@@ -496,7 +495,12 @@ public final class RecipeTreeViewerBridge {
                     Map<Object, Object> singletonMap =
                             (Map<Object, Object>) aspectMap(aspectsField, singleton);
                     singletonMap.put(entry.getKey(), entry.getValue());
-                    extras.add(ingredientUnchecked(primaryAspect.type, singleton));
+                    Ingredient aspect = ingredientUnchecked(primaryAspect.type, singleton);
+                    if (primaryAspectKey.equals(entry.getKey())) {
+                        extras.add(0, aspect);
+                    } else {
+                        extras.add(aspect);
+                    }
                 }
             } catch (Throwable throwable) {
                 FatalErrors.rethrowIfFatal(throwable);
@@ -1921,7 +1925,7 @@ public final class RecipeTreeViewerBridge {
         private final IFocus<?> focus;
         private final boolean emcTransmutation;
         private final List<Ingredient> selectableAspectSources;
-        private final Map<String, List<Ingredient>> aspectSourceByproducts;
+        private final Map<String, List<Ingredient>> aspectSourceOutputs;
         private final boolean selectedAspectSource;
 
         Recipe(String key, String categoryUid, String categoryTitle,
@@ -1939,7 +1943,7 @@ public final class RecipeTreeViewerBridge {
                int width, int height, IRecipeCategory<?> category,
                IRecipeWrapper wrapper, IFocus<?> focus, boolean emcTransmutation,
                List<Ingredient> selectableAspectSources,
-               Map<String, List<Ingredient>> aspectSourceByproducts,
+               Map<String, List<Ingredient>> aspectSourceOutputs,
                boolean selectedAspectSource) {
             this.key = key;
             this.categoryUid = categoryUid;
@@ -1955,8 +1959,8 @@ public final class RecipeTreeViewerBridge {
             this.emcTransmutation = emcTransmutation;
             this.selectableAspectSources = Collections.unmodifiableList(
                     new ArrayList<Ingredient>(selectableAspectSources));
-            this.aspectSourceByproducts = immutableAspectSourceByproducts(
-                    aspectSourceByproducts);
+            this.aspectSourceOutputs = immutableAspectSourceOutputs(
+                    aspectSourceOutputs);
             this.selectedAspectSource = selectedAspectSource;
         }
 
@@ -1974,10 +1978,10 @@ public final class RecipeTreeViewerBridge {
                 Ingredient catalystMachine, List<Slot> inputs, List<Slot> outputs,
                 int width, int height, IRecipeCategory<?> category,
                 IRecipeWrapper wrapper, IFocus<?> focus, List<Ingredient> sources,
-                Map<String, List<Ingredient>> sourceByproducts) {
+                Map<String, List<Ingredient>> sourceOutputs) {
             return new Recipe(key, categoryUid, categoryTitle, catalystMachine, inputs, outputs,
                     width, height, category, wrapper, focus, false, sources,
-                    sourceByproducts, false);
+                    sourceOutputs, false);
         }
 
         public Recipe selectAspectSource(Ingredient source) {
@@ -2021,12 +2025,21 @@ public final class RecipeTreeViewerBridge {
         }
 
         public List<Ingredient> getAspectSourceByproducts(Ingredient source) {
+            List<Ingredient> result = new ArrayList<Ingredient>();
+            String primaryKey = outputs.get(0).alternatives.get(0).key;
+            for (Ingredient aspect : getAspectSourceOutputs(source)) {
+                if (!primaryKey.equals(aspect.key)) result.add(aspect);
+            }
+            return Collections.unmodifiableList(result);
+        }
+
+        public List<Ingredient> getAspectSourceOutputs(Ingredient source) {
             if (source == null) return Collections.emptyList();
-            List<Ingredient> result = aspectSourceByproducts.get(aspectSourceIdentity(source));
+            List<Ingredient> result = aspectSourceOutputs.get(aspectSourceIdentity(source));
             return result == null ? Collections.<Ingredient>emptyList() : result;
         }
 
-        private static Map<String, List<Ingredient>> immutableAspectSourceByproducts(
+        private static Map<String, List<Ingredient>> immutableAspectSourceOutputs(
                 Map<String, List<Ingredient>> source) {
             Map<String, List<Ingredient>> result =
                     new LinkedHashMap<String, List<Ingredient>>();

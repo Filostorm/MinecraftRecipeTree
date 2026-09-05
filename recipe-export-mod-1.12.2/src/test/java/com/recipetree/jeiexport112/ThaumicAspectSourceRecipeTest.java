@@ -72,10 +72,12 @@ public final class ThaumicAspectSourceRecipeTest {
                 ingredient("aspect|motus", "Motus", 8);
         RecipeTreeViewerBridge.Ingredient volatus =
                 ingredient("aspect|volatus", "Volatus", 3);
+        RecipeTreeViewerBridge.Ingredient primaryYield =
+                ingredient("aspect|aer", "Aer", 45);
         Map<String, List<RecipeTreeViewerBridge.Ingredient>> byproducts =
                 new LinkedHashMap<String, List<RecipeTreeViewerBridge.Ingredient>>();
         byproducts.put(RecipeTreeViewerBridge.Recipe.aspectSourceIdentity(source),
-                Arrays.asList(motus, volatus));
+                Arrays.asList(primaryYield, motus, volatus));
         RecipeTreeViewerBridge.Recipe page = RecipeTreeViewerBridge.Recipe.aspectSourcePage(
                 "page", RecipeTreeViewerBridge.THAUMIC_ASPECT_SOURCE_CATEGORY_UID,
                 "Aspect from ItemStack", null,
@@ -85,6 +87,9 @@ public final class ThaumicAspectSourceRecipeTest {
         RecipeTreeViewerBridge.Recipe selected = page.selectAspectSource(source);
 
         assertEquals(Arrays.asList(motus, volatus), page.getAspectSourceByproducts(source));
+        assertEquals(Arrays.asList(primaryYield, motus, volatus),
+                page.getAspectSourceOutputs(source));
+        assertEquals(new BigDecimal("45"), page.getAspectSourceOutputs(source).get(0).getAmount());
         assertEquals(3, selected.getOutputs().size());
         assertEquals("aspect|aer", selected.getOutputs().get(0).getAlternatives().get(0).getKey());
         assertEquals("aspect|motus", selected.getOutputs().get(1).getAlternatives().get(0).getKey());
