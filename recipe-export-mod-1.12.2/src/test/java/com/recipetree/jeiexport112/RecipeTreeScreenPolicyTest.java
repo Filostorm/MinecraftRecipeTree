@@ -20,6 +20,25 @@ import static org.junit.Assert.assertTrue;
 
 public class RecipeTreeScreenPolicyTest {
     @Test
+    public void summaryScrollingReachesTheLastRowsAndClampsAtBothEnds() {
+        assertEquals(0, RecipeTreeScreen.summaryMaximumScroll(4, 10));
+        assertEquals(14, RecipeTreeScreen.summaryMaximumScroll(30, 16));
+        assertEquals(3, RecipeTreeScreen.scrollSummaryRows(0, -120, 14));
+        assertEquals(14, RecipeTreeScreen.scrollSummaryRows(12, -120, 14));
+        assertEquals(0, RecipeTreeScreen.scrollSummaryRows(2, 120, 14));
+        assertEquals(5, RecipeTreeScreen.scrollSummaryRows(5, 0, 14));
+        assertEquals(0, RecipeTreeScreen.scrollSummaryRows(14, -120, 0));
+    }
+
+    @Test
+    public void summaryScrollLimitAccountsForGridRowsAndReducedPanelHeight() {
+        // A seven-column grid containing 50 items needs eight rows, including the last partial row.
+        assertEquals(5, RecipeTreeScreen.summaryMaximumScroll((50 + 6) / 7, 3));
+        assertEquals(7, RecipeTreeScreen.summaryMaximumScroll(8, 0));
+        assertEquals(0, RecipeTreeScreen.summaryMaximumScroll(0, 0));
+    }
+
+    @Test
     public void inventoryKeyMatchesTheConfiguredKeyWithoutTransientModifierState() {
         assertTrue(RecipeTreeScreen.matchesConfiguredInventoryKey(Keyboard.KEY_E, Keyboard.KEY_E));
         assertTrue(RecipeTreeScreen.matchesConfiguredInventoryKey(Keyboard.KEY_I, Keyboard.KEY_I));

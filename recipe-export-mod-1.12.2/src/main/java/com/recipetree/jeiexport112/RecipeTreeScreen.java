@@ -111,6 +111,8 @@ public final class RecipeTreeScreen extends GuiScreen {
     private boolean useByproducts = true;
     private boolean recipeBookMode;
     private SummaryTab summaryTab = SummaryTab.TYPES;
+    private final int[] summaryScrollRows = new int[SummaryTab.values().length];
+    private int summaryMaximumScroll;
     private String selectedProcessKey;
     private String status = "";
 
@@ -755,12 +757,37 @@ public final class RecipeTreeScreen extends GuiScreen {
             top += 28;
         }
         RecipeTreeModel.Summary summary = model.summarize(useByproducts);
+        int rowHeight = summaryTab == SummaryTab.TYPES ? 24
+                : summaryTab == SummaryTab.MATERIALS ? 22 : 30;
+        int rowCount = summaryTab == SummaryTab.TYPES ? summary.processes.size()
+                : summaryTab == SummaryTab.MATERIALS ? summary.materials.size()
+                : (summary.byproducts.size() + byproductColumns() - 1) / byproductColumns();
+        int visibleRows = Math.max(0, (treeBottom - top) / rowHeight);
+        summaryMaximumScroll = summaryMaximumScroll(rowCount, visibleRows);
+        int tabIndex = summaryTab.ordinal();
+        summaryScrollRows[tabIndex] = clamp(summaryScrollRows[tabIndex], 0, summaryMaximumScroll);
         if (summaryTab == SummaryTab.TYPES) drawProcesses(summary.processes, top, mouseX, mouseY);
         else if (summaryTab == SummaryTab.MATERIALS) {
             drawSummaryList(summary.materials, top, mouseX, mouseY, false);
         } else {
             drawByproductGrid(summary.byproducts, top, mouseX, mouseY);
         }
+        if (visibleRows > 0) {
+            drawScrollbar(panelRight - 14, top, top + visibleRows * rowHeight,
+                    summaryScrollRows[tabIndex] * rowHeight, rowCount * rowHeight);
+        }
+    }
+
+    static int summaryMaximumScroll(int rowCount, int visibleRows) {
+        return Math.max(0, rowCount - Math.max(1, visibleRows));
+    }
+
+    static int scrollSummaryRows(int current, int wheel, int maximum) {
+        return clamp(current + (wheel < 0 ? 3 : wheel > 0 ? -3 : 0), 0, maximum);
+    }
+
+    private static int byproductColumns() {
+        return Math.max(1, (SUMMARY_WIDTH - 16) / 30);
     }
 
     private int drawSummaryPreview(int mouseX, int mouseY) {
@@ -843,8 +870,10 @@ public final class RecipeTreeScreen extends GuiScreen {
             int mouseX,
             int mouseY) {
         int y = top;
-        for (RecipeTreeModel.ProcessSummary process : processes) {
+        for (int index = summaryScrollRows[SummaryTab.TYPES.ordinal()];
+             index < processes.size(); index++) {
             if (y + 24 > treeBottom) break;
+            RecipeTreeModel.ProcessSummary process = processes.get(index);
             boolean hovered = mouseX >= summaryLeft + 5 && mouseX < panelRight - 15
                     && mouseY >= y && mouseY < y + 22;
             boolean selected = process.key.equals(selectedProcessKey);
@@ -877,8 +906,10 @@ public final class RecipeTreeScreen extends GuiScreen {
             int mouseY,
             boolean byproduct) {
         int y = top;
-        for (RecipeTreeModel.SummaryEntry entry : entries) {
+        for (int index = summaryScrollRows[SummaryTab.MATERIALS.ordinal()];
+             index < entries.size(); index++) {
             if (y + 22 > treeBottom) break;
+            RecipeTreeModel.SummaryEntry entry = entries.get(index);
             safeRenderIngredient(entry.ingredient, summaryLeft + 9, y + 3,
                     byproduct ? "byproduct-list" : "material-list");
             String name = trim(entry.ingredient.getDisplayName(), SUMMARY_WIDTH - 72);
@@ -896,12 +927,13 @@ public final class RecipeTreeScreen extends GuiScreen {
             int mouseX,
             int mouseY) {
         int cell = 30;
-        int columns = Math.max(1, (SUMMARY_WIDTH - 16) / cell);
-        for (int index = 0; index < entries.size(); index++) {
+        int columns = byproductColumns();
+        int firstRow = summaryScrollRows[SummaryTab.BYPRODUCTS.ordinal()];
+        for (int index = firstRow * columns; index < entries.size(); index++) {
             int column = index % columns;
             int row = index / columns;
             int left = summaryLeft + 7 + column * cell;
-            int y = top + row * cell;
+            int y = top + (row - firstRow) * cell;
             if (y + cell > treeBottom) break;
             RecipeTreeModel.SummaryEntry entry = entries.get(index);
             Gui.drawRect(left, y, left + cell - 3, y + cell - 3, 0x66324635);
@@ -1029,6 +1061,13 @@ public final class RecipeTreeScreen extends GuiScreen {
         if (wheel == 0) return;
         int mouseX = Mouse.getEventX() * width / mc.displayWidth;
         int mouseY = height - Mouse.getEventY() * height / mc.displayHeight - 1;
+        if (contains(summaryLeft, treeTop, panelRight - 10 - summaryLeft,
+                treeBottom - treeTop, mouseX, mouseY)) {
+            int tabIndex = summaryTab.ordinal();
+            summaryScrollRows[tabIndex] = scrollSummaryRows(
+                    summaryScrollRows[tabIndex], wheel, summaryMaximumScroll);
+            return;
+        }
         if (amountField != null && contains(
                 amountField.x, amountField.y, amountField.width, amountField.height,
                 mouseX, mouseY)) {

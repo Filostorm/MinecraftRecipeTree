@@ -5,6 +5,16 @@ manifest remains the source of truth for downloadable filenames, checksums, and 
 
 ## 2026-09-05
 
+### Scrollable tree sidebar tabs
+
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.127**
+- Scroll Types, Materials, and Byproducts with the mouse wheel over the sidebar.
+- Remember each tab's position, show overflow scrollbars, and keep tab headers and controls fixed.
+- Render only visible rows and clamp scrolling when the tree or available panel height changes.
+- Consume sidebar wheel input before tree zoom or ingredient-alternative cycling.
+
+## 2026-09-05
+
 ### Multiblock preview depth correction
 
 - Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.126**
