@@ -87,7 +87,6 @@ export default defineConfig(async ({command}) => {
           main: './worker/index.ts',
           compatibility_flags: ['nodejs_compat'],
           cache: {enabled: true},
-          limits: {cpu_ms: 1000},
           observability: {enabled: true, logs: {enabled: true, invocation_logs: false}},
           assets: {
             binding: 'ASSETS',
