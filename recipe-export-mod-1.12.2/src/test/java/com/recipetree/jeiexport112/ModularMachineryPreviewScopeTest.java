@@ -1,9 +1,53 @@
 package com.recipetree.jeiexport112;
 
 import org.junit.Test;
+import java.io.InputStream;
+import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.tree.AbstractInsnNode;
+import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.IntInsnNode;
+import org.objectweb.asm.tree.MethodInsnNode;
+import org.objectweb.asm.tree.MethodNode;
 import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 
 public class ModularMachineryPreviewScopeTest {
+    @Test
+    public void clearsOnlyDepthAfterInstallingTheMappedScissor() throws Exception {
+        ClassNode type = new ClassNode();
+        try (InputStream input = ModularMachineryPreviewScope.class.getResourceAsStream(
+                "ModularMachineryPreviewScope.class")) {
+            assertNotNull(input);
+            new ClassReader(input).accept(type, 0);
+        }
+        boolean mappedClear = false;
+        boolean depthOnly = false;
+        for (MethodNode method : type.methods) {
+            String previousCall = "";
+            for (AbstractInsnNode instruction : method.instructions.toArray()) {
+                if (!(instruction instanceof MethodInsnNode)) continue;
+                MethodInsnNode call = (MethodInsnNode) instruction;
+                if (method.name.equals("alignViewport") && call.name.equals("clearPreviewDepth")) {
+                    assertEquals("glScissor", previousCall);
+                    mappedClear = true;
+                }
+                if (method.name.equals("clearPreviewDepth") && call.name.equals("glClear")) {
+                    AbstractInsnNode argument = instruction.getPrevious();
+                    while (argument.getOpcode() < 0) argument = argument.getPrevious();
+                    assertTrue(argument instanceof IntInsnNode);
+                    assertEquals(256, ((IntInsnNode) argument).operand); // GL_DEPTH_BUFFER_BIT
+                    assertEquals("glClearDepth", previousCall);
+                    depthOnly = true;
+                }
+                previousCall = call.name;
+            }
+        }
+        assertTrue("Must clear the relocated, clipped scene", mappedClear);
+        assertTrue("Must preserve the panel color buffer", depthOnly);
+    }
+
     @Test
     public void movesNativeSceneIntoItsRecipeCard() {
         assertArrayEquals(new int[]{808, 588, 400, 360},

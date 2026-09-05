@@ -121,6 +121,23 @@ final class ModularMachineryPreviewScope implements AutoCloseable {
         }
         GL11.glEnable(GL11.GL_SCISSOR_TEST);
         GL11.glScissor(x, y, Math.max(0, right - x), Math.max(0, top - y));
+        clearPreviewDepth();
+    }
+
+    private static void clearPreviewDepth() {
+        // MMCE setupCamera clears its untransformed viewport before beforeRender runs.
+        // Clear again at the mapped scissor so the recipe background cannot occlude the
+        // relocated 3D scene. Preserve color and depth outside this visible preview.
+        boolean depthWritable = GL11.glGetBoolean(GL11.GL_DEPTH_WRITEMASK);
+        double clearDepth = GL11.glGetDouble(GL11.GL_DEPTH_CLEAR_VALUE);
+        try {
+            GlStateManager.depthMask(true);
+            GL11.glClearDepth(1D);
+            GL11.glClear(GL11.GL_DEPTH_BUFFER_BIT);
+        } finally {
+            GL11.glClearDepth(clearDepth);
+            GlStateManager.depthMask(depthWritable);
+        }
     }
 
     static int[] mapViewport(int x, int y, int width, int height,

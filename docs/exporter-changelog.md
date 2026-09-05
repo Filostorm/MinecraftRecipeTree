@@ -5,6 +5,14 @@ manifest remains the source of truth for downloadable filenames, checksums, and 
 
 ## 2026-09-05
 
+### Multiblock preview depth correction
+
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.126**
+- Clear depth inside the relocated, clipped MMCE structure viewport before rendering the scene,
+  so stale recipe-panel depth cannot hide it. Preserve the surrounding UI and panel colors.
+
+## 2026-09-05
+
 ### Compact, complete aspect tooltips
 
 - Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.125**
