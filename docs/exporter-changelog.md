@@ -3,6 +3,15 @@
 This file contains release-ready notes for the Minecraft exporter builds. The generated exporter
 manifest remains the source of truth for downloadable filenames, checksums, and compatibility.
 
+## 2026-09-05
+
+### Aspect-grid corner tooltips
+
+- Forge HEI/JEI 1.12.2 beta: **1.2.0-beta.123**
+- Shade the triangular `+` corner on aspect-source cards with additional aspects.
+- Show extra aspects as a single row of icons and amounts only while hovering that corner,
+  without names or a heading. Keep the normal item tooltip elsewhere on the card.
+
 ## 2026-09-04
 
 ### Searchable recipe picker and aspect byproducts

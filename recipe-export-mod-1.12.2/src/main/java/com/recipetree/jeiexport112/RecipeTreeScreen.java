@@ -1749,18 +1749,55 @@ public final class RecipeTreeScreen extends GuiScreen {
                 && output != null && output.getAmount().compareTo(source.getAmount()) == 0;
     }
 
-    private List<String> aspectSourceTooltip(AspectSourceHitbox source) {
-        List<String> lines = new ArrayList<String>(safeTooltip(
-                source.ingredient, "thaumic-aspect-grid-tooltip"));
-        if (!source.byproducts.isEmpty()) {
-            lines.add("");
-            lines.add("Byproducts:");
-            for (RecipeTreeViewerBridge.Ingredient byproduct : source.byproducts) {
-                lines.add("+" + RecipeTreeModel.formatAmount(byproduct.getAmount()) + " " +
-                        byproduct.getDisplayName());
-            }
+    private static final int ASPECT_CORNER_SIZE = 16;
+
+    private void drawAspectSourceCorner(int left, int top, int width, int height) {
+        int right = left + width;
+        int bottom = top + height;
+        for (int row = 0; row < ASPECT_CORNER_SIZE; row++) {
+            Gui.drawRect(right - row - 1, bottom - ASPECT_CORNER_SIZE + row,
+                    right, bottom - ASPECT_CORNER_SIZE + row + 1, 0xFF14231F);
         }
-        return lines;
+        fontRenderer.drawString("+", right - 8, bottom - 10, 0xFFF2F7EF);
+    }
+
+    private void drawAspectSourceByproductTooltip(
+            AspectSourceHitbox source, int mouseX, int mouseY,
+            int screenWidth, int screenHeight) {
+        int cellWidth = 24;
+        for (RecipeTreeViewerBridge.Ingredient byproduct : source.byproducts) {
+            cellWidth = Math.max(cellWidth, fontRenderer.getStringWidth(
+                    RecipeTreeModel.formatAmount(byproduct.getAmount())) + 6);
+        }
+        int rowWidth = source.byproducts.size() * cellWidth + 8;
+        float scale = Math.min(1F, (screenWidth - 8F) / rowWidth);
+        int tooltipWidth = (int) Math.ceil(rowWidth * scale);
+        int tooltipHeight = (int) Math.ceil(36 * scale);
+        int x = mouseX + 12;
+        if (x + tooltipWidth > screenWidth - 4) x = mouseX - tooltipWidth - 12;
+        x = Math.max(4, Math.min(x, screenWidth - tooltipWidth - 4));
+        int y = Math.max(4, Math.min(mouseY - 12, screenHeight - tooltipHeight - 4));
+        GlStateManager.pushMatrix();
+        try {
+            GlStateManager.translate(x, y, 300F);
+            GlStateManager.scale(scale, scale, 1F);
+            GlStateManager.disableDepth();
+            Gui.drawRect(0, 0, rowWidth, 36, 0xFF62547A);
+            Gui.drawRect(1, 1, rowWidth - 1, 35, 0xF0100010);
+            for (int index = 0; index < source.byproducts.size(); index++) {
+                RecipeTreeViewerBridge.Ingredient byproduct = source.byproducts.get(index);
+                int center = 4 + index * cellWidth + cellWidth / 2;
+                safeRenderIngredient(byproduct, center - 8, 4,
+                        "thaumic-aspect-grid-byproduct");
+                GlStateManager.disableDepth();
+                String amount = RecipeTreeModel.formatAmount(byproduct.getAmount());
+                fontRenderer.drawStringWithShadow(amount,
+                        center - fontRenderer.getStringWidth(amount) / 2, 24, 0xFFE8EEE6);
+            }
+        } finally {
+            GlStateManager.popMatrix();
+            restoreGuiRenderState();
+        }
     }
 
     static boolean pickerRecipeMatchesSearch(
@@ -2490,7 +2527,13 @@ public final class RecipeTreeScreen extends GuiScreen {
                             hoveredMachine.ingredient, "recipe-picker-machine-tooltip"),
                             mouseX, mouseY);
                 } else if (hoveredAspectSource != null) {
-                    drawHoveringText(aspectSourceTooltip(hoveredAspectSource), mouseX, mouseY);
+                    if (hoveredAspectSource.containsByproductCorner(mouseX, mouseY)) {
+                        drawAspectSourceByproductTooltip(hoveredAspectSource,
+                                mouseX, mouseY, width, height);
+                    } else {
+                        drawHoveringText(safeTooltip(hoveredAspectSource.ingredient,
+                                "thaumic-aspect-grid-tooltip"), mouseX, mouseY);
+                    }
                 } else {
                     drawNativeIngredientTooltip(mouseX, mouseY);
                 }
@@ -2615,8 +2658,7 @@ public final class RecipeTreeScreen extends GuiScreen {
                         List<RecipeTreeViewerBridge.Ingredient> byproducts =
                                 page.getAspectSourceByproducts(source);
                         if (!byproducts.isEmpty()) {
-                            fontRenderer.drawString("+", left + cellWidth - 8,
-                                    top + cellHeight - 10, 0xFFF2F7EF);
+                            drawAspectSourceCorner(left, top, cellWidth, cellHeight);
                         }
                         aspectSourceHitboxes.add(new AspectSourceHitbox(
                                 page, source, byproducts,
@@ -3137,7 +3179,13 @@ public final class RecipeTreeScreen extends GuiScreen {
                     }
                 }
                 if (hoveredSource != null) {
-                    drawHoveringText(aspectSourceTooltip(hoveredSource), mouseX, mouseY);
+                    if (hoveredSource.containsByproductCorner(mouseX, mouseY)) {
+                        drawAspectSourceByproductTooltip(hoveredSource,
+                                mouseX, mouseY, width, height);
+                    } else {
+                        drawHoveringText(safeTooltip(hoveredSource.ingredient,
+                                "thaumic-aspect-grid-tooltip"), mouseX, mouseY);
+                    }
                 } else {
                     drawNativeIngredientTooltip(mouseX, mouseY);
                 }
@@ -3267,8 +3315,7 @@ public final class RecipeTreeScreen extends GuiScreen {
                         List<RecipeTreeViewerBridge.Ingredient> byproducts =
                                 page.getAspectSourceByproducts(source);
                         if (!byproducts.isEmpty()) {
-                            fontRenderer.drawString("+", left + cellWidth - 8,
-                                    top + cellHeight - 10, 0xFFF2F7EF);
+                            drawAspectSourceCorner(left, top, cellWidth, cellHeight);
                         }
                         aspectSources.add(new AspectSourceHitbox(
                                 page, source, byproducts,
@@ -4371,6 +4418,12 @@ public final class RecipeTreeScreen extends GuiScreen {
         private final RecipeTreeViewerBridge.Recipe page;
         private final RecipeTreeViewerBridge.Ingredient ingredient;
         private final List<RecipeTreeViewerBridge.Ingredient> byproducts;
+
+        private boolean containsByproductCorner(int mouseX, int mouseY) {
+            return !byproducts.isEmpty() && contains(mouseX, mouseY)
+                    && (left + width - 1 - mouseX) + (top + height - 1 - mouseY)
+                    < ASPECT_CORNER_SIZE;
+        }
 
         private AspectSourceHitbox(
                 RecipeTreeViewerBridge.Recipe page,
