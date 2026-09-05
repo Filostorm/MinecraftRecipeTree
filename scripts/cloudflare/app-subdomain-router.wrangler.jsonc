@@ -16,8 +16,5 @@
       "enabled": true,
       "invocation_logs": false
     }
-  },
-  "limits": {
-    "cpu_ms": 100
   }
 }
