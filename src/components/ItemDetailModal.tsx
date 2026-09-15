@@ -106,6 +106,7 @@ export function ItemDetailModal({
   useSignalSurface(
     itemDetailVisible ? `item-detail/${sideName}` : tab,
     itemDetailVisible ? 'modal' : 'screen',
+    itemDetailVisible,
   );
 
   useEffect(() => setSide('p'), [key]);

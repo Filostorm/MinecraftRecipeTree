@@ -162,6 +162,7 @@ export default defineConfig(async ({command}) => {
     ],
     define: {
       __DEV__: JSON.stringify(false),
+      __MRT_SIGNAL_ENABLED__: JSON.stringify(!isCloudflareBeta && !isLocalDev && !isLocalDataOrigin),
     },
   };
 });

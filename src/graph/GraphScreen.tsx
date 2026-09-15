@@ -697,7 +697,8 @@ export function GraphScreen({
         : tab === 'graph' && nodeMenu
           ? 'graph/node-options'
         : tab,
-    drivingThePicker && (picker || pickerLookup) ? 'modal' : 'screen',
+    'modal',
+    isActive && (Boolean(drivingThePicker && (picker || pickerLookup)) || Boolean(tab === 'graph' && nodeMenu)),
   );
   const pickerGroupLoadsRef = useRef(new Set<string>());
   const pickerRequestIdRef = useRef(0);
