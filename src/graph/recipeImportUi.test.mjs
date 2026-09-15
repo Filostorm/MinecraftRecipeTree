@@ -22,16 +22,9 @@ test('the dedicated import dropdown opens the crafting-tree JSON flow', () => {
   assert.match(switcherSource, /accessibilityLabel=\{showImportMenu \? 'Close import menu' : 'Open import menu'\}/u);
   assert.match(switcherSource, /onImportTree\?\.\(\)/u);
   assert.doesNotMatch(appSource, /Drop or paste Recipe Tree JSON/u);
-  assert.match(appSource, /setRecipeImportRequestId\(value => value \+ 1\)/u);
-  assert.match(graphSource, /recipeImportRequestId/u);
-  assert.match(graphSource, /setTreeTransferMode\('import'\)/u);
-  assert.match(graphSource, /onRecipeImportRequestHandled\?\.\(\)/u);
-  assert.match(appSource, /onRecipeImportRequestHandled=\{\(\) => setRecipeImportRequestId\(0\)\}/u);
-  assert.doesNotMatch(
-    graphSource,
-    /setShowTreeShare\(true\);\s*onRecipeImportRequestHandled\?\.\(\)/u,
-  );
-  assert.match(graphSource, /setShowTreeShare\(false\);\s*onRecipeImportRequestHandled\?\.\(\)/u);
+  assert.match(appSource, /setShowRecipeImport\(true\)/u);
+  assert.match(appSource, /<TreeShareModal\s+visible=\{showRecipeImport\}/u);
+  assert.doesNotMatch(graphSource, /recipeImportRequestId/u);
   assert.match(graphSource, /onClose=\{closeTreeShare\}/u);
   assert.match(modalSource, /mode === 'import' \? 'Import crafting tree'/u);
 });
@@ -47,8 +40,10 @@ test('crafting-tree import supports file drops and pasted JSON without a clipboa
 });
 
 test('imports return to graph immediately and persist each reconstructed selection', () => {
-  assert.match(graphSource, /onRecipeImportStart\(raw\);\s*setTab\('graph'\);\s*restoreGraph/u);
-  assert.match(appSource, /recipeImportJob=\{recipeImportJob\}/u);
+  assert.match(appSource, /const treeId = ui\.restoreGraph\(share\.rootKey, share\.direction\)/u);
+  assert.match(appSource, /setShowRecipeImport\(false\);\s*setTab\('graph'\)/u);
+  assert.match(appSource, /recipeImportJob=\{recipeImportJob\?\.treeId === tree\.id \? recipeImportJob : null\}/u);
+  assert.match(graphSource, /if \(builtRequestRef\.current === requestKey\) return/u);
   assert.match(graphSource, /restorePortableTreeIncrementally\(recipeImportJob\.raw, root\)/u);
   assert.match(graphSource, /restoredSelections\.push\(stored\);\s*saveProgress\(\)/u);
   assert.match(graphSource, /await expandRecipe\(node, stored\.source\.ref/u);

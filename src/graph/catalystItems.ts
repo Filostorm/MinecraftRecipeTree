@@ -1,5 +1,8 @@
 import {useCallback, useEffect, useState} from 'react';
 import type {DatasetDescriptor} from '../data/datasetCatalog';
+import type {ItemTreeNode} from './model';
+import {resourceIdentity, catalystOverride} from './resourceIdentity.ts';
+type ResourceNode = Pick<ItemTreeNode, 'id' | 'key' | 'requirementId'>;
 
 /**
  * Which places in the tree the user has called a tool or a catalyst. Nothing is put there
@@ -19,7 +22,7 @@ export function catalystItemsKey(
   descriptor: Pick<DatasetDescriptor, 'slug' | 'publicationId'>,
   rootKey: string,
 ): string {
-  return `resourceCatalysts:2:${descriptor.slug}:${descriptor.publicationId}:${rootKey}`;
+  return `resourceCatalysts:3:${descriptor.slug}:${descriptor.publicationId}:${rootKey}`;
 }
 
 export function loadCatalystItems(
@@ -68,8 +71,12 @@ export function withCatalystItem(
   isCatalyst: boolean,
 ): Set<string> {
   const next = new Set(catalysts);
+  next.delete(`!${nodeId}`);
   if (isCatalyst) next.add(nodeId);
-  else next.delete(nodeId);
+  else {
+    next.delete(nodeId);
+    next.add(`!${nodeId}`);
+  }
   return next;
 }
 
@@ -108,8 +115,8 @@ export function useCatalystItems(
   rootKey: string | null,
 ): {
   catalysts: ReadonlySet<string>;
-  isCatalyst: (node: {id: string}) => boolean;
-  setCatalyst: (node: {id: string}, isCatalyst: boolean) => void;
+  isCatalyst: (node: ResourceNode) => boolean;
+  setCatalyst: (node: ResourceNode, isCatalyst: boolean) => void;
 } {
   const key = rootKey === null ? null : catalystItemsKey(descriptor, rootKey);
   const [catalysts, setCatalysts] = useState<ReadonlySet<string>>(() =>
@@ -126,13 +133,13 @@ export function useCatalystItems(
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the key is the tree's identity.
   }, [key]);
   const isCatalyst = useCallback(
-    (node: {id: string}) => catalysts.has(node.id),
+    (node: ResourceNode) => catalystOverride(catalysts, node) === true,
     [catalysts],
   );
   const setCatalyst = useCallback(
-    (node: {id: string}, isCatalystNext: boolean) => {
+    (node: ResourceNode, isCatalystNext: boolean) => {
       if (rootKey === null) return;
-      setCatalysts(setCatalystItem(descriptor, rootKey, node.id, isCatalystNext));
+      setCatalysts(setCatalystItem(descriptor, rootKey, resourceIdentity(node), isCatalystNext));
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the key is the tree's identity.
     [key],

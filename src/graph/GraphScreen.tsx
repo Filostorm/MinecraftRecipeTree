@@ -154,6 +154,7 @@ import {
   sharePortableTree,
 } from './portableTreeTransfer';
 import {TreeShareModal} from './TreeShareModal';
+import {childRequirementId, catalystOverride} from './resourceIdentity';
 import {
   RecipeImportDetailsModal,
   type RecipeImportReport,
@@ -350,9 +351,10 @@ function releaseByproductFulfillments(
   const removedStack = [removedNode];
   while (removedStack.length > 0) {
     const current = removedStack.pop()!;
-    if (!current.source) continue;
-    removedSourceIds.add(current.source.id);
-    for (const child of current.source.inputs) removedStack.push(child);
+    const source = current.source ?? current.collapsedSource;
+    if (!source) continue;
+    removedSourceIds.add(source.id);
+    for (const child of source.inputs) removedStack.push(child);
   }
   if (removedSourceIds.size === 0 || !root) return;
 
@@ -380,7 +382,7 @@ function releaseByproductFulfillments(
         current.byproductFulfillment = undefined;
       }
     }
-    for (const child of current.source?.inputs ?? []) treeStack.push(child);
+    for (const child of (current.source ?? current.collapsedSource)?.inputs ?? []) treeStack.push(child);
   }
   if (releasedAmount > 0) {
     console.info('Byproduct fulfillment was released because its producing recipe left the tree.', {
@@ -398,7 +400,7 @@ function parentRecipeSource(
   const stack = [root];
   while (stack.length > 0) {
     const current = stack.pop()!;
-    const source = current.source;
+    const source = current.source ?? current.collapsedSource;
     if (!source) continue;
     if (source.inputs.includes(target)) return source;
     stack.push(...source.inputs);
@@ -580,6 +582,7 @@ function nodeDepthBucket(
 
 export function GraphScreen({
   treeId,
+  buildId,
   rootKey: graphRootKey,
   recipeRef: graphRecipeRef,
   direction: graphDirection,
@@ -594,8 +597,6 @@ export function GraphScreen({
   showGraphControls,
   onToggleGraphControls,
   onSwipeSuppressChange,
-  recipeImportRequestId = 0,
-  onRecipeImportRequestHandled,
   recipeImportJob = null,
   onRecipeImportStart,
   onRecipeImportComplete,
@@ -606,6 +607,7 @@ export function GraphScreen({
 }: {
   /** Stable id of this open tree; every other tree open alongside it has its own instance. */
   treeId: number;
+  buildId: string;
   rootKey: string;
   recipeRef: RecipeRef | null;
   direction: GraphDirection;
@@ -623,10 +625,8 @@ export function GraphScreen({
   onToggleGraphControls(): void;
   /** While true, the enclosing multi-tree pager must not swipe — a drag inside this tree is active. */
   onSwipeSuppressChange?: (suppressed: boolean) => void;
-  recipeImportRequestId?: number;
-  onRecipeImportRequestHandled?: () => void;
   recipeImportJob?: {id: number; raw: string} | null;
-  onRecipeImportStart: (raw: string) => void;
+  onRecipeImportStart: (raw: string) => Promise<void>;
   onRecipeImportComplete: () => void;
   recipeImportNotice?: string | null;
   onRecipeImportNoticeChange?: React.Dispatch<React.SetStateAction<string | null>>;
@@ -634,11 +634,14 @@ export function GraphScreen({
   onRecipeImportReportChange?: React.Dispatch<React.SetStateAction<RecipeImportReport | null>>;
 }) {
   const data = useData();
+  const activeRef = useRef(isActive);
+  activeRef.current = isActive;
+  useEffect(() => () => { activeRef.current = false; }, []);
   const account = useUser();
   // Shared with the resources tab: one list, so marking a tool in either place shows in both.
   const {catalysts, isCatalyst, setCatalyst} = useCatalystItems(
     data.descriptor,
-    graphRootKey ?? null,
+    buildId,
   );
   // Read while a branch is being built, which happens outside render.
   const catalystsRef = useRef(catalysts);
@@ -677,19 +680,11 @@ export function GraphScreen({
   pickerRef.current = picker;
   const [showRootActions, setShowRootActions] = useState(false);
   const [showTreeShare, setShowTreeShare] = useState(false);
-  const [treeTransferMode, setTreeTransferMode] = useState<'share' | 'import'>('share');
   const [nodeMenu, setNodeMenu] = useState<NodeMenuState | null>(null);
   const [autoExpandSummary, setAutoExpandSummary] =
     useState<AutoExpandSummaryEntry[] | null>(null);
   const [showRecipeImportDetails, setShowRecipeImportDetails] = useState(false);
   useEffect(() => setShowRootActions(false), [graphRequestId]);
-  useEffect(() => {
-    if (recipeImportRequestId <= 0) return;
-    onRecipeImportReportChange?.(null);
-    setShowRecipeImportDetails(false);
-    setTreeTransferMode('import');
-    setShowTreeShare(true);
-  }, [onRecipeImportReportChange, recipeImportRequestId]);
   useEffect(() => {
     if (tab !== 'graph') setShowRootActions(false);
   }, [tab]);
@@ -713,6 +708,7 @@ export function GraphScreen({
   } | null>(null);
   const pendingGraphSessionRef = useRef<GraphSession | null>(null);
   const graphSessionRestoreAttemptedRef = useRef(false);
+  const builtRequestRef = useRef<string | null>(null);
   const restoringGraphSessionRef = useRef(recipeImportJob !== null);
   const recipeImportRestoreAttemptedRef = useRef<number | null>(null);
   const [compactMode, setCompactMode] = useState(loadCompactMode);
@@ -1147,15 +1143,18 @@ export function GraphScreen({
         const sourceId = `${node.id}.s`;
         const childSpecs = recipeChildrenForDirection(selectedRecipe, graphDirection);
         const children = childSpecs.map((spec, i) => {
-          const retentionOverride = graphDirection === 'inputs'
+          const requirementId = childRequirementId(node, ref, i, graphDirection);
+          const retentionOverride = catalystOverride(catalystsRef.current, {
+            id: `${sourceId}.${i}`, key: spec.key, requirementId,
+          }) ?? (graphDirection === 'inputs'
             ? manualRetentionOverrideFor(manualRetentionOverridesRef.current, ref, spec.key)
-            : undefined;
+            : undefined);
           // A node the user called a tool is one again when this branch is built back, which is what
           // makes the mark survive a collapse, a recipe change further up, or a restart.
-          const nonConsumed =
-            catalystsRef.current.has(`${sourceId}.${String(i)}`) || (retentionOverride ?? spec.nonConsumed);
+          const nonConsumed = retentionOverride ?? spec.nonConsumed;
           const child: ItemTreeNode = {
             id: `${sourceId}.${i}`,
+            requirementId,
             key: spec.key,
             amount: spec.amount,
             variantCount: spec.variants,
@@ -1253,6 +1252,7 @@ export function GraphScreen({
       for (const match of matches) {
         if (match.source) releaseByproductFulfillments(currentRoot, match);
         match.source = undefined;
+        match.collapsedSource = undefined;
       }
       for (const match of matches) {
         applyChoiceRef.current?.(match, choice, {expansionBudget});
@@ -1289,6 +1289,7 @@ export function GraphScreen({
           ) ?? pendingRecipeExpansionOwnersRef.current.get(identity);
         if (owner && owner !== node) {
           node.source = undefined;
+          node.collapsedSource = undefined;
           node.deferredRecipeExpansion = {
             ref: [...choice.ref],
             ...(choice.allowFluidTransfer ? {allowFluidTransfer: true as const} : {}),
@@ -1367,6 +1368,7 @@ export function GraphScreen({
           );
         }
         const restoredNodesByPath = new Map<string, ItemTreeNode>();
+        const foldedNodes: ItemTreeNode[] = [];
         const reconstructionFailures: Array<{
           path: number[];
           itemKey: string;
@@ -1438,6 +1440,7 @@ export function GraphScreen({
               applyChoice(node, sourceChoice);
             }
             restoredNodesByPath.set(pathKey, node);
+            if (selection.collapsed) foldedNodes.push(node);
             restoredSelectionCount += 1;
           } catch (error) {
             reconstructionFailures.push({
@@ -1449,6 +1452,11 @@ export function GraphScreen({
                   : 'Unknown graph reconstruction failure.',
             });
           }
+        }
+        // Rebuild descendants before folding their ancestors. Folding never discards a selection.
+        for (const node of foldedNodes) {
+          node.collapsedSource = node.source;
+          node.source = undefined;
         }
         const skippedSelectionCount =
           reconstructionFailures.length + dependentSelectionCount;
@@ -1473,8 +1481,8 @@ export function GraphScreen({
         needsFitRef.current = true;
       } catch (error) {
         console.error('The saved graph could not be reconstructed; its snapshot was discarded.', error);
-        clearGraphSession(data.descriptor);
-        const cleanRoot = makeRoot(session.rootKey);
+        clearGraphSession(data.descriptor, buildId);
+        const cleanRoot = {...makeRoot(session.rootKey), buildId};
         rootRef.current = cleanRoot;
         setRoot(cleanRoot);
         needsFitRef.current = true;
@@ -2100,7 +2108,7 @@ export function GraphScreen({
         });
         return;
       }
-      const ownerExpansion = recipeExpansionFromSource(owner.source);
+      const ownerExpansion = recipeExpansionFromSource(owner.source ?? owner.collapsedSource);
       if (!ownerExpansion) {
         console.error('The expanded recipe owner has no transferable recipe metadata.', {
           ownerNodeId: owner.id,
@@ -2111,6 +2119,7 @@ export function GraphScreen({
 
       releaseByproductFulfillmentsFromSubtree(owner);
       owner.source = undefined;
+      owner.collapsedSource = undefined;
       owner.deferredRecipeExpansion = ownerExpansion;
       node.deferredRecipeExpansion = undefined;
       // Moving the visible occurrence of a recipe must not behave like Fit.
@@ -2177,27 +2186,7 @@ export function GraphScreen({
         return;
       }
       if (node.source) {
-        const collapsedExpansion = recipeExpansionFromSource(node.source);
-        if (expandRecipesOnceRef.current && collapsedExpansion) {
-          const collapsedIdentity = recipeExpansionIdentity(
-            node.key,
-            graphDirection,
-            collapsedExpansion,
-          );
-          for (const candidate of deferredRecipeExpansionNodes(rootRef.current)) {
-            const deferred = candidate.deferredRecipeExpansion;
-            if (
-              deferred &&
-              recipeExpansionIdentity(candidate.key, graphDirection, deferred) ===
-                collapsedIdentity
-            ) {
-              candidate.deferredRecipeExpansion = undefined;
-            }
-          }
-        }
-        releaseByproductFulfillmentsFromSubtree(node);
-        // Kept so reopening restores this exact subtree. The byproduct credits released above do
-        // not come back with it; they are re-derived from whatever the tree looks like then.
+        // A fold changes visibility, not ownership, byproduct supply, or the calculation.
         node.collapsedSource = node.source;
         node.source = undefined;
         bump();
@@ -2307,7 +2296,7 @@ export function GraphScreen({
       }
     }
     clearGraphTreeRecipe(treeId);
-    clearGraphSession(data.descriptor);
+    if (openTreeCount === 1) clearGraphSession(data.descriptor, buildId);
     // Suppresses the persist effect, which would otherwise write this tree straight back out on
     // the render that follows.
     restoringGraphSessionRef.current = true;
@@ -2316,6 +2305,7 @@ export function GraphScreen({
     clearGraphTreeRecipe,
     data.descriptor,
     onClose,
+    openTreeCount,
     releaseByproductFulfillmentsFromSubtree,
     treeId,
   ]);
@@ -2354,6 +2344,7 @@ export function GraphScreen({
       }
       if (node.source) releaseByproductFulfillmentsFromSubtree(node);
       node.source = undefined;
+      node.collapsedSource = undefined;
       node.deferredRecipeExpansion = undefined;
       const parent = parentRecipeSource(rootRef.current, node);
       const selectionKey = node.selectionKey ?? node.alternatives[0];
@@ -2366,6 +2357,13 @@ export function GraphScreen({
         parent.recipe = applyIngredientSelections(parent.recipe, selections);
       }
       node.key = selectedKey;
+      const spec = parent?.recipe
+        ? recipeChildrenForDirection(parent.recipe, graphDirection).find(input => input.key === selectedKey)
+        : undefined;
+      const override = catalystOverride(catalystsRef.current, node);
+      node.nonConsumed = override ?? spec?.nonConsumed;
+      node.retentionMode = override === undefined ? spec?.retentionMode : override ? 'reusable' : undefined;
+      node.retentionUses = override === undefined ? spec?.retentionUses : undefined;
       node.cyclic = node.ancestors.includes(selectedKey);
       bump();
       setNodeMenu(null);
@@ -2381,6 +2379,7 @@ export function GraphScreen({
     if (recipeImportJob) return;
     const session = loadGraphSession(data.descriptor);
     if (!session) return;
+    if (session.buildId && session.buildId !== buildId) return;
     if (graphRecipeRef) return;
     // A resumed launch already knows which tab the user left off on; only a launch without that
     // memory should be pulled onto the graph just because a saved tree exists.
@@ -2414,7 +2413,10 @@ export function GraphScreen({
   // previously expanded chart.
   useEffect(() => {
     if (!graphRootKey) return;
-    const newRoot = makeRoot(graphRootKey);
+    const requestKey = JSON.stringify([graphRootKey, graphRequestId, graphRecipeRef, graphDirection]);
+    if (builtRequestRef.current === requestKey) return;
+    builtRequestRef.current = requestKey;
+    const newRoot = {...makeRoot(graphRootKey), buildId};
     rootRef.current = newRoot;
     setRoot(newRoot);
     needsFitRef.current = true;
@@ -2432,7 +2434,7 @@ export function GraphScreen({
           graphDirection,
         });
         restoringGraphSessionRef.current = false;
-        clearGraphSession(data.descriptor);
+        clearGraphSession(data.descriptor, buildId);
       } else {
         void restoreExpandedGraph(newRoot, pendingGraphSession);
         return;
@@ -2495,9 +2497,9 @@ export function GraphScreen({
   ]);
 
   useEffect(() => {
-    if (!root || restoringGraphSessionRef.current) return;
+    if (!isActive || !root || restoringGraphSessionRef.current) return;
     persistGraphSession(data.descriptor, root, graphDirection);
-  }, [data.descriptor, graphDirection, root, version]);
+  }, [data.descriptor, graphDirection, isActive, root, version]);
 
   // Recomputed against `version` so a focus survives the branch under it being expanded, and
   // resolves to null the moment its node stops existing rather than blanking the canvas.
@@ -2658,9 +2660,7 @@ export function GraphScreen({
     // decision to gather that item directly. It matters most at the root, which is the thing being
     // built rather than an ingredient: counting a collapsed root as an input replaced the entire
     // checklist with a single line asking for the item the user is trying to make.
-    const rootForTotals =
-      !root.source && root.collapsedSource ? {...root, source: root.collapsedSource} : root;
-    const totals = calculateTreeTotals(rootForTotals, useByproducts, {
+    const totals = calculateTreeTotals(root, useByproducts, {
       resolveDeferredRecipeSource: expandRecipesOnce
         ? createDeferredRecipeSourceResolver(root, graphDirection)
         : undefined,
@@ -2917,14 +2917,10 @@ export function GraphScreen({
       throw new Error('The shared starting item is not available in the selected modpack.');
     }
     setShowTreeShare(false);
-    onRecipeImportRequestHandled?.();
-    onRecipeImportStart(raw);
-    setTab('graph');
-    restoreGraph(share.rootKey, share.direction);
+    await onRecipeImportStart(raw);
   }, [
     data.descriptor,
     data.itemsByKey,
-    onRecipeImportRequestHandled,
     onRecipeImportStart,
     restoreGraph,
     setTab,
@@ -2943,8 +2939,10 @@ export function GraphScreen({
       const restoredSelections: StoredGraphSelection[] = [];
       const restoredNodesByPath = new Map<string, ItemTreeNode>();
       const saveProgress = () => {
+        if (!activeRef.current) return;
         persistGraphSessionSnapshot(data.descriptor, {
           version: 2,
+          buildId: newRoot.buildId,
           rootKey: share.rootKey,
           direction: share.direction,
           ...(share.productionPlan ? {productionPlan: {...share.productionPlan}} : {}),
@@ -3176,8 +3174,7 @@ export function GraphScreen({
 
   const closeTreeShare = useCallback(() => {
     setShowTreeShare(false);
-    if (treeTransferMode === 'import') onRecipeImportRequestHandled?.();
-  }, [onRecipeImportRequestHandled, treeTransferMode]);
+  }, []);
 
   const exportTotals = useCallback(() => {
     try {
@@ -3416,6 +3413,7 @@ export function GraphScreen({
           releaseByproductFulfillments(currentRoot, node);
           node.source = undefined;
           node.deferredRecipeExpansion = expansion;
+          node.collapsedSource = undefined;
         }
       } else {
         for (const node of deferredRecipeExpansionNodes(rootRef.current)) {
@@ -3817,8 +3815,8 @@ export function GraphScreen({
 
   const treeShareModal = (
     <TreeShareModal
-      visible={showTreeShare}
-      mode={treeTransferMode}
+      visible={isActive && showTreeShare}
+      mode="share"
       interfaceZoom={interfaceZoom}
       onClose={closeTreeShare}
       onShare={shareCurrentTree}
@@ -3911,7 +3909,6 @@ export function GraphScreen({
         kind: 'action',
         metricsId: 'graph.control.share',
         onPress: closeAfter(() => {
-          setTreeTransferMode('share');
           setShowTreeShare(true);
         }),
       },
@@ -4485,7 +4482,6 @@ export function GraphScreen({
             metricsId="graph.control.share"
             onPress={() => {
               setShowMoreControls(false);
-              setTreeTransferMode('share');
               setShowTreeShare(true);
             }}
           />
@@ -4593,7 +4589,7 @@ export function GraphScreen({
       )}
       {Platform.OS !== 'web' && (
         <GraphSettingsSheet
-          visible={showGraphControls}
+          visible={isActive && tab === 'graph' && showGraphControls}
           options={graphSettingOptions}
           onClose={onToggleGraphControls}
         />
@@ -4618,7 +4614,7 @@ export function GraphScreen({
           </View>
         </View>
       )}
-      {picker && (
+      {isActive && drivingThePicker && picker && (
         <PickerModal
           visible
           interfaceZoom={interfaceZoom}
@@ -4837,7 +4833,7 @@ export function GraphScreen({
           }}
         />
       )}
-      {nodeMenu && nodeMenuPlacement && (
+      {isActive && drivingThePicker && nodeMenu && nodeMenuPlacement && (
         <NodeActionMenu
           node={nodeMenu.node}
           interfaceZoom={interfaceZoom}
@@ -4895,12 +4891,12 @@ export function GraphScreen({
       )}
       {treeShareModal}
       <RecipeImportDetailsModal
-        report={showRecipeImportDetails ? recipeImportReport : null}
+        report={isActive && showRecipeImportDetails ? recipeImportReport : null}
         interfaceZoom={interfaceZoom}
         onClose={() => setShowRecipeImportDetails(false)}
       />
       <AutoExpandSummaryModal
-        entries={autoExpandSummary}
+        entries={isActive ? autoExpandSummary : null}
         interfaceZoom={interfaceZoom}
         onClose={() => setAutoExpandSummary(null)}
       />

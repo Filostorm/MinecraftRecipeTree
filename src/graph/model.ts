@@ -61,6 +61,10 @@ export function isEmcTransmutationSource(source: SourceTreeNode): boolean {
 
 export interface ItemTreeNode {
   id: string;
+  /** Recipe ancestry, independent of the canvas's reusable positional ids. */
+  requirementId?: string;
+  /** Durable identity of this build, distinct from another tree for the same root item. */
+  buildId?: string;
   /** Catalog key */
   key: string;
   /** Total amount required by the parent recipe (summed over merged slots) */
@@ -99,8 +103,8 @@ export interface ItemTreeNode {
   deferredRecipeExpansion?: DeferredRecipeExpansion;
   /**
    * The subtree this node had before it was collapsed, so reopening it restores what was there
-   * rather than rebuilding a different tree from remembered recipes. Held in memory only: the
-   * saved session records what is expanded, and a folded branch is not.
+   * rather than rebuilding a different tree from remembered recipes. Folding is visual only;
+   * calculation, persistence, and ownership still traverse this source.
    */
   collapsedSource?: SourceTreeNode;
 }

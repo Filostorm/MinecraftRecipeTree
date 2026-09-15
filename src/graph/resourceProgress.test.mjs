@@ -290,7 +290,7 @@ test('a tick is written once, outside the state updater', () => {
   const body = handler.slice(0, handler.indexOf('  );') + 4);
   // React may call an updater speculatively or twice, so a save cannot live inside one.
   assert.doesNotMatch(body, /setCompleted\(current =>/u);
-  assert.match(body, /setCompleted\(next\);\s*\n\s*persistCompletedResources\(/u);
+  assert.match(body, /setStoredCompleted\(next\);\s*\n\s*persistCompletedResources\(/u);
 });
 
 test('reloading progress follows the list being tracked, not the descriptor object', () => {

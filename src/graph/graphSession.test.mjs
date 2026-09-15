@@ -15,7 +15,7 @@ const graphScreenSource = await readFile(new URL('./GraphScreen.tsx', import.met
 test('reopens the graph workspace when a saved tree is restored', () => {
   assert.match(
     appSource,
-    /const session = loadGraphSession\(data\.descriptor\);[\s\S]*?ui\.restoreGraph\(session\.rootKey, session\.direction\);\s*setTab\('graph'\);/u,
+    /ui\.restoreGraph\(session\.rootKey, session\.direction, session\.buildId\);\s*if \(!ui\.restoredLastTab\) setTab\('graph'\);/u,
   );
   assert.match(
     graphScreenSource,

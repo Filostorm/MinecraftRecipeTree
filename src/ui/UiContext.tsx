@@ -8,6 +8,7 @@ export type Tab = 'items' | 'graph' | 'resources' | 'mobs' | 'settings';
 /** One independently interactive recipe tree; every field here is exclusive to this tree. */
 export interface OpenGraphTree {
   id: number;
+  buildId: string;
   rootKey: string;
   /** Exact recipe requested from an item-detail recipe card, for this tree only. */
   recipeRef: RecipeRef | null;
@@ -70,7 +71,7 @@ interface Ui {
   /** Forgets the recipe a tree was opened with, so clearing it can't be undone by a remount. */
   clearGraphTreeRecipe(id: number): void;
   /** Hydrates a saved graph as the one open tree, without changing the user's active workspace tab. */
-  restoreGraph(key: string, direction: GraphDirection): void;
+  restoreGraph(key: string, direction: GraphDirection, buildId?: string): number;
   changeGraphDirection(id: number, direction: GraphDirection): void;
   /** Mob sprite animation on/off (persisted). */
   animateMobs: boolean;
@@ -78,6 +79,10 @@ interface Ui {
 }
 
 const UiContext = createContext<Ui | null>(null);
+
+function newBuildId(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
 
 export function UiProvider({children}: {children: React.ReactNode}) {
   const restoredTabRef = useRef(loadActiveTab());
@@ -122,7 +127,7 @@ export function UiProvider({children}: {children: React.ReactNode}) {
     if (Platform.OS === 'web') setItemStack([]);
     const id = nextGraphTreeIdRef.current;
     nextGraphTreeIdRef.current += 1;
-    const entry: OpenGraphTree = {id, rootKey: key, recipeRef: ref, direction, requestId: 0};
+    const entry: OpenGraphTree = {id, buildId: newBuildId(), rootKey: key, recipeRef: ref, direction, requestId: 0};
     setOpenGraphTrees(trees => {
       // Balanced left/right: the first tree stays near the middle as later ones alternate onto
       // either edge, rather than every new tree just queuing up on one side.
@@ -135,11 +140,12 @@ export function UiProvider({children}: {children: React.ReactNode}) {
     setActiveGraphTreeId(id);
     setTab('graph');
   }, []);
-  const restoreGraph = useCallback((key: string, direction: GraphDirection) => {
+  const restoreGraph = useCallback((key: string, direction: GraphDirection, buildId = newBuildId()) => {
     const id = nextGraphTreeIdRef.current;
     nextGraphTreeIdRef.current += 1;
-    setOpenGraphTrees([{id, rootKey: key, recipeRef: null, direction, requestId: 0}]);
+    setOpenGraphTrees([{id, buildId, rootKey: key, recipeRef: null, direction, requestId: 0}]);
     setActiveGraphTreeId(id);
+    return id;
   }, []);
   const setActiveGraphTree = useCallback((id: number) => {
     setActiveGraphTreeId(id);

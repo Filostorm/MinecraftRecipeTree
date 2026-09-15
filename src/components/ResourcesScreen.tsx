@@ -17,6 +17,7 @@ import {displayIngredientName} from '../data/ingredientTags';
 import {formatIngredientQuantity} from '../data/ingredientQuantities';
 import {useGraphTotals} from '../graph/GraphTotalsContext';
 import {useCatalystItems} from '../graph/catalystItems';
+import {resourceNodesById, resourceCompletionIdentity} from '../graph/resourceIdentity';
 import {NodeActionMenu} from '../graph/NodeActionMenu';
 import {
   nodeContextMenuPlacement,
@@ -52,12 +53,12 @@ export function ResourcesScreen({contentZoom = 1}: {contentZoom?: number}) {
   const data = useData();
   const {setTab} = useUi();
   const {snapshot} = useGraphTotals();
-  const [completed, setCompleted] = useState<ReadonlySet<string>>(() => new Set());
+  const [storedCompleted, setStoredCompleted] = useState<ReadonlySet<string>>(() => new Set());
 
-  const rootKey = snapshot?.rootKey ?? null;
+  const rootKey = snapshot?.root?.buildId ?? snapshot?.rootKey ?? null;
   const progressKey = rootKey ? resourceProgressKey(data.descriptor, rootKey) : null;
   useEffect(() => {
-    setCompleted(
+    setStoredCompleted(
       rootKey && progressKey ? loadCompletedResources(data.descriptor, rootKey) : new Set(),
     );
     // progressKey is the identity of the list being tracked; the descriptor object behind it is
@@ -69,7 +70,19 @@ export function ResourcesScreen({contentZoom = 1}: {contentZoom?: number}) {
   // Which items the user has moved to the tools list, shared with the tree so the two cannot
   // disagree. Nothing arrives there on its own: a pack saying a recipe keeps an item describes the
   // craft, not how someone wants to shop for it.
-  const {catalysts, isCatalyst} = useCatalystItems(data.descriptor, snapshot?.rootKey ?? null);
+  const {catalysts: catalystMarks, isCatalyst} = useCatalystItems(data.descriptor, rootKey);
+  const nodes = useMemo(() => resourceNodesById(snapshot?.root ?? null), [snapshot, snapshot?.version]);
+  const catalysts = useMemo(() => new Set(
+    [...nodes.values()].filter(isCatalyst).map(node => node.id),
+  ), [nodes, isCatalyst, catalystMarks]);
+  const completionKeys = useMemo(() => new Map([...nodes.values()].map(node => [
+    node.id,
+    resourceCompletionIdentity(node, snapshot?.totals.requiredByNode.has(node.id)
+      ? snapshot.totals.requiredByNode.get(node.id)!
+      : node.amount ?? null),
+  ])), [nodes, snapshot]);
+  const completed = useMemo(() => new Set([...completionKeys]
+    .filter(([, key]) => storedCompleted.has(key)).map(([id]) => id)), [completionKeys, storedCompleted]);
   const window = useWindowDimensions();
   const interfaceScale = useContext(InterfaceScaleContext);
   const outline = useMemo(
@@ -225,12 +238,12 @@ export function ResourcesScreen({contentZoom = 1}: {contentZoom?: number}) {
   const tickRow = useCallback(
     (row: ResourceOutlineRow, done: boolean) => {
       if (!rootKey) return;
-      const next = withResourcesCompleted(completedRef.current, nodeIdsFor(row), !done);
-      completedRef.current = next;
-      setCompleted(next);
+      const identities = nodeIdsFor(row).map(id => completionKeys.get(id)).filter((key): key is string => key !== undefined);
+      const next = withResourcesCompleted(storedCompleted, identities, !done);
+      setStoredCompleted(next);
       persistCompletedResources(data.descriptor, rootKey, next);
     },
-    [data.descriptor, nodeIdsFor, rootKey],
+    [completionKeys, data.descriptor, nodeIdsFor, rootKey, storedCompleted],
   );
 
   const everything = useMemo(

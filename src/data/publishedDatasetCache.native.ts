@@ -12,6 +12,15 @@ const INDEX_FORMAT = 1;
 // equally long-lived cache for the same documents.
 const MAX_CACHE_BYTES = 96 * 1024 * 1024;
 
+// The index and document files form one transaction. Serialize both reads and writes so a
+// concurrent fetch cannot overwrite another entry or observe a partially committed document.
+let cacheQueue: Promise<unknown> = Promise.resolve();
+function inCacheOrder<T>(operation: () => Promise<T>): Promise<T> {
+  const next = cacheQueue.then(operation);
+  cacheQueue = next.catch(() => {}); // Each public operation reports its own failure below.
+  return next;
+}
+
 interface CacheIndexEntry {
   url: string;
   bytes: number;
@@ -41,20 +50,41 @@ function isValidIndex(value: unknown): value is CacheIndex {
     typeof value === 'object' &&
     (value as CacheIndex).format === INDEX_FORMAT &&
     !!(value as CacheIndex).entries &&
-    typeof (value as CacheIndex).entries === 'object'
+    typeof (value as CacheIndex).entries === 'object' &&
+    !Array.isArray((value as CacheIndex).entries) &&
+    Object.entries((value as CacheIndex).entries).every(([key, entry]) =>
+      /^[a-f0-9]{64}$/.test(key) && entry && typeof entry.url === 'string' &&
+      Number.isSafeInteger(entry.bytes) && entry.bytes >= 0 && Number.isFinite(entry.storedAt))
   );
 }
 
+let reconciled = false;
 async function readIndex(): Promise<CacheIndex> {
   const file = indexFile();
-  if (!file.exists) return emptyIndex();
+  let index = emptyIndex();
   try {
-    const parsed = JSON.parse(await file.text()) as unknown;
-    return isValidIndex(parsed) ? parsed : emptyIndex();
+    if (file.exists) {
+      const parsed = JSON.parse(await file.text()) as unknown;
+      if (!isValidIndex(parsed)) throw new Error('Invalid published cache index.');
+      index = parsed;
+    }
   } catch (error) {
-    console.error('The published dataset cache index is corrupt; starting empty.', error);
-    return emptyIndex();
+    console.error('The published dataset cache index is corrupt; discarding only its cached documents.', error);
+    reconciled = false;
   }
+  if (!reconciled) {
+    const directory = cacheDirectory();
+    if (directory.exists) {
+      for (const cachedFile of directory.list()) {
+        if (/^[a-f0-9]{64}$/.test(cachedFile.name) && !index.entries[cachedFile.name]) {
+          console.warn('Removing an untracked published cache document.', {file: cachedFile.name});
+          cachedFile.delete();
+        }
+      }
+    }
+    reconciled = true;
+  }
+  return index;
 }
 
 function writeIndex(index: CacheIndex): void {
@@ -91,7 +121,7 @@ function pruneIndex(index: CacheIndex): void {
   }
 }
 
-export async function readCachedPublishedDocument(
+async function readDocument(
   url: string,
 ): Promise<CachedPublishedDocument | null> {
   try {
@@ -114,22 +144,35 @@ export async function readCachedPublishedDocument(
   }
 }
 
-export async function writeCachedPublishedDocument(url: string, text: string): Promise<void> {
+async function writeDocument(url: string, text: string): Promise<void> {
   try {
     const bytes = new TextEncoder().encode(text).byteLength;
+    if (bytes > MAX_CACHE_BYTES) {
+      console.info('Published document exceeds the native cache budget; not caching it.', {url, bytes});
+      return;
+    }
     const key = await hashKeyForUrl(url);
+    const index = await readIndex();
     cacheDirectory().create({idempotent: true, intermediates: true});
     const file = new NativeFile(cacheDirectory(), key);
     file.create({intermediates: true, overwrite: true});
     file.write(text);
-    const index = await readIndex();
     index.entries[key] = {url, bytes, storedAt: Date.now()};
     pruneIndex(index);
     writeIndex(index);
   } catch (error) {
+    reconciled = false;
     console.error('The published dataset cache could not be written; continuing without it.', {
       url,
       error,
     });
   }
+}
+
+export function readCachedPublishedDocument(url: string): Promise<CachedPublishedDocument | null> {
+  return inCacheOrder(() => readDocument(url));
+}
+
+export function writeCachedPublishedDocument(url: string, text: string): Promise<void> {
+  return inCacheOrder(() => writeDocument(url, text));
 }

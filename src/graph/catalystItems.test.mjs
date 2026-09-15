@@ -37,7 +37,7 @@ test('scopes the marks to the pack and the tree they were made in', () => {
   // Node ids mean a place in one tree, so they cannot be shared between trees. A republished pack is
   // a different list, as it is for everything else keyed by publication.
   const stargate = catalystItemsKey(descriptor, 'item|stargate');
-  assert.equal(stargate, 'resourceCatalysts:2:gt-new-horizons:b0c08e74:item|stargate');
+  assert.equal(stargate, 'resourceCatalysts:3:gt-new-horizons:b0c08e74:item|stargate');
   assert.notEqual(stargate, catalystItemsKey(descriptor, 'item|sponge'));
   assert.notEqual(stargate, catalystItemsKey({...descriptor, publicationId: 'deadbeef'}, 'item|stargate'));
   assert.notEqual(stargate, catalystItemsKey({...descriptor, slug: 'other'}, 'item|stargate'));
@@ -77,7 +77,7 @@ test('marking a place leaves every other place alone', () => {
   const catalysts = new Set(['ring.s.0']);
   const added = withCatalystItem(catalysts, 'chevron.s.0', true);
   assert.deepEqual([...added].sort(), ['chevron.s.0', 'ring.s.0']);
-  assert.deepEqual([...withCatalystItem(added, 'ring.s.0', false)], ['chevron.s.0']);
+  assert.deepEqual([...withCatalystItem(added, 'ring.s.0', false)], ['chevron.s.0', '!ring.s.0']);
   assert.deepEqual([...catalysts], ['ring.s.0']);
   // Setting what is already set is not a toggle: the caller decides which way it goes.
   assert.deepEqual([...withCatalystItem(added, 'chevron.s.0', true)].sort(), [
@@ -116,8 +116,8 @@ test('the tree and the list share one idea of what a tool is', () => {
   const graph = readFileSync(new URL('./GraphScreen.tsx', import.meta.url), 'utf8');
   // Both screens read the live list through the same store, so a tool marked in one is a tool in the
   // other at once -- two loaded copies would each keep their own and drift apart.
-  assert.match(screen, /useCatalystItems\(data\.descriptor, snapshot\?\.rootKey \?\? null\)/u);
-  assert.match(graph, /useCatalystItems\(\s*data\.descriptor,\s*graphRootKey \?\? null,\s*\)/u);
+  assert.match(screen, /useCatalystItems\(data\.descriptor, rootKey\)/u);
+  assert.match(graph, /useCatalystItems\(\s*data\.descriptor,\s*buildId,\s*\)/u);
   // And the resources list acts through the graph rather than keeping its own version of the action.
   assert.match(screen, /onTreatAsTool\(menuNode, !isCatalyst\(menuNode\)\)/u);
   assert.doesNotMatch(screen, /persistCatalystItems|withCatalystItem/u);
@@ -167,7 +167,7 @@ test('the canvas says tool rather than reusable, and marks one node', () => {
   assert.doesNotMatch(graph, /applyManualRetentionOverrideToTree/u);
   assert.match(graph, /setCatalyst\(node, isTool\);\s*node\.nonConsumed = isTool;/u);
   // And it comes back when the branch is built again, which is what makes it survive a collapse.
-  assert.match(graph, /catalystsRef\.current\.has\(`\$\{sourceId\}\.\$\{String\(i\)\}`\)/u);
+  assert.match(graph, /catalystOverride\(catalystsRef\.current/u);
 });
 
 test('the tools list counts what is needed rather than what is ticked', () => {

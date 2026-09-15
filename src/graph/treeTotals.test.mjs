@@ -525,8 +525,8 @@ test('a collapsed root asks for its materials, not for the item being built', ()
   // not something anyone can go and gather.
   const collapsed = {id: 'root', key: 'item|stargate', ancestors: [], collapsedSource: subtree};
   assert.deepEqual(
-    calculateTreeTotals(collapsed).inputs.map(total => total.key),
-    ['item|stargate'],
+    calculateTreeTotals(collapsed).inputs.map(total => total.key).sort(),
+    ['item|gold', 'item|iron'],
   );
 
   // Read through the subtree a collapse now keeps, the materials survive folding the tree away.
@@ -541,8 +541,8 @@ test('the graph reads totals through a collapsed root', () => {
   const source = readFileSync(new URL('./GraphScreen.tsx', import.meta.url), 'utf8');
   assert.match(
     source,
-    /const rootForTotals =\s*!root\.source && root\.collapsedSource \? \{\.\.\.root, source: root\.collapsedSource\} : root;/u,
+    /calculateTreeTotals\(root, useByproducts/u,
   );
   // Only the root: collapsing an ingredient is still a way to say it will be acquired directly.
-  assert.match(source, /calculateTreeTotals\(rootForTotals, useByproducts/u);
+  assert.doesNotMatch(source, /rootForTotals/u);
 });

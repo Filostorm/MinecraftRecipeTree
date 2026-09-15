@@ -96,7 +96,7 @@ test('graph retry discards only the broken active snapshot and rebuilds the same
   // not disturb the others, so recovery targets that tree's own id and direction.
   assert.match(
     appSource,
-    /onRetry=\{recovery => \{[\s\S]*?clearGraphSession\(data\.descriptor\);[\s\S]*?ui\.changeGraphDirection\(tree\.id, tree\.direction\);/u,
+    /onRetry=\{recovery => \{[\s\S]*?clearGraphSession\(data\.descriptor, tree\.buildId\);[\s\S]*?ui\.changeGraphDirection\(tree\.id, tree\.direction\);/u,
   );
   assert.match(
     appSource,

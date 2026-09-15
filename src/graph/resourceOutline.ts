@@ -78,6 +78,11 @@ export function isOutlineBranch(node: ItemTreeNode): boolean {
   return node.source !== undefined || node.collapsedSource !== undefined;
 }
 
+function requiredAmount(node: ItemTreeNode, amounts?: ReadonlyMap<string, number | null>): number | null {
+  // A calculated null is explicitly unknown, not permission to use an unscaled per-craft count.
+  return amounts?.has(node.id) ? amounts.get(node.id)! : node.amount ?? null;
+}
+
 export function resourceOutlineRows(
   root: ItemTreeNode | null,
   options: ResourceOutlineOptions = {},
@@ -95,8 +100,8 @@ export function resourceOutlineRows(
     const sorted = inputs
       .filter(child => catalysts?.has(child.id) !== true)
       .sort((left, right) => {
-        const l = requiredByNode?.get(left.id) ?? left.amount ?? null;
-        const r = requiredByNode?.get(right.id) ?? right.amount ?? null;
+        const l = requiredAmount(left, requiredByNode);
+        const r = requiredAmount(right, requiredByNode);
         if (l == null || r == null) {
           if (l == null && r == null) return left.key.localeCompare(right.key);
           return l == null ? 1 : -1;
@@ -117,7 +122,7 @@ export function resourceOutlineRows(
         key: child.key,
         ...(child.tag === undefined ? {} : {tag: child.tag}),
         depth,
-        amount: requiredByNode?.get(child.id) ?? child.amount ?? null,
+        amount: requiredAmount(child, requiredByNode),
         variants: child.variantCount ?? 1,
         expanded: child.source !== undefined,
         collapsed: child.source === undefined && child.collapsedSource !== undefined,

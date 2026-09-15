@@ -38,7 +38,7 @@ export function findRecipeExpansionOwner(
   while (stack.length > 0) {
     const node = stack.pop()!;
     if (node !== excluded) {
-      const currentExpansion = recipeExpansionFromSource(node.source);
+      const currentExpansion = recipeExpansionFromSource(node.source ?? node.collapsedSource);
       if (
         currentExpansion &&
         recipeExpansionIdentity(node.key, direction, currentExpansion) === targetIdentity
@@ -46,7 +46,7 @@ export function findRecipeExpansionOwner(
         return node;
       }
     }
-    const children = node.source?.inputs ?? [];
+    const children = (node.source ?? node.collapsedSource)?.inputs ?? [];
     for (let index = children.length - 1; index >= 0; index -= 1) {
       stack.push(children[index]);
     }
@@ -73,7 +73,7 @@ export function duplicateRecipeExpansions(
   const stack = root ? [root] : [];
   while (stack.length > 0) {
     const node = stack.pop()!;
-    const expansion = recipeExpansionFromSource(node.source);
+    const expansion = recipeExpansionFromSource(node.source ?? node.collapsedSource);
     if (expansion) {
       const identity = recipeExpansionIdentity(node.key, direction, expansion);
       if (seen.has(identity)) {
@@ -82,7 +82,7 @@ export function duplicateRecipeExpansions(
       }
       seen.add(identity);
     }
-    const children = node.source?.inputs ?? [];
+    const children = (node.source ?? node.collapsedSource)?.inputs ?? [];
     for (let index = children.length - 1; index >= 0; index -= 1) {
       stack.push(children[index]);
     }
@@ -96,7 +96,7 @@ export function deferredRecipeExpansionNodes(root: ItemTreeNode | null): ItemTre
   while (stack.length > 0) {
     const node = stack.pop()!;
     if (node.deferredRecipeExpansion) deferred.push(node);
-    const children = node.source?.inputs ?? [];
+    const children = (node.source ?? node.collapsedSource)?.inputs ?? [];
     for (let index = children.length - 1; index >= 0; index -= 1) {
       stack.push(children[index]);
     }
@@ -121,14 +121,15 @@ export function createDeferredRecipeSourceResolver(
   const stack = root ? [root] : [];
   while (stack.length > 0) {
     const node = stack.pop()!;
-    const expansion = recipeExpansionFromSource(node.source);
-    if (expansion && node.source) {
+    const source = node.source ?? node.collapsedSource;
+    const expansion = recipeExpansionFromSource(source);
+    if (expansion && source) {
       const identity = recipeExpansionIdentity(node.key, direction, expansion);
       if (!sourcesByIdentity.has(identity)) {
-        sourcesByIdentity.set(identity, node.source);
+        sourcesByIdentity.set(identity, source);
       }
     }
-    const children = node.source?.inputs ?? [];
+    const children = source?.inputs ?? [];
     for (let index = children.length - 1; index >= 0; index -= 1) {
       stack.push(children[index]);
     }

@@ -27,7 +27,7 @@ test('future expansions apply the saved correction before calculating consumptio
   assert.match(graphSource, /manualRetentionOverrideFor\(manualRetentionOverridesRef\.current/u);
   assert.match(
     graphSource,
-    /catalystsRef\.current\.has\([\s\S]*?\) \|\| \(retentionOverride \?\? spec\.nonConsumed\)/u,
+    /const nonConsumed = retentionOverride \?\? spec\.nonConsumed/u,
   );
   assert.match(graphSource, /spec\.probabilityRole === 'consume' && !nonConsumed/u);
 });

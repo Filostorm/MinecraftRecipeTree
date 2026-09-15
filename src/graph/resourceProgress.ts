@@ -20,7 +20,7 @@ export function resourceProgressKey(
   descriptor: Pick<DatasetDescriptor, 'slug' | 'publicationId'>,
   rootKey: string,
 ): string {
-  return `resourceProgress:2:${descriptor.slug}:${descriptor.publicationId}:${rootKey}`;
+  return `resourceProgress:3:${descriptor.slug}:${descriptor.publicationId}:${rootKey}`;
 }
 
 function legacyResourceProgressKey(

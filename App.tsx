@@ -59,6 +59,9 @@ import {
 } from './src/graph/graphRenderError';
 import {clearGraphSession, loadGraphSession} from './src/graph/graphSession';
 import type {RecipeImportReport} from './src/graph/RecipeImportDetailsModal';
+import {TreeShareModal} from './src/graph/TreeShareModal';
+import {parsePortableTree, assertPortableTreePackMatches} from './src/graph/portableTree';
+import {pickPortableTreeFile} from './src/graph/portableTreeTransfer';
 import {UserProvider, useUser} from './src/account/UserContext';
 import {ThemePreferenceProvider, useThemePreference} from './src/ui/themePreference';
 import {hasSeenOnboarding, markOnboardingSeen} from './src/ui/onboarding';
@@ -526,10 +529,11 @@ function Shell({
   const infoMenuAnchorRef = useRef<View>(null);
   const [nativeMenuRight, setNativeMenuRight] = useState(0);
   const [showAppMenu, setShowAppMenu] = useState(false);
-  const [recipeImportRequestId, setRecipeImportRequestId] = useState(0);
+  const [showRecipeImport, setShowRecipeImport] = useState(false);
   const [recipeImportJob, setRecipeImportJob] = useState<{
     id: number;
     raw: string;
+    treeId: number;
   } | null>(null);
   const recipeImportJobIdRef = useRef(0);
   const [recipeImportNotice, setRecipeImportNotice] = useState<string | null>(null);
@@ -618,8 +622,8 @@ function Shell({
     if (recipeImportJob || openGraphTrees.length > 0) return;
     const session = loadGraphSession(data.descriptor);
     if (!session) return;
-    ui.restoreGraph(session.rootKey, session.direction);
-    setTab('graph');
+    ui.restoreGraph(session.rootKey, session.direction, session.buildId);
+    if (!ui.restoredLastTab) setTab('graph');
   }, [data.descriptor, openGraphTrees.length, recipeImportJob, setTab, ui.restoreGraph]);
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
@@ -749,8 +753,21 @@ function Shell({
     setShowAppMenu(false);
   };
   const openCraftingTreeImport = () => {
+    setShowRecipeImport(true);
+  };
+  const startRecipeImport = async (raw: string) => {
+    const share = parsePortableTree(raw);
+    assertPortableTreePackMatches(share, data.descriptor);
+    if (!data.itemsByKey.has(share.rootKey)) {
+      throw new Error('The shared starting item is not available in the selected modpack.');
+    }
+    const treeId = ui.restoreGraph(share.rootKey, share.direction);
+    recipeImportJobIdRef.current += 1;
+    setRecipeImportJob({id: recipeImportJobIdRef.current, raw, treeId});
+    setRecipeImportReport(null);
+    setRecipeImportNotice(null);
+    setShowRecipeImport(false);
     setTab('graph');
-    setRecipeImportRequestId(value => value + 1);
   };
   const infoMenu = (
     <View
@@ -1072,7 +1089,7 @@ function Shell({
                           globalThis.location?.reload();
                           return;
                         }
-                        clearGraphSession(data.descriptor);
+                        clearGraphSession(data.descriptor, tree.buildId);
                         ui.changeGraphDirection(tree.id, tree.direction);
                       }}
                       onReturnToItems={() => setTab('items')}>
@@ -1085,6 +1102,7 @@ function Shell({
                         }>
                         <LazyGraphScreen
                           treeId={tree.id}
+                          buildId={tree.buildId}
                           rootKey={tree.rootKey}
                           recipeRef={tree.recipeRef}
                           direction={tree.direction}
@@ -1096,7 +1114,7 @@ function Shell({
                           contentZoom={contentZoom}
                           onContentZoomChange={previewContentZoom}
                           onContentZoomComplete={saveContentZoom}
-                          showGraphControls={showGraphControls}
+                          showGraphControls={showGraphControls && tab === 'graph' && tree.id === activeGraphTreeId}
                           onToggleGraphControls={() =>
                             setShowGraphControls(value => !value)
                           }
@@ -1109,17 +1127,9 @@ function Shell({
                               ? setGraphTreePagerSuppressed
                               : undefined
                           }
-                          recipeImportRequestId={recipeImportRequestId}
-                          onRecipeImportRequestHandled={() => setRecipeImportRequestId(0)}
-                          recipeImportJob={recipeImportJob}
-                          onRecipeImportStart={raw => {
-                            recipeImportJobIdRef.current += 1;
-                            setRecipeImportJob({
-                              id: recipeImportJobIdRef.current,
-                              raw,
-                            });
-                          }}
-                          onRecipeImportComplete={() => setRecipeImportJob(null)}
+                          recipeImportJob={recipeImportJob?.treeId === tree.id ? recipeImportJob : null}
+                          onRecipeImportStart={startRecipeImport}
+                          onRecipeImportComplete={() => setRecipeImportJob(current => current?.treeId === tree.id ? null : current)}
                           recipeImportNotice={recipeImportNotice}
                           onRecipeImportNoticeChange={setRecipeImportNotice}
                           recipeImportReport={recipeImportReport}
@@ -1235,6 +1245,15 @@ function Shell({
           />
         </Suspense>
       )}
+      <TreeShareModal
+        visible={showRecipeImport}
+        mode="import"
+        interfaceZoom={interfaceZoom}
+        onClose={() => setShowRecipeImport(false)}
+        onShare={async () => { throw new Error('No tree is selected for sharing.'); }}
+        onImport={startRecipeImport}
+        onChooseFile={pickPortableTreeFile}
+      />
       {showRecipeStages && (
         <Suspense fallback={<DeferredModalFallback label="recipe stages" />}>
           <LazyRecipeStageModal

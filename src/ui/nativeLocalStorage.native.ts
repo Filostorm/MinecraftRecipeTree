@@ -51,14 +51,17 @@ export function migrateLegacyNativeLocalStorage(): void {
     for (const [key, value] of Object.entries(parsed)) {
       if (storage.getItem(key) !== null) continue;
       storage.setItem(key, value);
+      if (storage.getItem(key) !== value) {
+        throw new Error(`Legacy storage entry ${JSON.stringify(key)} was not persisted.`);
+      }
       migrated += 1;
     }
   } catch (error) {
-    console.error('Legacy native storage could not be migrated; it will be discarded.', error);
+    console.error('Legacy native storage could not be migrated; keeping the original for retry.', error);
+    return;
   }
 
-  // Deleted either way: a file that cannot be parsed will not parse on the next launch either,
-  // and keeping it would re-run this on every start for no benefit.
+  // Only remove the original after every missing entry has been copied and read back.
   try {
     file.delete();
   } catch (error) {

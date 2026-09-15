@@ -31,11 +31,11 @@ test('the cache is pruned oldest-stored-first once it exceeds its byte budget', 
 
 test('read and write failures degrade gracefully instead of throwing', () => {
   const readFn = nativeSource.slice(
-    nativeSource.indexOf('export async function readCachedPublishedDocument'),
-    nativeSource.indexOf('export async function writeCachedPublishedDocument'),
+    nativeSource.indexOf('async function readDocument'),
+    nativeSource.indexOf('async function writeDocument'),
   );
   const writeFn = nativeSource.slice(
-    nativeSource.indexOf('export async function writeCachedPublishedDocument'),
+    nativeSource.indexOf('async function writeDocument'),
   );
   assert.match(readFn, /catch \(error\) \{[\s\S]*?return null;\s*\}/u);
   assert.match(writeFn, /catch \(error\) \{[\s\S]*?console\.error/u);
