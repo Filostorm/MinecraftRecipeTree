@@ -1,5 +1,13 @@
-import React, {useRef, useState} from 'react';
-import {Image, Platform, StyleSheet, Text, View, type ImageErrorEvent} from 'react-native';
+import React, {useEffect, useRef, useState} from 'react';
+import {
+  ActivityIndicator,
+  Image,
+  Platform,
+  StyleSheet,
+  Text,
+  View,
+  type ImageErrorEvent,
+} from 'react-native';
 import {useData} from '../data/DataContext';
 import {
   hasItemIconUriFailed,
@@ -11,6 +19,14 @@ import {
 } from '../data/projecteEmc';
 import {theme} from '../theme';
 import {CatalogItem} from '../types';
+import {
+  ITEM_ICON_LOAD_TIMEOUT_MS,
+  ITEM_ICON_SPINNER_DELAY_MS,
+  itemIconRetryDelayMs,
+  type ItemIconFailureReason,
+  itemIconSpinnerScale,
+  shouldRetryItemIconLoad,
+} from './itemIconLoading';
 import {
   LOGICAL_ITEM_ICON_GRID_SIZE,
   isPixelGridAlignedItemIconSize,
@@ -72,24 +88,83 @@ function UriItemIcon({
   reportFailure,
 }: UriItemIconProps) {
   const [failedUri, setFailedUri] = useState<string | null>(null);
+  // Remounts the Image with the same URI. The URI is content-addressed, so a cache-busting query
+  // is not an option: the service worker matches packed-image coordinates on an exact search
+  // string and would stop recognizing the request.
+  const [attempt, setAttempt] = useState(0);
+  const [loaded, setLoaded] = useState(false);
+  const [slow, setSlow] = useState(false);
   const reportedFailure = useRef(false);
-  if (hasItemIconUriFailed(failedUri, uri)) {
-    return <ItemIconFallback colorKey={colorKey} label={label} size={size} />;
-  }
-  const onError = (event: ImageErrorEvent) => {
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const failRef = useRef<
+    ((detail: unknown, reason?: ItemIconFailureReason) => void) | null
+  >(null);
+  useEffect(
+    () => () => {
+      if (retryTimer.current !== null) clearTimeout(retryTimer.current);
+    },
+    [],
+  );
+  useEffect(() => {
+    if (loaded) return undefined;
+    const spinnerTimer = setTimeout(() => setSlow(true), ITEM_ICON_SPINNER_DELAY_MS);
+    // A hung request never reports anything at all, so nothing but a timer can end this attempt.
+    const timeoutTimer = setTimeout(
+      () => failRef.current?.('The image load timed out without a response.', 'timeout'),
+      ITEM_ICON_LOAD_TIMEOUT_MS,
+    );
+    return () => {
+      clearTimeout(spinnerTimer);
+      clearTimeout(timeoutTimer);
+    };
+  }, [attempt, loaded]);
+  const failAttempt = (detail: unknown, reason: ItemIconFailureReason = 'error') => {
+    const attemptsMade = attempt + 1;
+    if (shouldRetryItemIconLoad(attemptsMade, reason)) {
+      retryTimer.current = setTimeout(() => {
+        retryTimer.current = null;
+        setAttempt(attemptsMade);
+      }, itemIconRetryDelayMs(attemptsMade));
+      return;
+    }
+    // Only a load that exhausted its retries is a real failure worth a diagnostic.
     if (!reportedFailure.current) {
       reportedFailure.current = true;
-      reportFailure({uri, itemKey, label, detail: event.nativeEvent.error});
+      reportFailure({uri, itemKey, label, detail});
     }
     setFailedUri(uri);
   };
+  failRef.current = failAttempt;
+  if (hasItemIconUriFailed(failedUri, uri)) {
+    return <ItemIconFallback colorKey={colorKey} label={label} size={size} />;
+  }
+  const onError = (event: ImageErrorEvent) => failAttempt(event.nativeEvent.error);
   return (
-    <Image
-      source={{uri}}
-      style={[{width: size, height: size}, pixelated as object]}
-      resizeMode="contain"
-      onError={onError}
-    />
+    <View style={{width: size, height: size}}>
+      <Image
+        key={attempt}
+        source={{uri}}
+        style={[{width: size, height: size}, pixelated as object]}
+        resizeMode="contain"
+        onLoad={() => setLoaded(true)}
+        onError={onError}
+      />
+      {!loaded && (
+        <View
+          accessible
+          accessibilityRole="progressbar"
+          accessibilityLabel={`${label} icon loading`}
+          style={[styles.loading, {width: size, height: size}]}>
+          {slow && (
+            <ActivityIndicator
+              size="small"
+              color={theme.textDim}
+              style={{transform: [{scale: itemIconSpinnerScale(size)}]}}
+            />
+          )}
+        </View>
+      )}
+    </View>
   );
 }
 
@@ -141,6 +216,17 @@ export function ItemIcon({item, itemKey, size}: {item?: CatalogItem; itemKey?: s
 }
 
 const styles = StyleSheet.create({
+  /** Sits over the still-blank Image so a pending icon reads as loading rather than as missing. */
+  loading: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 4,
+    backgroundColor: theme.panelAlt,
+    opacity: 0.55,
+  },
   fallback: {
     borderRadius: 4,
     alignItems: 'center',

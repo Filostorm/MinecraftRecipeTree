@@ -11,7 +11,8 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.craftsmannsoftware.minecraftrecipetree",
-      "buildNumber": "1"
+      "buildNumber": "1",
+      "appleTeamId": "YWNQ85LG6H"
     },
     "android": {
       "adaptiveIcon": {
@@ -20,10 +21,17 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.craftsmannsoftware.minecraftrecipetree"
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-web-browser",
+      "expo-sharing",
+      "expo-sqlite"
+    ]
   }
 }

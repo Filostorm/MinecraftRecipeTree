@@ -1,9 +1,24 @@
-import React, {createContext, useCallback, useContext, useMemo, useState} from 'react';
+import React, {createContext, useCallback, useContext, useMemo, useRef, useState} from 'react';
 import {Platform} from 'react-native';
 import {RecipeRef} from '../types';
 import type {GraphDirection} from '../graph/direction';
 
-export type Tab = 'items' | 'graph' | 'mobs';
+export type Tab = 'items' | 'graph' | 'resources' | 'mobs' | 'settings';
+
+/** One independently interactive recipe tree; every field here is exclusive to this tree. */
+export interface OpenGraphTree {
+  id: number;
+  buildId: string;
+  rootKey: string;
+  /** Exact recipe requested from an item-detail recipe card, for this tree only. */
+  recipeRef: RecipeRef | null;
+  direction: GraphDirection;
+  /** Bumped to force this tree's own remount (e.g. a direction change) without touching others. */
+  requestId: number;
+}
+
+/** Open trees beyond this are closed oldest-first; each holds a full, independent tree in memory. */
+export const MAX_OPEN_GRAPH_TREES = 12;
 
 function loadAnimateMobs(): boolean {
   try {
@@ -13,26 +28,51 @@ function loadAnimateMobs(): boolean {
   }
 }
 
+const ACTIVE_TAB_KEY = 'activeTab';
+
+function isTab(value: unknown): value is Tab {
+  return (
+    value === 'items' ||
+    value === 'graph' ||
+    value === 'resources' ||
+    value === 'mobs' ||
+    value === 'settings'
+  );
+}
+
+function loadActiveTab(): Tab | null {
+  try {
+    const saved = globalThis.localStorage?.getItem(ACTIVE_TAB_KEY);
+    return isTab(saved) ? saved : null;
+  } catch (error) {
+    console.error('The last active tab could not be loaded from localStorage.', error);
+    return null;
+  }
+}
+
 interface Ui {
   tab: Tab;
   setTab(t: Tab): void;
+  /** True when this launch resumed the user's last tab, which nothing else may override. */
+  restoredLastTab: boolean;
   /** Item-detail modal stack (navigating between items keeps history). */
   itemStack: string[];
   openItem(key: string): void;
   popItem(): void;
   closeItems(): void;
-  /** Current flowchart root item. */
-  graphRootKey: string | null;
-  /** Increments for every flowchart request, including repeated requests for the same item. */
-  graphRequestId: number;
-  /** Exact recipe requested from an item-detail recipe card. */
-  graphRecipeRef: RecipeRef | null;
-  /** Active traversal direction for the current graph. */
-  graphDirection: GraphDirection;
+  /** Every currently open, independently interactive recipe tree, oldest first. */
+  openGraphTrees: OpenGraphTree[];
+  /** Which open tree is focused; new trees and direction changes target this one. */
+  activeGraphTreeId: number | null;
+  setActiveGraphTree(id: number): void;
+  closeGraphTree(id: number): void;
+  /** Opens a new tree (appended after the active one) without replacing what's already open. */
   openRecipeInGraph(key: string, ref: RecipeRef, direction?: GraphDirection): void;
-  /** Hydrates a saved graph without changing the user's active workspace tab. */
-  restoreGraph(key: string, direction: GraphDirection): void;
-  changeGraphDirection(direction: GraphDirection): void;
+  /** Forgets the recipe a tree was opened with, so clearing it can't be undone by a remount. */
+  clearGraphTreeRecipe(id: number): void;
+  /** Hydrates a saved graph as the one open tree, without changing the user's active workspace tab. */
+  restoreGraph(key: string, direction: GraphDirection, buildId?: string): number;
+  changeGraphDirection(id: number, direction: GraphDirection): void;
   /** Mob sprite animation on/off (persisted). */
   animateMobs: boolean;
   toggleAnimateMobs(): void;
@@ -40,13 +80,25 @@ interface Ui {
 
 const UiContext = createContext<Ui | null>(null);
 
+function newBuildId(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
 export function UiProvider({children}: {children: React.ReactNode}) {
-  const [tab, setTab] = useState<Tab>('items');
+  const restoredTabRef = useRef(loadActiveTab());
+  const [tab, setTabState] = useState<Tab>(restoredTabRef.current ?? 'items');
+  const setTab = useCallback((next: Tab) => {
+    setTabState(next);
+    try {
+      globalThis.localStorage?.setItem(ACTIVE_TAB_KEY, next);
+    } catch (error) {
+      console.error('The active tab could not be saved to localStorage.', error);
+    }
+  }, []);
   const [itemStack, setItemStack] = useState<string[]>([]);
-  const [graphRootKey, setGraphRootKey] = useState<string | null>(null);
-  const [graphRequestId, setGraphRequestId] = useState(0);
-  const [graphRecipeRef, setGraphRecipeRef] = useState<RecipeRef | null>(null);
-  const [graphDirection, setGraphDirection] = useState<GraphDirection>('inputs');
+  const [openGraphTrees, setOpenGraphTrees] = useState<OpenGraphTree[]>([]);
+  const [activeGraphTreeId, setActiveGraphTreeId] = useState<number | null>(null);
+  const nextGraphTreeIdRef = useRef(0);
   const [animateMobs, setAnimateMobs] = useState<boolean>(loadAnimateMobs);
 
   const toggleAnimateMobs = useCallback(() => {
@@ -73,37 +125,72 @@ export function UiProvider({children}: {children: React.ReactNode}) {
     // Native panes stay mounted behind the bottom tabs. Preserve the current
     // item and its resolved recipe cards so returning to Browse is immediate.
     if (Platform.OS === 'web') setItemStack([]);
-    setGraphRootKey(key);
-    setGraphRecipeRef(ref);
-    setGraphDirection(direction);
-    setGraphRequestId(requestId => requestId + 1);
+    const id = nextGraphTreeIdRef.current;
+    nextGraphTreeIdRef.current += 1;
+    const entry: OpenGraphTree = {id, buildId: newBuildId(), rootKey: key, recipeRef: ref, direction, requestId: 0};
+    setOpenGraphTrees(trees => {
+      // Balanced left/right: the first tree stays near the middle as later ones alternate onto
+      // either edge, rather than every new tree just queuing up on one side.
+      const next = id % 2 === 0 ? [...trees, entry] : [entry, ...trees];
+      if (next.length <= MAX_OPEN_GRAPH_TREES) return next;
+      // Oldest-first eviction (by id, since array position is now spatial, not chronological).
+      const oldest = next.reduce((min, tree) => (tree.id < min.id ? tree : min));
+      return next.filter(tree => tree.id !== oldest.id);
+    });
+    setActiveGraphTreeId(id);
     setTab('graph');
   }, []);
-  const restoreGraph = useCallback((key: string, direction: GraphDirection) => {
-    setGraphRootKey(key);
-    setGraphRecipeRef(null);
-    setGraphDirection(direction);
-    setGraphRequestId(requestId => requestId + 1);
+  const restoreGraph = useCallback((key: string, direction: GraphDirection, buildId = newBuildId()) => {
+    const id = nextGraphTreeIdRef.current;
+    nextGraphTreeIdRef.current += 1;
+    setOpenGraphTrees([{id, buildId, rootKey: key, recipeRef: null, direction, requestId: 0}]);
+    setActiveGraphTreeId(id);
+    return id;
   }, []);
-  const changeGraphDirection = useCallback((direction: GraphDirection) => {
-    setGraphRecipeRef(null);
-    setGraphDirection(direction);
-    setGraphRequestId(requestId => requestId + 1);
+  const setActiveGraphTree = useCallback((id: number) => {
+    setActiveGraphTreeId(id);
+  }, []);
+  const clearGraphTreeRecipe = useCallback((id: number) => {
+    setOpenGraphTrees(trees =>
+      trees.map(tree => (tree.id === id ? {...tree, recipeRef: null} : tree)),
+    );
+  }, []);
+  const closeGraphTree = useCallback((id: number) => {
+    setOpenGraphTrees(trees => {
+      const next = trees.filter(tree => tree.id !== id);
+      setActiveGraphTreeId(current => {
+        if (current !== id) return current;
+        const closedIndex = trees.findIndex(tree => tree.id === id);
+        return next[Math.min(closedIndex, next.length - 1)]?.id ?? null;
+      });
+      return next;
+    });
+  }, []);
+  const changeGraphDirection = useCallback((id: number, direction: GraphDirection) => {
+    setOpenGraphTrees(trees =>
+      trees.map(tree =>
+        tree.id === id
+          ? {...tree, recipeRef: null, direction, requestId: tree.requestId + 1}
+          : tree,
+      ),
+    );
   }, []);
 
   const value = useMemo<Ui>(
     () => ({
       tab,
       setTab,
+      restoredLastTab: restoredTabRef.current !== null,
       itemStack,
       openItem,
       popItem,
       closeItems,
-      graphRootKey,
-      graphRequestId,
-      graphRecipeRef,
-      graphDirection,
+      openGraphTrees,
+      activeGraphTreeId,
+      setActiveGraphTree,
+      closeGraphTree,
       openRecipeInGraph,
+      clearGraphTreeRecipe,
       restoreGraph,
       changeGraphDirection,
       animateMobs,
@@ -111,11 +198,13 @@ export function UiProvider({children}: {children: React.ReactNode}) {
     }),
     [
       tab,
+      setTab,
       itemStack,
-      graphRootKey,
-      graphRequestId,
-      graphRecipeRef,
-      graphDirection,
+      openGraphTrees,
+      activeGraphTreeId,
+      setActiveGraphTree,
+      closeGraphTree,
+      clearGraphTreeRecipe,
       changeGraphDirection,
       animateMobs,
       openItem,

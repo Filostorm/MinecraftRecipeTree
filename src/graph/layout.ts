@@ -1,6 +1,7 @@
 import type {Recipe} from '../types.ts';
 import {pixelArtDisplaySize} from '../data/pixelArtSizing.ts';
 import {isEmcTransmutationSource} from './model.ts';
+import {visibleInputs} from './treeFocus.ts';
 import type {ItemTreeNode, SourceTreeNode} from './model.ts';
 import type {NodeByproductCoverage} from './treeTotals.ts';
 
@@ -28,7 +29,15 @@ export const ROOT_SOURCE_ACTIONS_HEIGHT = 46;
 export const ROOT_ATTACHED_ACTIONS_WIDTH = 220;
 export const ROOT_ATTACHED_ACTIONS_HEIGHT = 62;
 /** Vertical gap between tree levels (rows). */
-const LEVEL_GAP = 48;
+/**
+ * Every child's edge radiates from the same point on its parent, so on a wide level those
+ * segments leave at nearly the same angle and visually merge. Elbow routing is the usual answer
+ * and was tried here: shared horizontal rows made unrelated branches look connected wherever two
+ * parents' runs overlapped, which is worse. Vertical room is what separates them instead -- the
+ * further a child sits below its parent, the wider apart its segment ends up from its siblings'.
+ * Paid for in panning, so this is a deliberate middle rather than as much as would be legible.
+ */
+const LEVEL_GAP = 72;
 /** Horizontal gap between siblings. */
 const SIBLING_GAP = 18;
 const EDGE_T = 2;
@@ -236,6 +245,8 @@ export function layoutTree(
   compact = false,
   showCompactLabels = false,
   showRootActions = false,
+  /** Restricts the tree to one focused branch; undefined draws every child. */
+  visibleNodeIds?: ReadonlySet<string>,
 ): GraphLayout {
   const nodes: LaidNode[] = [];
   const edges: EdgeRect[] = [];
@@ -250,8 +261,9 @@ export function layoutTree(
     const {node, depth} = rowStack.pop()!;
     if (node.source) {
       seeH(depth, treeNodeSize(node, compact, depth === 0, showRootActions).h);
-      for (let index = node.source.inputs.length - 1; index >= 0; index -= 1) {
-        rowStack.push({node: node.source.inputs[index], depth: depth + 1});
+      const visible = visibleInputs(node, visibleNodeIds);
+      for (let index = visible.length - 1; index >= 0; index -= 1) {
+        rowStack.push({node: visible[index], depth: depth + 1});
       }
     } else {
       seeH(depth, treeNodeSize(node, compact, depth === 0).h);
@@ -312,7 +324,7 @@ export function layoutTree(
   while (flattenStack.length > 0) {
     const record = flattenStack.pop()!;
     traversal.push(record);
-    const inputs = record.node.source?.inputs ?? [];
+    const inputs = visibleInputs(record.node, visibleNodeIds);
     record.children = inputs.map((input, index) => createRecord(input, record, index));
     for (let index = record.children.length - 1; index >= 0; index -= 1) {
       flattenStack.push(record.children[index]);

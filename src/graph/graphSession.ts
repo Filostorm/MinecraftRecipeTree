@@ -25,11 +25,13 @@ export interface StoredGraphSelection {
   itemKey: string;
   source: StoredGraphSource;
   deferred?: true;
+  collapsed?: true;
 }
 
 export interface GraphSession {
   version: typeof GRAPH_SESSION_VERSION;
   rootKey: string;
+  buildId?: string;
   direction: GraphDirection;
   productionPlan?: {
     amount: number;
@@ -140,6 +142,7 @@ function requireStoredSource(value: unknown, index: number): StoredGraphSource {
 function requireSelection(value: unknown, index: number): StoredGraphSelection {
   const expectedKeys = [
     ...(value && typeof value === 'object' && 'deferred' in value ? ['deferred'] : []),
+    ...(value && typeof value === 'object' && 'collapsed' in value ? ['collapsed'] : []),
     'itemKey',
     'path',
     'source',
@@ -148,6 +151,8 @@ function requireSelection(value: unknown, index: number): StoredGraphSelection {
     !isRecord(value) ||
     !hasExactKeys(value, expectedKeys) ||
     (value.deferred !== undefined && value.deferred !== true) ||
+    (value.collapsed !== undefined && value.collapsed !== true) ||
+    (value.collapsed === true && value.deferred === true) ||
     !isBoundedString(value.itemKey, MAX_ITEM_KEY_LENGTH) ||
     !Array.isArray(value.path) ||
     value.path.length > MAX_TREE_DEPTH ||
@@ -166,6 +171,7 @@ function requireSelection(value: unknown, index: number): StoredGraphSelection {
     itemKey: value.itemKey,
     source,
     ...(value.deferred === true ? {deferred: true as const} : {}),
+    ...(value.collapsed === true ? {collapsed: true as const} : {}),
   };
 }
 
@@ -173,6 +179,7 @@ export function parseGraphSession(raw: string): GraphSession {
   const parsed = JSON.parse(raw) as unknown;
   const expectedKeys = [
     'direction',
+    ...(isRecord(parsed) && parsed.buildId !== undefined ? ['buildId'] : []),
     ...(isRecord(parsed) && parsed.productionPlan !== undefined
       ? ['productionPlan']
       : []),
@@ -185,6 +192,7 @@ export function parseGraphSession(raw: string): GraphSession {
     !hasExactKeys(parsed, expectedKeys) ||
     parsed.version !== GRAPH_SESSION_VERSION ||
     !isBoundedString(parsed.rootKey, MAX_ITEM_KEY_LENGTH) ||
+    (parsed.buildId !== undefined && !isBoundedString(parsed.buildId, 128)) ||
     (parsed.direction !== 'inputs' && parsed.direction !== 'outputs') ||
     !Array.isArray(parsed.selections) ||
     parsed.selections.length > MAX_GRAPH_SESSION_SELECTIONS
@@ -254,6 +262,7 @@ export function parseGraphSession(raw: string): GraphSession {
   return {
     version: GRAPH_SESSION_VERSION,
     rootKey: parsed.rootKey,
+    ...(typeof parsed.buildId === 'string' ? {buildId: parsed.buildId} : {}),
     direction: parsed.direction,
     ...(productionPlan ? {productionPlan} : {}),
     selections,
@@ -321,23 +330,26 @@ export function serializeGraphSession(
       }
       return;
     }
-    if (!node.source) return;
+    const source = node.source ?? node.collapsedSource;
+    if (!source) return;
     selections.push({
       path,
       itemKey: node.key,
-      source: storedSourceFromNode(node.source),
+      source: storedSourceFromNode(source),
+      ...(node.collapsedSource && !node.source ? {collapsed: true as const} : {}),
     });
     if (selections.length > MAX_GRAPH_SESSION_SELECTIONS) {
       throw new Error(
         `The graph exceeds the persisted expansion limit of ${MAX_GRAPH_SESSION_SELECTIONS}.`,
       );
     }
-    node.source.inputs.forEach((child, childIndex) => visit(child, [...path, childIndex]));
+    source.inputs.forEach((child, childIndex) => visit(child, [...path, childIndex]));
   };
   visit(root, []);
   return {
     version: GRAPH_SESSION_VERSION,
     rootKey: root.key,
+    ...(root.buildId ? {buildId: root.buildId} : {}),
     direction,
     ...(root.productionPlan ? {productionPlan: {...root.productionPlan}} : {}),
     selections,
@@ -407,6 +419,7 @@ export function persistGraphSessionSnapshot(
 
 export function clearGraphSession(
   descriptor: Pick<DatasetDescriptor, 'slug' | 'publicationId'>,
+  expectedBuildId?: string,
 ): void {
   try {
     const storage = globalThis.localStorage;
@@ -414,7 +427,12 @@ export function clearGraphSession(
       console.warn('The invalid saved graph could not be cleared because localStorage is unavailable.');
       return;
     }
-    storage.removeItem(graphSessionStorageKey(descriptor));
+    const key = graphSessionStorageKey(descriptor);
+    if (expectedBuildId) {
+      const raw = storage.getItem(key);
+      if (!raw || parseGraphSession(raw).buildId !== expectedBuildId) return;
+    }
+    storage.removeItem(key);
   } catch (error) {
     console.error('The invalid saved graph could not be cleared from localStorage.', error);
   }

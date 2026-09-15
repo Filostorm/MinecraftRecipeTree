@@ -15,6 +15,8 @@ import {
 import {formatDropStat} from '../components/DropList';
 import {DisclosureChevron} from '../components/DisclosureChevron';
 import {ItemIcon, pixelated} from '../components/ItemIcon';
+import {NodeActionMenu} from './NodeActionMenu';
+import {useCatalystItems} from './catalystItems';
 import {
   RADIAL_ROOT_ITEM_ICON_SIZE,
 } from '../components/itemIconSizing';
@@ -67,7 +69,7 @@ import {reportRecipeRetentionOverride} from '../data/recipeRetentionReports';
 import {useUser} from '../account/UserContext';
 import {theme} from '../theme';
 import {DropStat, Mob, Recipe, RecipeRef} from '../types';
-import {useUi} from '../ui/UiContext';
+import {useUi, type Tab} from '../ui/UiContext';
 import {
   COMPACT_LABEL_WIDTH,
   COMPACT_ITEM_SIZE,
@@ -112,11 +114,10 @@ import {
 } from './panGesture';
 import type {GraphTransform, PanGestureOrigin} from './panGesture';
 import {recordRecipeHistory} from './recipeHistory';
+import {RecipeLoadTimeoutError, withRecipeLoadTimeout} from './recipeLoadTimeout';
 import {
   loadManualRetentionOverrides,
   manualRetentionOverrideFor,
-  manualRetentionOverrideKey,
-  persistManualRetentionOverrides,
   type ManualRetentionOverrides,
 } from './manualRetentionOverrides';
 import {planRecipePickerChoices} from './recipePickerPlan';
@@ -153,6 +154,7 @@ import {
   sharePortableTree,
 } from './portableTreeTransfer';
 import {TreeShareModal} from './TreeShareModal';
+import {childRequirementId, catalystOverride} from './resourceIdentity';
 import {
   RecipeImportDetailsModal,
   type RecipeImportReport,
@@ -162,6 +164,10 @@ import {
   type AutoExpandSummaryEntry,
 } from './AutoExpandSummaryModal';
 import {LowDetailGraphCanvas} from './LowDetailGraphCanvas';
+import {GraphMinimap, MINIMAP_MAX_WIDTH} from './GraphMinimap';
+import {GraphSettingsSheet, type GraphSettingOption} from './GraphSettingsSheet';
+import {shouldShowMinimap, transformCenteredOn} from './minimap';
+import {useGraphTotals} from './GraphTotalsContext';
 import {autoExpandPreferredNodes} from './autoExpandTree';
 import {
   createDeferredRecipeSourceResolver,
@@ -172,6 +178,8 @@ import {
   recipeExpansionIdentity,
 } from './expansionOwnership';
 import {isEmcTransmutationSource, isRecursiveItemNode, makeRoot} from './model';
+import {treeFocus} from './treeFocus';
+import {ExpansionBudget} from './expansionBudget';
 import type {
   DeferredRecipeExpansion,
   ItemTreeNode,
@@ -189,11 +197,14 @@ import type {
   TreeTotal,
   TreeTotals,
 } from './treeTotals';
-import {GRAPH_VIEWPORT_OVERSCAN, visibleGraphElements} from './viewportCulling';
+import {
+  GRAPH_VIEWPORT_OVERSCAN,
+  shouldRecomputeCulling,
+  visibleGraphElements,
+} from './viewportCulling';
 import {indexedRecipeRefs} from './indexedRecipeRefs';
 import {
   DENSE_GRAPH_NODE_THRESHOLD,
-  shouldRequireUniqueRecipes,
   shouldShowNodeAmounts,
   shouldUseLowDetailGraph,
 } from './renderDetail';
@@ -340,9 +351,10 @@ function releaseByproductFulfillments(
   const removedStack = [removedNode];
   while (removedStack.length > 0) {
     const current = removedStack.pop()!;
-    if (!current.source) continue;
-    removedSourceIds.add(current.source.id);
-    for (const child of current.source.inputs) removedStack.push(child);
+    const source = current.source ?? current.collapsedSource;
+    if (!source) continue;
+    removedSourceIds.add(source.id);
+    for (const child of source.inputs) removedStack.push(child);
   }
   if (removedSourceIds.size === 0 || !root) return;
 
@@ -370,7 +382,7 @@ function releaseByproductFulfillments(
         current.byproductFulfillment = undefined;
       }
     }
-    for (const child of current.source?.inputs ?? []) treeStack.push(child);
+    for (const child of (current.source ?? current.collapsedSource)?.inputs ?? []) treeStack.push(child);
   }
   if (releasedAmount > 0) {
     console.info('Byproduct fulfillment was released because its producing recipe left the tree.', {
@@ -388,7 +400,7 @@ function parentRecipeSource(
   const stack = [root];
   while (stack.length > 0) {
     const current = stack.pop()!;
-    const source = current.source;
+    const source = current.source ?? current.collapsedSource;
     if (!source) continue;
     if (source.inputs.includes(target)) return source;
     stack.push(...source.inputs);
@@ -396,41 +408,29 @@ function parentRecipeSource(
   return null;
 }
 
-function applyManualRetentionOverrideToTree(
-  root: ItemTreeNode | null,
-  ref: RecipeRef,
-  itemKey: string,
-  reusable: boolean,
-): void {
-  if (!root) return;
-  const stack = [root];
-  while (stack.length > 0) {
-    const current = stack.pop()!;
-    const source = current.source;
-    if (!source) continue;
-    if (
-      source.kind === 'recipe' &&
-      source.direction === 'inputs' &&
-      source.ref?.[0] === ref[0] &&
-      source.ref[1] === ref[1]
-    ) {
-      for (const child of source.inputs) {
-        if (child.key !== itemKey) continue;
-        child.nonConsumed = reusable;
-        child.retentionMode = reusable ? 'reusable' : undefined;
-        child.retentionUses = undefined;
-      }
-    }
-    stack.push(...source.inputs);
-  }
-}
-
 /** Dragging the canvas must never start a text selection (web). */
 const noSelect = Platform.OS === 'web' ? ({userSelect: 'none'} as unknown as object) : null;
 const COMPACT_MODE_KEY = 'graphCompactMode';
 const RADIAL_LAYOUT_KEY = 'graphRadialLayout';
 const LEGACY_PACKED_LAYOUT_KEY = 'graphPackedLayout';
+const LOW_DETAIL_KEY = 'graphLowDetail';
 const USE_BYPRODUCTS_KEY = 'graphUseByproducts';
+/** Distance from the canvas top to the controls bar; panels below it clear it by measurement. */
+const CONTROLS_TOP_INSET = 10;
+/**
+ * Surfaces that can ask the graph for a recipe. The resources list opens the picker without
+ * leaving itself, so an in-flight lookup started there must not be abandoned as though the user
+ * had navigated away from the graph.
+ */
+const TABS_DRIVING_THE_PICKER: ReadonlySet<Tab> = new Set<Tab>(['graph', 'resources']);
+const CANVAS_EDGE_INSET = 10;
+const FIT_CONTROL_SIZE = Platform.OS === 'web' ? 40 : 44;
+/**
+ * Bottom-edge notices start clear of the fit control in the corner and end at the opposite edge.
+ * They used to be placed by hand-counted offsets with no right bound at all, which reads fine on a
+ * desktop canvas and runs straight off the side of a phone.
+ */
+const BOTTOM_NOTICE_LEFT_INSET = CANVAS_EDGE_INSET + FIT_CONTROL_SIZE + 12;
 const EXPAND_RECIPES_ONCE_KEY = 'graphExpandRecipesOnce';
 const MAX_RECIPE_PICKER_CHOICES = 40;
 const RECIPE_PICKER_GROUP_PAGE = 40;
@@ -524,10 +524,27 @@ function loadRadialLayout(): boolean {
       storage?.setItem(RADIAL_LAYOUT_KEY, legacyPacked);
       return legacyPacked !== '0';
     }
-    return true;
+    // Default off: Unique mode is the recommended default and reads best in the plain
+    // (non-radial) layout.
+    return false;
   } catch (error) {
     console.error('Radial graph layout could not be loaded from localStorage.', error);
-    return true;
+    return false;
+  }
+}
+
+/**
+ * Far-zoom trees drop to flat chips so a dense graph stays interactive. A phone needs that to
+ * survive a large pack at all, so it stays automatic there. A desktop has the headroom to keep
+ * drawing real nodes, and the chips are a downgrade it should be asked for rather than given.
+ */
+function loadLowDetailMode(): boolean {
+  if (Platform.OS !== 'web') return true;
+  try {
+    return globalThis.localStorage?.getItem(LOW_DETAIL_KEY) === '1';
+  } catch (error) {
+    console.error('Low-detail preference could not be loaded from localStorage.', error);
+    return false;
   }
 }
 
@@ -544,10 +561,13 @@ function loadUseByproducts(): boolean {
 
 function loadExpandRecipesOnce(): boolean {
   try {
-    return globalThis.localStorage?.getItem(EXPAND_RECIPES_ONCE_KEY) === '1';
+    // Defaults on: absence of a stored preference means "never explicitly turned off", not
+    // "off". Native has no persistence for this at all yet, so this default is also the only
+    // thing that makes Unique mode "stick" there.
+    return globalThis.localStorage?.getItem(EXPAND_RECIPES_ONCE_KEY) !== '0';
   } catch (error) {
     console.error('Expand-once graph preference could not be loaded from localStorage.', error);
-    return false;
+    return true;
   }
 }
 
@@ -561,14 +581,22 @@ function nodeDepthBucket(
 }
 
 export function GraphScreen({
+  treeId,
+  buildId,
+  rootKey: graphRootKey,
+  recipeRef: graphRecipeRef,
+  direction: graphDirection,
+  requestId: graphRequestId = 0,
+  isActive = true,
+  openTreeCount = 1,
+  onClose,
   interfaceZoom = 1,
   contentZoom = 1,
   onContentZoomChange,
   onContentZoomComplete,
   showGraphControls,
   onToggleGraphControls,
-  recipeImportRequestId = 0,
-  onRecipeImportRequestHandled,
+  onSwipeSuppressChange,
   recipeImportJob = null,
   onRecipeImportStart,
   onRecipeImportComplete,
@@ -577,16 +605,28 @@ export function GraphScreen({
   recipeImportReport = null,
   onRecipeImportReportChange,
 }: {
+  /** Stable id of this open tree; every other tree open alongside it has its own instance. */
+  treeId: number;
+  buildId: string;
+  rootKey: string;
+  recipeRef: RecipeRef | null;
+  direction: GraphDirection;
+  /** Bumped by changeGraphDirection/retry to reset this tree's own transient UI state. */
+  requestId?: number;
+  /** Whether this is the currently focused tree among possibly several open side by side. */
+  isActive?: boolean;
+  openTreeCount?: number;
+  onClose?: () => void;
   interfaceZoom?: number;
   contentZoom?: number;
   onContentZoomChange?: (value: number) => void;
   onContentZoomComplete?: (value: number) => void;
   showGraphControls: boolean;
   onToggleGraphControls(): void;
-  recipeImportRequestId?: number;
-  onRecipeImportRequestHandled?: () => void;
+  /** While true, the enclosing multi-tree pager must not swipe — a drag inside this tree is active. */
+  onSwipeSuppressChange?: (suppressed: boolean) => void;
   recipeImportJob?: {id: number; raw: string} | null;
-  onRecipeImportStart: (raw: string) => void;
+  onRecipeImportStart: (raw: string) => Promise<void>;
   onRecipeImportComplete: () => void;
   recipeImportNotice?: string | null;
   onRecipeImportNoticeChange?: React.Dispatch<React.SetStateAction<string | null>>;
@@ -594,24 +634,37 @@ export function GraphScreen({
   onRecipeImportReportChange?: React.Dispatch<React.SetStateAction<RecipeImportReport | null>>;
 }) {
   const data = useData();
+  const activeRef = useRef(isActive);
+  activeRef.current = isActive;
+  useEffect(() => () => { activeRef.current = false; }, []);
   const account = useUser();
+  // Shared with the resources tab: one list, so marking a tool in either place shows in both.
+  const {catalysts, isCatalyst, setCatalyst} = useCatalystItems(
+    data.descriptor,
+    buildId,
+  );
+  // Read while a branch is being built, which happens outside render.
+  const catalystsRef = useRef(catalysts);
+  catalystsRef.current = catalysts;
   const {
     hiddenStages: hiddenRecipeStages,
     toggleStage: toggleRecipeStage,
   } = useRecipeStages();
   const {
-    graphRootKey,
-    graphRequestId,
-    graphRecipeRef,
-    graphDirection,
-    changeGraphDirection,
     openRecipeInGraph,
+    clearGraphTreeRecipe,
     restoreGraph,
     openItem,
     tab,
     setTab,
+    restoredLastTab,
     animateMobs,
+    changeGraphDirection: changeGraphDirectionForTree,
   } = useUi();
+  const changeGraphDirection = useCallback(
+    (direction: GraphDirection) => changeGraphDirectionForTree(treeId, direction),
+    [changeGraphDirectionForTree, treeId],
+  );
 
   const [root, setRoot] = useState<ItemTreeNode | null>(null);
   const rootRef = useRef<ItemTreeNode | null>(null);
@@ -627,31 +680,24 @@ export function GraphScreen({
   pickerRef.current = picker;
   const [showRootActions, setShowRootActions] = useState(false);
   const [showTreeShare, setShowTreeShare] = useState(false);
-  const [treeTransferMode, setTreeTransferMode] = useState<'share' | 'import'>('share');
   const [nodeMenu, setNodeMenu] = useState<NodeMenuState | null>(null);
   const [autoExpandSummary, setAutoExpandSummary] =
     useState<AutoExpandSummaryEntry[] | null>(null);
   const [showRecipeImportDetails, setShowRecipeImportDetails] = useState(false);
   useEffect(() => setShowRootActions(false), [graphRequestId]);
   useEffect(() => {
-    if (recipeImportRequestId <= 0) return;
-    onRecipeImportReportChange?.(null);
-    setShowRecipeImportDetails(false);
-    setTreeTransferMode('import');
-    setShowTreeShare(true);
-  }, [onRecipeImportReportChange, recipeImportRequestId]);
-  useEffect(() => {
     if (tab !== 'graph') setShowRootActions(false);
   }, [tab]);
+  const drivingThePicker = TABS_DRIVING_THE_PICKER.has(tab);
   useSignalSurface(
-    tab === 'graph' && picker
-      ? 'graph/source-picker'
-      : tab === 'graph' && pickerLookup
-        ? 'graph/source-lookup'
+    drivingThePicker && picker
+      ? `${tab}/source-picker`
+      : drivingThePicker && pickerLookup
+        ? `${tab}/source-lookup`
         : tab === 'graph' && nodeMenu
           ? 'graph/node-options'
         : tab,
-    tab === 'graph' && (picker || pickerLookup) ? 'modal' : 'screen',
+    drivingThePicker && (picker || pickerLookup) ? 'modal' : 'screen',
   );
   const pickerGroupLoadsRef = useRef(new Set<string>());
   const pickerRequestIdRef = useRef(0);
@@ -662,24 +708,22 @@ export function GraphScreen({
   } | null>(null);
   const pendingGraphSessionRef = useRef<GraphSession | null>(null);
   const graphSessionRestoreAttemptedRef = useRef(false);
+  const builtRequestRef = useRef<string | null>(null);
   const restoringGraphSessionRef = useRef(recipeImportJob !== null);
   const recipeImportRestoreAttemptedRef = useRef<number | null>(null);
   const [compactMode, setCompactMode] = useState(loadCompactMode);
   const [radialLayout, setRadialLayout] = useState(loadRadialLayout);
-  const [showTreeTotals, setShowTreeTotals] = useState(true);
+  // The controls wrap onto as many rows as the screen width forces, so the panels below them
+  // cannot assume a fixed single-row height without ending up underneath the buttons.
+  const [controlsHeight, setControlsHeight] = useState(0);
+  const [showMoreControls, setShowMoreControls] = useState(false);
+  const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
+  const [lowDetailEnabled, setLowDetailEnabled] = useState(loadLowDetailMode);
   const [useByproducts, setUseByproducts] = useState(loadUseByproducts);
   const [expandRecipesOnce, setExpandRecipesOnce] = useState(loadExpandRecipesOnce);
   const expandRecipesOnceRef = useRef(expandRecipesOnce);
   expandRecipesOnceRef.current = expandRecipesOnce;
-  const [largeTreeUniqueModeRequired, setLargeTreeUniqueModeRequired] = useState(false);
-  const largeTreeUniqueModeRequiredRef = useRef(false);
-  const largeTreeUniqueModeRootRef = useRef<ItemTreeNode | null>(null);
-  const [showLargeTreeUniqueNotice, setShowLargeTreeUniqueNotice] = useState(false);
   useEffect(() => {
-    largeTreeUniqueModeRequiredRef.current = false;
-    largeTreeUniqueModeRootRef.current = null;
-    setLargeTreeUniqueModeRequired(false);
-    setShowLargeTreeUniqueNotice(false);
     const storedPreference = loadExpandRecipesOnce();
     expandRecipesOnceRef.current = storedPreference;
     setExpandRecipesOnce(storedPreference);
@@ -808,9 +852,45 @@ export function GraphScreen({
     // the imperative reference synchronized so every event sees the newest transform.
     transformRef.current = next;
     setTransform(next);
+    setCullingTransform(next);
   }, []);
+  /**
+   * Pointer and touch move events arrive far faster than the screen refreshes -- a high-polling
+   * mouse reports hundreds of times a second, and a finger is not much kinder -- and rendering the
+   * graph once per event meant most of those renders were thrown away before anything was drawn.
+   * Gesture updates are coalesced to one render per frame; everything else still applies at once,
+   * since a tap or a fit is a single change the user is waiting on.
+   */
+  const pendingTransformRef = useRef<GraphTransform | null>(null);
+  const transformFrameRef = useRef(0);
+  const scheduleTransform = useCallback((next: GraphTransform) => {
+    transformRef.current = next;
+    pendingTransformRef.current = next;
+    if (transformFrameRef.current !== 0) return;
+    transformFrameRef.current = requestAnimationFrame(() => {
+      transformFrameRef.current = 0;
+      const pending = pendingTransformRef.current;
+      pendingTransformRef.current = null;
+      if (!pending) return;
+      setTransform(pending);
+      setCullingTransform(current =>
+        shouldRecomputeCulling(current, pending) ? pending : current,
+      );
+    });
+  }, []);
+  useEffect(
+    () => () => {
+      if (transformFrameRef.current !== 0) cancelAnimationFrame(transformFrameRef.current);
+    },
+    [],
+  );
   const viewportRef = useRef({w: 0, h: 0});
   const [viewportSize, setViewportSize] = useState({w: 0, h: 0});
+  const [cullingTransform, setCullingTransform] = useState<GraphTransform>({
+    x: 60,
+    y: 60,
+    scale: 1,
+  });
   const needsFitRef = useRef(false);
   const wrapRef = useRef<View>(null);
   const anchorRef = useRef<View>(null);
@@ -951,7 +1031,14 @@ export function GraphScreen({
     [data.descriptor],
   );
 
-  const applyChoiceRef = useRef<((node: ItemTreeNode, choice: SourceChoice) => void) | null>(null);
+  const applyChoiceRef = useRef<
+    | ((
+        node: ItemTreeNode,
+        choice: SourceChoice,
+        options?: {renderUpdates?: boolean; expansionBudget?: ExpansionBudget},
+      ) => void)
+    | null
+  >(null);
 
   const expandRecipe = useCallback(
     async (
@@ -963,18 +1050,24 @@ export function GraphScreen({
         recordHistory = true,
         ingredientSelections,
         renderUpdates = true,
+        expansionBudget,
       }: {
         allowFluidTransfer?: boolean;
         expandPreferredChildren?: boolean;
         recordHistory?: boolean;
         ingredientSelections?: IngredientSelections;
         renderUpdates?: boolean;
+        /** Present only for the automatic cascade; a deliberate Auto expand passes none. */
+        expansionBudget?: ExpansionBudget;
       } = {},
     ): Promise<boolean> => {
       node.loading = true;
       if (renderUpdates) bump();
       try {
-        const [recipe] = await data.getRecipes([ref]);
+        const [recipe] = await withRecipeLoadTimeout(
+          data.getRecipes([ref]),
+          `Recipe ${ref.join(':')}`,
+        );
         const cat = data.categories[ref[0]];
         if (!recipe || !cat || recipe.err) {
           console.error('The selected graph recipe is unavailable or invalid.', {
@@ -1050,12 +1143,18 @@ export function GraphScreen({
         const sourceId = `${node.id}.s`;
         const childSpecs = recipeChildrenForDirection(selectedRecipe, graphDirection);
         const children = childSpecs.map((spec, i) => {
-          const retentionOverride = graphDirection === 'inputs'
+          const requirementId = childRequirementId(node, ref, i, graphDirection);
+          const retentionOverride = catalystOverride(catalystsRef.current, {
+            id: `${sourceId}.${i}`, key: spec.key, requirementId,
+          }) ?? (graphDirection === 'inputs'
             ? manualRetentionOverrideFor(manualRetentionOverridesRef.current, ref, spec.key)
-            : undefined;
+            : undefined);
+          // A node the user called a tool is one again when this branch is built back, which is what
+          // makes the mark survive a collapse, a recipe change further up, or a restart.
           const nonConsumed = retentionOverride ?? spec.nonConsumed;
           const child: ItemTreeNode = {
             id: `${sourceId}.${i}`,
+            requirementId,
             key: spec.key,
             amount: spec.amount,
             variantCount: spec.variants,
@@ -1086,6 +1185,7 @@ export function GraphScreen({
           };
           return child;
         });
+        node.collapsedSource = undefined;
         node.source = {
           id: sourceId,
           kind: 'recipe',
@@ -1112,18 +1212,29 @@ export function GraphScreen({
           });
         }
         if (expandPreferredChildren) {
+          // The budget learns the tree's width from each level as it lands, so a pack that
+          // branches ten ways stops after two levels while a near-linear chain keeps going.
+          expansionBudget?.record(children.length);
           for (const child of children) {
             if (child.cyclic) continue;
+            if (expansionBudget && !expansionBudget.allowsDepth(child.ancestors.length)) {
+              continue;
+            }
             const preferred =
               graphDirection === 'inputs'
                 ? preferredSourceFor(child.key, child.alternatives)
                 : null;
-            if (preferred) applyChoiceRef.current?.(child, preferred);
+            if (preferred) {
+              applyChoiceRef.current?.(child, preferred, {expansionBudget});
+            }
           }
         }
         return true;
       } catch (error) {
         console.error('The selected graph recipe could not be expanded.', error);
+        if (error instanceof RecipeLoadTimeoutError) {
+          setExportMessage(`${error.message} Tap the item to try again.`);
+        }
         return false;
       } finally {
         node.loading = false;
@@ -1135,15 +1246,16 @@ export function GraphScreen({
 
   /** Replace every eligible occurrence with the newly preferred source. */
   const applyPreferredSourceAcrossTree = useCallback(
-    (target: ItemTreeNode, choice: SourceChoice) => {
+    (target: ItemTreeNode, choice: SourceChoice, expansionBudget?: ExpansionBudget) => {
       const currentRoot = rootRef.current;
       const matches = preferredSourceTargets(currentRoot, target);
       for (const match of matches) {
         if (match.source) releaseByproductFulfillments(currentRoot, match);
         match.source = undefined;
+        match.collapsedSource = undefined;
       }
       for (const match of matches) {
-        applyChoiceRef.current?.(match, choice);
+        applyChoiceRef.current?.(match, choice, {expansionBudget});
       }
     },
     [],
@@ -1157,10 +1269,12 @@ export function GraphScreen({
         expandPreferredChildren = true,
         renderUpdates = true,
         recordHistory = true,
+        expansionBudget,
       }: {
         expandPreferredChildren?: boolean;
         renderUpdates?: boolean;
         recordHistory?: boolean;
+        expansionBudget?: ExpansionBudget;
       } = {},
     ): Promise<boolean> => {
       const identity = recipeExpansionIdentity(node.key, graphDirection, choice);
@@ -1175,6 +1289,7 @@ export function GraphScreen({
           ) ?? pendingRecipeExpansionOwnersRef.current.get(identity);
         if (owner && owner !== node) {
           node.source = undefined;
+          node.collapsedSource = undefined;
           node.deferredRecipeExpansion = {
             ref: [...choice.ref],
             ...(choice.allowFluidTransfer ? {allowFluidTransfer: true as const} : {}),
@@ -1198,6 +1313,7 @@ export function GraphScreen({
           expandPreferredChildren,
           renderUpdates,
           recordHistory,
+          expansionBudget,
         });
         if (!expanded) {
           console.error('The requested recipe expansion could not claim its graph position.', {
@@ -1220,14 +1336,18 @@ export function GraphScreen({
     (
       node: ItemTreeNode,
       choice: SourceChoice,
-      {renderUpdates = true}: {renderUpdates?: boolean} = {},
+      {renderUpdates = true, expansionBudget}: {
+        renderUpdates?: boolean;
+        expansionBudget?: ExpansionBudget;
+      } = {},
     ) => {
       if (blockRecursiveExpansion(node, 'apply source choice')) return;
       if (choice.t === 'recipe') {
-        void applyRecipeChoice(node, choice, {renderUpdates});
+        void applyRecipeChoice(node, choice, {renderUpdates, expansionBudget});
         return;
       }
       node.deferredRecipeExpansion = undefined;
+      node.collapsedSource = undefined;
       const sourceId = `${node.id}.s`;
       node.source =
         choice.t === 'mob'
@@ -1248,6 +1368,7 @@ export function GraphScreen({
           );
         }
         const restoredNodesByPath = new Map<string, ItemTreeNode>();
+        const foldedNodes: ItemTreeNode[] = [];
         const reconstructionFailures: Array<{
           path: number[];
           itemKey: string;
@@ -1319,6 +1440,7 @@ export function GraphScreen({
               applyChoice(node, sourceChoice);
             }
             restoredNodesByPath.set(pathKey, node);
+            if (selection.collapsed) foldedNodes.push(node);
             restoredSelectionCount += 1;
           } catch (error) {
             reconstructionFailures.push({
@@ -1330,6 +1452,11 @@ export function GraphScreen({
                   : 'Unknown graph reconstruction failure.',
             });
           }
+        }
+        // Rebuild descendants before folding their ancestors. Folding never discards a selection.
+        for (const node of foldedNodes) {
+          node.collapsedSource = node.source;
+          node.source = undefined;
         }
         const skippedSelectionCount =
           reconstructionFailures.length + dependentSelectionCount;
@@ -1354,9 +1481,8 @@ export function GraphScreen({
         needsFitRef.current = true;
       } catch (error) {
         console.error('The saved graph could not be reconstructed; its snapshot was discarded.', error);
-        clearGraphSession(data.descriptor);
-        const cleanRoot = makeRoot(session.rootKey);
-        largeTreeUniqueModeRootRef.current = cleanRoot;
+        clearGraphSession(data.descriptor, buildId);
+        const cleanRoot = {...makeRoot(session.rootKey), buildId};
         rootRef.current = cleanRoot;
         setRoot(cleanRoot);
         needsFitRef.current = true;
@@ -1517,8 +1643,9 @@ export function GraphScreen({
       const loadedRefKeys = new Set<string>();
       let identifiedFluidTransferCount = 0;
       let excludedRedundantContainerCount = 0;
-      const initialRecipes = await data.getRecipes(
-        plan.initialChoices.map(choice => choice.ref),
+      const initialRecipes = await withRecipeLoadTimeout(
+        data.getRecipes(plan.initialChoices.map(choice => choice.ref)),
+        `Recipes for ${itemName}`,
       );
       plan.initialChoices.forEach((choice, index) => {
         const recipe = initialRecipes[index];
@@ -1823,9 +1950,45 @@ export function GraphScreen({
     ) => {
       void openPicker(node, byproductCoverage, direction).catch(error => {
         console.error('The recipe-source picker could not be opened.', error);
+        setExportMessage(
+          error instanceof RecipeLoadTimeoutError
+            ? `${error.message} Tap the item to try again.`
+            : 'Recipes for that item could not be loaded.',
+        );
       });
     },
     [graphDirection, openPicker],
+  );
+
+  /**
+   * Auto expand pauses on a node with no remembered recipe and asks. The picker reports its
+   * outcome through this, so the run continues on a choice and stops when the prompt is dismissed
+   * -- the alternative being a prompt for every remaining node with no way out of them.
+   */
+  const sourcePromptRef = useRef<((chosen: boolean) => void) | null>(null);
+  const pickerSelectionMadeRef = useRef(false);
+  const settleSourcePrompt = useCallback((chosen: boolean) => {
+    const resolve = sourcePromptRef.current;
+    sourcePromptRef.current = null;
+    resolve?.(chosen);
+  }, []);
+  useEffect(() => {
+    if (picker || !sourcePromptRef.current) return;
+    const chosen = pickerSelectionMadeRef.current;
+    pickerSelectionMadeRef.current = false;
+    settleSourcePrompt(chosen);
+  }, [picker, settleSourcePrompt]);
+  const requestSourceChoice = useCallback(
+    (node: ItemTreeNode) =>
+      new Promise<boolean>(resolve => {
+        // A prompt already waiting means the previous one never settled; treat it as dismissed
+        // rather than leaving two runs waiting on the same picker.
+        settleSourcePrompt(false);
+        pickerSelectionMadeRef.current = false;
+        sourcePromptRef.current = resolve;
+        openPickerWithErrorHandling(node);
+      }),
+    [openPickerWithErrorHandling, settleSourcePrompt],
   );
 
   const cancelPickerLookup = useCallback(() => {
@@ -1834,7 +1997,7 @@ export function GraphScreen({
   }, []);
 
   useEffect(() => {
-    if (tab !== 'graph' && pickerLookup) cancelPickerLookup();
+    if (!TABS_DRIVING_THE_PICKER.has(tab) && pickerLookup) cancelPickerLookup();
   }, [cancelPickerLookup, pickerLookup, tab]);
 
   const updateRootRequestedAmount = useCallback(
@@ -1864,9 +2027,9 @@ export function GraphScreen({
   );
 
   const applyOnlyChoice = useCallback(
-    async (node: ItemTreeNode, choice: SourceChoice) => {
+    async (node: ItemTreeNode, choice: SourceChoice, expansionBudget?: ExpansionBudget) => {
       if (graphDirection === 'outputs') {
-        applyChoice(node, choice);
+        applyChoice(node, choice, {expansionBudget});
         return;
       }
       if (choice.t === 'recipe') {
@@ -1885,7 +2048,7 @@ export function GraphScreen({
         }
       }
       setPreferredSource(node.key, choice);
-      applyPreferredSourceAcrossTree(node, choice);
+      applyPreferredSourceAcrossTree(node, choice, expansionBudget);
     },
     [
       applyChoice,
@@ -1898,13 +2061,23 @@ export function GraphScreen({
     ],
   );
 
+  /**
+   * Expanding a node follows its remembered recipes downward, and that cascade was unbounded:
+   * one tap on a node deep in a pack like GT New Horizons could unfold thousands of nodes at
+   * once. Every user-initiated expansion now gets its own budget, measured from that node.
+   */
+  const budgetFor = useCallback(
+    (node: ItemTreeNode) => new ExpansionBudget(undefined, node.ancestors.length),
+    [],
+  );
+
   const applyOnlyChoiceWithErrorHandling = useCallback(
     (node: ItemTreeNode, choice: SourceChoice) => {
-      void applyOnlyChoice(node, choice).catch(error => {
+      void applyOnlyChoice(node, choice, budgetFor(node)).catch(error => {
         console.error('The only recipe source could not be classified and applied.', error);
       });
     },
-    [applyOnlyChoice],
+    [applyOnlyChoice, budgetFor],
   );
 
   const releaseByproductFulfillmentsFromSubtree = useCallback(
@@ -1930,10 +2103,12 @@ export function GraphScreen({
           recipeRef: expansion.ref,
         });
         node.deferredRecipeExpansion = undefined;
-        await applyRecipeChoice(node, {t: 'recipe', ...expansion});
+        await applyRecipeChoice(node, {t: 'recipe', ...expansion}, {
+          expansionBudget: budgetFor(node),
+        });
         return;
       }
-      const ownerExpansion = recipeExpansionFromSource(owner.source);
+      const ownerExpansion = recipeExpansionFromSource(owner.source ?? owner.collapsedSource);
       if (!ownerExpansion) {
         console.error('The expanded recipe owner has no transferable recipe metadata.', {
           ownerNodeId: owner.id,
@@ -1944,12 +2119,15 @@ export function GraphScreen({
 
       releaseByproductFulfillmentsFromSubtree(owner);
       owner.source = undefined;
+      owner.collapsedSource = undefined;
       owner.deferredRecipeExpansion = ownerExpansion;
       node.deferredRecipeExpansion = undefined;
       // Moving the visible occurrence of a recipe must not behave like Fit.
       bump();
 
-      const expanded = await applyRecipeChoice(node, {t: 'recipe', ...expansion});
+      const expanded = await applyRecipeChoice(node, {t: 'recipe', ...expansion}, {
+        expansionBudget: budgetFor(node),
+      });
       if (expanded && node.source) return;
 
       console.error('Recipe expansion ownership transfer failed; restoring the previous owner.', {
@@ -1959,7 +2137,9 @@ export function GraphScreen({
       });
       node.deferredRecipeExpansion = expansion;
       owner.deferredRecipeExpansion = undefined;
-      const restored = await applyRecipeChoice(owner, {t: 'recipe', ...ownerExpansion});
+      const restored = await applyRecipeChoice(owner, {t: 'recipe', ...ownerExpansion}, {
+        expansionBudget: budgetFor(owner),
+      });
       if (!restored || !owner.source) {
         console.error('The previous recipe expansion owner could not be restored.', {
           ownerNodeId: owner.id,
@@ -1969,14 +2149,36 @@ export function GraphScreen({
     },
     [
       applyRecipeChoice,
+      budgetFor,
       bump,
       graphDirection,
       releaseByproductFulfillmentsFromSubtree,
     ],
   );
 
+  /**
+   * Expanding or collapsing a node re-lays out the whole tree, and the canvas transform is
+   * unchanged, so every other node slides to a new position underneath the user. Pinning the
+   * node they touched keeps the tree still around the one thing they were looking at.
+   */
+  const anchorNodeRef = useRef<{id: string; screenX: number; screenY: number} | null>(null);
+  const pinNodePosition = useCallback((node: ItemTreeNode) => {
+    const laid = graphRef.current?.nodes.find(candidate => candidate.item.id === node.id);
+    if (!laid) {
+      anchorNodeRef.current = null;
+      return;
+    }
+    const {x, y, scale} = transformRef.current;
+    anchorNodeRef.current = {
+      id: node.id,
+      screenX: x + (laid.x + laid.w / 2) * scale,
+      screenY: y + (laid.y + laid.h / 2) * scale,
+    };
+  }, []);
+
   const onItemTap = useCallback(
     (node: ItemTreeNode) => {
+      pinNodePosition(node);
       if (node.loading) return;
       if (blockRecursiveExpansion(node, 'tap graph node')) return;
       if (node.deferredRecipeExpansion) {
@@ -1984,34 +2186,48 @@ export function GraphScreen({
         return;
       }
       if (node.source) {
-        const collapsedExpansion = recipeExpansionFromSource(node.source);
-        if (expandRecipesOnceRef.current && collapsedExpansion) {
-          const collapsedIdentity = recipeExpansionIdentity(
-            node.key,
-            graphDirection,
-            collapsedExpansion,
-          );
-          for (const candidate of deferredRecipeExpansionNodes(rootRef.current)) {
-            const deferred = candidate.deferredRecipeExpansion;
-            if (
-              deferred &&
-              recipeExpansionIdentity(candidate.key, graphDirection, deferred) ===
-                collapsedIdentity
-            ) {
-              candidate.deferredRecipeExpansion = undefined;
-            }
-          }
-        }
-        releaseByproductFulfillmentsFromSubtree(node);
+        // A fold changes visibility, not ownership, byproduct supply, or the calculation.
+        node.collapsedSource = node.source;
         node.source = undefined;
         bump();
         return;
       }
+      if (node.collapsedSource) {
+        const restored = node.collapsedSource;
+        const expansion = recipeExpansionFromSource(restored);
+        // Unique mode may have handed this recipe to another occurrence while it was folded, and
+        // restoring it here would leave the same recipe expanded twice.
+        const takenOver =
+          expandRecipesOnceRef.current &&
+          expansion !== null &&
+          findRecipeExpansionOwner(
+            rootRef.current,
+            node.key,
+            graphDirection,
+            expansion,
+            node,
+          ) !== null;
+        if (!takenOver) {
+          node.collapsedSource = undefined;
+          node.source = restored;
+          bump();
+          return;
+        }
+        node.collapsedSource = undefined;
+      }
       const choices = choicesFor(node.key, graphDirection, node.alternatives);
-      if (choices.length === 0) return;
+      if (choices.length === 0) {
+        const itemName = data.itemsByKey.get(node.key)?.n ?? node.key;
+        setExportMessage(
+          graphDirection === 'outputs'
+            ? `Nothing in this pack uses ${itemName}.`
+            : `${itemName} has no recipe in this pack; it has to be gathered.`,
+        );
+        return;
+      }
       const preferred = preferredSourceFor(node.key, node.alternatives);
       if (preferred) {
-        applyChoice(node, preferred);
+        applyChoice(node, preferred, {expansionBudget: budgetFor(node)});
       } else if (choices.length === 1) {
         applyOnlyChoiceWithErrorHandling(node, choices[0]);
       } else {
@@ -2021,6 +2237,9 @@ export function GraphScreen({
     [
       bump,
       applyChoice,
+      budgetFor,
+      data.itemsByKey,
+      pinNodePosition,
       openPickerWithErrorHandling,
       choicesFor,
       preferredSourceFor,
@@ -2044,6 +2263,53 @@ export function GraphScreen({
     [bump, onItemTap],
   );
 
+  /**
+   * Discards the tree outright rather than collapsing it back to a bare root: a lone root node
+   * left sitting on the canvas is not a cleared workspace, and re-expanding it was one tap away
+   * from everything the user just asked to be rid of. Three things have to go together or the
+   * tree comes back -- the open tree itself, the saved session that would restore it on the next
+   * launch, and the root's remembered base recipe, which is also what reopening that item would
+   * silently re-expand. Descendants keep their remembered sources; those are a per-item
+   * preference, not part of this workspace.
+   */
+  const treeIsExpanded = !!root?.source;
+  const toggleWholeTree = useCallback(() => {
+    const currentRoot = rootRef.current;
+    if (!currentRoot) return;
+    onItemTap(currentRoot);
+  }, [onItemTap]);
+
+  const clearAllExpansions = useCallback(() => {
+    const currentRoot = rootRef.current;
+    if (currentRoot) {
+      if (currentRoot.source) releaseByproductFulfillmentsFromSubtree(currentRoot);
+      currentRoot.source = undefined;
+      currentRoot.deferredRecipeExpansion = undefined;
+      if (preferredSourcesRef.current[currentRoot.key]) {
+        // Local-only removal: forgetting the root here is part of clearing this tree, not the user
+        // un-favoriting the recipe everywhere (that's unsetNodeRecipe, which also syncs it).
+        const next = {...preferredSourcesRef.current};
+        delete next[currentRoot.key];
+        preferredSourcesRef.current = next;
+        persistPreferredSources(data.descriptor, next);
+        setPreferredSources(next);
+      }
+    }
+    clearGraphTreeRecipe(treeId);
+    if (openTreeCount === 1) clearGraphSession(data.descriptor, buildId);
+    // Suppresses the persist effect, which would otherwise write this tree straight back out on
+    // the render that follows.
+    restoringGraphSessionRef.current = true;
+    onClose?.();
+  }, [
+    clearGraphTreeRecipe,
+    data.descriptor,
+    onClose,
+    openTreeCount,
+    releaseByproductFulfillmentsFromSubtree,
+    treeId,
+  ]);
+
   const unsetNodeRecipe = useCallback(
     (node: ItemTreeNode) => {
       const next = {...preferredSourcesRef.current};
@@ -2058,6 +2324,7 @@ export function GraphScreen({
       }
       if (node.source) releaseByproductFulfillmentsFromSubtree(node);
       node.source = undefined;
+      node.collapsedSource = undefined;
       node.deferredRecipeExpansion = undefined;
       bump();
       setNodeMenu(null);
@@ -2077,6 +2344,7 @@ export function GraphScreen({
       }
       if (node.source) releaseByproductFulfillmentsFromSubtree(node);
       node.source = undefined;
+      node.collapsedSource = undefined;
       node.deferredRecipeExpansion = undefined;
       const parent = parentRecipeSource(rootRef.current, node);
       const selectionKey = node.selectionKey ?? node.alternatives[0];
@@ -2089,6 +2357,13 @@ export function GraphScreen({
         parent.recipe = applyIngredientSelections(parent.recipe, selections);
       }
       node.key = selectedKey;
+      const spec = parent?.recipe
+        ? recipeChildrenForDirection(parent.recipe, graphDirection).find(input => input.key === selectedKey)
+        : undefined;
+      const override = catalystOverride(catalystsRef.current, node);
+      node.nonConsumed = override ?? spec?.nonConsumed;
+      node.retentionMode = override === undefined ? spec?.retentionMode : override ? 'reusable' : undefined;
+      node.retentionUses = override === undefined ? spec?.retentionUses : undefined;
       node.cyclic = node.ancestors.includes(selectedKey);
       bump();
       setNodeMenu(null);
@@ -2104,17 +2379,23 @@ export function GraphScreen({
     if (recipeImportJob) return;
     const session = loadGraphSession(data.descriptor);
     if (!session) return;
+    if (session.buildId && session.buildId !== buildId) return;
     if (graphRecipeRef) return;
+    // A resumed launch already knows which tab the user left off on; only a launch without that
+    // memory should be pulled onto the graph just because a saved tree exists.
+    const focusRestoredGraph = () => {
+      if (!restoredLastTab) setTab('graph');
+    };
     if (graphRootKey) {
       if (session.rootKey !== graphRootKey || session.direction !== graphDirection) return;
       pendingGraphSessionRef.current = session;
       restoringGraphSessionRef.current = true;
-      setTab('graph');
+      focusRestoredGraph();
       return;
     }
     pendingGraphSessionRef.current = session;
     restoringGraphSessionRef.current = true;
-    setTab('graph');
+    focusRestoredGraph();
     restoreGraph(session.rootKey, session.direction);
   }, [
     data.descriptor,
@@ -2123,6 +2404,7 @@ export function GraphScreen({
     graphRootKey,
     recipeImportJob,
     restoreGraph,
+    restoredLastTab,
     setTab,
   ]);
 
@@ -2131,8 +2413,10 @@ export function GraphScreen({
   // previously expanded chart.
   useEffect(() => {
     if (!graphRootKey) return;
-    const newRoot = makeRoot(graphRootKey);
-    largeTreeUniqueModeRootRef.current = newRoot;
+    const requestKey = JSON.stringify([graphRootKey, graphRequestId, graphRecipeRef, graphDirection]);
+    if (builtRequestRef.current === requestKey) return;
+    builtRequestRef.current = requestKey;
+    const newRoot = {...makeRoot(graphRootKey), buildId};
     rootRef.current = newRoot;
     setRoot(newRoot);
     needsFitRef.current = true;
@@ -2150,7 +2434,7 @@ export function GraphScreen({
           graphDirection,
         });
         restoringGraphSessionRef.current = false;
-        clearGraphSession(data.descriptor);
+        clearGraphSession(data.descriptor, buildId);
       } else {
         void restoreExpandedGraph(newRoot, pendingGraphSession);
         return;
@@ -2170,7 +2454,7 @@ export function GraphScreen({
           graphDirection,
         });
       } else {
-        applyChoice(newRoot, pendingRootChoice.choice);
+        applyChoice(newRoot, pendingRootChoice.choice, {expansionBudget: budgetFor(newRoot)});
         return;
       }
     }
@@ -2183,7 +2467,7 @@ export function GraphScreen({
       if (graphDirection === 'inputs') {
         setPreferredSource(graphRootKey, requestedChoice);
       }
-      applyChoice(newRoot, requestedChoice);
+      applyChoice(newRoot, requestedChoice, {expansionBudget: budgetFor(newRoot)});
       return;
     }
     // An imported tree owns this fresh root. Its selections are resolved and
@@ -2192,7 +2476,7 @@ export function GraphScreen({
     const choices = choicesFor(graphRootKey);
     const preferred = preferredSourceFor(graphRootKey);
     if (preferred) {
-      applyChoice(newRoot, preferred);
+      applyChoice(newRoot, preferred, {expansionBudget: budgetFor(newRoot)});
     } else if (choices.length === 1) {
       const onlyChoice = choices[0];
       applyOnlyChoiceWithErrorHandling(newRoot, onlyChoice);
@@ -2213,15 +2497,40 @@ export function GraphScreen({
   ]);
 
   useEffect(() => {
-    if (!root || restoringGraphSessionRef.current) return;
+    if (!isActive || !root || restoringGraphSessionRef.current) return;
     persistGraphSession(data.descriptor, root, graphDirection);
-  }, [data.descriptor, graphDirection, root, version]);
+  }, [data.descriptor, graphDirection, isActive, root, version]);
+
+  // Recomputed against `version` so a focus survives the branch under it being expanded, and
+  // resolves to null the moment its node stops existing rather than blanking the canvas.
+  const focus = useMemo(
+    () => treeFocus(root, focusNodeId),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- version tracks in-place tree edits.
+    [root, focusNodeId, version],
+  );
+  const focusVisibleNodeIds = focus?.visibleNodeIds;
+  const focusLabel = useMemo(() => {
+    const focusedKey = focus?.pathKeys[focus.pathKeys.length - 1];
+    if (!focusedKey) return null;
+    return data.itemsByKey.get(focusedKey)?.n ?? focusedKey;
+  }, [data.itemsByKey, focus]);
+  const focusBranch = useCallback((node: ItemTreeNode) => {
+    setFocusNodeId(current => (current === node.id ? null : node.id));
+    setNodeMenu(null);
+    needsFitRef.current = true;
+  }, []);
+  const clearFocus = useCallback(() => {
+    setFocusNodeId(null);
+    needsFitRef.current = true;
+  }, []);
+  // A rebuilt tree issues new node ids, so a focus from the previous one can never match.
+  useEffect(() => setFocusNodeId(null), [graphRequestId]);
 
   const graphLayout = useMemo(() => {
     if (!root) return {graph: null, fallback: null as string | null};
     if (!radialLayout) {
       return {
-        graph: layoutTree(root, compactMode, true, showRootActions),
+        graph: layoutTree(root, compactMode, true, showRootActions, focusVisibleNodeIds),
         fallback: null as string | null,
       };
     }
@@ -2235,6 +2544,7 @@ export function GraphScreen({
             : undefined,
           true,
           showRootActions,
+          focusVisibleNodeIds,
         ),
         fallback: null as string | null,
       };
@@ -2244,7 +2554,7 @@ export function GraphScreen({
         error,
       );
       return {
-        graph: layoutTree(root, compactMode, true, showRootActions),
+        graph: layoutTree(root, compactMode, true, showRootActions, focusVisibleNodeIds),
         fallback: 'This tree is too complex for Radial placement, so the standard layout is shown.',
       };
     }
@@ -2254,6 +2564,7 @@ export function GraphScreen({
       version,
       compactMode,
       radialLayout,
+      focusVisibleNodeIds,
       graphDirection,
       usagesFor,
       showRootActions,
@@ -2294,29 +2605,24 @@ export function GraphScreen({
     },
     [],
   );
-  const toggleNodeReusable = useCallback(
-    (node: ItemTreeNode) => {
+  const treatNodeAsTool = useCallback(
+    (node: ItemTreeNode, isTool: boolean) => {
+      // One place picked is one place marked. Sweeping every node asking for the same item, which is
+      // what the per-recipe override did, turned one decision into an opinion about the rest of the
+      // tree -- and the rest of the tree may well want the thing consumed.
+      setCatalyst(node, isTool);
+      node.nonConsumed = isTool;
+      node.retentionMode = isTool ? 'reusable' : undefined;
+      node.retentionUses = undefined;
+      setNodeMenu(null);
+      bump();
       const parent = parentRecipeSource(rootRef.current, node);
       const ref = parent?.kind === 'recipe' ? parent.ref : undefined;
-      if (!parent || parent.direction !== 'inputs' || !ref) {
-        console.warn('A manual retention override was requested outside a recipe input.', {
-          nodeId: node.id,
-          itemKey: node.key,
-        });
-        setNodeMenu(null);
-        return;
-      }
-      const reusable = node.nonConsumed !== true;
-      const overrideKey = manualRetentionOverrideKey(ref, node.key);
-      const next = {
-        ...manualRetentionOverridesRef.current,
-        [overrideKey]: reusable,
-      };
-      manualRetentionOverridesRef.current = next;
-      setManualRetentionOverrides(next);
-      persistManualRetentionOverrides(data.descriptor, next);
-      applyManualRetentionOverrideToTree(rootRef.current, ref, node.key, reusable);
+      if (!parent || parent.direction !== 'inputs' || !ref) return;
+      const reusable = isTool;
       const category = data.categories[ref[0]];
+      // Still reported: "this recipe keeps this ingredient" is a claim about the pack's data, and
+      // worth sending whether or not the rest of the tree is marked with it.
       console.info('A recipe ingredient retention override was changed.', {
         packSlug: data.descriptor.slug,
         publicationId: data.descriptor.publicationId,
@@ -2327,8 +2633,6 @@ export function GraphScreen({
         itemName: data.itemsByKey.get(node.key)?.n ?? null,
         reusable,
       });
-      setNodeMenu(null);
-      bump();
       void reportRecipeRetentionOverride(
         data.descriptor,
         ref,
@@ -2336,10 +2640,10 @@ export function GraphScreen({
         reusable,
       ).catch(error => {
         console.error('The manual recipe retention report could not be recorded.', error);
-        setExportMessage('Reusable override saved locally; its report could not be sent.');
+        setExportMessage('The tool override was saved locally; its report could not be sent.');
       });
     },
-    [bump, data],
+    [bump, data, setCatalyst],
   );
   const treeTotals = useMemo(() => {
     if (!root || graphDirection === 'outputs') {
@@ -2352,6 +2656,10 @@ export function GraphScreen({
         byproductCoverageByNode: new Map(),
       } as TreeCalculation;
     }
+    // A collapsed branch keeps its subtree, so folding one away is a view change rather than a
+    // decision to gather that item directly. It matters most at the root, which is the thing being
+    // built rather than an ingredient: counting a collapsed root as an input replaced the entire
+    // checklist with a single line asking for the item the user is trying to make.
     const totals = calculateTreeTotals(root, useByproducts, {
       resolveDeferredRecipeSource: expandRecipesOnce
         ? createDeferredRecipeSourceResolver(root, graphDirection)
@@ -2383,7 +2691,9 @@ export function GraphScreen({
     [graph, treeTotals],
   );
   const lowDetailGraph =
-    !exportingTree && shouldUseLowDetailGraph(transform.scale, graph?.nodes.length ?? 0);
+    lowDetailEnabled &&
+    !exportingTree &&
+    shouldUseLowDetailGraph(transform.scale, graph?.nodes.length ?? 0);
   const rasterLowDetailGraph = Platform.OS === 'web' && lowDetailGraph;
   const renderedGraph = useMemo(() => {
     if (!graph) return null;
@@ -2397,10 +2707,12 @@ export function GraphScreen({
     }
     const visible = visibleGraphElements(
       graph,
-      transform,
+      cullingTransform,
       viewportSize,
       rasterLowDetailGraph ? 0 : GRAPH_VIEWPORT_OVERSCAN,
-      !lowDetailGraph,
+      // Kept at every tier: the lines are what make this read as a tree rather than as loose
+      // chips, and they are the cheapest thing on the canvas -- a plain rect each.
+      true,
     );
     const visibleSupplyEdges = lowDetailGraph
       ? []
@@ -2411,12 +2723,12 @@ export function GraphScreen({
         ).edges as ByproductSupplyEdge[]);
     return {...visible, supplyEdges: visibleSupplyEdges};
   }, [
+    cullingTransform,
     exportingTree,
     graph,
     lowDetailGraph,
     rasterLowDetailGraph,
     supplyEdges,
-    transform,
     viewportSize,
   ]);
   const showNodeAmounts = shouldShowNodeAmounts(transform.scale, exportingTree);
@@ -2429,9 +2741,17 @@ export function GraphScreen({
         : requiredAmountFor(node, treeTotals),
     [graphDirection, treeTotals],
   );
-  const handleLowDetailNodeTap = useCallback(
+  const isCollapsedBranch = useCallback(
     (node: ItemTreeNode) =>
-      node.id === 'root' ? setShowRootActions(value => !value) : onItemTap(node),
+      !node.source &&
+      !node.deferredRecipeExpansion &&
+      node.id !== 'root' &&
+      preferredSources[node.key] !== undefined,
+    [preferredSources],
+  );
+
+  const handleLowDetailNodeTap = useCallback(
+    (node: ItemTreeNode) => onItemTap(node),
     [onItemTap],
   );
   const handleLowDetailNodeActions = useCallback(
@@ -2490,6 +2810,39 @@ export function GraphScreen({
       focusByproductProducer(producer.producerSourceId);
     },
     [focusByproductProducer, openPickerWithErrorHandling, treeTotals],
+  );
+
+  const handleCompactNodeTap = useCallback(
+    (node: ItemTreeNode, radial = false) => {
+      if (node.id === 'root') {
+        onItemTap(node);
+        return;
+      }
+      handleCollapsedIngredientTap(node, () =>
+        node.deferredRecipeExpansion || radial
+          ? onItemTap(node)
+          : openPickerWithErrorHandling(node),
+      );
+    },
+    [handleCollapsedIngredientTap, onItemTap, openPickerWithErrorHandling],
+  );
+  const handleItemNodeTap = useCallback(
+    (node: ItemTreeNode) => {
+      if (node.id === 'root') {
+        onItemTap(node);
+        return;
+      }
+      handleCollapsedIngredientTap(node, () => onItemTap(node));
+    },
+    [handleCollapsedIngredientTap, onItemTap],
+  );
+  const handleNodeInfo = useCallback(
+    (node: ItemTreeNode) => openItem(node.key),
+    [openItem],
+  );
+  const handleNodeSwap = useCallback(
+    (node: ItemTreeNode) => openPickerWithErrorHandling(node),
+    [openPickerWithErrorHandling],
   );
 
   const handleTreeTotalIngredientTap = useCallback(
@@ -2564,14 +2917,10 @@ export function GraphScreen({
       throw new Error('The shared starting item is not available in the selected modpack.');
     }
     setShowTreeShare(false);
-    onRecipeImportRequestHandled?.();
-    onRecipeImportStart(raw);
-    setTab('graph');
-    restoreGraph(share.rootKey, share.direction);
+    await onRecipeImportStart(raw);
   }, [
     data.descriptor,
     data.itemsByKey,
-    onRecipeImportRequestHandled,
     onRecipeImportStart,
     restoreGraph,
     setTab,
@@ -2590,8 +2939,10 @@ export function GraphScreen({
       const restoredSelections: StoredGraphSelection[] = [];
       const restoredNodesByPath = new Map<string, ItemTreeNode>();
       const saveProgress = () => {
+        if (!activeRef.current) return;
         persistGraphSessionSnapshot(data.descriptor, {
           version: 2,
+          buildId: newRoot.buildId,
           rootKey: share.rootKey,
           direction: share.direction,
           ...(share.productionPlan ? {productionPlan: {...share.productionPlan}} : {}),
@@ -2823,8 +3174,7 @@ export function GraphScreen({
 
   const closeTreeShare = useCallback(() => {
     setShowTreeShare(false);
-    if (treeTransferMode === 'import') onRecipeImportRequestHandled?.();
-  }, [onRecipeImportRequestHandled, treeTransferMode]);
+  }, []);
 
   const exportTotals = useCallback(() => {
     try {
@@ -2927,19 +3277,83 @@ export function GraphScreen({
   useEffect(() => {
     if (needsFitRef.current && fitView()) {
       needsFitRef.current = false;
+      anchorNodeRef.current = null;
+      return;
     }
-  }, [graph, fitView]);
+    // Runs after the relayout the tap caused: shift the canvas by however far the pinned node
+    // moved, so it ends up back under the finger and the rest of the tree moves around it.
+    const pinned = anchorNodeRef.current;
+    anchorNodeRef.current = null;
+    if (!pinned || !graph) return;
+    const laid = graph.nodes.find(candidate => candidate.item.id === pinned.id);
+    if (!laid) return;
+    const current = transformRef.current;
+    const nextX = pinned.screenX - (laid.x + laid.w / 2) * current.scale;
+    const nextY = pinned.screenY - (laid.y + laid.h / 2) * current.scale;
+    if (Math.abs(nextX - current.x) < 0.5 && Math.abs(nextY - current.y) < 0.5) return;
+    applyTransform({...current, x: nextX, y: nextY});
+  }, [applyTransform, graph, fitView]);
 
+  const recenterOnGraphPoint = useCallback(
+    (graphPoint: {x: number; y: number}) => {
+      const vp = viewportRef.current;
+      if (vp.w === 0 || vp.h === 0) return;
+      applyTransform(transformCenteredOn(graphPoint, transformRef.current, vp));
+    },
+    [applyTransform],
+  );
+  // Stable identity, or the memo on the overview cannot hold across a pan.
+  // graphMenuScaleStyle itself is declared past the empty-tree return, so the same zoom is
+  // derived here rather than referenced.
+  const minimapStyle = useMemo(
+    () =>
+      [
+        styles.minimap,
+        Platform.OS === 'web' ? ({zoom: interfaceZoom} as unknown as object) : null,
+      ] as unknown as object,
+    [interfaceZoom],
+  );
+  const minimapVisible = useMemo(
+    () => (graph ? shouldShowMinimap(graph, viewportSize, transform) : false),
+    [graph, transform, viewportSize],
+  );
+  // The bottom notices span to the right edge, which is exactly where the overview sits.
+  const bottomNoticeStyle = useMemo(
+    () =>
+      minimapVisible
+        ? {right: CANVAS_EDGE_INSET + MINIMAP_MAX_WIDTH + 8}
+        : null,
+    [minimapVisible],
+  );
+
+  // Wheel and pinch both arrive as a stream rather than as single events, so they coalesce the
+  // same way a drag does.
   const zoomAt = useCallback((px: number, py: number, factor: number) => {
     const current = transformRef.current;
     const scale = Math.min(4, Math.max(0.12, current.scale * factor));
     const k = scale / current.scale;
-    applyTransform({
+    scheduleTransform({
       x: px - (px - current.x) * k,
       y: py - (py - current.y) * k,
       scale,
     });
-  }, [applyTransform]);
+  }, [scheduleTransform]);
+
+  const toggleLowDetail = useCallback(() => {
+    setLowDetailEnabled(current => {
+      const next = !current;
+      try {
+        const storage = globalThis.localStorage;
+        if (storage) storage.setItem(LOW_DETAIL_KEY, next ? '1' : '0');
+        else if (Platform.OS === 'web') {
+          console.warn('Low-detail mode is using memory only because localStorage is unavailable.');
+        }
+      } catch (error) {
+        console.error('Low-detail preference could not be saved to localStorage.', error);
+      }
+      return next;
+    });
+  }, []);
 
   const toggleCompactMode = useCallback(() => {
     setCompactMode(current => {
@@ -2999,35 +3413,24 @@ export function GraphScreen({
           releaseByproductFulfillments(currentRoot, node);
           node.source = undefined;
           node.deferredRecipeExpansion = expansion;
+          node.collapsedSource = undefined;
         }
       } else {
         for (const node of deferredRecipeExpansionNodes(rootRef.current)) {
           const expansion = node.deferredRecipeExpansion;
           if (!expansion) continue;
           node.deferredRecipeExpansion = undefined;
-          void applyRecipeChoice(node, {t: 'recipe', ...expansion});
+          // Turning Unique off asks for the duplicates themselves, not for a deep cascade under
+          // every one of them, so each still expands within its own budget.
+          void applyRecipeChoice(node, {t: 'recipe', ...expansion}, {
+            expansionBudget: budgetFor(node),
+          });
         }
       }
       bump();
     },
     [applyRecipeChoice, bump, graphDirection],
   );
-
-  useEffect(() => {
-    if (
-      largeTreeUniqueModeRequiredRef.current ||
-      !root ||
-      largeTreeUniqueModeRootRef.current !== root ||
-      !shouldRequireUniqueRecipes(graph?.nodes.length ?? 0)
-    ) {
-      return;
-    }
-    largeTreeUniqueModeRequiredRef.current = true;
-    setLargeTreeUniqueModeRequired(true);
-    if (!expandRecipesOnceRef.current) {
-      updateExpandRecipesOnce(true, false);
-    }
-  }, [graph?.nodes.length, root, updateExpandRecipesOnce]);
 
   const toggleCommunityAutoExpand = useCallback(async () => {
     if (graphDirection !== 'inputs') return;
@@ -3102,6 +3505,18 @@ export function GraphScreen({
           },
           {
             batchSize: AUTO_EXPAND_BATCH_SIZE,
+            // Nothing is favourited for this item, by the user or anyone else, so the run asks
+            // rather than walking past it and reporting a tree it quietly declined to fill in.
+            resolveMissingSource: async node => {
+              if (
+                communityFavoriteRequestRef.current !== requestId ||
+                !communityAutoExpandRef.current
+              ) {
+                return false;
+              }
+              bump();
+              return requestSourceChoice(node);
+            },
             shouldContinue: () =>
               communityFavoriteRequestRef.current === requestId &&
               communityAutoExpandRef.current,
@@ -3162,6 +3577,7 @@ export function GraphScreen({
     data.metaCategories,
     graphDirection,
     preferredSourceFor,
+    requestSourceChoice,
   ]);
 
   const updateUseByproducts = useCallback((value: boolean) => {
@@ -3176,6 +3592,82 @@ export function GraphScreen({
       console.error('Byproduct-credit preference could not be saved to localStorage.', error);
     }
   }, []);
+
+  const {publish: publishGraphTotals} = useGraphTotals();
+  const resourceTapHandlerRef = useRef((total: TreeTotal) => {
+    handleTreeTotalIngredientTap(total, 'input');
+  });
+  resourceTapHandlerRef.current = total => handleTreeTotalIngredientTap(total, 'input');
+  const onResourceTap = useCallback((total: TreeTotal) => {
+    resourceTapHandlerRef.current(total);
+  }, []);
+  // Held in refs so the published identity is stable: these change with the tree, and a new function
+  // on every edit would re-render every row in the resources list for a one-row change.
+  const changeRecipeRef = useRef((node: ItemTreeNode) => {
+    openPickerWithErrorHandling(node, treeTotals.byproductCoverageByNode.get(node.id));
+  });
+  changeRecipeRef.current = node => {
+    if (node.id === 'root') {
+      openRootPicker('inputs');
+      return;
+    }
+    openPickerWithErrorHandling(node, treeTotals.byproductCoverageByNode.get(node.id));
+  };
+  const onChangeRecipe = useCallback((node: ItemTreeNode) => {
+    changeRecipeRef.current(node);
+  }, []);
+  const selectAlternativeRef = useRef(selectNodeAlternative);
+  selectAlternativeRef.current = selectNodeAlternative;
+  const onSelectAlternative = useCallback((node: ItemTreeNode, selectedKey: string) => {
+    selectAlternativeRef.current(node, selectedKey);
+  }, []);
+  const treatAsToolRef = useRef(treatNodeAsTool);
+  treatAsToolRef.current = treatNodeAsTool;
+  const onTreatAsTool = useCallback((node: ItemTreeNode, isTool: boolean) => {
+    treatAsToolRef.current(node, isTool);
+  }, []);
+  useEffect(() => {
+    if (!isActive || !graphRootKey) return undefined;
+    publishGraphTotals({
+      rootKey: graphRootKey,
+      // The production plan is edited in place, so version is what tells this it moved.
+      rootAmount: root?.productionPlan?.amount ?? root?.amount ?? 1,
+      totals: treeTotals,
+      root,
+      version,
+      visibleNodeIds: focusVisibleNodeIds,
+      onToggleNode: onItemTap,
+      onSelectAlternative,
+      onChangeRecipe,
+      onTreatAsTool,
+      useByproducts,
+      onUseByproductsChange: updateUseByproducts,
+      onResourceTap,
+      onExportCsv: exportTotals,
+      lookupPending: pickerLookup !== null,
+    });
+    // Left published on unmount rather than cleared: clearing races the next tree's publish and
+    // would blank the resources tab while switching between open trees.
+    return undefined;
+  }, [
+    exportTotals,
+    focusVisibleNodeIds,
+    graphRootKey,
+    isActive,
+    onChangeRecipe,
+    onItemTap,
+    onResourceTap,
+    onSelectAlternative,
+    onTreatAsTool,
+    pickerLookup,
+    publishGraphTotals,
+    root,
+    treeTotals,
+    updateUseByproducts,
+    useByproducts,
+    version,
+  ]);
+
 
   // Native web listeners handle browser behaviors that React Native Web's
   // responder and inherited userSelect style do not consistently suppress in Safari.
@@ -3266,6 +3758,7 @@ export function GraphScreen({
           Math.abs(g.dx) + Math.abs(g.dy) > 6 || g.numberActiveTouches === 2,
         onPanResponderGrant: (_event, gesture) => {
           clearWebSelection();
+          onSwipeSuppressChange?.(true);
           panOrigin.current = capturePanGestureOrigin(
             transformRef.current,
             gesture.dx,
@@ -3301,157 +3794,193 @@ export function GraphScreen({
             console.error('Graph pan received movement without a gesture origin.');
             return;
           }
-          applyTransform(transformForPanGesture(panOrigin.current, g.dx, g.dy));
+          scheduleTransform(transformForPanGesture(panOrigin.current, g.dx, g.dy));
         },
         onPanResponderTerminationRequest: () => false,
         onPanResponderRelease: () => {
           panOrigin.current = null;
           pinchDist.current = 0;
           pinching.current = false;
+          onSwipeSuppressChange?.(false);
         },
         onPanResponderTerminate: () => {
           panOrigin.current = null;
           pinchDist.current = 0;
           pinching.current = false;
+          onSwipeSuppressChange?.(false);
         },
       }),
-    [applyTransform, clearWebSelection, zoomAt],
+    [applyTransform, clearWebSelection, onSwipeSuppressChange, zoomAt],
   );
 
-  if (!graphRootKey || !root) {
-    return (
-      <View style={styles.emptyWrap}>
-        <Text style={styles.emptyTitle}>No item selected</Text>
-        <Text style={styles.emptyText}>
-          Open an item and tap one of its recipe cards to start a crafting tree. Tap nodes to
-          expand how each item is obtained — recipes, mining, or mob drops.
-        </Text>
-        <TouchableOpacity
-          {...signalTarget('graph.empty.browse-items')}
-          style={styles.emptyBtn}
-          onPress={() => setTab('items')}>
-          <Text style={styles.emptyBtnText}>Browse items</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
+  const treeShareModal = (
+    <TreeShareModal
+      visible={isActive && showTreeShare}
+      mode="share"
+      interfaceZoom={interfaceZoom}
+      onClose={closeTreeShare}
+      onShare={shareCurrentTree}
+      onImport={importPortableTree}
+      onChooseFile={pickPortableTreeFile}
+    />
+  );
 
-  const rootNodeActions: RootNodeActionProps | undefined = showRootActions
-    ? {
-        amount: root.productionPlan?.amount ?? root.amount ?? 1,
-        onAmountChange: updateRootRequestedAmount,
-        onChangeRecipe: () => openRootPicker('inputs'),
-        onAddUsedBy: () => openRootPicker('outputs'),
+  // Declared above the empty-tree return below: a hook after a conditional return runs only
+  // on the renders that get past it, which React reports as rendering more hooks than the
+  // previous render and refuses to draw.
+  const graphSettingOptions = useMemo<GraphSettingOption[]>(() => {
+    const closeAfter = (run: () => void) => () => {
+      onToggleGraphControls();
+      run();
+    };
+    const options: GraphSettingOption[] = [];
+    if (graphDirection === 'inputs') {
+      options.push({
+        key: 'use-byproducts',
+        label: 'Use byproducts',
+        description: 'Count what a recipe returns against what the tree still needs',
+        kind: 'toggle',
+        active: useByproducts,
+        metricsId: 'graph.totals.use-byproducts',
+        onPress: () => updateUseByproducts(!useByproducts),
+      });
     }
-    : undefined;
-  const graphMenuScaleStyle =
-    Platform.OS === 'web'
-      ? ({zoom: interfaceZoom} as unknown as object)
-      : null;
-  const nodeMenuDirection: GraphDirection =
-    nodeMenu?.node.id === 'root' ? 'inputs' : graphDirection;
-  const nodeMenuChoiceCount = nodeMenu
-    ? choicesFor(
-        nodeMenu.node.key,
-        nodeMenuDirection,
-        nodeMenu.node.alternatives,
-      ).length
-    : 0;
-  const nodeMenuHasRememberedSource = nodeMenu
-    ? !!preferredSourceFor(nodeMenu.node.key, nodeMenu.node.alternatives)
-    : false;
-  const nodeMenuParentSource = nodeMenu
-    ? parentRecipeSource(root, nodeMenu.node)
-    : null;
-  const nodeMenuCanToggleReusable =
-    nodeMenuParentSource?.kind === 'recipe' &&
-    nodeMenuParentSource.direction === 'inputs' &&
-    nodeMenuParentSource.ref !== undefined;
-  const nodeMenuPlacement = nodeMenu
-    ? nodeContextMenuPlacement(
-        nodeMenu.anchor,
-        {width: viewportSize.w, height: viewportSize.h},
-        interfaceZoom,
-      )
-    : null;
+    options.push(
+      {
+        key: 'radial',
+        label: 'Radial layout',
+        description: 'Arrange the tree outward from its root instead of top to bottom',
+        kind: 'toggle',
+        active: radialLayout,
+        metricsId: 'graph.control.radial',
+        onPress: toggleRadialLayout,
+      },
+      {
+        key: 'compact',
+        label: 'Compact nodes',
+        description: 'Smaller nodes, so more of the tree fits on screen',
+        kind: 'toggle',
+        active: compactMode,
+        metricsId: 'graph.control.compact',
+        onPress: toggleCompactMode,
+      },
+      {
+        key: 'unique',
+        label: 'Unique recipes',
+        description:
+          'Expand each recipe once, and mark duplicates instead of repeating them',
+        kind: 'toggle',
+        active: expandRecipesOnce,
+        metricsId: 'graph.control.expand-once',
+        onPress: () => updateExpandRecipesOnce(!expandRecipesOnce),
+      },
+    );
+    if (graphDirection === 'inputs' && !/^local-[a-f0-9]{16}$/u.test(data.descriptor.slug)) {
+      options.push({
+        key: 'auto-expand',
+        label: communityAutoExpandLoading
+          ? communityAutoExpand
+            ? 'Auto expand · Expanding…'
+            : 'Auto expand · Loading…'
+          : 'Auto expand',
+        description: 'Fill the tree in using the recipes other players favourited',
+        kind: 'toggle',
+        active: communityAutoExpand,
+        metricsId: 'graph.control.community-auto-expand',
+        onPress: () => void toggleCommunityAutoExpand(),
+      });
+    }
+    options.push(
+      {
+        key: 'export-png',
+        label: exportingTree ? 'Export HQ PNG · Rendering…' : 'Export HQ PNG',
+        description:
+          Platform.OS === 'web'
+            ? 'Render the whole tree as a high-resolution image'
+            : 'Available in the web viewer',
+        kind: 'action',
+        metricsId: 'graph.totals.export-png',
+        onPress: exportingTree ? () => {} : closeAfter(() => void exportTreeImage()),
+      },
+      {
+        key: 'share',
+        label: 'Share this tree',
+        description: 'Send the tree as a file, or open one you were sent',
+        kind: 'action',
+        metricsId: 'graph.control.share',
+        onPress: closeAfter(() => {
+          setShowTreeShare(true);
+        }),
+      },
+      {
+        key: 'clear-all',
+        label: 'Clear all',
+        description: 'Discard this tree entirely',
+        kind: 'action',
+        destructive: true,
+        metricsId: 'graph.control.clear-all',
+        onPress: closeAfter(clearAllExpansions),
+      },
+    );
+    if (onClose && openTreeCount > 1) {
+      options.push({
+        key: 'close-tree',
+        label: 'Close this tree',
+        description: 'Leave the other open trees alone',
+        kind: 'action',
+        metricsId: 'graph.control.close-tree',
+        onPress: closeAfter(onClose),
+      });
+    }
+    return options;
+  }, [
+    clearAllExpansions,
+    communityAutoExpand,
+    communityAutoExpandLoading,
+    compactMode,
+    data.descriptor.slug,
+    expandRecipesOnce,
+    graphDirection,
+    onClose,
+    onToggleGraphControls,
+    openTreeCount,
+    exportTotals,
+    exportTreeImage,
+    exportingTree,
+    radialLayout,
+    toggleCommunityAutoExpand,
+    toggleCompactMode,
+    toggleRadialLayout,
+    updateExpandRecipesOnce,
+    updateUseByproducts,
+    useByproducts,
+  ]);
 
-  return (
-    <View style={styles.root}>
-      <View
-        ref={setCanvasRef}
-        style={[styles.canvas, noSelect]}
-        onLayout={e => {
-          const nextViewport = {
-            w: e.nativeEvent.layout.width,
-            h: e.nativeEvent.layout.height,
-          };
-          viewportRef.current = nextViewport;
-          setViewportSize(current =>
-            current.w === nextViewport.w && current.h === nextViewport.h
-              ? current
-              : nextViewport,
-          );
-          // The graph tab mounts hidden; fit once it actually gets a size.
-          if (needsFitRef.current && fitView()) {
-            needsFitRef.current = false;
+  // Memoized and hoisted above the empty-tree return, because the element lists below depend on
+  // it and a fresh object each render would rebuild every node.
+  const rootNodeActions = useMemo<RootNodeActionProps | undefined>(
+    () =>
+      showRootActions && root
+        ? {
+            amount: root.productionPlan?.amount ?? root.amount ?? 1,
+            onAmountChange: updateRootRequestedAmount,
+            onChangeRecipe: () => openRootPicker('inputs'),
+            onAddUsedBy: () => openRootPicker('outputs'),
           }
-        }}
-        {...responder.panHandlers}>
-        {rasterLowDetailGraph && (
-          <LowDetailGraphCanvas
-            nodes={renderedGraph?.nodes ?? []}
-            transform={displayTransform}
-            viewport={viewportSize}
-          />
-        )}
-        {/*
-          Keep translation outside the detailed web scale layer. Detailed nodes
-          use CSS zoom for crisp text and pixel art. The web low-detail tier is
-          painted above as one fixed canvas; this transformed path remains for
-          native low-detail nodes.
-        */}
-        <View
-          style={[
-            styles.anchor,
-            Platform.OS !== 'web' && styles.nativeAnchor,
-            Platform.OS === 'web'
-              ? lowDetailGraph
-                ? ({
-                    transform: [
-                      {translateX: displayTransform.x},
-                      {translateY: displayTransform.y},
-                    ],
-                    willChange: 'transform',
-                  } as unknown as object)
-                : {
-                    left: displayTransform.x,
-                    top: displayTransform.y,
-                  }
-              : {
-                  transform: [
-                    {translateX: displayTransform.x},
-                    {translateY: displayTransform.y},
-                    {scale: displayTransform.scale},
-                  ],
-                },
-          ]}>
-          <View
-            ref={anchorRef}
-            collapsable={false}
-            style={[
-              styles.anchor,
-              Platform.OS !== 'web' && styles.nativeAnchor,
-              Platform.OS === 'web' && !displayTransform.nativeScale
-                ? lowDetailGraph
-                  ? ({
-                      transform: [{scale: displayTransform.scale}],
-                      transformOrigin: '0 0',
-                      willChange: 'transform',
-                    } as unknown as object)
-                  : ({zoom: displayTransform.scale} as unknown as object)
-                : null,
-            ]}>
-          {!lowDetailGraph && renderedGraph?.edges.map((e, i) => (
+        : undefined,
+    // version: the production plan is edited in place on the root.
+    [openRootPicker, root, showRootActions, updateRootRequestedAmount, version],
+  );
+
+  /**
+   * The element lists are memoized, not just the components in them. A pan changes only the
+   * transform, and a profile of one showed ten milliseconds of a sixteen millisecond frame
+   * inside the refresh observer: with the culled set now steady between frames, holding these
+   * arrays by identity lets React skip the whole graph subtree instead of rebuilding an element
+   * and a props object for every node and edge on its way to the same result.
+   */
+  const edgeElements = useMemo(
+    () => !rasterLowDetailGraph && renderedGraph?.edges.map((e, i) => (
             <View
               key={`e${i}`}
               style={[
@@ -3468,8 +3997,11 @@ export function GraphScreen({
                 },
               ]}
             />
-          ))}
-          {!lowDetailGraph && renderedGraph?.supplyEdges.map(edge => (
+          )),
+    [rasterLowDetailGraph, renderedGraph],
+  );
+  const supplyEdgeElements = useMemo(
+    () => !lowDetailGraph && renderedGraph?.supplyEdges.map(edge => (
             <View
               key={`byproduct:${edge.targetNodeId}:${edge.producerSourceId}`}
               pointerEvents="none"
@@ -3484,8 +4016,11 @@ export function GraphScreen({
                 },
               ]}
             />
-          ))}
-          {!rasterLowDetailGraph && renderedGraph?.nodes.map(n =>
+          )),
+    [lowDetailGraph, renderedGraph],
+  );
+  const nodeElements = useMemo(
+    () => !rasterLowDetailGraph && renderedGraph?.nodes.map(n =>
             lowDetailGraph ? (
               <LowDetailNodeView
                 key={n.id}
@@ -3548,6 +4083,7 @@ export function GraphScreen({
                 branchLabel={n.compactBranch === true}
                 showLabel
                 showAmounts={showNodeAmounts}
+                collapsedBranch={isCollapsedBranch(n.item)}
                 deferredDuplicate={!!n.item.deferredRecipeExpansion}
                 rootActions={n.item.id === 'root' ? rootNodeActions : undefined}
                 onChangeRecipe={
@@ -3565,16 +4101,9 @@ export function GraphScreen({
                         )
                     : undefined
                 }
-                onTap={() =>
-                  n.item.id === 'root'
-                    ? setShowRootActions(value => !value)
-                    : handleCollapsedIngredientTap(n.item, () =>
-                        n.item.deferredRecipeExpansion || n.radial
-                          ? onItemTap(n.item)
-                          : openPickerWithErrorHandling(n.item),
-                      )
-                }
-                onActions={pointer => openNodeMenu(n.item, pointer)}
+                radialTap={n.radial === true}
+                onTap={handleCompactNodeTap}
+                onActions={openNodeMenu}
               />
             ) : n.kind === 'item' ? (
               <ItemNodeView
@@ -3594,6 +4123,7 @@ export function GraphScreen({
                       n.item.alternatives,
                     ).length > 0)
                 }
+                collapsedBranch={isCollapsedBranch(n.item)}
                 deferredDuplicate={!!n.item.deferredRecipeExpansion}
                 terminalLabel={
                   isRecursiveItemNode(n.item)
@@ -3604,13 +4134,9 @@ export function GraphScreen({
                 }
                 showAmounts={showNodeAmounts}
                 rootActions={n.item.id === 'root' ? rootNodeActions : undefined}
-                onTap={() =>
-                  n.item.id === 'root'
-                    ? setShowRootActions(value => !value)
-                    : handleCollapsedIngredientTap(n.item, () => onItemTap(n.item))
-                }
-                onInfo={() => openItem(n.item.key)}
-                onActions={pointer => openNodeMenu(n.item, pointer)}
+                onTap={handleItemNodeTap}
+                onInfo={handleNodeInfo}
+                onActions={openNodeMenu}
               />
             ) : (
               <SourceNodeView
@@ -3638,42 +4164,178 @@ export function GraphScreen({
                     n.item.alternatives,
                   ).length > 1
                 }
-                onCollapse={() =>
-                  n.item.id === 'root'
-                    ? setShowRootActions(value => !value)
-                    : onItemTap(n.item)
-                }
-                onSwap={() => openPickerWithErrorHandling(n.item)}
-                onInfo={() => openItem(n.item.key)}
-                onActions={pointer => openNodeMenu(n.item, pointer)}
+                onCollapse={onItemTap}
+                onSwap={handleNodeSwap}
+                onInfo={handleNodeInfo}
+                onActions={openNodeMenu}
               />
             ),
-          )}
+          ),
+    [
+      animateMobs,
+      choicesFor,
+      compactMode,
+      displayedAmountFor,
+      focusedSourceId,
+      graphDirection,
+      handleCompactNodeTap,
+      handleItemNodeTap,
+      handleNodeInfo,
+      handleNodeSwap,
+      isCollapsedBranch,
+      onItemTap,
+      openNodeMenu,
+      radialLayout,
+      rasterLowDetailGraph,
+      renderedGraph,
+      rootNodeActions,
+      showNodeAmounts,
+      treeTotals,
+    ],
+  );
+
+  if (!graphRootKey || !root) {
+    return (
+      <View style={styles.emptyWrap}>
+        <Text style={styles.emptyTitle}>No item selected</Text>
+        <Text style={styles.emptyText}>
+          Open an item and tap one of its recipe cards to start a crafting tree. Tap nodes to
+          expand how each item is obtained — recipes, mining, or mob drops.
+        </Text>
+        <TouchableOpacity
+          {...signalTarget('graph.empty.browse-items')}
+          style={styles.emptyBtn}
+          onPress={() => setTab('items')}>
+          <Text style={styles.emptyBtnText}>Browse items</Text>
+        </TouchableOpacity>
+        {treeShareModal}
+      </View>
+    );
+  }
+
+  const graphMenuScaleStyle =
+    Platform.OS === 'web'
+      ? ({zoom: interfaceZoom} as unknown as object)
+      : {transform: [{scale: interfaceZoom}], transformOrigin: 'top right', maxWidth: `${96 / interfaceZoom}%`} as const;
+  const nodeMenuDirection: GraphDirection =
+    nodeMenu?.node.id === 'root' ? 'inputs' : graphDirection;
+  const nodeMenuChoiceCount = nodeMenu
+    ? choicesFor(
+        nodeMenu.node.key,
+        nodeMenuDirection,
+        nodeMenu.node.alternatives,
+      ).length
+    : 0;
+  const nodeMenuHasRememberedSource = nodeMenu
+    ? !!preferredSourceFor(nodeMenu.node.key, nodeMenu.node.alternatives)
+    : false;
+  const nodeMenuPlacement = nodeMenu
+    ? nodeContextMenuPlacement(
+        nodeMenu.anchor,
+        {width: viewportSize.w, height: viewportSize.h},
+        interfaceZoom,
+      )
+    : null;
+
+  return (
+    <View style={styles.root}>
+      <View
+        ref={setCanvasRef}
+        style={[styles.canvas, noSelect]}
+        onLayout={e => {
+          const nextViewport = {
+            w: e.nativeEvent.layout.width,
+            h: e.nativeEvent.layout.height,
+          };
+          viewportRef.current = nextViewport;
+          setViewportSize(current =>
+            current.w === nextViewport.w && current.h === nextViewport.h
+              ? current
+              : nextViewport,
+          );
+          // The graph tab mounts hidden; fit once it actually gets a size.
+          if (needsFitRef.current && fitView()) {
+            needsFitRef.current = false;
+          }
+        }}
+        {...responder.panHandlers}>
+        {rasterLowDetailGraph && (
+          <LowDetailGraphCanvas
+            nodes={renderedGraph?.nodes ?? []}
+            edges={renderedGraph?.edges ?? []}
+            transform={displayTransform}
+            viewport={viewportSize}
+          />
+        )}
+        {/*
+          Keep translation outside the detailed web scale layer. Detailed nodes
+          use CSS zoom for crisp text and pixel art. The web low-detail tier is
+          painted above as one fixed canvas; this transformed path remains for
+          native low-detail nodes.
+        */}
+        <View
+          style={[
+            styles.anchor,
+            Platform.OS !== 'web' && styles.nativeAnchor,
+            // Translated with a transform rather than left/top on both web tiers: left and top
+            // are layout properties, so panning reflowed every node in the tree each frame, while
+            // a transform is composited. Scale still belongs to the inner layer below, so this
+            // keeps translation outside it exactly as before.
+            Platform.OS === 'web'
+              ? ({
+                  transform: [
+                    {translateX: displayTransform.x},
+                    {translateY: displayTransform.y},
+                  ],
+                  willChange: 'transform',
+                } as unknown as object)
+              : {
+                  transform: [
+                    {translateX: displayTransform.x},
+                    {translateY: displayTransform.y},
+                    {scale: displayTransform.scale},
+                  ],
+                },
+          ]}>
+          <View
+            ref={anchorRef}
+            collapsable={false}
+            style={[
+              styles.anchor,
+              Platform.OS !== 'web' && styles.nativeAnchor,
+              Platform.OS === 'web' && !displayTransform.nativeScale
+                ? lowDetailGraph
+                  ? ({
+                      transform: [{scale: displayTransform.scale}],
+                      transformOrigin: '0 0',
+                      willChange: 'transform',
+                    } as unknown as object)
+                  : ({zoom: displayTransform.scale} as unknown as object)
+                : null,
+            ]}>
+          {edgeElements}
+          {supplyEdgeElements}
+          {nodeElements}
           </View>
         </View>
       </View>
 
       {graphLayout.fallback && (
         <View
-          style={[styles.layoutFallbackNotice, graphMenuScaleStyle]}
+          style={[styles.layoutFallbackNotice, bottomNoticeStyle, graphMenuScaleStyle]}
           accessibilityRole="alert">
           <Text style={[styles.layoutFallbackText, noSelect]}>{graphLayout.fallback}</Text>
         </View>
       )}
 
-      <View style={[styles.controls, graphMenuScaleStyle]}>
-        {showGraphControls && (
+      <View
+        style={[styles.controls, graphMenuScaleStyle]}
+        onLayout={event => {
+          const {height} = event.nativeEvent.layout;
+          setControlsHeight(current => (current === height ? current : height));
+        }}>
+        {showGraphControls && Platform.OS === 'web' && (
           <View style={styles.controlOptions}>
-            {graphDirection === 'inputs' && (
-              <CtrlBtn
-                label="Totals"
-                expanded={showTreeTotals}
-                accessibilityLabel={showTreeTotals ? 'Collapse tree totals' : 'Expand tree totals'}
-                metricsId="graph.control.totals"
-                active={showTreeTotals}
-                onPress={() => setShowTreeTotals(value => !value)}
-              />
-            )}
             <CtrlBtn
               label="Radial"
               metricsId="graph.control.radial"
@@ -3687,102 +4349,169 @@ export function GraphScreen({
               onPress={toggleCompactMode}
             />
             <CtrlBtn
-              label={largeTreeUniqueModeRequired ? 'Unique · Locked' : 'Unique'}
-              accessibilityLabel={
-                largeTreeUniqueModeRequired
-                  ? 'Unique recipes are required for this large tree'
-                  : 'Use unique recipes'
-              }
+              label="Unique"
+              accessibilityLabel="Use unique recipes"
               metricsId="graph.control.expand-once"
               active={expandRecipesOnce}
-              onPress={() => {
-                if (largeTreeUniqueModeRequired) {
-                  setShowLargeTreeUniqueNotice(true);
-                  return;
-                }
-                updateExpandRecipesOnce(!expandRecipesOnce);
-              }}
+              onPress={() => updateExpandRecipesOnce(!expandRecipesOnce)}
             />
-            {graphDirection === 'inputs' && !/^local-[a-f0-9]{16}$/u.test(data.descriptor.slug) && (
+            {Platform.OS === 'web' && (
               <CtrlBtn
-                label={
-                  communityAutoExpandLoading
-                    ? communityAutoExpand
-                      ? 'Expanding…'
-                      : 'Loading…'
-                    : communityAutoExpand
-                      ? 'Auto expand on'
-                      : 'Auto expand'
-                }
+                label="Fast zoom"
                 accessibilityLabel={
-                  communityAutoExpand
-                    ? 'Stop automatically expanding community favorite recipes'
-                    : 'Automatically expand community favorite recipes'
+                  lowDetailEnabled
+                    ? 'Draw full detail when zoomed out'
+                    : 'Draw zoomed-out trees as flat chips so they stay interactive'
                 }
-                metricsId="graph.control.community-auto-expand"
-                active={communityAutoExpand}
-                onPress={() => void toggleCommunityAutoExpand()}
+                metricsId="graph.control.low-detail"
+                active={lowDetailEnabled}
+                onPress={toggleLowDetail}
               />
             )}
+            {/* Everything past this point is an action rather than a view toggle, and none of it
+                is reached often enough to earn a permanent row across a phone's canvas. */}
             <CtrlBtn
-              label="Share"
-              metricsId="graph.control.share"
-              onPress={() => {
-                setTreeTransferMode('share');
-                setShowTreeShare(true);
-              }}
+              label="More ⋯"
+              accessibilityLabel={showMoreControls ? 'Hide more graph actions' : 'Show more graph actions'}
+              metricsId="graph.control.more"
+              active={showMoreControls}
+              onPress={() => setShowMoreControls(value => !value)}
             />
           </View>
         )}
         <TouchableOpacity
+          {...signalTarget('graph.control.collapse-all')}
+          accessibilityRole="button"
+          accessibilityLabel={treeIsExpanded ? 'Collapse the whole tree' : 'Expand the whole tree'}
+          style={[styles.ctrlBtn, styles.controlMenuBtn]}
+          onPress={toggleWholeTree}>
+          <Text style={[styles.ctrlBtnText, styles.settingsGearIcon]}>
+            {treeIsExpanded ? '⊟' : '⊞'}
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
           {...signalTarget('graph.control.menu')}
           accessibilityRole="button"
-          accessibilityLabel={showGraphControls ? 'Collapse graph controls' : 'Expand graph controls'}
+          accessibilityLabel={
+            Platform.OS === 'web'
+              ? showGraphControls
+                ? 'Collapse graph controls'
+                : 'Expand graph controls'
+              : 'Open graph settings'
+          }
           accessibilityState={{expanded: showGraphControls}}
           style={[
             styles.ctrlBtn,
             styles.controlMenuBtn,
-            !showGraphControls && styles.controlMenuBtnCollapsed,
-            showGraphControls && styles.ctrlBtnActive,
+            Platform.OS === 'web' && !showGraphControls && styles.controlMenuBtnCollapsed,
+            showGraphControls && Platform.OS === 'web' && styles.ctrlBtnActive,
           ]}
           onPress={onToggleGraphControls}>
           <View style={styles.ctrlBtnContent}>
-            {!showGraphControls && (
-              <Text style={[styles.ctrlBtnText, noSelect]}>Graph controls</Text>
+            {Platform.OS === 'web' ? (
+              <>
+                {!showGraphControls && (
+                  <Text style={[styles.ctrlBtnText, noSelect]}>Graph controls</Text>
+                )}
+                <DisclosureChevron
+                  expanded={showGraphControls}
+                  color={showGraphControls ? theme.accent : theme.text}
+                  size={18}
+                  strokeWidth={2.4}
+                />
+              </>
+            ) : (
+              <Text style={[styles.ctrlBtnText, styles.settingsGearIcon]}>⚙</Text>
             )}
-            <DisclosureChevron
-              expanded={showGraphControls}
-              color={showGraphControls ? theme.accent : theme.text}
-              size={18}
-              strokeWidth={2.4}
-            />
           </View>
         </TouchableOpacity>
       </View>
-      {showLargeTreeUniqueNotice && (
+      {showGraphControls && showMoreControls && Platform.OS === 'web' && (
         <View
-          style={[styles.uniqueModeNotice, graphMenuScaleStyle]}
-          accessibilityRole="alert">
-          <Text style={[styles.uniqueModeNoticeText, noSelect]}>
-            Unique mode stays on after this tree reaches {DENSE_GRAPH_NODE_THRESHOLD} nodes. It
-            prevents duplicate recipe branches from multiplying and keeps very large trees
-            responsive. Start a new, smaller tree to change it.
-          </Text>
-          <TouchableOpacity
-            {...signalTarget('graph.control.expand-once-notice.dismiss')}
-            accessibilityRole="button"
-            accessibilityLabel="Dismiss unique mode notice"
-            style={styles.uniqueModeNoticeDismiss}
-            onPress={() => setShowLargeTreeUniqueNotice(false)}>
-            <Text style={styles.uniqueModeNoticeDismissText}>Got it</Text>
-          </TouchableOpacity>
+          style={[
+            styles.moreControls,
+            controlsHeight > 0 ? {top: CONTROLS_TOP_INSET + controlsHeight + 6} : null,
+            graphMenuScaleStyle,
+          ]}>
+          {graphDirection === 'inputs' && !/^local-[a-f0-9]{16}$/u.test(data.descriptor.slug) && (
+            <CtrlBtn
+              label={
+                communityAutoExpandLoading
+                  ? communityAutoExpand
+                    ? 'Expanding…'
+                    : 'Loading…'
+                  : communityAutoExpand
+                    ? 'Auto expand on'
+                    : 'Auto expand'
+              }
+              accessibilityLabel={
+                communityAutoExpand
+                  ? 'Stop automatically expanding community favorite recipes'
+                  : 'Automatically expand community favorite recipes'
+              }
+              metricsId="graph.control.community-auto-expand"
+              active={communityAutoExpand}
+              onPress={() => void toggleCommunityAutoExpand()}
+            />
+          )}
+          {graphDirection === 'inputs' && (
+            <CtrlBtn
+              label="Use byproducts"
+              accessibilityLabel={
+                useByproducts
+                  ? 'Stop counting byproducts against what the tree needs'
+                  : 'Count byproducts against what the tree needs'
+              }
+              metricsId="graph.totals.use-byproducts"
+              active={useByproducts}
+              onPress={() => updateUseByproducts(!useByproducts)}
+            />
+          )}
+          <CtrlBtn
+            label={exportingTree ? 'Rendering…' : 'Export HQ PNG'}
+            accessibilityLabel="Export the tree as a high-resolution image"
+            metricsId="graph.totals.export-png"
+            onPress={() => {
+              if (exportingTree) return;
+              setShowMoreControls(false);
+              void exportTreeImage();
+            }}
+          />
+          <CtrlBtn
+            label="Share"
+            metricsId="graph.control.share"
+            onPress={() => {
+              setShowMoreControls(false);
+              setShowTreeShare(true);
+            }}
+          />
+          <CtrlBtn
+            label="Clear all"
+            accessibilityLabel="Discard this recipe tree entirely"
+            metricsId="graph.control.clear-all"
+            onPress={() => {
+              setShowMoreControls(false);
+              clearAllExpansions();
+            }}
+          />
+          {onClose && openTreeCount > 1 && (
+            <CtrlBtn
+              label="Close tree"
+              accessibilityLabel="Close this recipe tree"
+              metricsId="graph.control.close-tree"
+              onPress={() => {
+                setShowMoreControls(false);
+                onClose();
+              }}
+            />
+          )}
         </View>
       )}
       {recipeImportNotice && (
         <View
           style={[
             styles.uniqueModeNotice,
-            showLargeTreeUniqueNotice && styles.treeImportNoticeStacked,
+            bottomNoticeStyle,
             graphMenuScaleStyle,
           ]}
           accessibilityRole="alert">
@@ -3818,22 +4547,51 @@ export function GraphScreen({
         {...signalTarget('graph.control.fit')}
         accessibilityRole="button"
         accessibilityLabel="Fit graph to view"
-        style={[styles.ctrlBtn, styles.fitControl, graphMenuScaleStyle]}
+        style={[styles.ctrlBtn, styles.fitControl, graphMenuScaleStyle, Platform.OS !== 'web' && {transformOrigin: 'bottom left'}]}
         onPress={fitView}>
         <Text style={[styles.ctrlBtnText, styles.fitControlIcon]}>⛶</Text>
       </TouchableOpacity>
-      {showGraphControls && graphDirection === 'inputs' && showTreeTotals && (
-        <TreeTotalsPanel
-          interfaceZoom={interfaceZoom}
-          totals={treeTotals}
-          useByproducts={useByproducts}
-          exportingTree={exportingTree}
-          exportMessage={exportMessage}
-          onUseByproductsChange={updateUseByproducts}
-          onExportTotals={exportTotals}
-          onExportTree={() => void exportTreeImage()}
-          onIngredientTap={handleTreeTotalIngredientTap}
-          onOpenItem={openItem}
+      {exportMessage && (
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel={`${exportMessage}. Dismiss.`}
+          style={[styles.exportNotice, bottomNoticeStyle, graphMenuScaleStyle]}
+          onPress={() => setExportMessage(null)}>
+          <Text style={[styles.exportNoticeText, noSelect]}>{exportMessage}</Text>
+          <Text style={[styles.exportNoticeDismiss, noSelect]}>✕</Text>
+        </TouchableOpacity>
+      )}
+      {focus && (
+        <TouchableOpacity
+          {...signalTarget('graph.focus.clear')}
+          accessibilityRole="button"
+          accessibilityLabel={`Focused on ${focusLabel}. Show the whole tree.`}
+          style={[
+            styles.focusChip,
+            controlsHeight > 0 ? {top: CONTROLS_TOP_INSET + controlsHeight + 6} : null,
+            graphMenuScaleStyle,
+          ]}
+          onPress={clearFocus}>
+          <Text style={[styles.focusChipText, noSelect]} numberOfLines={1}>
+            Focused: {focusLabel}
+          </Text>
+          <Text style={[styles.focusChipClear, noSelect]}>Show all ✕</Text>
+        </TouchableOpacity>
+      )}
+      {graph && minimapVisible && (
+        <GraphMinimap
+          layout={graph}
+          transform={transform}
+          viewport={viewportSize}
+          onRecenter={recenterOnGraphPoint}
+          style={minimapStyle}
+        />
+      )}
+      {Platform.OS !== 'web' && (
+        <GraphSettingsSheet
+          visible={isActive && tab === 'graph' && showGraphControls}
+          options={graphSettingOptions}
+          onClose={onToggleGraphControls}
         />
       )}
       {pickerLookup && (
@@ -3856,7 +4614,7 @@ export function GraphScreen({
           </View>
         </View>
       )}
-      {picker && (
+      {isActive && drivingThePicker && picker && (
         <PickerModal
           visible
           interfaceZoom={interfaceZoom}
@@ -3994,6 +4752,9 @@ export function GraphScreen({
             openItem(machineKey);
           }}
           onSelect={i => {
+            // Recorded rather than resolved here: the effect below settles the prompt once the
+            // picker has actually closed, so the waiting run reads a node that has its source.
+            pickerSelectionMadeRef.current = true;
             const p = picker;
             const entries = visiblePickerEntries(p, hiddenRecipeStages);
             const selectedEntry = entries[i];
@@ -4048,7 +4809,7 @@ export function GraphScreen({
             }
             if (p.direction === 'outputs') {
               p.target.source = undefined;
-              applyChoice(p.target, choice);
+              applyChoice(p.target, choice, {expansionBudget: budgetFor(p.target)});
               return;
             }
             if (p.target.source) {
@@ -4065,14 +4826,14 @@ export function GraphScreen({
             }
             setPreferredSource(p.target.key, p.rememberSource ? choice : null);
             if (p.rememberSource) {
-              applyPreferredSourceAcrossTree(p.target, choice);
+              applyPreferredSourceAcrossTree(p.target, choice, budgetFor(p.target));
               return;
             }
-            applyChoice(p.target, choice);
+            applyChoice(p.target, choice, {expansionBudget: budgetFor(p.target)});
           }}
         />
       )}
-      {nodeMenu && nodeMenuPlacement && (
+      {isActive && drivingThePicker && nodeMenu && nodeMenuPlacement && (
         <NodeActionMenu
           node={nodeMenu.node}
           interfaceZoom={interfaceZoom}
@@ -4111,29 +4872,31 @@ export function GraphScreen({
           }
           onUnsetRecipe={() => unsetNodeRecipe(nodeMenu.node)}
           onCollapseRecipe={() => collapseNodeRecipe(nodeMenu.node)}
-          onToggleReusable={
-            nodeMenuCanToggleReusable
-              ? () => toggleNodeReusable(nodeMenu.node)
+          onToggleRootControls={
+            nodeMenu.node.id === 'root'
+              ? () => {
+                  setShowRootActions(value => !value);
+                  setNodeMenu(null);
+                }
               : undefined
           }
+          rootControlsShown={showRootActions}
+          onFocusBranch={() => focusBranch(nodeMenu.node)}
+          isFocused={focusNodeId === nodeMenu.node.id}
+          treatAsTool={{
+            isTool: isCatalyst(nodeMenu.node),
+            onPress: () => treatNodeAsTool(nodeMenu.node, !isCatalyst(nodeMenu.node)),
+          }}
         />
       )}
-      <TreeShareModal
-        visible={showTreeShare}
-        mode={treeTransferMode}
-        interfaceZoom={interfaceZoom}
-        onClose={closeTreeShare}
-        onShare={shareCurrentTree}
-        onImport={importPortableTree}
-        onChooseFile={pickPortableTreeFile}
-      />
+      {treeShareModal}
       <RecipeImportDetailsModal
-        report={showRecipeImportDetails ? recipeImportReport : null}
+        report={isActive && showRecipeImportDetails ? recipeImportReport : null}
         interfaceZoom={interfaceZoom}
         onClose={() => setShowRecipeImportDetails(false)}
       />
       <AutoExpandSummaryModal
-        entries={autoExpandSummary}
+        entries={isActive ? autoExpandSummary : null}
         interfaceZoom={interfaceZoom}
         onClose={() => setAutoExpandSummary(null)}
       />
@@ -4271,8 +5034,14 @@ function AttachedRootActions({
   );
 }
 
+/**
+ * Unreferenced on purpose: the canvas panel and its toggle were removed when the totals controls
+ * were split into standalone settings, and totals are moving to a tab of their own. Kept because
+ * that tab needs exactly this rendering, along with TreeTotalsSection below.
+ */
 function TreeTotalsPanel({
   interfaceZoom,
+  top,
   totals,
   useByproducts,
   exportingTree,
@@ -4284,6 +5053,8 @@ function TreeTotalsPanel({
   onOpenItem,
 }: {
   interfaceZoom: number;
+  /** Measured clearance below the controls, which wrap onto more rows as the screen narrows. */
+  top?: number;
   totals: TreeTotals;
   useByproducts: boolean;
   exportingTree: boolean;
@@ -4298,6 +5069,7 @@ function TreeTotalsPanel({
     <View
       style={[
         styles.totalsPanel,
+        top === undefined ? null : {top},
         Platform.OS === 'web'
           ? ({zoom: interfaceZoom} as unknown as object)
           : null,
@@ -4427,8 +5199,14 @@ function useNodeActionHandlers(
   return {press, longPress, contextMenuProps};
 }
 
-const LowDetailItemIcon = React.memo(function LowDetailItemIcon({itemKey}: {itemKey: string}) {
-  return <ItemIcon itemKey={itemKey} size={32} />;
+const LowDetailItemIcon = React.memo(function LowDetailItemIcon({
+  itemKey,
+  size,
+}: {
+  itemKey: string;
+  size: number;
+}) {
+  return <ItemIcon itemKey={itemKey} size={size} />;
 });
 
 const LowDetailNodeView = React.memo(function LowDetailNodeView({
@@ -4456,6 +5234,10 @@ const LowDetailNodeView = React.memo(function LowDetailNodeView({
     [node, onActions],
   );
   const handlers = useNodeActionHandlers(handleTap, handleActions);
+  // The layout box is 172 by 58 for an item, which at this zoom is a wide empty rectangle with a
+  // small icon adrift in it. A square chip on the same centre keeps the edges meeting where they
+  // did, and the icon fills it rather than floating inside it.
+  const chip = Math.max(16, Math.min(w, h));
   return (
     <Pressable
       {...handlers.contextMenuProps}
@@ -4468,262 +5250,32 @@ const LowDetailNodeView = React.memo(function LowDetailNodeView({
         styles.lowDetailNode,
         expanded && styles.lowDetailSourceNode,
         node.id === 'root' && styles.lowDetailRootNode,
-        {left: x, top: y, width: Math.max(16, w), height: Math.max(16, h)},
+        {
+          left: x + (w - chip) / 2,
+          top: y + (h - chip) / 2,
+          width: chip,
+          height: chip,
+        },
       ]}
     >
-      <LowDetailItemIcon itemKey={node.key} />
+      <LowDetailItemIcon itemKey={node.key} size={chip} />
     </Pressable>
   );
 });
 
-function ContextAmountStepper({
-  amount,
-  onAmountChange,
-}: {
-  amount: number;
-  onAmountChange: (amount: number) => void;
-}) {
-  const [amountText, setAmountText] = useState(String(amount));
-  useEffect(() => setAmountText(String(amount)), [amount]);
-  const updateAmountText = (value: string) => {
-    setAmountText(value);
-    const parsed = Number(value);
-    if (Number.isFinite(parsed) && parsed >= 1) onAmountChange(parsed);
-  };
-  return (
-    <View style={styles.nodeActionAmountSection}>
-      <Text style={styles.nodeActionSectionLabel}>Requested amount</Text>
-      <View style={styles.nodeActionAmountStepper}>
-        <TouchableOpacity
-          {...signalTarget('graph.node-menu.amount.decrease')}
-          accessibilityRole="button"
-          accessibilityLabel="Decrease requested amount"
-          style={styles.nodeActionAmountButton}
-          onPress={() => onAmountChange(amount - 1)}>
-          <Text style={styles.nodeActionAmountButtonText}>−</Text>
-        </TouchableOpacity>
-        <TextInput
-          accessibilityLabel="Amount requested"
-          style={styles.nodeActionAmountInput}
-          value={amountText}
-          onChangeText={updateAmountText}
-          onBlur={() => setAmountText(String(amount))}
-          keyboardType="number-pad"
-          inputMode="numeric"
-          selectTextOnFocus
-        />
-        <TouchableOpacity
-          {...signalTarget('graph.node-menu.amount.increase')}
-          accessibilityRole="button"
-          accessibilityLabel="Increase requested amount"
-          style={[styles.nodeActionAmountButton, styles.nodeActionAmountButtonPrimary]}
-          onPress={() => onAmountChange(amount + 1)}>
-          <Text
-            style={[
-              styles.nodeActionAmountButtonText,
-              styles.nodeActionAmountButtonPrimaryText,
-            ]}>
-            +
-          </Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
-}
 
-function NodeActionMenu({
-  node,
-  interfaceZoom,
-  placement,
-  canSetRecipe,
-  hasRememberedSource,
-  amount,
-  onClose,
-  onSelectAlternative,
-  onSetOrChangeRecipe,
-  onAddUsedBy,
-  onAmountChange,
-  onUnsetRecipe,
-  onCollapseRecipe,
-  onToggleReusable,
-}: {
-  node: ItemTreeNode;
-  interfaceZoom: number;
-  placement: NodeContextMenuPlacement;
-  canSetRecipe: boolean;
-  hasRememberedSource: boolean;
-  amount?: number;
-  onClose: () => void;
-  onSelectAlternative: (selectedKey: string) => void;
-  onSetOrChangeRecipe: () => void;
-  onAddUsedBy?: () => void;
-  onAmountChange?: (amount: number) => void;
-  onUnsetRecipe: () => void;
-  onCollapseRecipe: () => void;
-  onToggleReusable?: () => void;
-}) {
-  const data = useData();
-  const alternatives = Array.from(
-    new Map(
-      (node.alternatives ?? []).map(itemKey => {
-        const item = data.itemsByKey.get(itemKey);
-        const identity = item
-          ? `${item.t ?? 'item'}\u0000${item.id}\u0000${item.n}`
-          : itemKey;
-        return [identity, itemKey] as const;
-      }),
-    ).values(),
-  );
-  const hasSelectedRecipe = !!node.source || !!node.deferredRecipeExpansion;
-  const isRoot = node.id === 'root';
-  const stateLabel = node.deferredRecipeExpansion
-    ? 'Recipe expanded elsewhere'
-    : node.source
-      ? 'Recipe expanded'
-      : canSetRecipe
-        ? 'No recipe selected'
-        : 'No recipe available';
-  const menuScaleStyle =
-    Platform.OS === 'web' ? ({zoom: interfaceZoom} as unknown as object) : null;
-  return (
-    <View style={styles.nodeActionLayer} pointerEvents="box-none">
-      <Pressable
-        style={styles.nodeActionDismiss}
-        accessibilityLabel="Close node menu"
-        onPress={onClose}
-      />
-      <View
-        pointerEvents="box-none"
-        style={[
-          styles.nodeActionAnchor,
-          {left: placement.left, top: placement.top},
-        ]}>
-        <Pressable
-          accessibilityRole="menu"
-          accessibilityLabel={`${data.itemsByKey.get(node.key)?.n ?? node.key} node menu`}
-          style={[
-            styles.nodeActionCard,
-            {width: placement.width, maxHeight: placement.maxHeight},
-            menuScaleStyle,
-          ]}
-          onPointerDown={event => event.stopPropagation()}
-          onTouchStart={event => event.stopPropagation()}
-          onPress={event => event.stopPropagation()}>
-          <View style={styles.nodeActionHeader}>
-            <ItemIcon itemKey={node.key} size={32} />
-            <View style={styles.nodeActionHeaderCopy}>
-              <Text style={styles.nodeActionTitle} numberOfLines={1}>
-                {data.itemsByKey.get(node.key)?.n ?? node.key}
-              </Text>
-              <Text style={styles.nodeActionHint}>
-                {isRoot ? `Starting node · ${stateLabel}` : stateLabel}
-              </Text>
-            </View>
-          </View>
-          {amount !== undefined && onAmountChange && (
-            <ContextAmountStepper amount={amount} onAmountChange={onAmountChange} />
-          )}
-          {alternatives.length > 1 && (
-            <View style={styles.nodeAlternativeSection}>
-              <Text style={styles.nodeActionSectionLabel}>
-                {node.tag ? `#${node.tag}` : 'Ingredient alternatives'}
-              </Text>
-              <ScrollView style={styles.nodeAlternativeScroll}>
-                {alternatives.map(itemKey => (
-                  <TouchableOpacity
-                    key={itemKey}
-                    accessibilityRole="button"
-                    accessibilityState={{selected: itemKey === node.key}}
-                    style={[
-                      styles.nodeAlternativeRow,
-                      itemKey === node.key && styles.nodeAlternativeRowSelected,
-                    ]}
-                    onPress={() => onSelectAlternative(itemKey)}>
-                    <ItemIcon itemKey={itemKey} size={32} />
-                    <Text style={styles.nodeAlternativeName} numberOfLines={2}>
-                      {data.itemsByKey.get(itemKey)?.n ?? itemKey}
-                    </Text>
-                    {itemKey === node.key && (
-                      <Text style={styles.nodeAlternativeSelected}>✓</Text>
-                    )}
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-          )}
-          <View style={styles.nodeActionButtons}>
-            {canSetRecipe && (
-              <TouchableOpacity
-                {...signalTarget('graph.node-menu.set-recipe')}
-                accessibilityRole="button"
-                style={[styles.nodeActionButton, styles.nodeActionButtonPrimary]}
-                onPress={onSetOrChangeRecipe}>
-                <Text style={styles.nodeActionButtonPrimaryText}>
-                  {hasSelectedRecipe ? 'Change recipe' : 'Set recipe'}
-                </Text>
-                <Text style={styles.nodeActionButtonPrimaryHint}>
-                  {hasSelectedRecipe ? 'Choose a different source' : 'Choose how to make this item'}
-                </Text>
-              </TouchableOpacity>
-            )}
-            {onAddUsedBy && (
-              <TouchableOpacity
-                {...signalTarget('graph.node-menu.add-used-by')}
-                accessibilityRole="button"
-                style={styles.nodeActionButton}
-                onPress={onAddUsedBy}>
-                <Text style={styles.nodeActionButtonText}>Add used by</Text>
-                <Text style={styles.nodeActionButtonHint}>Add a recipe that consumes the starting item</Text>
-              </TouchableOpacity>
-            )}
-            {onToggleReusable && (
-              <TouchableOpacity
-                {...signalTarget('graph.node-menu.toggle-reusable')}
-                accessibilityRole="button"
-                accessibilityLabel={
-                  node.nonConsumed ? 'Treat recipe ingredient as consumed' : 'Treat recipe ingredient as reusable'
-                }
-                style={styles.nodeActionButton}
-                onPress={onToggleReusable}>
-                <Text style={styles.nodeActionButtonText}>
-                  {node.nonConsumed ? 'Treat as consumed' : 'Treat as reusable'}
-                </Text>
-                <Text style={styles.nodeActionButtonHint}>
-                  Manual override for this recipe input
-                </Text>
-              </TouchableOpacity>
-            )}
-            {hasSelectedRecipe && (
-              <TouchableOpacity
-                {...signalTarget('graph.node-menu.collapse-recipe')}
-                accessibilityRole="button"
-                style={styles.nodeActionButton}
-                onPress={onCollapseRecipe}>
-                <Text style={styles.nodeActionButtonText}>Collapse recipe</Text>
-                <Text style={styles.nodeActionButtonHint}>Keep the remembered source</Text>
-              </TouchableOpacity>
-            )}
-            {(hasSelectedRecipe || hasRememberedSource) && (
-              <TouchableOpacity
-                {...signalTarget('graph.node-menu.unset-recipe')}
-                accessibilityRole="button"
-                style={[styles.nodeActionButton, styles.nodeActionButtonDanger]}
-                onPress={onUnsetRecipe}>
-                <Text style={styles.nodeActionButtonDangerText}>Unset recipe</Text>
-                <Text style={styles.nodeActionButtonHint}>Clear this node and its remembered source</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        </Pressable>
-      </View>
-    </View>
-  );
-}
-
-function CompactItemNodeView({
+/**
+ * Memoized: panning sets a new transform on every frame, which re-renders the graph, and without
+ * this every visible node re-rendered with it -- recipe previews, item chips and all. That cost is
+ * per frame rather than per tree, which is why a sixteen-node tree panned as badly as a large one.
+ * Every callback prop is node-taking so the parent can pass one stable function; an inline closure
+ * here is a new prop each frame and a memo cannot see past it.
+ */
+const CompactItemNodeView = React.memo(function CompactItemNodeView({
   x,
   y,
   node,
+  radialTap,
   requiredAmount,
   byproductCoverage,
   isRoot,
@@ -4735,6 +5287,7 @@ function CompactItemNodeView({
   branchLabel = false,
   showLabel,
   showAmounts,
+  collapsedBranch,
   deferredDuplicate,
   rootActions,
   onChangeRecipe,
@@ -4755,11 +5308,16 @@ function CompactItemNodeView({
   branchLabel?: boolean;
   showLabel: boolean;
   showAmounts: boolean;
+  /** Not expanded, but a remembered recipe means there is a tree folded under it. */
+  collapsedBranch: boolean;
   deferredDuplicate: boolean;
   rootActions?: RootNodeActionProps;
   onChangeRecipe?: () => void;
-  onTap: () => void;
-  onActions: (pointer?: NodeActionPointer) => void;
+  /** True for a radial collapsed ingredient, which taps straight through to expanding. */
+  radialTap?: boolean;
+  /** Node-taking, so the parent passes one stable function rather than a closure per render. */
+  onTap: (node: ItemTreeNode, radial?: boolean) => void;
+  onActions: (node: ItemTreeNode, pointer?: NodeActionPointer) => void;
 }) {
   const data = useData();
   const item = data.itemsByKey.get(node.key);
@@ -4794,7 +5352,7 @@ function CompactItemNodeView({
   const handleTap = () => {
     if (!selectable || node.loading) return;
     if (!onChangeRecipe) {
-      onTap();
+      onTap(node, radialTap);
       return;
     }
     if (pendingTapRef.current) {
@@ -4804,12 +5362,12 @@ function CompactItemNodeView({
     }
     pendingTapRef.current = setTimeout(() => {
       pendingTapRef.current = null;
-      onTap();
+      onTap(node, radialTap);
     }, 280);
   };
-  const handlers = useNodeActionHandlers(handleTap, () => {
+  const handlers = useNodeActionHandlers(handleTap, pointer => {
     clearPendingTap();
-    onActions();
+    onActions(node, pointer);
   });
   return (
     <>
@@ -4817,7 +5375,7 @@ function CompactItemNodeView({
       {...signalTarget(`graph.node.expand.${nodeDepthBucket(node)}`)}
       {...handlers.contextMenuProps}
       accessibilityRole={selectable ? 'button' : undefined}
-      accessibilityLabel={`${name}, quantity ${formatIngredientQuantity(node.key, requiredAmount)}${terminal ? `, ${terminalLabel}` : ''}${deferredDuplicate ? ', recipe expanded elsewhere, tap to move expansion here' : ''}${byproductLabel ? `, ${byproductLabel}` : ''}${node.nonConsumed ? ', not consumed' : ''}${node.consumptionProbability !== undefined ? `, ${node.consumptionProbability == null ? 'unknown' : `${String(Math.round(node.consumptionProbability * 10_000) / 100)} percent`} consume chance` : ''}${node.productionProbability !== undefined ? `, ${node.productionProbability == null ? 'unknown' : `${String(Math.round(node.productionProbability * 10_000) / 100)} percent`} produce chance` : ''}${isRoot ? ', open amount and recipe controls' : selectable && !deferredDuplicate ? byproductCoverage?.remainingAmount === 0 ? ', navigate to producing recipe' : ', choose source' : ''}${onChangeRecipe ? ', double tap to change recipe' : ''}, long press or right click for node options`}
+      accessibilityLabel={`${name}, quantity ${formatIngredientQuantity(node.key, requiredAmount)}${terminal ? `, ${terminalLabel}` : ''}${deferredDuplicate ? ', recipe expanded elsewhere, tap to move expansion here' : ''}${byproductLabel ? `, ${byproductLabel}` : ''}${node.nonConsumed ? ', tool or catalyst' : ''}${node.consumptionProbability !== undefined ? `, ${node.consumptionProbability == null ? 'unknown' : `${String(Math.round(node.consumptionProbability * 10_000) / 100)} percent`} consume chance` : ''}${node.productionProbability !== undefined ? `, ${node.productionProbability == null ? 'unknown' : `${String(Math.round(node.productionProbability * 10_000) / 100)} percent`} produce chance` : ''}${isRoot ? ', open amount and recipe controls' : selectable && !deferredDuplicate ? byproductCoverage?.remainingAmount === 0 ? ', navigate to producing recipe' : ', choose source' : ''}${onChangeRecipe ? ', double tap to change recipe' : ''}, long press or right click for node options`}
       disabled={!selectable || node.loading}
       focusable
       onPress={handlers.press}
@@ -4837,6 +5395,7 @@ function CompactItemNodeView({
         byproductCoverage &&
           byproductCoverage.remainingAmount > 0 &&
           styles.nodeByproductPartial,
+        collapsedBranch && styles.nodeCollapsedBranch,
         deferredDuplicate && styles.nodeDeferredRecipe,
         isRoot && !radialRoot && styles.compactRootNode,
         radialRoot && styles.radialRootNode,
@@ -4899,9 +5458,16 @@ function CompactItemNodeView({
       )}
     </>
   );
-}
+});
 
-function ItemNodeView({
+/**
+ * Memoized: panning sets a new transform on every frame, which re-renders the graph, and without
+ * this every visible node re-rendered with it -- recipe previews, item chips and all. That cost is
+ * per frame rather than per tree, which is why a sixteen-node tree panned as badly as a large one.
+ * Every callback prop is node-taking so the parent can pass one stable function; an inline closure
+ * here is a new prop each frame and a memo cannot see past it.
+ */
+const ItemNodeView = React.memo(function ItemNodeView({
   x,
   y,
   node,
@@ -4909,6 +5475,7 @@ function ItemNodeView({
   byproductCoverage,
   isRoot,
   expandable,
+  collapsedBranch,
   deferredDuplicate,
   terminalLabel,
   showAmounts,
@@ -4924,13 +5491,16 @@ function ItemNodeView({
   byproductCoverage?: NodeByproductCoverage;
   isRoot: boolean;
   expandable: boolean;
+  /** Not expanded, but a remembered recipe means there is a tree folded under it. */
+  collapsedBranch: boolean;
   deferredDuplicate: boolean;
   terminalLabel: string;
   showAmounts: boolean;
   rootActions?: RootNodeActionProps;
-  onTap: () => void;
-  onInfo: () => void;
-  onActions: (pointer?: NodeActionPointer) => void;
+  /** Node-taking, so the parent passes one stable function rather than a closure per render. */
+  onTap: (node: ItemTreeNode) => void;
+  onInfo: (node: ItemTreeNode) => void;
+  onActions: (node: ItemTreeNode, pointer?: NodeActionPointer) => void;
 }) {
   const data = useData();
   const item = data.itemsByKey.get(node.key);
@@ -4958,7 +5528,13 @@ function ItemNodeView({
         ? `  ✓ ${formatIngredientQuantity(node.key, byproductCoverage.creditedAmount)} byproduct`
         : `  ${formatIngredientQuantity(node.key, byproductCoverage.remainingAmount)} needed · ${formatIngredientQuantity(node.key, byproductCoverage.creditedAmount)} byproduct`
     : '';
-  const handlers = useNodeActionHandlers(onTap, onActions);
+  const handleTap = useCallback(() => onTap(node), [node, onTap]);
+  const handleActions = useCallback(
+    (pointer?: NodeActionPointer) => onActions(node, pointer),
+    [node, onActions],
+  );
+  const handleInfo = useCallback(() => onInfo(node), [node, onInfo]);
+  const handlers = useNodeActionHandlers(handleTap, handleActions);
   return (
     <>
       <Pressable
@@ -4981,6 +5557,7 @@ function ItemNodeView({
         byproductCoverage &&
           byproductCoverage.remainingAmount > 0 &&
           styles.nodeByproductPartial,
+        collapsedBranch && styles.nodeCollapsedBranch,
         deferredDuplicate && styles.nodeDeferredRecipe,
         isRoot && styles.nodeRoot,
         isRoot && rootActions && styles.rootNodeSelected,
@@ -5005,7 +5582,7 @@ function ItemNodeView({
           {node.retentionMode === 'durability'
             ? `  tool · ${String(node.retentionUses ?? '?')} uses`
             : node.nonConsumed
-              ? '  reusable'
+              ? '  tool/catalyst'
               : ''}
           {node.consumptionProbability !== undefined
             ? `  ${node.consumptionProbability == null ? '?' : `${String(Math.round(node.consumptionProbability * 10_000) / 100)}%`} consume`
@@ -5018,7 +5595,7 @@ function ItemNodeView({
       </View>
       <TouchableOpacity
         {...signalTarget(`graph.node.info.${nodeDepthBucket(node)}`)}
-        onPress={onInfo}
+        onPress={handleInfo}
         style={styles.infoBtn}
         hitSlop={6}>
         <Text style={[styles.smallBtnText, noSelect]}>ⓘ</Text>
@@ -5036,10 +5613,17 @@ function ItemNodeView({
       )}
     </>
   );
-}
+});
 
 /** Expanded item: one node with the item + amount in the header and the source below. */
-function SourceNodeView({
+/**
+ * Memoized: panning sets a new transform on every frame, which re-renders the graph, and without
+ * this every visible node re-rendered with it -- recipe previews, item chips and all. That cost is
+ * per frame rather than per tree, which is why a sixteen-node tree panned as badly as a large one.
+ * Every callback prop is node-taking so the parent can pass one stable function; an inline closure
+ * here is a new prop each frame and a memo cannot see past it.
+ */
+const SourceNodeView = React.memo(function SourceNodeView({
   x,
   y,
   w,
@@ -5075,10 +5659,11 @@ function SourceNodeView({
   showAmounts: boolean;
   rootActions?: RootNodeActionProps;
   canSwap: boolean;
-  onCollapse: () => void;
-  onSwap: () => void;
-  onInfo: () => void;
-  onActions: (pointer?: NodeActionPointer) => void;
+  /** Node-taking, so the parent passes one stable function rather than a closure per render. */
+  onCollapse: (node: ItemTreeNode) => void;
+  onSwap: (node: ItemTreeNode) => void;
+  onInfo: (node: ItemTreeNode) => void;
+  onActions: (node: ItemTreeNode, pointer?: NodeActionPointer) => void;
 }) {
   const data = useData();
   const catalogItem = data.itemsByKey.get(item.key);
@@ -5155,7 +5740,14 @@ function SourceNodeView({
       )}
     </View>
   );
-  const handlers = useNodeActionHandlers(onCollapse, onActions);
+  const handleCollapse = useCallback(() => onCollapse(item), [item, onCollapse]);
+  const handleActions = useCallback(
+    (pointer?: NodeActionPointer) => onActions(item, pointer),
+    [item, onActions],
+  );
+  const handleSwap = useCallback(() => onSwap(item), [item, onSwap]);
+  const handleInfo = useCallback(() => onInfo(item), [item, onInfo]);
+  const handlers = useNodeActionHandlers(handleCollapse, handleActions);
 
   return (
     <Pressable
@@ -5195,6 +5787,10 @@ function SourceNodeView({
         onPress={isRoot ? undefined : handlers.press}
         onLongPress={isRoot ? undefined : handlers.longPress}
         delayLongPress={450}
+        // The strip is SOURCE_HEADER tall, well under a finger's worth, and it is the only way to
+        // collapse an expanded recipe. Extending the touch area leaves the layout alone, and the
+        // swap and info buttons inside it keep their own taps.
+        hitSlop={Platform.OS === 'web' ? undefined : {top: 8, bottom: 10, left: 8, right: 8}}
         style={styles.sourceHeader}>
         {isRoot ? (
           <View style={styles.rootSourceIconFrame}>
@@ -5207,7 +5803,7 @@ function SourceNodeView({
         {canSwap && (
           <TouchableOpacity
             {...signalTarget(`graph.node.swap.${nodeDepthBucket(item)}`)}
-            onPress={onSwap}
+            onPress={handleSwap}
             hitSlop={6}
             style={styles.headerBtn}>
             <Text style={[styles.smallBtnText, noSelect]}>⇄</Text>
@@ -5215,7 +5811,7 @@ function SourceNodeView({
         )}
         <TouchableOpacity
           {...signalTarget(`graph.node.info.${nodeDepthBucket(item)}`)}
-          onPress={onInfo}
+          onPress={handleInfo}
           hitSlop={6}
           style={styles.headerBtn}>
           <Text style={[styles.smallBtnText, noSelect]}>ⓘ</Text>
@@ -5349,7 +5945,7 @@ function SourceNodeView({
       )}
     </Pressable>
   );
-}
+});
 
 function CtrlBtn({
   label,
@@ -5414,106 +6010,11 @@ const styles = StyleSheet.create({
     borderWidth: 4,
     opacity: 1,
   },
-  nodeActionLayer: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-    zIndex: 90,
-  },
-  nodeActionDismiss: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-  },
-  nodeActionAnchor: {position: 'absolute', zIndex: 91},
-  nodeActionCard: {
-    padding: 10,
-    gap: 9,
-    borderWidth: 1,
-    borderColor: theme.borderLight,
-    borderRadius: 9,
-    backgroundColor: theme.panel,
-    shadowColor: '#000',
-    shadowOpacity: 0.38,
-    shadowRadius: 16,
-    shadowOffset: {width: 0, height: 8},
-    elevation: 20,
-    overflow: 'hidden',
-  },
-  nodeActionHeader: {flexDirection: 'row', alignItems: 'center', gap: 10},
-  nodeActionHeaderCopy: {flex: 1},
-  nodeActionTitle: {color: theme.text, fontSize: 14, fontWeight: '700'},
-  nodeActionHint: {color: theme.textDim, fontSize: 11, marginTop: 2},
-  nodeActionAmountSection: {gap: 6},
-  nodeActionAmountStepper: {flexDirection: 'row', alignItems: 'center'},
-  nodeActionAmountButton: {
-    width: 38,
-    height: 34,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: theme.border,
-    backgroundColor: theme.panelAlt,
-  },
-  nodeActionAmountButtonPrimary: {
-    borderColor: theme.accent,
-    backgroundColor: theme.accent,
-  },
-  nodeActionAmountButtonText: {color: theme.text, fontSize: 18, fontWeight: '800'},
-  nodeActionAmountButtonPrimaryText: {color: '#0b1610'},
-  nodeActionAmountInput: {
-    flex: 1,
-    height: 34,
-    paddingHorizontal: 8,
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: theme.border,
-    color: theme.text,
-    backgroundColor: '#0f141b',
-    fontSize: 13,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  nodeAlternativeSection: {gap: 7, minHeight: 0, flexShrink: 1},
   nodeActionSectionLabel: {
     color: theme.accent,
     fontSize: 11,
     fontWeight: '700',
   },
-  nodeAlternativeScroll: {maxHeight: 220},
-  nodeAlternativeRow: {
-    minHeight: 46,
-    paddingHorizontal: 9,
-    paddingVertical: 7,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 9,
-    borderRadius: 8,
-  },
-  nodeAlternativeRowSelected: {backgroundColor: theme.panelAlt},
-  nodeAlternativeName: {flex: 1, color: theme.text, fontSize: 13},
-  nodeAlternativeSelected: {color: theme.accent, fontSize: 16, fontWeight: '800'},
-  nodeActionButtons: {gap: 5},
-  nodeActionButton: {
-    minHeight: 44,
-    paddingHorizontal: 11,
-    paddingVertical: 7,
-    borderWidth: 1,
-    borderColor: theme.border,
-    borderRadius: 8,
-    backgroundColor: theme.panelAlt,
-  },
-  nodeActionButtonPrimary: {borderColor: theme.accent, backgroundColor: '#173724'},
-  nodeActionButtonDanger: {borderColor: theme.warn},
-  nodeActionButtonText: {color: theme.text, fontSize: 13, fontWeight: '700'},
-  nodeActionButtonHint: {color: theme.textDim, fontSize: 10, marginTop: 2},
-  nodeActionButtonPrimaryText: {color: theme.accent, fontSize: 13, fontWeight: '800'},
-  nodeActionButtonPrimaryHint: {color: theme.text, fontSize: 10, marginTop: 2},
-  nodeActionButtonDangerText: {color: theme.warn, fontSize: 13, fontWeight: '700'},
   edge: {position: 'absolute', backgroundColor: theme.borderLight},
   byproductSupplyEdge: {
     position: 'absolute',
@@ -5666,6 +6167,13 @@ const styles = StyleSheet.create({
     borderColor: theme.warn,
     borderStyle: 'dashed',
     backgroundColor: '#332b17',
+  },
+  /** Has a remembered recipe but is not expanded: something is folded away under it. */
+  nodeCollapsedBranch: {
+    borderColor: theme.accent,
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    backgroundColor: theme.panelAlt,
   },
   nodeCyclic: {borderColor: theme.warn},
   nodeTerminal: {borderColor: theme.textDim, borderWidth: 2},
@@ -5861,17 +6369,25 @@ const styles = StyleSheet.create({
   },
   rootNodePrimaryActionText: {color: '#0b1610', fontSize: 9, fontWeight: '800'},
   controls: {
+    // Anchored as a genuine top bar spanning the available width, not just a top-right corner
+    // box -- that width is what lets the options below wrap into extra rows instead of running
+    // off the side of a narrow portrait screen.
     position: 'absolute',
-    top: 10,
+    top: CONTROLS_TOP_INSET,
+    left: 10,
     right: 10,
     flexDirection: 'row',
+    alignItems: 'flex-start',
+    // Without the inline options beside it, the gear is the row's only child and would otherwise
+    // sit against the left edge rather than in the corner a settings control belongs in.
+    justifyContent: Platform.OS === 'web' ? 'flex-start' : 'flex-end',
     gap: 6,
-    maxWidth: '96%',
   },
   layoutFallbackNotice: {
     position: 'absolute',
-    left: 62,
-    bottom: 10,
+    left: BOTTOM_NOTICE_LEFT_INSET,
+    right: CANVAS_EDGE_INSET,
+    bottom: CANVAS_EDGE_INSET,
     maxWidth: 420,
     paddingHorizontal: 10,
     paddingVertical: 7,
@@ -5925,19 +6441,37 @@ const styles = StyleSheet.create({
   },
   recipeLookupCancelText: {color: theme.text, fontSize: 13, fontWeight: '700'},
   controlOptions: {
+    // Shrinks and wraps, but does not grow: growing pushed the buttons that follow it to the far
+    // side of the canvas, so the bar read as two unrelated groups at opposite edges.
+    flexShrink: 1,
     flexDirection: 'row',
-    alignItems: 'center',
     flexWrap: 'wrap',
-    justifyContent: 'flex-end',
+    alignItems: 'center',
     gap: 6,
+  },
+  /** Overflow for the actions the toggles above no longer keep on the canvas permanently. */
+  moreControls: {
+    position: 'absolute',
+    top: 54,
+    left: 10,
+    right: 10,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-start',
+    gap: 6,
+    padding: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: 'rgba(23,29,38,0.97)',
   },
   uniqueModeNotice: {
     position: 'absolute',
-    right: 10,
-    bottom: 10,
+    left: BOTTOM_NOTICE_LEFT_INSET,
+    right: CANVAS_EDGE_INSET,
+    bottom: CANVAS_EDGE_INSET,
     zIndex: 30,
-    width: 390,
-    maxWidth: '92%',
+    maxWidth: 390,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
@@ -6051,9 +6585,11 @@ const styles = StyleSheet.create({
     borderColor: theme.border,
     borderWidth: 1,
     borderRadius: 8,
-    height: 36,
+    // 44 on touch platforms is the documented minimum target; the web pointer keeps the denser
+    // 36 so the bar does not grow on the surface that never had trouble hitting it.
+    height: Platform.OS === 'web' ? 36 : 44,
     paddingHorizontal: 10,
-    minWidth: 40,
+    minWidth: Platform.OS === 'web' ? 40 : 44,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -6070,11 +6606,59 @@ const styles = StyleSheet.create({
     minWidth: 118,
     paddingHorizontal: 10,
   },
+  /** Sits under the controls, on the left, opposite the totals panel. */
+  focusChip: {
+    position: 'absolute',
+    top: 54,
+    ...(Platform.OS === 'web'
+      ? {right: CANVAS_EDGE_INSET}
+      : {left: CANVAS_EDGE_INSET}),
+    maxWidth: '70%',
+    zIndex: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    minHeight: Platform.OS === 'web' ? 32 : 44,
+    paddingHorizontal: 11,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: theme.accent,
+    backgroundColor: 'rgba(23,29,38,0.97)',
+  },
+  /** Export results used to be reported inside the totals panel, which no longer exists. */
+  exportNotice: {
+    position: 'absolute',
+    left: BOTTOM_NOTICE_LEFT_INSET,
+    right: CANVAS_EDGE_INSET,
+    bottom: CANVAS_EDGE_INSET,
+    zIndex: 25,
+    maxWidth: 420,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    minHeight: Platform.OS === 'web' ? 32 : 44,
+    paddingHorizontal: 11,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: theme.borderLight,
+    backgroundColor: 'rgba(23,29,38,0.97)',
+  },
+  exportNoticeText: {color: theme.text, fontSize: 11, lineHeight: 15, flex: 1},
+  exportNoticeDismiss: {color: theme.textDim, fontSize: 12, fontWeight: '700'},
+  settingsGearIcon: {fontSize: 19, lineHeight: 22},
+  focusChipText: {color: theme.text, fontSize: 12, fontWeight: '700', flexShrink: 1},
+  focusChipClear: {color: theme.accent, fontSize: 11, fontWeight: '700'},
+  /** Opposite corner from the fit control, which is the other persistent canvas affordance. */
+  minimap: {
+    position: 'absolute',
+    right: CANVAS_EDGE_INSET,
+    bottom: CANVAS_EDGE_INSET,
+  },
   fitControl: {
     position: 'absolute',
-    left: 10,
-    bottom: 10,
-    width: 40,
+    left: CANVAS_EDGE_INSET,
+    bottom: CANVAS_EDGE_INSET,
+    width: FIT_CONTROL_SIZE,
     paddingHorizontal: 0,
   },
   fitControlIcon: {

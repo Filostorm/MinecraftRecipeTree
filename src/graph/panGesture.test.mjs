@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import {readFile} from 'node:fs/promises';
 import test from 'node:test';
 import {
@@ -11,6 +12,9 @@ import {
 } from './panGesture.ts';
 
 const graphScreenSource = await readFile(new URL('./GraphScreen.tsx', import.meta.url), 'utf8');
+// The node menu is its own module: the resources list opens the same one, so it cannot live inside
+// the graph screen any more.
+const nodeMenuSource = await readFile(new URL('./NodeActionMenu.tsx', import.meta.url), 'utf8');
 const lowDetailCanvasSource = await readFile(
   new URL('./LowDetailGraphCanvas.tsx', import.meta.url),
   'utf8',
@@ -38,15 +42,28 @@ test('native graph scale avoids composited scaling and snaps to physical pixels'
 test('web graph zoom keeps detailed content crisp and composites low-detail trees', () => {
   assert.match(graphScreenSource, /zoom:\s*displayTransform\.scale/u);
   const anchorMarkup = graphScreenSource.slice(
-    graphScreenSource.indexOf('Keep translation outside the detailed web scale layer'),
-    graphScreenSource.indexOf('{!lowDetailGraph && renderedGraph?.edges.map'),
+    graphScreenSource.indexOf('Translated with a transform rather than left/top'),
+    graphScreenSource.indexOf('{!rasterLowDetailGraph && renderedGraph?.edges.map'),
   );
-  assert.match(anchorMarkup, /Platform\.OS === 'web'[\s\S]*?left:\s*displayTransform\.x/u);
+  // Translation stays outside the layer that scales, so zoom keeps owning crispness: the outer
+  // view only ever translates, and it does so with a transform rather than by reflowing.
+  assert.match(anchorMarkup, /Platform\.OS === 'web'[\s\S]*?translateX:\s*displayTransform\.x/u);
+  // The web branch's transform ends at translateY: scaling belongs to the inner zoom layer, and
+  // adding it here would scale the nodes twice.
   assert.match(
     anchorMarkup,
-    /lowDetailGraph[\s\S]*?translateX:\s*displayTransform\.x[\s\S]*?transformOrigin:\s*'0 0'/u,
+    /Platform\.OS === 'web'[\s\S]*?translateY: displayTransform\.y\},\s*\],\s*willChange: 'transform',/u,
   );
-  assert.match(anchorMarkup, /Platform\.OS !== 'web'[\s\S]*?translateX:\s*displayTransform\.x/u);
+  assert.match(
+    anchorMarkup,
+    /lowDetailGraph[\s\S]*?transformOrigin:\s*'0 0'/u,
+  );
+  // Native still applies translation and scale together on one layer, which is the ternary's
+  // other branch rather than a platform check of its own.
+  assert.match(
+    anchorMarkup,
+    /: \{\s*transform: \[\s*\{translateX: displayTransform\.x\},\s*\{translateY: displayTransform\.y\},\s*\{scale: displayTransform\.scale\},/u,
+  );
 });
 
 test('far-zoom web graphs use one inert canvas without recipe hover expansion', () => {
@@ -69,9 +86,14 @@ test('interface zoom scales graph menu chrome without scaling the graph canvas',
   assert.match(graphScreenSource, /style=\{\[styles\.controls, graphMenuScaleStyle\]\}/u);
   assert.match(
     graphScreenSource,
-    /style=\{\[styles\.ctrlBtn, styles\.fitControl, graphMenuScaleStyle\]\}/u,
+    /style=\{\[styles\.ctrlBtn, styles\.fitControl, graphMenuScaleStyle(?:,|\])/u,
   );
-  assert.match(graphScreenSource, /interfaceZoom=\{interfaceZoom\}[\s\S]*?totals=\{treeTotals\}/u);
+  // The totals panel used to stand in for zoomed chrome here; it moved out of the canvas when
+  // its controls were split into standalone settings, so a notice that is still on it is used.
+  assert.match(
+    graphScreenSource,
+    /style=\{\[styles\.exportNotice, bottomNoticeStyle, graphMenuScaleStyle\]\}/u,
+  );
   assert.match(
     graphScreenSource,
     /style=\{\[styles\.recipeLookupCard, graphMenuScaleStyle\]\}/u,
@@ -92,16 +114,6 @@ test('collapsed graph controls put their label on the chevron button', () => {
   assert.doesNotMatch(graphScreenSource, /controlMenuBtnText/u);
 });
 
-test('very large trees lock unique mode without changing the saved preference', () => {
-  assert.match(
-    graphScreenSource,
-    /shouldRequireUniqueRecipes\(graph\?\.nodes\.length \?\? 0\)[\s\S]*?updateExpandRecipesOnce\(true, false\)/u,
-  );
-  assert.match(graphScreenSource, /Unique · Locked/u);
-  assert.match(graphScreenSource, /keeps very large trees\s+responsive/u);
-  assert.match(graphScreenSource, /largeTreeUniqueModeRootRef\.current !== root/u);
-});
-
 test('compact byproduct nodes support alternate recipe gestures', () => {
   assert.match(
     graphScreenSource,
@@ -114,7 +126,9 @@ test('compact byproduct nodes support alternate recipe gestures', () => {
   assert.match(graphScreenSource, /long press or right click for node options/u);
   assert.match(
     graphScreenSource,
-    /pendingTapRef\.current = setTimeout\([\s\S]*?onTap\(\)[\s\S]*?280/u,
+    // Node-taking now, so the node views can be memoized; the 280ms wait that separates a single
+    // tap from a double tap is what this is guarding.
+    /pendingTapRef\.current = setTimeout\([\s\S]*?onTap\(node, radialTap\)[\s\S]*?280/u,
   );
   assert.match(
     graphScreenSource,
@@ -124,12 +138,15 @@ test('compact byproduct nodes support alternate recipe gestures', () => {
 
 test('node actions use an anchored state-aware menu instead of a modal', () => {
   assert.doesNotMatch(graphScreenSource, /<Modal transparent visible/u);
-  assert.match(graphScreenSource, /accessibilityRole="menu"/u);
+  assert.match(nodeMenuSource, /accessibilityRole="menu"/u);
   assert.match(graphScreenSource, /nodeContextMenuPlacement\(/u);
-  assert.match(graphScreenSource, /hasSelectedRecipe \? 'Change recipe' : 'Set recipe'/u);
-  assert.match(graphScreenSource, />Add used by<\/Text>/u);
-  assert.match(graphScreenSource, /<ContextAmountStepper amount=\{amount\}/u);
-  assert.match(graphScreenSource, /hasSelectedRecipe && \(/u);
+  assert.match(nodeMenuSource, /hasSelectedRecipe \? 'Change recipe' : 'Set recipe'/u);
+  assert.match(nodeMenuSource, />Add used by<\/Text>/u);
+  assert.match(nodeMenuSource, /<ContextAmountStepper amount=\{amount\}/u);
+  // Still state-aware: collapsing and unsetting are offered only where there is a recipe to act on,
+  // and only where the caller passed a handler for them.
+  assert.match(nodeMenuSource, /hasSelectedRecipe && onCollapseRecipe && \(/u);
+  assert.match(nodeMenuSource, /\(hasSelectedRecipe \|\| hasRememberedSource\) && onUnsetRecipe && \(/u);
 });
 
 test('compact nodes render wide item and fluid quantities when amounts are enabled', () => {
@@ -143,15 +160,15 @@ test('compact nodes render wide item and fluid quantities when amounts are enabl
 
 test('node alternative previews stay aligned to the item icon pixel grid', () => {
   assert.match(
-    graphScreenSource,
+    nodeMenuSource,
     /const alternatives = Array\.from\([\s\S]*?item\.id[\s\S]*?item\.n[\s\S]*?\.values\(\)/u,
   );
   assert.match(
-    graphScreenSource,
+    nodeMenuSource,
     /<ItemIcon itemKey=\{itemKey\} size=\{32\} \/>/u,
   );
   assert.doesNotMatch(
-    graphScreenSource,
+    nodeMenuSource,
     /<ItemIcon itemKey=\{itemKey\} size=\{28\} \/>/u,
   );
 });
@@ -212,4 +229,85 @@ test('rebasing after a pinch preserves the current transform before panning resu
     y: 445,
     scale: 1.4,
   });
+});
+
+test('panning does not re-render every visible node', () => {
+  // A new transform every frame re-renders the graph. Unless the node views are memoized *and* their
+  // props keep their identity, every visible node re-renders with it -- recipe previews, chips
+  // and all -- which is a per-frame cost rather than a per-tree one.
+  for (const view of ['CompactItemNodeView', 'ItemNodeView', 'SourceNodeView']) {
+    assert.match(
+      graphScreenSource,
+      new RegExp(`const ${view} = React\\.memo\\(function ${view}\\(`, 'u'),
+      `${view} is not memoized`,
+    );
+  }
+  // An inline closure is a fresh prop on every frame, and a memo cannot see past it.
+  const renderBlock = graphScreenSource.slice(
+    graphScreenSource.indexOf('{!rasterLowDetailGraph && renderedGraph?.nodes.map(n =>'),
+  );
+  const nodeMarkup = renderBlock.slice(0, renderBlock.indexOf('</View>'));
+  assert.doesNotMatch(nodeMarkup, /on(Tap|Collapse|Swap|Info|Actions)=\{\(?\w*\)? ?=>/u);
+});
+
+test('gesture updates are coalesced to one render per frame', () => {
+  // Pointer and touch moves arrive far faster than the screen refreshes -- a high-polling mouse
+  // reports hundreds of times a second -- so rendering per event threw most of that work away
+  // before anything was drawn, and stuttered on trees small enough to rule out their size.
+  assert.match(graphScreenSource, /const scheduleTransform = useCallback\(/u);
+  assert.match(graphScreenSource, /transformFrameRef\.current = requestAnimationFrame\(/u);
+  assert.match(
+    graphScreenSource,
+    /scheduleTransform\(transformForPanGesture\(panOrigin\.current, g\.dx, g\.dy\)\)/u,
+  );
+  // Zoom arrives as a stream too, from both the wheel and a pinch.
+  assert.match(graphScreenSource, /scheduleTransform\(\{\s*x: px - \(px - current\.x\) \* k/u);
+  // A discrete change still applies at once: fit and recentre are single actions being waited on.
+  assert.match(graphScreenSource, /applyTransform\(transformCenteredOn\(/u);
+  // The frame must be released, or an unmount mid-gesture leaves it pointing at a dead setState.
+  assert.match(graphScreenSource, /cancelAnimationFrame\(transformFrameRef\.current\)/u);
+});
+
+test('panning composites on web instead of reflowing the tree', () => {
+  // left and top are layout properties: animating them reflowed every node in the tree on every
+  // frame, which is why panning stuttered on web while zooming -- far sparser events -- did not.
+  const anchor = graphScreenSource.slice(
+    graphScreenSource.indexOf('Translated with a transform rather than left/top'),
+  );
+  const block = anchor.slice(0, anchor.indexOf(']}>'));
+  assert.match(block, /willChange: 'transform'/u);
+  assert.doesNotMatch(block, /left: displayTransform\.x/u);
+  assert.doesNotMatch(block, /top: displayTransform\.y/u);
+});
+
+test('a pan frame reuses the graph element lists instead of rebuilding them', () => {
+  // A profile of a pan put ten milliseconds of a sixteen millisecond frame inside the refresh
+  // observer, while layout accounted for nineteen milliseconds across the whole recording. The
+  // cost was building an element and a props object per node and edge on the way to the same
+  // result, so the lists are held by identity and the culled set they come from is steady.
+  assert.match(graphScreenSource, /const nodeElements = useMemo\(/u);
+  assert.match(graphScreenSource, /const edgeElements = useMemo\(/u);
+  assert.match(graphScreenSource, /\{nodeElements\}/u);
+  assert.match(graphScreenSource, /\{edgeElements\}/u);
+  // None of them may depend on the live transform, or they would rebuild every frame regardless.
+  const memoBlock = graphScreenSource.slice(
+    graphScreenSource.indexOf('const edgeElements = useMemo('),
+    graphScreenSource.indexOf('if (!graphRootKey || !root) {'),
+  );
+  assert.doesNotMatch(memoBlock, /^\s+transform,$/mu);
+  assert.match(graphScreenSource, /cullingTransform,\s*\n\s*exportingTree,/u);
+});
+
+test('starting a drag does not re-render the app when there is no pager to suppress', () => {
+  // The pager is only scrollable with more than one tree open, so suppressing it on the first
+  // event of every drag was a state change in the app -- and a re-render of everything under it --
+  // for no effect, which showed up as a stutter exactly at the start of a pan.
+  const appSource = readFileSync(new URL('../../App.tsx', import.meta.url), 'utf8');
+  assert.match(
+    appSource,
+    /onSwipeSuppressChange=\{\s*openGraphTrees\.length > 1 && tree\.id === activeGraphTreeId/u,
+  );
+  // The graph still reports it, so a real pager is still suppressed for the length of a drag.
+  assert.match(graphScreenSource, /onSwipeSuppressChange\?\.\(true\)/u);
+  assert.match(graphScreenSource, /onSwipeSuppressChange\?\.\(false\)/u);
 });

@@ -515,10 +515,10 @@ export function calculateTreeTotals(
     }
 
     const deferredSource =
-      node.source || !node.deferredRecipeExpansion
+      node.source || node.collapsedSource || !node.deferredRecipeExpansion
         ? undefined
         : options.resolveDeferredRecipeSource?.(node);
-    const source = node.source ?? deferredSource;
+    const source = node.source ?? node.collapsedSource ?? deferredSource;
     if (!source || source.kind !== 'recipe' || !source.recipe || node.cyclic) {
       if (!node.nonConsumed) {
         addTotal(inputs, node.key, required, node.variantCount ?? 1, node.tag);

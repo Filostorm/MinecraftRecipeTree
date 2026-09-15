@@ -1,4 +1,13 @@
+// Preserve the viewer's existing storage contracts on iOS using SQLite.
+import 'expo-sqlite/localStorage/install';
+
 import { registerRootComponent } from 'expo';
+
+import './src/ui/nativeStorageBootstrap';
+
+// Must run after the SQLite-backed localStorage above is installed and before App (and everything
+// it imports, like theme/zoom preferences and the graph session) first reads it, so state saved by
+// builds that used the older JSON-file polyfill is already in place by the time anything asks.
 
 import App from './App';
 
