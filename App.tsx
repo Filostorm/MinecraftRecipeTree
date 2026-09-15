@@ -636,7 +636,8 @@ function Shell({
     window.history.replaceState(window.history.state, '', url.toString());
   }, []);
   useEffect(() => {
-    if (tab !== 'graph' || data.indexStatus === 'ready' || data.indexStatus === 'loading') return;
+    // Resources consumes the restored graph too, even before Graph has been visited.
+    if ((tab !== 'graph' && tab !== 'resources') || data.indexStatus === 'ready' || data.indexStatus === 'loading') return;
     void data.ensureIndex().catch(() => {
       // DataContext logs transport and validation detail and exposes the error below.
     });

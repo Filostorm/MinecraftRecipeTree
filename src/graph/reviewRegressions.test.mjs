@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import {readFileSync} from 'node:fs';
 import {childRequirementId, resourceIdentity, resourceCompletionIdentity, catalystOverride} from './resourceIdentity.ts';
 import {withCatalystItem, catalystItemsKey} from './catalystItems.ts';
 import {resourceProgressKey} from './resourceProgress.ts';
@@ -9,6 +10,18 @@ import {parseGraphSession, serializeGraphSession} from './graphSession.ts';
 import {findRecipeExpansionOwner, createDeferredRecipeSourceResolver} from './expansionOwnership.ts';
 
 const item = (id, key, amount = 1) => ({id, key, amount, ancestors: []});
+test('restoring directly into Resources loads the graph index', () => {
+  const app = readFileSync(new URL('../../App.tsx', import.meta.url), 'utf8');
+  const guard = app.match(/if \(([^\n]+)\) return;\n    void data\.ensureIndex\(\)/)?.[1];
+  assert.ok(guard, 'index-loading effect has a guard');
+  const skips = new Function('tab', 'data', `return ${guard};`);
+  for (const tab of ['graph', 'resources']) {
+    assert.equal(skips(tab, {indexStatus: 'idle'}), false);
+    assert.equal(skips(tab, {indexStatus: 'ready'}), true);
+    assert.equal(skips(tab, {indexStatus: 'loading'}), true);
+  }
+  assert.equal(skips('settings', {indexStatus: 'idle'}), true);
+});
 function recipe(node, ref, inputs) {
   node.source = {id: `${node.id}.s`, kind: 'recipe', ref,
     recipe: {out: [[[node.key, 1]]]}, inputs};
