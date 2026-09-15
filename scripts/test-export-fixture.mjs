@@ -173,9 +173,11 @@ export async function configureMultiblockExportFixture(root, profile) {
     manifest.diagnostics.transparentIcons = 0;
     const itemsPath = join(root, 'items.json');
     const itemsDocument = await readJson(itemsPath);
-    for (const id of MULTIBLOCK_MADNESS_2_118_ICON_OMISSION_IDS) {
+    for (const {id, type} of MULTIBLOCK_MADNESS_2_118_ICON_OMISSIONS) {
+      const catalogType = type === 'minecraft:item' ? 'item' : type.replace(':', '/');
       itemsDocument.items.push({
-        k: `item|${id}`,
+        k: `${catalogType}|${id}`,
+        ...(catalogType === 'item' ? {} : {t: catalogType}),
         id,
         n: `Audited iconless ${id}`,
         m: id.split(':', 1)[0],

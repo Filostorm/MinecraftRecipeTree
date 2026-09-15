@@ -3,6 +3,7 @@ import {readFile, stat} from 'node:fs/promises';
 import {extname, join, posix, relative, resolve, sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import sharp from 'sharp';
+import {auditItemIcons} from '../src/data/itemIconAudit.ts';
 import {collectFiles, isRecord, pathKind, readJsonDocument} from './export-data-utils.mjs';
 import {
   collectIconlessItemIds,
@@ -950,14 +951,21 @@ export async function validateExportData(exportRoot = defaultExportRoot, options
   }
 
   let warnings;
-  if (
-    qualityProfile === MULTIBLOCK_MADNESS_112_PROFILE ||
-    qualityProfile === MULTIBLOCK_MADNESS_2_118_PROFILE
-  ) {
+  if (fileKeys.has('warnings.json') || qualityProfile === MULTIBLOCK_MADNESS_112_PROFILE || qualityProfile === MULTIBLOCK_MADNESS_2_118_PROFILE) {
     if (fileKeys.has('warnings.json')) {
       warnings = await readJsonDocument(join(root, 'warnings.json'), 'warnings.json');
     } else {
       warnings = null;
+    }
+  }
+
+  if (!structuredDataOnly && items.some(item => !item.icon)) {
+    try {
+      const iconAudit = auditItemIcons(items, warnings ?? []);
+      const unexplained = iconAudit.omissions.filter(item => item.reason === 'unexplained');
+      if (unexplained.length) fail(`Catalog has ${unexplained.length} unexplained missing icons; exporter omission evidence is required: ${unexplained.slice(0, 8).map(item => item.key).join(', ')}`);
+    } catch (error) {
+      fail(`Catalog icon audit failed: ${error.message}`);
     }
   }
 

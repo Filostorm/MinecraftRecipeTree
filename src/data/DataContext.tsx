@@ -1,4 +1,5 @@
 import React, {createContext, useContext, useEffect, useRef, useState} from 'react';
+import {auditItemIcons} from './itemIconAudit';
 import {
   BlockDropEntry,
   BlockDropsFile,
@@ -1257,10 +1258,22 @@ export function DataProvider({
               detail,
             );
           } else {
-            console.warn(
-              'The loaded item catalog contains entries without icon URLs; named fallbacks will be rendered.',
-              detail,
-            );
+            // One immutable diagnostics read only for iconless catalogs, off the critical path.
+            // An unavailable audit remains a warning; missing evidence is never silently accepted.
+            void fetchBoundedJson(versionExportUrl(`${base}/warnings.json`, datasetIdentity))
+              .then(({value}) => {
+                if (!alive) return;
+                const audit = auditItemIcons(items, value);
+                const summary = {...detail, byReason: audit.byReason,
+                  unexplainedSample: audit.omissions.filter(item => item.reason === 'unexplained').slice(0, 8)};
+                if (audit.byReason.unexplained) {
+                  console.warn('The item catalog contains unexplained missing icons; named fallbacks will be rendered.', summary);
+                } else {
+                  console.info('Catalog icon omissions are accounted for by exporter evidence or the EMC table icon.', summary);
+                }
+              }).catch(error => {
+                if (alive) console.warn('Missing catalog icons could not be audited; named fallbacks will be rendered.', {detail, error});
+              });
           }
         }
         const itemIconFailureReporter = new BoundedItemIconFailureReporter(datasetIdentity);
