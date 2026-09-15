@@ -32,19 +32,16 @@ const PRODUCTION_ORIGIN = 'https://minecraftrecipetree.craftsmannsoftware.com';
 const CATALOG_CACHE_KEY = 'minecraft-recipe-tree-published-catalog-cache';
 
 /**
- * Last-known catalog only, read synchronously so the very first render can skip the loading
- * spinner instead of always showing it while the network request in the effect below resolves --
- * that request still runs regardless and corrects anything stale. Native previously had no
- * persistence for this at all (no localStorage), which is why every native launch showed
- * "loading modpacks" even on a device that had already loaded the catalog before; now that
- * nativeLocalStorage.native.ts polyfills it, this works the same way on both platforms.
+ * Last-known catalog only. Native can read it on the first render; web must wait until after
+ * hydration so cached browser data cannot disagree with the server's loading shell.
  */
 function readCachedCatalog(): readonly DatasetDescriptor[] {
   try {
     const raw = globalThis.localStorage?.getItem(CATALOG_CACHE_KEY);
     if (!raw) return [];
     return requireDatasetCatalog(JSON.parse(raw));
-  } catch {
+  } catch (error) {
+    console.warn('The cached published catalog is unreadable; requesting a fresh catalog.', error);
     return [];
   }
 }
@@ -159,21 +156,25 @@ function errorMessage(error: unknown): string {
 const DatasetCatalogContext = createContext<DatasetCatalogContextValue | null>(null);
 
 export function DatasetCatalogProvider({children}: {children: React.ReactNode}) {
-  const [datasets, setDatasets] = useState<readonly DatasetDescriptor[]>(readCachedCatalog);
+  const [initialCatalog] = useState<readonly DatasetDescriptor[]>(() =>
+    Platform.OS === 'web' ? [] : readCachedCatalog(),
+  );
+  const [datasets, setDatasets] = useState<readonly DatasetDescriptor[]>(initialCatalog);
   const [selected, setSelected] = useState<DatasetDescriptor | null>(() => {
-    const cached = readCachedCatalog();
+    const cached = initialCatalog;
     if (cached.length === 0) return null;
     // The default channel only; currentWebRequestSlug() needs `window`, unavailable this early
     // during a static prerender. The effect below corrects this to the real requested slug (if
     // different) immediately after mount, the same way it already does on every catalog refresh.
     try {
       return selectDataset(cached, null);
-    } catch {
+    } catch (error) {
+      console.warn('The cached catalog has no usable default selection.', error);
       return null;
     }
   });
   const [assetOrigin, setAssetOrigin] = useState(() => requestConfiguration().assetOrigin);
-  const [loading, setLoading] = useState(() => readCachedCatalog().length === 0);
+  const [loading, setLoading] = useState(initialCatalog.length === 0);
   const [error, setError] = useState<string | null>(null);
   const [localCatalogRevision, setLocalCatalogRevision] = useState(0);
   const selectedSlugRef = useRef<string | null>(null);
@@ -205,6 +206,23 @@ export function DatasetCatalogProvider({children}: {children: React.ReactNode}) 
             workerError,
           );
         });
+        // Restore cache only after hydration and image-cache readiness. Never replace a newer
+        // network result, or briefly mount the default pack when the URL selects another pack.
+        if (Platform.OS === 'web') {
+          void serviceWorkerReady.then(() => {
+            if (!alive || publishedDatasetsRef.current) return;
+            const cached = readCachedCatalog();
+            const requestedSlug = currentWebRequestSlug();
+            if (cached.length === 0 || requestedSlug?.startsWith('local-')) return;
+            const cachedSelection = selectDataset(cached, requestedSlug);
+            setDatasets(cached);
+            selectedSlugRef.current = cachedSelection.slug;
+            setSelected(current => preserveDatasetMount(current, cachedSelection));
+            setLoading(false);
+          }).catch(cacheError => {
+            console.warn('The cached catalog could not restore the requested pack; awaiting the fresh catalog.', cacheError);
+          });
+        }
         const publishedDatasets = await loadPublishedDatasetCatalogOnce(
           publishedDatasetsRef,
           async () => {

@@ -54,13 +54,22 @@ function applyThemePreference(preference: ThemePreference, minecraftFont: boolea
 }
 
 export function ThemePreferenceProvider({children}: {children: React.ReactNode}) {
-  const [initial] = useState(loadThemePreference);
-  const [preference, setPreferenceState] = useState<ThemePreference>(initial.preference);
-  const [minecraftFont, setMinecraftFontState] = useState(initial.minecraftFont);
+  const [preference, setPreferenceState] = useState<ThemePreference>('dark');
+  const [minecraftFont, setMinecraftFontState] = useState(false);
+  const [restored, setRestored] = useState(false);
 
   useEffect(() => {
-    applyThemePreference(preference, minecraftFont);
-  }, [minecraftFont, preference]);
+    const saved = loadThemePreference();
+    setPreferenceState(saved.preference);
+    setMinecraftFontState(saved.minecraftFont);
+    applyThemePreference(saved.preference, saved.minecraftFont);
+    setRestored(true);
+  }, []);
+
+  useEffect(() => {
+    // Keep the pre-paint theme script's choice until browser preferences have been read.
+    if (restored) applyThemePreference(preference, minecraftFont);
+  }, [minecraftFont, preference, restored]);
 
   const setPreference = useCallback((next: ThemePreference) => {
     setPreferenceState(next);
