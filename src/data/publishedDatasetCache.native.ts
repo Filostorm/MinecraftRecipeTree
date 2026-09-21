@@ -33,7 +33,9 @@ interface CacheIndex {
 }
 
 function cacheDirectory(): Directory {
-  return new Directory(Paths.cache, ROOT_DIRECTORY_NAME, CACHE_DIRECTORY_NAME);
+  // Viewed recipe documents survive OS cache eviction; the explicit byte budget still
+  // bounds storage. Complete, pinned packs use the separate Downloads library.
+  return new Directory(Paths.document, ROOT_DIRECTORY_NAME, CACHE_DIRECTORY_NAME);
 }
 
 function indexFile(): NativeFile {
@@ -133,7 +135,10 @@ async function readDocument(
     if (!file.exists) return null;
     const text = await file.text();
     const bytes = new TextEncoder().encode(text).byteLength;
-    if (bytes !== entry.bytes) return null;
+    if (bytes !== entry.bytes) {
+      console.warn('Cached published document has an invalid byte count; fetching it again.', {url});
+      return null;
+    }
     return {text, bytes};
   } catch (error) {
     console.error('The published dataset cache could not be read; fetching from the network.', {

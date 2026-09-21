@@ -139,9 +139,6 @@ export function UserProvider({children}: {children: React.ReactNode}) {
   }, []);
 
   const signInWithPassword = useCallback(async (email: string, password: string) => {
-    if (Platform.OS !== 'web') {
-      throw new Error('Password sign-in is currently available only in the web app.');
-    }
     const client = await supabaseAccountClient();
     const {error: authError} = await client.auth.signInWithPassword({
       email: validEmail(email),
@@ -154,9 +151,6 @@ export function UserProvider({children}: {children: React.ReactNode}) {
     email: string,
     password: string,
   ): Promise<'signed_in' | 'confirmation_required'> => {
-    if (Platform.OS !== 'web') {
-      throw new Error('Account creation is currently available only in the web app.');
-    }
     const client = await supabaseAccountClient();
     const {data, error: authError} = await client.auth.signUp({
       email: validEmail(email),

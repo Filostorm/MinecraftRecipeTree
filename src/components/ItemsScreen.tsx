@@ -30,6 +30,8 @@ import {useUi} from '../ui/UiContext';
 import {ItemIcon} from './ItemIcon';
 import {itemGridDisplayMetrics} from './itemIconSizing';
 import {ModFilter, SearchBar} from './SearchBar';
+import {loadCommunityViews} from '../data/communityViews';
+import {popularityOrder} from '../data/popularityOrder';
 
 const MAX_RESULTS = 800;
 const CELL_W = 104;
@@ -46,12 +48,25 @@ export function ItemsScreen({
   const {openItem} = useUi();
   const [query, setQuery] = useState('');
   const [mod, setMod] = useState<string | null>(null);
+  const [popular, setPopular] = useState<string[]>([]);
+  const [popularityError, setPopularityError] = useState(false);
+  useEffect(() => {
+    const request = new AbortController();
+    setPopular([]); setPopularityError(false);
+    void loadCommunityViews(data.descriptor, request.signal).then(setPopular).catch(error => {
+      if (request.signal.aborted) return;
+      console.error('Community browse ranking could not be loaded; showing catalog order.', error);
+      setPopularityError(true);
+    });
+    return () => request.abort();
+  }, [data.descriptor]);
   const {width} = useWindowDimensions();
 
   const catalogItems = useMemo(
     () => data.items.filter(isItemCatalogEligible),
     [data.items],
   );
+  const browseItems = useMemo(() => popularityOrder(catalogItems, popular), [catalogItems, popular]);
   // Browsing without a query only ever needs `catalogItems`; the per-item normalized
   // text/words below are for search matching only, so building them eagerly for the whole
   // catalog on every mount wastes main-thread time before the user has typed anything.
@@ -130,7 +145,7 @@ export function ItemsScreen({
     };
 
     if (!q || !searchableItems) {
-      for (const item of catalogItems) {
+      for (const item of browseItems) {
         if (!isItemCatalogBrowseVisible(item)) continue;
         if (!eligible(item)) continue;
         out.push(item);
@@ -174,6 +189,7 @@ export function ItemsScreen({
     }
     return out;
   }, [
+    browseItems,
     catalogItems,
     searchableItems,
     fuzzyIndex,
@@ -205,6 +221,7 @@ export function ItemsScreen({
     <View style={[styles.root, scaledInterfaceStyle]}>
       <NativeUiScale>
       <View style={styles.stickyControls}>
+        {popularityError && <Text accessibilityRole="alert" style={{color: theme.warn, padding: 8}}>Community popularity is unavailable. Showing catalog order.</Text>}
         <View style={styles.controlsRow}>
           <SearchBar
             value={query}

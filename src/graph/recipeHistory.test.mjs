@@ -5,6 +5,7 @@ import {
   mergeRecipeHistory,
   parseRecipeHistory,
   recipeHistoryStorageKey,
+  removeRecipeHistory,
 } from './recipeHistory.ts';
 
 const scope = {slug: 'meatballcraft', publicationId: 'a'.repeat(64)};
@@ -73,4 +74,31 @@ test('keeps input- and output-directed trees as distinct history entries', () =>
   const inputTree = entry(1, 10, 'inputs');
   const outputTree = entry(1, 20, 'outputs');
   assert.deepEqual(mergeRecipeHistory([inputTree], outputTree), [outputTree, inputTree]);
+});
+
+test('deletion is scoped to the exact recipe, direction, pack and publication', () => {
+  const old = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const values = new Map();
+  Object.defineProperty(globalThis, 'localStorage', {configurable: true, value: {
+    getItem: key => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+  }});
+  try {
+    const current = recipeHistoryStorageKey(scope);
+    const other = recipeHistoryStorageKey({...scope, publicationId: 'b'.repeat(64)});
+    const raw = JSON.stringify({version: 1, entries: [entry(1, 10), entry(1, 11, 'outputs'), entry(2, 12)]});
+    values.set(current, raw); values.set(other, raw);
+    assert.deepEqual(removeRecipeHistory(scope, entry(1, 10)).map(row => [row.ref[1], row.direction]), [[1, 'outputs'], [2, 'inputs']]);
+    assert.equal(values.get(other), raw);
+    values.set(current, '{broken');
+    assert.throws(() => removeRecipeHistory(scope, entry(1)), SyntaxError);
+    assert.equal(values.get(current), '{broken');
+    globalThis.localStorage.setItem = () => {throw new Error('Disk full');};
+    values.set(current, raw);
+    assert.throws(() => removeRecipeHistory(scope, entry(1)), /Disk full/);
+    assert.equal(values.get(current), raw);
+  } finally {
+    if (old) Object.defineProperty(globalThis, 'localStorage', old);
+    else delete globalThis.localStorage;
+  }
 });

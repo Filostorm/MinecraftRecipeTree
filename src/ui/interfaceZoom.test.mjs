@@ -43,7 +43,9 @@ test('secondary information actions share one anchored header menu without impor
   );
   assert.doesNotMatch(infoMenuSource, />\s*Import crafting tree\s*</u);
   assert.doesNotMatch(infoMenuSource, />\s*Details\s*</u);
-  assert.match(appSource, />\s*Info\s*</u);
+  assert.doesNotMatch(infoMenuSource, />\s*Info\s*</u);
+  assert.match(graphSource, /accessibilityLabel="Open graph info and guide"/u);
+  assert.match(graphSource, /FIT_CONTROL_SIZE \+ 8/u);
   assert.match(appSource, />\s*Bug report\s*</u);
   assert.match(appSource, />\s*History\s*</u);
   assert.match(appSource, /headerSurface: \{position: 'relative', zIndex: 200\}/u);

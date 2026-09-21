@@ -32,7 +32,7 @@ import {
   RecipeStageProvider,
   useRecipeStages,
 } from './src/data/RecipeStageContext';
-import {datasetMountKey} from './src/data/datasetCatalog';
+import {datasetMountKey, type DatasetDescriptor} from './src/data/datasetCatalog';
 import {isLocalPackExportUrl} from './src/data/runtimeDocumentLimits';
 import {theme} from './src/theme';
 import type {Manifest} from './src/types';
@@ -65,6 +65,11 @@ import {pickPortableTreeFile} from './src/graph/portableTreeTransfer';
 import {UserProvider, useUser} from './src/account/UserContext';
 import {ThemePreferenceProvider, useThemePreference} from './src/ui/themePreference';
 import {hasSeenOnboarding, markOnboardingSeen} from './src/ui/onboarding';
+
+import {AppIcon} from './src/components/AppIcon';
+import {starterItem} from './src/ui/starterItem';
+import {useCommunityViewTracking} from './src/data/useCommunityViewTracking';
+import {PackDownloadPrompt} from './src/native/PackDownloadPrompt';
 
 const LazyGraphScreen = React.lazy(async () => {
   const module = await import('./src/graph/GraphScreen');
@@ -236,6 +241,7 @@ function DatasetRoot() {
   const catalog = useDatasetCatalog();
   const [showDatasetPicker, setShowDatasetPicker] = useState(false);
   const [showMobileUploadGuide, setShowMobileUploadGuide] = useState(false);
+  const [downloadPrompt, setDownloadPrompt] = useState<DatasetDescriptor | null>(null);
   const datasets = catalog.state.status === 'loading' ? [] : catalog.state.datasets;
   const selectedSlug = catalog.state.status === 'ready' ? catalog.state.selected.slug : null;
   const openLocalPackImport = () => {
@@ -286,6 +292,7 @@ function DatasetRoot() {
             onSelect={slug => {
               catalog.select(slug);
               setShowDatasetPicker(false);
+              if (slug !== selectedSlug) setDownloadPrompt(datasets.find(dataset => dataset.slug === slug) ?? null);
             }}
             onDeleteLocal={catalog.removeLocal}
             onClose={() => setShowDatasetPicker(false)}
@@ -342,6 +349,8 @@ function DatasetRoot() {
 
   const {source} = catalog.state;
   return (
+    <>
+    <PackDownloadPrompt dataset={downloadPrompt} onComplete={() => catalog.refreshLocal()} />
     <DataProvider
       key={datasetMountKey(source.descriptor)}
       descriptor={source.descriptor}
@@ -353,6 +362,7 @@ function DatasetRoot() {
         onImportPack={openLocalPackImport}
       />
     </DataProvider>
+    </>
   );
 }
 
@@ -618,13 +628,28 @@ function Shell({
   useEffect(() => {
     if (account.user) setShowSignIn(false);
   }, [account.user]);
+  const initializedTree = useRef(false);
+  useCommunityViewTracking(data.descriptor, tab === 'items' ? ui.itemStack.at(-1) ?? null : tab === 'graph' ? activeGraphTree?.rootKey ?? null : null);
   useEffect(() => {
-    if (recipeImportJob || openGraphTrees.length > 0) return;
+    if (initializedTree.current) return;
+    // An imported/open tree already fulfills initialization. Closing it later must
+    // not unexpectedly resurrect a saved tree or the first-run starter.
+    if (recipeImportJob || openGraphTrees.length > 0) {
+      initializedTree.current = true;
+      return;
+    }
+    if (data.items.length === 0) return;
+    initializedTree.current = true;
     const session = loadGraphSession(data.descriptor);
-    if (!session) return;
+    if (!session) {
+      const starter = starterItem(data.items);
+      if (starter) ui.restoreGraph(starter.k, 'inputs');
+      else console.info('This pack has no standard starter item; leaving the first tree empty.', {pack: data.descriptor.slug});
+      return;
+    }
     ui.restoreGraph(session.rootKey, session.direction, session.buildId);
     if (!ui.restoredLastTab) setTab('graph');
-  }, [data.descriptor, openGraphTrees.length, recipeImportJob, setTab, ui.restoreGraph]);
+  }, [data.descriptor, data.items, openGraphTrees.length, recipeImportJob, setTab, ui.restoreGraph]);
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
     const url = new URL(window.location.href);
@@ -874,19 +899,6 @@ function Shell({
               <Text style={styles.infoMenuItemText}>Favorites</Text>
             </TouchableOpacity>
           <TouchableOpacity
-            {...signalTarget('header.graph-guide')}
-            style={[styles.infoMenuItem, Platform.OS !== 'web' && styles.nativeInfoMenuItem]}
-            onPress={() => {
-              lightImpactFeedback();
-              closeInfoMenu();
-              setShowGraphGuide(true);
-            }}
-            accessibilityRole="button"
-            accessibilityLabel="Open graph info and guide">
-            <Text style={styles.infoMenuItemIcon}>?</Text>
-            <Text style={styles.infoMenuItemText}>Info</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
             {...signalTarget('header.issue-report')}
             style={[styles.infoMenuItem, Platform.OS !== 'web' && styles.nativeInfoMenuItem]}
             onPress={() => {
@@ -923,7 +935,7 @@ function Shell({
     <TouchableOpacity
       ref={accountButtonRef}
       {...signalTarget('header.account')}
-      style={[styles.accountHeaderButton, account.user && styles.accountHeaderButtonSignedIn]}
+      style={[styles.accountHeaderButton, Platform.OS !== 'web' && {minHeight: 44}, account.user && styles.accountHeaderButtonSignedIn]}
       onPress={() => {
         lightImpactFeedback();
         if (account.user) {
@@ -1111,6 +1123,7 @@ function Shell({
                           isActive={tree.id === activeGraphTreeId}
                           openTreeCount={openGraphTrees.length}
                           onClose={() => ui.closeGraphTree(tree.id)}
+                          onOpenGuide={() => setShowGraphGuide(true)}
                           interfaceZoom={interfaceZoom}
                           contentZoom={contentZoom}
                           onContentZoomChange={previewContentZoom}
@@ -1384,11 +1397,11 @@ function MobileBottomNavigation({hasMobs}: {hasMobs: boolean}) {
   const ui = useUi();
   const tabs = useMemo(
     () => [
-      {tab: 'items' as const, icon: '☷', label: 'Browse'},
-      {tab: 'graph' as const, icon: '⌘', label: 'Tree'},
-      {tab: 'resources' as const, icon: '☑', label: 'Resources'},
-      ...(hasMobs ? [{tab: 'mobs' as const, icon: '♟', label: 'Mobs'}] : []),
-      {tab: 'settings' as const, icon: '⚙', label: 'Settings'},
+      {tab: 'items' as const, label: 'Browse'},
+      {tab: 'graph' as const, label: 'Tree'},
+      {tab: 'resources' as const, label: 'Resources'},
+      ...(hasMobs ? [{tab: 'mobs' as const, label: 'Mobs'}] : []),
+      {tab: 'settings' as const, label: 'Settings'},
     ],
     [hasMobs],
   );
@@ -1436,7 +1449,7 @@ function MobileBottomNavigation({hasMobs}: {hasMobs: boolean}) {
   );
 }
 
-function MobileTabBtn({tab, icon, label}: {tab: Tab; icon: string; label: string}) {
+function MobileTabBtn({tab, label}: {tab: Tab; label: string}) {
   const ui = useUi();
   const active = ui.tab === tab;
   return (
@@ -1450,9 +1463,7 @@ function MobileTabBtn({tab, icon, label}: {tab: Tab; icon: string; label: string
         ui.setTab(tab);
       }}
       style={[styles.mobileTab, active && styles.mobileTabActive]}>
-      <Text style={[styles.mobileTabIcon, active && styles.mobileTabIconActive]}>
-        {icon}
-      </Text>
+      <AppIcon name={tab} color={active ? theme.accent : theme.textDim} />
       <Text style={[styles.mobileTabLabel, active && styles.mobileTabLabelActive]}>
         {label}
       </Text>

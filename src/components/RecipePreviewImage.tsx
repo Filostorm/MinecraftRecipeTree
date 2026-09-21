@@ -2,6 +2,7 @@ import React, {useEffect, useState} from 'react';
 import {Image, ImageProps, StyleSheet, Text, View, type ViewStyle} from 'react-native';
 import {theme} from '../theme';
 import {pixelated} from './ItemIcon';
+import {useSavedPreview} from '../data/useSavedPreview';
 
 type RecipePreviewImageProps = Pick<ImageProps, 'style' | 'resizeMode'> & {
   uri: string;
@@ -18,14 +19,19 @@ export function RecipePreviewImage({
   resizeMode = 'contain',
 }: RecipePreviewImageProps) {
   const [failed, setFailed] = useState(false);
+  const savedUri = useSavedPreview(uri);
+  const savedBackground = useSavedPreview(backgroundUri);
   useEffect(() => setFailed(false), [backgroundUri, uri]);
 
   if (failed) {
     return <Text style={styles.failure}>JEI layout preview failed to load</Text>;
   }
+  if (!savedUri || (backgroundUri && !savedBackground)) {
+    return <View style={style as ViewStyle} accessibilityLabel="Loading recipe preview" />;
+  }
   const image = (
     <Image
-      source={{uri}}
+      source={{uri: savedUri}}
       style={backgroundUri ? [styles.layer, pixelated as object] : style}
       resizeMode={resizeMode}
       onError={event => {
@@ -42,7 +48,7 @@ export function RecipePreviewImage({
   return (
     <View style={[styles.composite, style as ViewStyle]}>
       <Image
-        source={{uri: backgroundUri}}
+        source={{uri: savedBackground}}
         style={[styles.layer, pixelated as object]}
         resizeMode={resizeMode}
         onError={event => {

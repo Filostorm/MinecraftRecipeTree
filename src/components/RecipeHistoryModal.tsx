@@ -10,7 +10,7 @@ import {
   View,
 } from 'react-native';
 import {useData} from '../data/DataContext';
-import {loadRecipeHistory, type RecipeHistoryEntry} from '../graph/recipeHistory';
+import {loadRecipeHistory, removeRecipeHistory, type RecipeHistoryEntry} from '../graph/recipeHistory';
 import {theme} from '../theme';
 import {useUi} from '../ui/UiContext';
 import {ItemIcon} from './ItemIcon';
@@ -28,6 +28,7 @@ export function RecipeHistoryModal({
   const data = useData();
   const {openRecipeInGraph} = useUi();
   const [entries, setEntries] = useState<RecipeHistoryEntry[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const scaledCardStyle =
     Platform.OS === 'web'
       ? ({
@@ -40,6 +41,7 @@ export function RecipeHistoryModal({
 
   useEffect(() => {
     if (!visible) return;
+    setError(null);
     const loaded = loadRecipeHistory(data.descriptor);
     const valid = loaded.filter(entry => {
       const category = data.categories[entry.ref[0]];
@@ -75,6 +77,7 @@ export function RecipeHistoryModal({
           </View>
 
           <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
+            {error && <Text accessibilityRole="alert" style={{color: theme.danger}}>{error}</Text>}
             {entries.length === 0 ? (
               <Text style={styles.empty}>No recipe trees opened for this pack yet.</Text>
             ) : (
@@ -82,11 +85,12 @@ export function RecipeHistoryModal({
                 const item = data.itemsByKey.get(entry.itemKey);
                 const itemName = item?.n ?? entry.itemKey;
                 return (
+                  <View key={`${entry.itemKey}:${entry.ref[0]}:${entry.ref[1]}:${entry.direction}`} style={styles.row}>
                   <TouchableOpacity
                     key={`${entry.itemKey}:${entry.ref[0]}:${entry.ref[1]}`}
                     accessibilityRole="button"
                     accessibilityLabel={`Reopen ${entry.title} ${entry.direction === 'outputs' ? 'output' : 'ingredient'} tree for ${itemName}`}
-                    style={styles.row}
+                    style={{flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10}}
                     onPress={() => {
                       onClose();
                       openRecipeInGraph(
@@ -112,6 +116,11 @@ export function RecipeHistoryModal({
                     </View>
                     <Text style={styles.time}>{new Date(entry.openedAt).toLocaleString()}</Text>
                   </TouchableOpacity>
+                  <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Remove ${entry.title} from history`} style={{minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center'}} onPress={() => {
+                    try {setEntries(removeRecipeHistory(data.descriptor, entry)); setError(null);}
+                    catch {setError('Could not remove this history entry. Please try again.');}
+                  }}><Text style={{color: theme.danger, fontSize: 20}}>×</Text></TouchableOpacity>
+                  </View>
                 );
               })
             )}

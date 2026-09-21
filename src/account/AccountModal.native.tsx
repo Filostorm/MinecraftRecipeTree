@@ -11,6 +11,8 @@ import {listDownloads, removeDownload, saveDownload} from '../native/packLibrary
 import type {DownloadProgress} from '../native/packDownload';
 import {isLocalPackDescriptor} from '../data/localPackStorage';
 import {DiscordIcon} from '../components/DiscordIcon';
+import {PackIcon} from '../components/DatasetPicker';
+import {EmailAccountForm} from './EmailAccountForm';
 import {theme} from '../theme';
 
 // The native account surface lives in the Settings tab. The web adapter remains a modal.
@@ -31,6 +33,7 @@ export function AccountModal({onClose, onOpenHistory, interfaceZoom, contentZoom
   const catalog = useDatasetCatalog();
   const [name, setName] = useState(account.user?.displayName ?? '');
   const [editingName, setEditingName] = useState(false);
+  const [showUi, setShowUi] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<DownloadProgress | null>(null);
@@ -78,14 +81,16 @@ export function AccountModal({onClose, onOpenHistory, interfaceZoom, contentZoom
   const accountError = error ?? account.error;
 
   return (
-    <ScrollView style={s.screen} keyboardShouldPersistTaps="handled">
+    <ScrollView style={s.screen} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
       <NativeUiScale><View style={s.content}>
       <View style={s.pageHeader}>
         <Text style={s.pageTitle} accessibilityRole="header">Settings</Text>
-        <Text style={s.subtitle}>Your account and offline library</Text>
       </View>
 
-      <ScaleSettings interfaceZoom={interfaceZoom} contentZoom={contentZoom} onInterfaceZoomChange={onInterfaceZoomChange} onContentZoomChange={onContentZoomChange} onContentZoomComplete={onContentZoomComplete} />
+      <TouchableOpacity style={s.packRow} accessibilityRole="button" accessibilityLabel="UI settings" accessibilityState={{expanded: showUi}} onPress={() => setShowUi(value => !value)}>
+        <Text style={[s.sectionTitle, s.grow]}>UI</Text><Text style={s.chevron}>{showUi ? '⌄' : '›'}</Text>
+      </TouchableOpacity>
+      {showUi && <ScaleSettings interfaceZoom={interfaceZoom} contentZoom={contentZoom} onInterfaceZoomChange={onInterfaceZoomChange} onContentZoomChange={onContentZoomChange} onContentZoomComplete={onContentZoomComplete} />}
 
       {accountError && <Text style={s.error} accessibilityRole="alert">{accountError}</Text>}
       <View style={s.card}>
@@ -95,7 +100,7 @@ export function AccountModal({onClose, onOpenHistory, interfaceZoom, contentZoom
           </View>
           <View style={s.grow}>
             <Text style={s.title}>{account.user?.displayName ?? 'Your recipe library'}</Text>
-            <Text style={s.detail}>{account.user ? 'Connected with Discord' : 'Favorites and packs, in one place.'}</Text>
+            <Text style={s.detail}>{account.user?.email ?? (account.user ? 'Signed in' : 'Sign in or create an account')}</Text>
           </View>
           {account.user && !editingName && <Action label="Edit" accessibilityLabel="Edit display name" disabled={pending} onPress={() => setEditingName(true)} />}
         </View>
@@ -105,6 +110,7 @@ export function AccountModal({onClose, onOpenHistory, interfaceZoom, contentZoom
             <Text style={s.discordText}>{pending ? 'Signing in…' : 'Continue with Discord'}</Text>
           </TouchableOpacity>
         )}
+        {!account.user && <EmailAccountForm />}
         {account.user && editingName && (
           <View style={s.editName}>
             <Text style={s.detail}>Display name</Text>
@@ -146,6 +152,7 @@ export function AccountModal({onClose, onOpenHistory, interfaceZoom, contentZoom
               const saved = downloads.find(entry => entry.descriptor.publicationId === descriptor.publicationId && entry.descriptor.previewAssetSetId === descriptor.previewAssetSetId);
               return (
                 <View key={descriptor.slug} style={[s.packRow, index > 0 && s.separator]}>
+                  <PackIcon dataset={descriptor} size={40} />
                   <View style={s.grow}>
                     <Text style={s.title}>{descriptor.displayName}</Text>
                     <Text style={s.detail}>{descriptor.packVersion}{saved ? ` · ${formatBytes(saved.bytes)}` : ''}</Text>

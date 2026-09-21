@@ -20,7 +20,11 @@ test('cache entries are keyed by a SHA-256 hash of the full URL, not a raw path'
 
 test('a stored entry is rejected as a miss if its URL or byte count no longer matches', () => {
   assert.match(nativeSource, /if \(!entry \|\| entry\.url !== url\) return null;/u);
-  assert.match(nativeSource, /if \(bytes !== entry\.bytes\) return null;/u);
+  assert.match(nativeSource, /if \(bytes !== entry\.bytes\) \{[\s\S]*?console\.warn[\s\S]*?return null;/u);
+});
+
+test('viewed documents use durable storage with an explicit budget instead of an OS-purgeable cache', () => {
+  assert.match(nativeSource, /new Directory\(Paths.document, ROOT_DIRECTORY_NAME, CACHE_DIRECTORY_NAME\)/u);
 });
 
 test('the cache is pruned oldest-stored-first once it exceeds its byte budget', () => {

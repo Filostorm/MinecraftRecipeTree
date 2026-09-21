@@ -96,6 +96,7 @@ export default defineConfig(async ({command}) => {
           main: './worker/index.ts',
           compatibility_flags: ['nodejs_compat'],
           cache: {enabled: true},
+          ratelimits: [{name: 'ITEM_VIEW_RATE_LIMITER', namespace_id: isCloudflareBeta ? '2101' : '2102', simple: {limit: 6, period: 60}}],
           observability: {enabled: true, logs: {enabled: true, invocation_logs: false}},
           assets: {
             binding: 'ASSETS',
@@ -105,6 +106,7 @@ export default defineConfig(async ({command}) => {
               '/api/admin/dataset-channels/*',
               '/api/admin/migration/*',
               '/api/datasets',
+              '/api/item-views',
               '/api/export-failures',
               '/api/feedback',
               '/api/recipe-favorites*',

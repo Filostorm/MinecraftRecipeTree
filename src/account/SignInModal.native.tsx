@@ -5,6 +5,7 @@ import {useSafeAreaInsets} from '../ui/safeArea';
 import {theme} from '../theme';
 import {useUser} from './UserContext';
 import {DiscordIcon} from '../components/DiscordIcon';
+import {EmailAccountForm} from './EmailAccountForm';
 
 export function SignInModal({visible, anchor, onClose}: {
   visible: boolean;
@@ -43,7 +44,7 @@ export function SignInModal({visible, anchor, onClose}: {
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityRole="button" accessibilityLabel="Dismiss sign in" />
         <View style={[styles.card, {left, top, width: cardWidth}]} accessibilityViewIsModal>
           <View pointerEvents="none" style={[styles.arrow, {left: arrowLeft}]} />
-          <ScrollView style={{maxHeight: Math.max(100, height - top - insets.bottom - 12)}} contentContainerStyle={styles.content} bounces={false}>
+          <ScrollView style={{maxHeight: Math.max(100, height - top - insets.bottom - 12)}} contentContainerStyle={styles.content} bounces={false} automaticallyAdjustKeyboardInsets keyboardShouldPersistTaps="handled">
             <NativeUiScale>
             <View style={{gap: 14}}>
             <View style={styles.header}>
@@ -55,13 +56,12 @@ export function SignInModal({visible, anchor, onClose}: {
                 <Text style={styles.closeText}>✕</Text>
               </TouchableOpacity>
             </View>
-            <Text style={styles.detail}>Sync favorites and keep downloaded packs in your account’s library on this iPhone.</Text>
             <TouchableOpacity accessibilityRole="button" accessibilityState={{disabled: pending, busy: pending}} disabled={pending} style={[styles.discordButton, pending && styles.pending]} onPress={startSignIn}>
               {pending ? <ActivityIndicator color="#fff" /> : <DiscordIcon size={20} />}
               <Text style={styles.discordLabel}>{pending ? 'Signing in…' : 'Continue with Discord'}</Text>
             </TouchableOpacity>
             {(error || account.error) && <Text style={styles.error} accessibilityRole="alert">{error ?? account.error}</Text>}
-            <Text style={styles.footnote}>Discord opens in the iOS sign-in browser. Recipe Tree never receives your Discord password.</Text>
+            <EmailAccountForm />
             </View></NativeUiScale>
           </ScrollView>
         </View>

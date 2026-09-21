@@ -119,6 +119,7 @@ test('Cloudflare routes catalog, immutable datasets, and administration through 
     '/api/admin/dataset-channels/*',
     '/api/admin/migration/*',
     '/api/datasets',
+    '/api/item-views',
     '/api/export-failures',
     '/api/feedback',
     '/api/recipe-favorites*',

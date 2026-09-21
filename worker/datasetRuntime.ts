@@ -48,6 +48,7 @@ export interface DatasetR2Bucket extends PreviewUploadR2Bucket {
 }
 
 export interface DatasetRuntime {
+  ITEM_VIEW_RATE_LIMITER?: {limit(options: {key: string}): Promise<{success: boolean}>};
   DATASET_RESPONSE_CACHE?: string;
   ASSETS?: {fetch(request: Request): Promise<Response>};
   DB?: D1Database;

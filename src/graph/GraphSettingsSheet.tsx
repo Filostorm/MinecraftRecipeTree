@@ -70,14 +70,11 @@ export function GraphSettingsSheet({
                     ]}>
                     {option.label}
                   </Text>
-                  {option.description ? (
-                    <Text style={styles.rowDescription}>{option.description}</Text>
-                  ) : null}
                 </View>
                 {option.kind === 'toggle' && (
                   <View style={[styles.pill, option.active && styles.pillActive]}>
                     <Text style={[styles.pillText, option.active && styles.pillTextActive]}>
-                      {option.active ? 'On' : 'Off'}
+                      {option.active ? '✓' : '−'}
                     </Text>
                   </View>
                 )}
@@ -138,7 +135,6 @@ const styles = StyleSheet.create({
   rowLabel: {color: theme.text, fontSize: 14, fontWeight: '700'},
   rowLabelActive: {color: theme.accent},
   rowLabelDestructive: {color: theme.warn},
-  rowDescription: {color: theme.textDim, fontSize: 11, lineHeight: 15, marginTop: 2},
   pill: {
     minWidth: 44,
     paddingHorizontal: 10,

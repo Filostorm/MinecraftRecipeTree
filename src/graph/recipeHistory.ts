@@ -142,3 +142,25 @@ export function recordRecipeHistory(
     console.error('Recipe history could not be saved to localStorage.', error);
   }
 }
+
+/** Remove only this recipe/direction from this exact publication. Storage errors reach the UI. */
+export function removeRecipeHistory(descriptor: Pick<DatasetDescriptor, 'slug' | 'publicationId'>, target: RecipeHistoryEntry): RecipeHistoryEntry[] {
+  try {
+    const storage = globalThis.localStorage;
+    if (!storage) throw new Error('History storage is unavailable.');
+    const key = recipeHistoryStorageKey(descriptor);
+    const raw = storage.getItem(key);
+    // A corrupt history must not be replaced by an empty list when deleting one entry.
+    const entries = raw === null ? [] : parseRecipeHistory(raw);
+    const next = entries.filter(entry => !(
+      entry.itemKey === target.itemKey &&
+      entry.ref[0] === target.ref[0] && entry.ref[1] === target.ref[1] &&
+      (entry.direction ?? 'inputs') === (target.direction ?? 'inputs')
+    ));
+    storage.setItem(key, JSON.stringify({version: RECIPE_HISTORY_VERSION, entries: next}));
+    return next;
+  } catch (error) {
+    console.error('Recipe history entry could not be removed.', error);
+    throw error;
+  }
+}

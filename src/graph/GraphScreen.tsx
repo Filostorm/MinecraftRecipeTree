@@ -580,6 +580,8 @@ function nodeDepthBucket(
   return 'depth-3-plus';
 }
 
+import {AppIcon} from '../components/AppIcon';
+
 export function GraphScreen({
   treeId,
   buildId,
@@ -590,6 +592,7 @@ export function GraphScreen({
   isActive = true,
   openTreeCount = 1,
   onClose,
+  onOpenGuide,
   interfaceZoom = 1,
   contentZoom = 1,
   onContentZoomChange,
@@ -617,6 +620,7 @@ export function GraphScreen({
   isActive?: boolean;
   openTreeCount?: number;
   onClose?: () => void;
+  onOpenGuide?: () => void;
   interfaceZoom?: number;
   contentZoom?: number;
   onContentZoomChange?: (value: number) => void;
@@ -4422,7 +4426,7 @@ export function GraphScreen({
                 />
               </>
             ) : (
-              <Text style={[styles.ctrlBtnText, styles.settingsGearIcon]}>⚙</Text>
+              <AppIcon name="settings" color={theme.text} />
             )}
           </View>
         </TouchableOpacity>
@@ -4552,6 +4556,9 @@ export function GraphScreen({
         onPress={fitView}>
         <Text style={[styles.ctrlBtnText, styles.fitControlIcon]}>⛶</Text>
       </TouchableOpacity>
+      {onOpenGuide && <TouchableOpacity accessibilityRole="button" accessibilityLabel="Open graph info and guide" style={[styles.ctrlBtn, styles.fitControl, graphMenuScaleStyle, {left: CANVAS_EDGE_INSET + (FIT_CONTROL_SIZE + 8) * interfaceZoom}, Platform.OS !== 'web' && {transformOrigin: 'bottom left'}]} onPress={onOpenGuide}>
+        <AppIcon name="info" color={theme.text} />
+      </TouchableOpacity>}
       {exportMessage && (
         <TouchableOpacity
           accessibilityRole="button"

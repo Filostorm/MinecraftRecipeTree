@@ -88,6 +88,7 @@
     "package:exporter:1.21.1": "node scripts/package-exporter-releases.mjs --release neoforge-jei-1.21.1",
     "test:generic-jei": "node --test scripts/export-quality-policy.test.mjs scripts/generic-jei-profile.test.mjs scripts/pack-identity.test.mjs",
     "test:catalog-presentation": "node --test src/data/catalogPresentation.test.mjs",
+    "test:mobile-usability": "node --test src/ui/mobileUsability.test.mjs src/ui/starterItem.test.mjs src/data/popularityOrder.test.mjs src/data/publishedDatasetCache.test.mjs src/graph/recipeHistory.test.mjs worker/itemViews.test.mjs",
     "test:multiblock": "node --test scripts/validate-export-data.test.mjs src/components/multiblockProjection.test.mjs src/data/currentMultiblockCompatibilityStructures.test.mjs src/data/legacyMultiblockMadness323Structures.test.mjs src/data/recipeStructure.test.mjs",
     "test:cold-dataset": "node --test scripts/benchmark-cold-dataset.test.mjs",
     "test:migration": "node --test worker/migration.test.mjs",

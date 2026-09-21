@@ -1,5 +1,14 @@
 import {sql} from 'drizzle-orm';
-import {index, integer, sqliteTable, text, uniqueIndex} from 'drizzle-orm/sqlite-core';
+import {index, integer, primaryKey, sqliteTable, text, uniqueIndex} from 'drizzle-orm/sqlite-core';
+
+export const itemViewTotals = sqliteTable('item_view_totals', {
+  packSlug: text('pack_slug').notNull(),
+  itemKey: text('item_key').notNull(),
+  views: integer('views').notNull().default(0),
+}, table => [
+  primaryKey({columns: [table.packSlug, table.itemKey]}),
+  index('item_view_ranking').on(table.packSlug, sql`${table.views} DESC`, table.itemKey),
+]);
 
 export const modpacks = sqliteTable('modpacks', {
   id: text('id').primaryKey(),

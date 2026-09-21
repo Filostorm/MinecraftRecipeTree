@@ -78,6 +78,13 @@
       "when": 1788314519863,
       "tag": "0010_slim_invisible_woman",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1789990739218,
+      "tag": "0011_item_views",
+      "breakpoints": true
     }
   ]
 }

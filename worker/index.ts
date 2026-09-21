@@ -25,6 +25,7 @@ import {FEEDBACK_ROUTE, handleFeedback} from './feedback.ts';
 import {EXPORT_FAILURE_ROUTE, handleExportFailureIssue} from './exportFailureIssue.ts';
 import {MIGRATION_BASE_PATH, handleStorageMigration} from './migration.ts';
 import {RECIPE_FAVORITES_ROUTE, handleRecipeFavorites} from './recipeFavorites.ts';
+import {ITEM_VIEWS_ROUTE, handleItemViews} from './itemViews.ts';
 import {
   RECIPE_RETENTION_REPORTS_ROUTE,
   handleRecipeRetentionReports,
@@ -174,6 +175,7 @@ async function dispatchRequest(
   if (url.pathname === '/api/datasets') {
     return handleDatasetCatalog(request, runtime);
   }
+  if (url.pathname === ITEM_VIEWS_ROUTE) return handleItemViews(request, runtime, url, ctx);
   if (url.pathname === FEEDBACK_ROUTE) {
     return handleFeedback(request, runtime, url);
   }

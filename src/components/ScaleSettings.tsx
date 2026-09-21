@@ -1,5 +1,5 @@
 import React, {useEffect, useMemo, useState} from 'react';
-import {ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {ActivityIndicator, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import {useData} from '../data/DataContext';
 import {theme} from '../theme';
 import type {Recipe} from '../types';
@@ -61,7 +61,7 @@ export function ScaleSettings({interfaceZoom, contentZoom, onInterfaceZoomChange
       <Text style={s.heading} accessibilityRole="header">Display</Text>
       <View style={s.card}>
         <View style={s.row}>
-          <View style={s.grow}><Text style={s.label}>UI scale</Text><Text style={s.detail}>Menus, text and controls</Text></View>
+          <View style={s.grow}><Text style={s.label}>UI scale</Text></View>
           <View style={s.stepper}>
             <TouchableOpacity style={s.step} accessibilityRole="button" accessibilityLabel="Decrease interface zoom" disabled={interfaceZoom <= MINIMUM_INTERFACE_ZOOM} onPress={() => onInterfaceZoomChange(-1)}>
               <Text style={[s.stepText, interfaceZoom <= MINIMUM_INTERFACE_ZOOM && s.disabled]}>−</Text>
@@ -73,7 +73,7 @@ export function ScaleSettings({interfaceZoom, contentZoom, onInterfaceZoomChange
           </View>
         </View>
         <View style={s.row}>
-          <View style={s.grow}><Text style={s.label}>Recipe/items scale</Text><Text style={s.detail}>Recipe cards and item icons</Text></View>
+          <View style={s.grow}><Text style={s.label}>Recipe/items scale</Text></View>
           <View style={s.stepper}>
             <TouchableOpacity style={s.step} accessibilityRole="button" accessibilityLabel="Decrease recipe and item size" disabled={contentZoom <= MINIMUM_CONTENT_ZOOM} onPress={() => stepContent(-1)}>
               <Text style={[s.stepText, contentZoom <= MINIMUM_CONTENT_ZOOM && s.disabled]}>−</Text>
@@ -87,16 +87,15 @@ export function ScaleSettings({interfaceZoom, contentZoom, onInterfaceZoomChange
       </View>
       <View style={s.preview} onLayout={event => setWidth(event.nativeEvent.layout.width)}>
         <Text style={s.previewTitle}>Live preview</Text>
-        <Text style={s.detail}>Same items and recipes as the viewer. Scroll larger previews to inspect them.</Text>
-        <ScrollView nestedScrollEnabled style={{maxHeight: 210 / renderedScale}}>
+        <View pointerEvents="none">
           <View style={s.itemGrid}>
             {items.map(item => <ItemGridCell key={item.k} item={item} zoom={contentZoom} width={`${100 / columns}%`} />)}
           </View>
-        </ScrollView>
+        </View>
         {items.length === 0 && <Text style={s.detail}>This pack has no Minecraft items to preview.</Text>}
-        {width > 0 && recipe && category && <ScrollView nestedScrollEnabled style={{maxHeight: 240 / renderedScale}}>
+        {width > 0 && recipe && category && <View pointerEvents="none">
           <RecipeCard recipe={recipe} dir={category.dir} catTitle={category.title} contentZoom={contentZoom} availableCardWidth={width - 24} />
-        </ScrollView>}
+        </View>}
         {!recipe && !error && category && <ActivityIndicator color={theme.accent} />}
         {!category && <Text style={s.detail}>This pack has no crafting recipe to preview.</Text>}
         {error && <View><Text style={s.error} accessibilityRole="alert">{error}</Text><TouchableOpacity style={s.step} onPress={() => setAttempt(value => value + 1)} accessibilityRole="button" accessibilityLabel="Retry recipe preview"><Text style={s.label}>Retry</Text></TouchableOpacity></View>}
