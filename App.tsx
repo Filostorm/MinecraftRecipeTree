@@ -6,7 +6,6 @@ import React, {Suspense, useEffect, useMemo, useRef, useState} from 'react';
 import {
   ActivityIndicator,
   Animated,
-  Linking,
   Modal,
   Platform,
   ScrollView,
@@ -249,10 +248,7 @@ function DatasetRoot() {
       setShowMobileUploadGuide(true);
       return;
     }
-    const url = '/publish#upload';
-    void Linking.openURL(url).catch(error => {
-      console.error('Could not open the modpack upload page.', {url, error});
-    });
+    window.location.assign('/publish#upload');
   };
 
   const datasetControls = (
