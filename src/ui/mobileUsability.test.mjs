@@ -17,6 +17,28 @@ test('graph toggles retain accessible state without redundant on/off prose', () 
   assert.doesNotMatch(sheet, /\{option.description\}|\? 'On' : 'Off'/);
 });
 
+test('graph settings use a native draggable sheet with coordinated scrolling', () => {
+  const surface = source('../graph/GraphSheetSurface.native.tsx');
+  assert.match(surface, /@expo\/ui\/community\/bottom-sheet/);
+  assert.match(surface, /index=\{visible \? 0 : -1\}/);
+  assert.match(surface, /enablePanDownToClose/);
+  assert.match(surface, /if \(!visibleRef.current\) return/);
+  assert.match(surface, /visibleRef.current = false;\s*onClose\(\)/);
+  const sheet = source('../graph/GraphSettingsSheet.tsx');
+  assert.match(sheet, /<ScrollView nestedScrollEnabled/);
+  assert.match(sheet, /<NativeUiScale>/);
+  assert.doesNotMatch(sheet, /animationType="fade"|<Modal/);
+});
+
+test('navigation uses platform icons and graph settings are distinct from the main gear', () => {
+  const icons = source('../components/AppSymbol.tsx');
+  assert.match(icons, /from 'expo-symbols'/);
+  assert.match(icons, /graphSettings: \{ios: 'slider.horizontal.3', android: 'tune'/);
+  assert.match(icons, /settings: \{ios: 'gearshape', android: 'settings'/);
+  assert.match(source('../graph/GraphScreen.tsx'), /<AppIcon name="graphSettings"/);
+  assert.match(source('../components/AppIcon.tsx'), /materialIconPaths/);
+});
+
 test('mobile signup uses the existing password auth instead of a second account system', () => {
   const form = source('../account/EmailAccountForm.tsx');
   assert.match(form, /account.signUpWithPassword\(email, password\)/);

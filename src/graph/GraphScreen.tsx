@@ -846,6 +846,11 @@ export function GraphScreen({
   }, [data.descriptor.slug, data.descriptor.publicationId]);
 
   const [transform, setTransform] = useState<GraphTransform>({x: 60, y: 60, scale: 1});
+  const [isPanning, setIsPanning] = useState(false);
+
+  useEffect(() => {
+    if (!isActive || tab !== 'graph') setIsPanning(false);
+  }, [isActive, tab]);
   const transformRef = useRef(transform);
   transformRef.current = transform;
   const displayTransform = graphDisplayTransform(
@@ -2277,13 +2282,6 @@ export function GraphScreen({
    * silently re-expand. Descendants keep their remembered sources; those are a per-item
    * preference, not part of this workspace.
    */
-  const treeIsExpanded = !!root?.source;
-  const toggleWholeTree = useCallback(() => {
-    const currentRoot = rootRef.current;
-    if (!currentRoot) return;
-    onItemTap(currentRoot);
-  }, [onItemTap]);
-
   const clearAllExpansions = useCallback(() => {
     const currentRoot = rootRef.current;
     if (currentRoot) {
@@ -3319,8 +3317,8 @@ export function GraphScreen({
     [interfaceZoom],
   );
   const minimapVisible = useMemo(
-    () => (graph ? shouldShowMinimap(graph, viewportSize, transform) : false),
-    [graph, transform, viewportSize],
+    () => isPanning && isActive && tab === 'graph' && !!graph && shouldShowMinimap(graph, viewportSize, transform),
+    [graph, isActive, isPanning, tab, transform, viewportSize],
   );
   // The bottom notices span to the right edge, which is exactly where the overview sits.
   const bottomNoticeStyle = useMemo(
@@ -3762,6 +3760,7 @@ export function GraphScreen({
         onMoveShouldSetPanResponderCapture: (_e, g) =>
           Math.abs(g.dx) + Math.abs(g.dy) > 6 || g.numberActiveTouches === 2,
         onPanResponderGrant: (_event, gesture) => {
+          setIsPanning(false);
           clearWebSelection();
           onSwipeSuppressChange?.(true);
           panOrigin.current = capturePanGestureOrigin(
@@ -3775,6 +3774,7 @@ export function GraphScreen({
         onPanResponderMove: (e, g) => {
           const touches = e.nativeEvent.touches;
           if (touches && touches.length === 2) {
+            setIsPanning(false);
             const dx = touches[0].pageX - touches[1].pageX;
             const dy = touches[0].pageY - touches[1].pageY;
             const dist = Math.hypot(dx, dy);
@@ -3799,23 +3799,26 @@ export function GraphScreen({
             console.error('Graph pan received movement without a gesture origin.');
             return;
           }
+          setIsPanning(true);
           scheduleTransform(transformForPanGesture(panOrigin.current, g.dx, g.dy));
         },
         onPanResponderTerminationRequest: () => false,
         onPanResponderRelease: () => {
+          setIsPanning(false);
           panOrigin.current = null;
           pinchDist.current = 0;
           pinching.current = false;
           onSwipeSuppressChange?.(false);
         },
         onPanResponderTerminate: () => {
+          setIsPanning(false);
           panOrigin.current = null;
           pinchDist.current = 0;
           pinching.current = false;
           onSwipeSuppressChange?.(false);
         },
       }),
-    [applyTransform, clearWebSelection, onSwipeSuppressChange, zoomAt],
+    [scheduleTransform, clearWebSelection, onSwipeSuppressChange, zoomAt],
   );
 
   const treeShareModal = (
@@ -4385,16 +4388,6 @@ export function GraphScreen({
           </View>
         )}
         <TouchableOpacity
-          {...signalTarget('graph.control.collapse-all')}
-          accessibilityRole="button"
-          accessibilityLabel={treeIsExpanded ? 'Collapse the whole tree' : 'Expand the whole tree'}
-          style={[styles.ctrlBtn, styles.controlMenuBtn]}
-          onPress={toggleWholeTree}>
-          <Text style={[styles.ctrlBtnText, styles.settingsGearIcon]}>
-            {treeIsExpanded ? '⊟' : '⊞'}
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
           {...signalTarget('graph.control.menu')}
           accessibilityRole="button"
           accessibilityLabel={
@@ -4426,7 +4419,7 @@ export function GraphScreen({
                 />
               </>
             ) : (
-              <AppIcon name="settings" color={theme.text} />
+              <AppIcon name="graphSettings" color={theme.text} />
             )}
           </View>
         </TouchableOpacity>

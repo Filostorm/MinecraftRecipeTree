@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import test from 'node:test';
 import {
   MINIMAP_DIRECT_NODE_LIMIT,
@@ -11,6 +12,18 @@ import {
 } from './minimap.ts';
 
 const bounds = {minX: 0, minY: 0, maxX: 1000, maxY: 500};
+
+test('graph overview is transient during panning, not pinch zoom or idle', () => {
+  const source = readFileSync(new URL('./GraphScreen.tsx', import.meta.url), 'utf8');
+  assert.match(source, /isPanning && isActive && tab === 'graph' && !!graph && shouldShowMinimap/);
+  assert.match(source, /setIsPanning\(true\);\s*scheduleTransform\(transformForPanGesture/);
+  for (const callback of ['onPanResponderGrant', 'onPanResponderRelease', 'onPanResponderTerminate']) {
+    assert.match(source, new RegExp(`${callback}: [^\\n]+\\n\\s*setIsPanning\\(false\\);`));
+  }
+  assert.match(source, /if \(touches && touches.length === 2\) \{\s*setIsPanning\(false\);/);
+  assert.match(source, /if \(!isActive \|\| tab !== 'graph'\) setIsPanning\(false\);/);
+  assert.doesNotMatch(source, /graph\.control\.collapse-all|toggleWholeTree/);
+});
 
 function node(x, y, w = 40, h = 20) {
   return {id: `${x}:${y}`, kind: 'item', x, y, w, h, item: {id: 'i', key: 'k', ancestors: []}};

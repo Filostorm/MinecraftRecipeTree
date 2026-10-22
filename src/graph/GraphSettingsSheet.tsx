@@ -1,6 +1,8 @@
 import React from 'react';
-import {Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
-import {Modal} from '../ui/nativeUiScale';
+import {ScrollView, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {GraphSheetSurface} from './GraphSheetSurface';
+import {NativeUiScale} from '../ui/nativeUiScale';
+import {AppIcon} from '../components/AppIcon';
 import {signalTarget} from '../analytics/signal';
 import {theme} from '../theme';
 
@@ -16,12 +18,7 @@ export interface GraphSettingOption {
   onPress(): void;
 }
 
-/**
- * The graph options as an overlay rather than a bar across the canvas. On a phone those buttons
- * cost several rows of the tree permanently, to be reached a few times a session; here they cost
- * nothing until asked for. The overlay stays translucent so the tree is still visible behind the
- * choices being made about it.
- */
+/** Native presentation owns the slide animation, drag handle, and scroll-to-dismiss gesture. */
 export function GraphSettingsSheet({
   visible,
   options,
@@ -32,13 +29,13 @@ export function GraphSettingsSheet({
   onClose: () => void;
 }) {
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable
+    <GraphSheetSurface visible={visible} onClose={onClose}>
+      <ScrollView nestedScrollEnabled style={styles.scroll} contentContainerStyle={styles.content}>
+        <NativeUiScale>
+        <View
           accessibilityViewIsModal
           accessibilityLabel="Graph settings"
-          style={styles.panel}
-          onPress={() => {}}>
+          style={styles.panel}>
           <View style={styles.header}>
             <Text style={styles.title}>Graph settings</Text>
             <TouchableOpacity
@@ -47,10 +44,10 @@ export function GraphSettingsSheet({
               accessibilityLabel="Close graph settings"
               style={styles.closeButton}
               onPress={onClose}>
-              <Text style={styles.closeText}>✕</Text>
+              <AppIcon name="close" size={20} />
             </TouchableOpacity>
           </View>
-          <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
+          <View style={styles.options}>
             {options.map(option => (
               <TouchableOpacity
                 key={option.key}
@@ -73,35 +70,21 @@ export function GraphSettingsSheet({
                 </View>
                 {option.kind === 'toggle' && (
                   <View style={[styles.pill, option.active && styles.pillActive]}>
-                    <Text style={[styles.pillText, option.active && styles.pillTextActive]}>
-                      {option.active ? '✓' : '−'}
-                    </Text>
+                    <AppIcon name={option.active ? 'check' : 'minus'} size={16} color={option.active ? theme.accent : theme.textDim} />
                   </View>
                 )}
               </TouchableOpacity>
             ))}
-          </ScrollView>
-        </Pressable>
-      </Pressable>
-    </Modal>
+          </View>
+        </View>
+        </NativeUiScale>
+      </ScrollView>
+    </GraphSheetSurface>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    // Deliberately light: the tree stays legible behind the options that reshape it.
-    backgroundColor: 'rgba(5,8,12,0.45)',
-    justifyContent: 'flex-end',
-  },
   panel: {
-    maxHeight: '82%',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    borderWidth: 1,
-    borderBottomWidth: 0,
-    borderColor: theme.borderLight,
-    backgroundColor: 'rgba(23,29,38,0.93)',
     paddingHorizontal: 14,
     paddingTop: 12,
     paddingBottom: 22,
@@ -114,10 +97,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  closeText: {color: theme.textDim, fontSize: 17},
-  /** Capped by the panel's maxHeight, so the list has to be allowed to shrink to scroll. */
-  scroll: {flexShrink: 1, minHeight: 0, marginTop: 6},
-  content: {paddingBottom: 4, gap: 8},
+  scroll: {flex: 1},
+  content: {paddingBottom: 16},
+  options: {marginTop: 6, gap: 8},
   row: {
     minHeight: 56,
     flexDirection: 'row',
@@ -145,6 +127,4 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   pillActive: {borderColor: theme.accent},
-  pillText: {color: theme.textDim, fontSize: 11, fontWeight: '700'},
-  pillTextActive: {color: theme.accent},
 });
