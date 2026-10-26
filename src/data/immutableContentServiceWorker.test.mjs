@@ -6,12 +6,14 @@ import vm from 'node:vm';
 const ORIGIN = 'https://viewer.example';
 const PUBLICATION = 'a'.repeat(64);
 
-async function serviceWorkerHarness({networkResponses, failCachePut = false} = {}) {
+async function serviceWorkerHarness({networkResponses, failCachePut = false, beforePut, beforeKeys} = {}) {
   const source = await readFile(new URL('../../public/local-pack-sw.js', import.meta.url), 'utf8');
   const listeners = new Map();
   const errors = [];
   let networkRequests = 0;
   const cachesByName = new Map();
+  const background = [];
+  let cleanupScans = 0;
   function cacheFor(name) {
     let entries = cachesByName.get(name);
     if (!entries) {
@@ -23,12 +25,15 @@ async function serviceWorkerHarness({networkResponses, failCachePut = false} = {
         return entries.delete(typeof request === 'string' ? request : request.url);
       },
       async keys() {
+        cleanupScans += 1;
+        await beforeKeys?.();
         return [...entries.keys()].map(url => new Request(url));
       },
       async match(request) {
         return entries.get(typeof request === 'string' ? request : request.url)?.clone();
       },
       async put(request, response) {
+        await beforePut?.();
         if (failCachePut) throw new Error('The cache storage quota was exceeded.');
         entries.set(typeof request === 'string' ? request : request.url, response.clone());
       },
@@ -50,6 +55,9 @@ async function serviceWorkerHarness({networkResponses, failCachePut = false} = {
     Response,
     URL,
     Uint8Array,
+    AbortController,
+    setTimeout,
+    clearTimeout,
     caches: {async open(name) { return cacheFor(name); }},
     console: {
       error(...values) { errors.push(values); },
@@ -72,6 +80,7 @@ async function serviceWorkerHarness({networkResponses, failCachePut = false} = {
     listeners.get('fetch')({
       request: new Request(`${ORIGIN}${path}`),
       respondWith(value) { response = Promise.resolve(value); },
+      waitUntil(value) { background.push(value); },
     });
     return response;
   }
@@ -79,6 +88,8 @@ async function serviceWorkerHarness({networkResponses, failCachePut = false} = {
   return {
     dispatch,
     errors,
+    flush: () => Promise.all(background),
+    cleanupScans: () => cleanupScans,
     cacheSize: name => cachesByName.get(name)?.size ?? 0,
     networkRequests: () => networkRequests,
   };
@@ -125,6 +136,7 @@ test('a byte budget over the limit prunes the oldest entries first', async () =>
   });
   await harness.dispatch('/assets/one-aaa.js');
   await harness.dispatch('/assets/two-bbb.js');
+  await harness.flush();
   assert.equal(harness.cacheSize('minecraft-recipe-tree-immutable-content-v1'), 1);
 
   const stillFresh = await harness.dispatch('/assets/two-bbb.js');
@@ -135,7 +147,56 @@ test('a byte budget over the limit prunes the oldest entries first', async () =>
 test('a cache write failure still serves the network response', async () => {
   const harness = await serviceWorkerHarness({failCachePut: true});
   const response = await harness.dispatch('/assets/App-abc123.js');
+  await harness.flush();
   assert.equal(await response.text(), 'payload');
   assert.equal(harness.cacheSize('minecraft-recipe-tree-immutable-content-v1'), 0);
   assert.equal(harness.errors.length, 1);
+});
+
+test('content responses do not wait for cache storage, while concurrent reads stay coalesced', async () => {
+  const started = Promise.withResolvers();
+  const gate = Promise.withResolvers();
+  const harness = await serviceWorkerHarness({beforePut: () => {
+    started.resolve();
+    return gate.promise;
+  }});
+  let response;
+  const request = harness.dispatch('/assets/App-abc123.js').then(value => { response = value; });
+  try {
+    await started.promise;
+    await new Promise(setImmediate);
+    assert.equal(response?.status, 200);
+    assert.equal(await response.text(), 'payload');
+    const repeated = await harness.dispatch('/assets/App-abc123.js');
+    assert.equal(await repeated.text(), 'payload');
+    assert.equal(harness.networkRequests(), 1);
+  } finally {
+    gate.resolve();
+    await request;
+    await harness.flush();
+  }
+  assert.equal(harness.cacheSize('minecraft-recipe-tree-immutable-content-v1'), 1);
+});
+
+test('concurrent content downloads combine cache cleanup instead of rescanning per file', async () => {
+  const started = Promise.withResolvers();
+  const gate = Promise.withResolvers();
+  const harness = await serviceWorkerHarness({beforeKeys: () => {
+    started.resolve();
+    return gate.promise;
+  }});
+  await harness.dispatch('/assets/first-aaa.js');
+  await started.promise;
+  try {
+    await Promise.all(Array.from({length: 24}, (_, index) =>
+      harness.dispatch(`/assets/chunk-${index}.js`),
+    ));
+    await new Promise(setImmediate);
+    assert.equal(harness.cleanupScans(), 1);
+  } finally {
+    gate.resolve();
+    await harness.flush();
+  }
+  assert.equal(harness.cleanupScans(), 2);
+  assert.equal(harness.cacheSize('minecraft-recipe-tree-immutable-content-v1'), 25);
 });

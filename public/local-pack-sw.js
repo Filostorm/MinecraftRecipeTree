@@ -4,6 +4,7 @@ const HOSTED_IMAGE_PACK_CACHE = 'minecraft-recipe-tree-hosted-image-packs-v1';
 const MAX_PACK_BYTES = 1024 * 1024;
 const MAX_MEMORY_PACK_BYTES = 32 * 1024 * 1024;
 const MAX_PERSISTENT_PACKS = 192;
+const IMAGE_PACK_TIMEOUT_MS = 15_000;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const CORE_IMAGE_ROUTE =
   /^\/dataset\/publications\/([a-f0-9]{64})\/exports\/assets\/s\/(\d+)-(\d+)-(\d+)\.webp$/;
@@ -23,6 +24,7 @@ const PREVIEW_EXPORT_DOCUMENT_ROUTE =
   /^\/dataset\/preview-sets\/[a-f0-9]{64}\/(?!assets\/(?:s\/|pack-)).+$/;
 
 const pendingImmutableContent = new Map();
+const pendingMaintenance = new Map();
 
 const memoryPacks = new Map();
 const pendingPacks = new Map();
@@ -173,7 +175,34 @@ async function pruneImmutableContent(cache) {
   }
 }
 
-async function immutableContentResponse(request) {
+// Cache writes and eviction must not hold up visible content. Register the lifetime extension
+// synchronously, then let each response add its background jobs while it is being constructed.
+function respondWithBackground(event, buildResponse) {
+  const background = [];
+  const response = buildResponse(job => background.push(job));
+  event.respondWith(response);
+  event.waitUntil(response.then(() => Promise.all(background)));
+}
+
+// Concurrent downloads share cleanup passes instead of each scanning the entire cache.
+function maintainCache(name, cache, prune) {
+  const pending = pendingMaintenance.get(name);
+  if (pending) {
+    pending.dirty = true;
+    return pending.promise;
+  }
+  const state = {dirty: false, promise: null};
+  state.promise = (async () => {
+    do {
+      state.dirty = false;
+      await prune(cache);
+    } while (state.dirty);
+  })().finally(() => pendingMaintenance.delete(name));
+  pendingMaintenance.set(name, state);
+  return state.promise;
+}
+
+async function immutableContentResponse(request, keepAlive) {
   const cache = await caches.open(IMMUTABLE_CONTENT_CACHE);
   const cached = await cache.match(request);
   if (cached) return cached;
@@ -184,26 +213,29 @@ async function immutableContentResponse(request) {
     operation = (async () => {
       const response = await fetch(request, {cache: 'no-store'});
       if (response.ok) {
-        try {
-          await cache.put(request, response.clone());
-          await pruneImmutableContent(cache);
-        } catch (error) {
+        const saving = cache.put(request, response.clone()).then(
+          () => maintainCache(IMMUTABLE_CONTENT_CACHE, cache, pruneImmutableContent),
+        ).catch(error => {
           console.error('Immutable content could not be cached; it was still served.', {
             url: request.url,
             error,
           });
-        }
+        }).finally(() => pendingImmutableContent.delete(cacheKey));
+        keepAlive(saving);
+      } else {
+        pendingImmutableContent.delete(cacheKey);
       }
       return response;
-    })().finally(() => {
+    })().catch(error => {
       pendingImmutableContent.delete(cacheKey);
+      throw error;
     });
     pendingImmutableContent.set(cacheKey, operation);
   }
   return (await operation).clone();
 }
 
-async function loadPack(packUrl) {
+async function loadPack(packUrl, keepAlive) {
   const remembered = memoryPacks.get(packUrl);
   if (remembered) {
     rememberPack(packUrl, remembered);
@@ -231,13 +263,24 @@ async function loadPack(packUrl) {
       }
     }
 
-    const response = await fetch(packUrl, {
-      cache: 'no-store',
-      credentials: 'same-origin',
-      headers: {Accept: 'application/octet-stream'},
-    });
-    const pack = await validatedPack(response, packUrl);
-    await cache.put(
+    // Retrying an icon cannot recover while its shared pack promise is hung. Bound the actual
+    // download, including the body, so a later request can start a fresh verified download.
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), IMAGE_PACK_TIMEOUT_MS);
+    let pack;
+    try {
+      const response = await fetch(packUrl, {
+        cache: 'no-store',
+        credentials: 'same-origin',
+        headers: {Accept: 'application/octet-stream'},
+        signal: controller.signal,
+      });
+      pack = await validatedPack(response, packUrl);
+    } finally {
+      clearTimeout(timeout);
+    }
+    rememberPack(packUrl, pack);
+    const saving = cache.put(
       packUrl,
       new Response(pack.bytes.slice(), {
         status: 200,
@@ -250,9 +293,15 @@ async function loadPack(packUrl) {
           'X-Content-Type-Options': 'nosniff',
         },
       }),
-    );
-    await prunePersistentPacks(cache);
-    rememberPack(packUrl, pack);
+    ).then(
+      () => maintainCache(HOSTED_IMAGE_PACK_CACHE, cache, prunePersistentPacks),
+    ).catch(error => {
+      console.error('A verified image pack could not be cached; its images were still served.', {
+        packUrl,
+        error,
+      });
+    });
+    keepAlive(saving);
     return pack;
   })().finally(() => {
     pendingPacks.delete(packUrl);
@@ -261,9 +310,9 @@ async function loadPack(packUrl) {
   return operation;
 }
 
-async function packedImageResponse(coordinate) {
+async function packedImageResponse(coordinate, keepAlive) {
   try {
-    const pack = await loadPack(coordinate.packUrl);
+    const pack = await loadPack(coordinate.packUrl, keepAlive);
     if (coordinate.offset + coordinate.length > pack.bytes.byteLength) {
       throw new Error(`Image coordinate exceeds its verified pack at ${coordinate.packUrl}.`);
     }
@@ -304,11 +353,11 @@ self.addEventListener('fetch', event => {
 
   const coordinate = packedCoordinate(url);
   if (coordinate) {
-    event.respondWith(packedImageResponse(coordinate));
+    respondWithBackground(event, keepAlive => packedImageResponse(coordinate, keepAlive));
     return;
   }
   if (isImmutableContentRequest(url)) {
-    event.respondWith(immutableContentResponse(event.request));
+    respondWithBackground(event, keepAlive => immutableContentResponse(event.request, keepAlive));
     return;
   }
   if (!url.pathname.startsWith(LOCAL_PACK_ROUTE_PREFIX)) return;

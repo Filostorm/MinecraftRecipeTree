@@ -60,7 +60,7 @@ export function ItemsScreen({
     });
     return () => request.abort();
   }, [data.descriptor]);
-  const {width} = useWindowDimensions();
+  const {width, height} = useWindowDimensions();
 
   const catalogItems = useMemo(
     () => data.items.filter(isItemCatalogEligible),
@@ -205,6 +205,9 @@ export function ItemsScreen({
     1,
     Math.min(12, Math.floor(width / (CELL_W * contentZoom))),
   );
+  // FlatList counts rows when numColumns is set. Sixty rows eagerly loaded hundreds of icons.
+  // Use a minimum cell height (icon, padding, one label line) to cover even a tall viewport.
+  const initialRows = Math.max(1, Math.ceil(height / (84 * contentZoom)) + 1);
   const compactControls = width < 640;
   const scaledInterfaceStyle =
     Platform.OS === 'web'
@@ -264,9 +267,9 @@ export function ItemsScreen({
         data={shown}
         numColumns={columns}
         keyExtractor={i => i.k}
-        windowSize={7}
-        initialNumToRender={60}
-        maxToRenderPerBatch={60}
+        windowSize={3}
+        initialNumToRender={initialRows}
+        maxToRenderPerBatch={4}
         contentContainerStyle={styles.gridContent}
         ListEmptyComponent={
           <View style={styles.emptyState}>
