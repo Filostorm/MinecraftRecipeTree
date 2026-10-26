@@ -18,6 +18,7 @@ import {
 import {SafeAreaProvider, SafeAreaView, initialWindowMetrics} from './src/ui/safeArea';
 import {ContentZoomControl} from './src/components/ContentZoomControl';
 import {DatasetSwitcher} from './src/components/DatasetSwitcher';
+import {ImportPackLink} from './src/components/ImportPackLink';
 import {BugIcon} from './src/components/BugIcon';
 import type {GitHubIssueKind, IssueReportContext} from './src/components/githubIssues';
 import {ItemsScreen} from './src/components/ItemsScreen';
@@ -841,8 +842,8 @@ function Shell({
           ]}
           accessibilityRole="menu">
           {(compactHeader || Platform.OS !== 'web') && (
-            <TouchableOpacity
-              {...signalTarget(Platform.OS === 'web' ? 'header.import-pack' : 'header.import-tree')}
+            <ImportPackLink
+              metricsId={Platform.OS === 'web' ? 'header.import-pack' : 'header.import-tree'}
               style={[styles.infoMenuItem, Platform.OS !== 'web' && styles.nativeInfoMenuItem]}
               onPress={() => {
                 lightImpactFeedback();
@@ -850,11 +851,10 @@ function Shell({
                 if (Platform.OS === 'web') onImportPack();
                 else openCraftingTreeImport();
               }}
-              accessibilityRole="button"
               accessibilityLabel={Platform.OS === 'web' ? 'Import a local modpack exporter ZIP' : 'Import a crafting tree from JSON'}>
               <Text style={styles.infoMenuItemIcon}>⇧</Text>
               <Text style={styles.infoMenuItemText}>{Platform.OS === 'web' ? 'Import pack' : 'Import tree'}</Text>
-            </TouchableOpacity>
+            </ImportPackLink>
           )}
           {Platform.OS !== 'web' && recipeStages.catalog.stages.length > 0 && (
             <TouchableOpacity

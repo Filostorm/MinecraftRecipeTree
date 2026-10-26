@@ -14,6 +14,7 @@ import type {Manifest} from '../types';
 import {DisclosureChevron} from './DisclosureChevron';
 import {DatasetDisclaimer} from './DatasetDisclaimer';
 import {PackIcon} from './DatasetPicker';
+import {ImportPackLink} from './ImportPackLink';
 
 type CatalogStatus = 'loading' | 'ready' | 'error';
 
@@ -167,16 +168,15 @@ export function DatasetSwitcher({
       </TouchableOpacity>
       {showImportMenu && (
         <View style={styles.importDropdown} accessibilityRole="menu">
-          <TouchableOpacity
+          <ImportPackLink
             style={styles.importDropdownItem}
             onPress={() => {
               setShowImportMenu(false);
               onImportPack();
             }}
-            accessibilityRole="button"
             accessibilityLabel="Import a local modpack exporter ZIP">
             <Text style={styles.importDropdownText}>Import pack</Text>
-          </TouchableOpacity>
+          </ImportPackLink>
           <TouchableOpacity
             style={[styles.importDropdownItem, !onImportTree && styles.disabled]}
             disabled={!onImportTree}
@@ -266,12 +266,15 @@ const styles = StyleSheet.create({
   barNative: {paddingVertical: 7, zIndex: 100, overflow: 'visible'},
   fullRows: {gap: 7},
   fullTitleRow: {
+    // Keep its dropdown above the following control row, including hit testing.
+    zIndex: 2,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     minHeight: 26,
   },
   fullControlRow: {
+    zIndex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
