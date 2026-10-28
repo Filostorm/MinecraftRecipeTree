@@ -12,6 +12,10 @@ export class ExportHttpError extends Error {
   }
 }
 
+export function isPublicationConflict(error: unknown): error is ExportHttpError {
+  return error instanceof ExportHttpError && error.status === 409;
+}
+
 /** Bound the whole transfer, not just response headers, so a retry starts fresh work. */
 export async function fetchDatasetText(
   url: string,

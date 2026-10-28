@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {ExportHttpError, fetchDatasetText, loadCachedDocument} from './datasetRequest.ts';
+import {ExportHttpError, fetchDatasetText, isPublicationConflict, loadCachedDocument} from './datasetRequest.ts';
+
+test('ordinary recipe failures remain local; only an identity conflict invalidates the pack', () => {
+  assert.equal(isPublicationConflict(new ExportHttpError(409, '/dataset')), true);
+  for (const error of [new ExportHttpError(503, '/recipe'), new ExportHttpError(404, '/recipe'),
+    new Error('Request timed out'), new Error('Invalid recipe JSON')]) {
+    assert.equal(isPublicationConflict(error), false);
+  }
+});
 
 test('concurrent document reads share work, and a rejected read can be retried', async () => {
   const cache = new Map();

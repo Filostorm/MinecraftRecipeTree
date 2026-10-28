@@ -75,7 +75,7 @@ import {
   writeCachedPublishedDocument,
 } from './publishedDatasetCache';
 import {localDatasetVisualUri} from './localDatasetVisual';
-import {ExportHttpError, fetchDatasetText, loadCachedDocument, RECIPE_DOCUMENT_TIMEOUT_MS} from './datasetRequest';
+import {ExportHttpError, fetchDatasetText, isPublicationConflict, loadCachedDocument, RECIPE_DOCUMENT_TIMEOUT_MS} from './datasetRequest';
 
 const SHARDED_JSON_FORMAT = 'mrt-sharded-json-v1';
 const MAX_SHARD_BYTES = MAX_NETWORK_DOCUMENT_BYTES;
@@ -905,7 +905,7 @@ function exportLoadErrorState(
   error: unknown,
   base: string,
 ): Extract<LoadState, {status: 'error'}> {
-  if (error instanceof ExportHttpError && error.status === 409) {
+  if (isPublicationConflict(error)) {
     return {
       status: 'error',
       kind: 'stale',
@@ -1798,7 +1798,9 @@ export function DataProvider({
                 references: refs.slice(0, 40),
                 error,
               });
-              if (alive) setState(exportLoadErrorState(error, base));
+              // A failed branch must remain retryable without unmounting the whole pack.
+              // Only a rejected publication identity invalidates every loaded recipe.
+              if (alive && isPublicationConflict(error)) setState(exportLoadErrorState(error, base));
               throw error;
             }),
         };
