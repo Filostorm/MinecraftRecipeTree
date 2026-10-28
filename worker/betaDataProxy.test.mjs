@@ -97,6 +97,24 @@ test('beta data proxy refuses mutations without contacting production', async ()
   assert.equal(response.headers.get('allow'), 'GET, HEAD');
 });
 
+test('public recovery reads retain revalidation and cancellation without forwarding credentials', async () => {
+  const controller = new AbortController();
+  const request = new Request('https://beta.example/dataset/publications/abc/exports/items.json?dataset=abc', {
+    headers: {'cache-control': 'no-store', cookie: 'private=1', authorization: 'Bearer private'},
+    signal: controller.signal,
+  });
+  let upstream;
+  await proxyBetaDatasetRequest(request, {BETA_DATA_ORIGIN: PRODUCTION_ORIGIN}, new URL(request.url), async value => {
+    upstream = value;
+    return new Response('public dataset');
+  });
+  assert.equal(upstream.headers.get('cache-control'), 'no-cache');
+  assert.equal(upstream.headers.get('cookie'), null);
+  assert.equal(upstream.headers.get('authorization'), null);
+  controller.abort();
+  assert.equal(upstream.signal.aborted, true);
+});
+
 test('beta catalog responses are locally reframed after an upstream Worker', async () => {
   const request = new Request('https://beta.example/api/datasets');
   const response = await proxyBetaDatasetRequest(

@@ -111,6 +111,11 @@ function forwardedHeaders(request: Request): Headers {
     const value = request.headers.get(name);
     if (value !== null) headers.set(name, value);
   }
+  // Preserve an explicit recovery read across this public-only hop. Otherwise a retry at
+  // beta can fetch the same stalled production cache entry despite the client revalidating.
+  if (/\bno-cache\b|\bno-store\b/.test(request.headers.get('cache-control') ?? '')) {
+    headers.set('cache-control', 'no-cache');
+  }
   return headers;
 }
 
@@ -146,6 +151,7 @@ export async function proxyBetaDatasetRequest(
         method: request.method,
         headers: forwardedHeaders(request),
         redirect: 'manual',
+        signal: request.signal,
       }),
     );
   } catch (error) {
