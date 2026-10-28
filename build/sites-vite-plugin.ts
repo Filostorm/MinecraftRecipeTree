@@ -63,6 +63,9 @@ function staticSecurityHeaders(connectSrcOrigins: readonly string[]): string {
 /assets/*
   Cache-Control: public, max-age=31536000, immutable
 
+/app-version.json
+  Cache-Control: no-cache, no-store, must-revalidate
+
 `;
 }
 

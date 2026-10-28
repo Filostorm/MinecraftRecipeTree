@@ -1,8 +1,10 @@
 import vinext from 'vinext';
+import {randomUUID} from 'node:crypto';
 import {defineConfig} from 'vite';
 import hostingConfig from './.openai/hosting.json';
 import {sites} from './build/sites-vite-plugin';
 import {SUPABASE_PROJECT_URL} from './src/account/supabaseConfig';
+import {appVersionPlugin} from './build/app-version-plugin';
 
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === 'seatbelt';
 const isCloudflareBeta = process.env.MRT_DEPLOY_TARGET === 'cloudflare-beta';
@@ -40,6 +42,7 @@ export default defineConfig(async ({command}) => {
   process.env.MINIFLARE_REGISTRY_PATH ??= '.wrangler/registry';
 
   const isLocalDev = command === 'serve' && !isCloudflareBeta && !isCloudflareProduction;
+  const applicationBuildId = randomUUID();
 
   const {cloudflare} = await import('@cloudflare/vite-plugin');
 
@@ -57,6 +60,7 @@ export default defineConfig(async ({command}) => {
       ? {watch: {useFsEvents: false, usePolling: true}}
       : undefined,
     plugins: [
+      appVersionPlugin(applicationBuildId),
       vinext(),
       sites({connectSrcOrigins: [SUPABASE_URL]}),
       cloudflare({
@@ -164,6 +168,7 @@ export default defineConfig(async ({command}) => {
     ],
     define: {
       __DEV__: JSON.stringify(false),
+      __MRT_APP_BUILD_ID__: JSON.stringify(applicationBuildId),
       __MRT_SIGNAL_ENABLED__: JSON.stringify(!isCloudflareBeta && !isLocalDev && !isLocalDataOrigin),
     },
   };

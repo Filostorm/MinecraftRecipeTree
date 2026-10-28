@@ -26,6 +26,14 @@ function diagnosticDetail(error: unknown): string {
 
 export function graphRenderRecovery(error: unknown): GraphRenderRecovery {
   const detail = searchableError(error);
+  if (error instanceof Error && error.name === 'AppUpdateAvailableError') {
+    return {
+      kind: 'bundle',
+      title: 'Recipe Tree update available',
+      message: 'Reload to open the graph with the current site version. Your saved trees will stay available.',
+      reloadPage: true,
+    };
+  }
   if (
     /dynamically imported module|failed to fetch.*module|chunkloaderror|loading chunk|importing a module script failed/u.test(
       detail,
@@ -33,9 +41,9 @@ export function graphRenderRecovery(error: unknown): GraphRenderRecovery {
   ) {
     return {
       kind: 'bundle',
-      title: 'Recipe Tree was updated',
+      title: 'Part of Recipe Tree could not load',
       message:
-        'This tab still has an older part of the site open. Reload to use the current Recipe Tree version; your saved trees will stay available.',
+        'A required site file could not be downloaded. This can happen after an update or a network interruption. Reload to retry; your saved trees will stay available.',
       detail: diagnosticDetail(error),
       reloadPage: true,
     };

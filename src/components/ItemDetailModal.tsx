@@ -468,6 +468,8 @@ function RefsList({
     loadCollapsedRecipeCategories,
   );
   const [recipesByRef, setRecipesByRef] = useState<Map<string, Recipe>>(() => new Map());
+  const [recipeLoadError, setRecipeLoadError] = useState(false);
+  const [recipeLoadAttempt, setRecipeLoadAttempt] = useState(0);
   const [availableCardWidth, setAvailableCardWidth] = useState<number | null>(null);
   const isolatedRecipeStyle =
     Platform.OS === 'web'
@@ -683,6 +685,7 @@ function RefsList({
     const missing = refsToLoad.filter(ref => !recipeForRef(ref));
     if (missing.length === 0) return;
     let alive = true;
+    setRecipeLoadError(false);
     (async () => {
       try {
         const loaded = await data.getRecipes(missing);
@@ -694,12 +697,13 @@ function RefsList({
         });
       } catch (error) {
         console.error('The visible recipe references could not be displayed.', error);
+        if (alive) setRecipeLoadError(true);
       }
     })();
     return () => {
       alive = false;
     };
-  }, [refsToLoad, recipeForRef, data]);
+  }, [refsToLoad, recipeForRef, data, recipeLoadAttempt]);
 
   const showRecipeFilters =
     informational ||
@@ -866,7 +870,19 @@ function RefsList({
           {informational ? 'No informational pages are available.' : 'No recipe types are available.'}
         </Text>
       ) : null}
-      {loadingVisiblePage ? (
+      {recipeLoadError && (
+        <View style={styles.lookupActions} accessibilityRole="alert">
+          <Text style={styles.indexError}>Recipes could not load.</Text>
+          <TouchableOpacity
+            style={styles.lookupSecondaryButton}
+            accessibilityRole="button"
+            accessibilityLabel="Retry loading recipes"
+            onPress={() => setRecipeLoadAttempt(attempt => attempt + 1)}>
+            <Text style={styles.lookupSecondaryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+      {loadingVisiblePage && !recipeLoadError ? (
         <Text style={styles.loadingText}>
           {informational ? 'loading informational pages…' : 'classifying recipe variants…'}
         </Text>
@@ -970,7 +986,9 @@ function RefsList({
                           measuring {category.title} layout…
                         </Text>
                       ) : (
-                        <Text style={styles.loadingText}>loading {category.title}…</Text>
+                        <Text style={styles.loadingText}>
+                          {recipeLoadError ? 'Recipe unavailable' : `loading ${category.title}…`}
+                        </Text>
                       )}
                     </View>
                   );

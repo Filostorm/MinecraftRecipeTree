@@ -5,6 +5,7 @@ const MAX_PACK_BYTES = 1024 * 1024;
 const MAX_MEMORY_PACK_BYTES = 32 * 1024 * 1024;
 const MAX_PERSISTENT_PACKS = 192;
 const IMAGE_PACK_TIMEOUT_MS = 15_000;
+const IMMUTABLE_REQUEST_TIMEOUT_MS = 60_000;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const CORE_IMAGE_ROUTE =
   /^\/dataset\/publications\/([a-f0-9]{64})\/exports\/assets\/s\/(\d+)-(\d+)-(\d+)\.webp$/;
@@ -204,30 +205,57 @@ function maintainCache(name, cache, prune) {
 
 async function immutableContentResponse(request, keepAlive) {
   const cache = await caches.open(IMMUTABLE_CONTENT_CACHE);
-  const cached = await cache.match(request);
+  const revalidate = request.cache === 'reload' ||
+    /\bno-cache\b/.test(request.headers.get('cache-control') ?? '');
+  const cached = revalidate ? undefined : await cache.match(request);
   if (cached) return cached;
 
   const cacheKey = request.url;
-  let operation = pendingImmutableContent.get(cacheKey);
+  // A manual retry must not clone the same half-downloaded response again.
+  let operation = revalidate ? undefined : pendingImmutableContent.get(cacheKey);
+  const release = () => {
+    if (pendingImmutableContent.get(cacheKey) === operation) pendingImmutableContent.delete(cacheKey);
+  };
   if (!operation) {
     operation = (async () => {
-      const response = await fetch(request, {cache: 'no-store'});
-      if (response.ok) {
-        const saving = cache.put(request, response.clone()).then(
-          () => maintainCache(IMMUTABLE_CONTENT_CACHE, cache, pruneImmutableContent),
-        ).catch(error => {
-          console.error('Immutable content could not be cached; it was still served.', {
-            url: request.url,
-            error,
+      // A stalled shared request must not poison every subsequent recipe retry.
+      const controller = new AbortController();
+      const timer = setTimeout(() => {
+        console.error('Immutable content download or cache write timed out.', {url: request.url});
+        controller.abort();
+        release();
+      }, IMMUTABLE_REQUEST_TIMEOUT_MS);
+      try {
+        const response = await fetch(request, {cache: 'no-store', signal: controller.signal});
+        if (response.ok) {
+          const saving = cache.put(request, response.clone()).finally(() => {
+            // put consumes the body. Header arrival alone does not finish a download.
+            clearTimeout(timer);
+            release();
+          }).then(
+            () => maintainCache(IMMUTABLE_CONTENT_CACHE, cache, pruneImmutableContent),
+          ).catch(error => {
+            console.error('Immutable content download or cache write failed.', {
+              url: request.url,
+              error,
+            });
           });
-        }).finally(() => pendingImmutableContent.delete(cacheKey));
-        keepAlive(saving);
-      } else {
-        pendingImmutableContent.delete(cacheKey);
+          keepAlive(saving);
+        } else {
+          clearTimeout(timer);
+          release();
+        }
+        return response;
+      } catch (error) {
+        clearTimeout(timer);
+        throw error;
       }
-      return response;
     })().catch(error => {
-      pendingImmutableContent.delete(cacheKey);
+      release();
+      console.error('Immutable content request failed; a new request can retry.', {
+        url: request.url,
+        error,
+      });
       throw error;
     });
     pendingImmutableContent.set(cacheKey, operation);

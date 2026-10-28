@@ -2,6 +2,15 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {graphRenderRecovery} from './graphRenderError.ts';
 
+test('a verified app update requests a reload without claiming a recipe failed', () => {
+  const error = new Error('New build');
+  error.name = 'AppUpdateAvailableError';
+  const recovery = graphRenderRecovery(error);
+  assert.equal(recovery.reloadPage, true);
+  assert.equal(recovery.title, 'Recipe Tree update available');
+  assert.match(recovery.message, /saved trees will stay available/);
+});
+
 test('classifies browser resource exhaustion separately from graph data failures', () => {
   const recovery = graphRenderRecovery(new RangeError('Maximum call stack size exceeded'));
   assert.equal(recovery.kind, 'resources');
@@ -14,7 +23,8 @@ test('recovers a stale lazy graph bundle by reloading the current site', () => {
   );
   assert.equal(recovery.kind, 'bundle');
   assert.equal(recovery.reloadPage, true);
-  assert.match(recovery.title, /updated/u);
+  assert.match(recovery.title, /could not load/u);
+  assert.match(recovery.message, /network interruption/u);
 });
 
 test('classifies invalid item imagery separately from layout failures', () => {

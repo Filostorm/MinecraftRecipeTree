@@ -75,6 +75,7 @@ import {
   writeCachedPublishedDocument,
 } from './publishedDatasetCache';
 import {localDatasetVisualUri} from './localDatasetVisual';
+import {ExportHttpError, fetchDatasetText, loadCachedDocument, RECIPE_DOCUMENT_TIMEOUT_MS} from './datasetRequest';
 
 const SHARDED_JSON_FORMAT = 'mrt-sharded-json-v1';
 const MAX_SHARD_BYTES = MAX_NETWORK_DOCUMENT_BYTES;
@@ -232,15 +233,6 @@ function supplementCustomDeathDrops(exportedMobs: Mob[]): Mob[] {
   });
 }
 
-class ExportHttpError extends Error {
-  constructor(
-    readonly status: number,
-    url: string,
-  ) {
-    super(`HTTP ${status} for ${url}`);
-  }
-}
-
 function parseExportJson<T>(text: string, url: string): T {
   try {
     return JSON.parse(text) as T;
@@ -261,9 +253,7 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
     const cached = await readCachedPublishedDocument(url);
     if (cached !== null) return parseExportJson<T>(cached.text, url);
   }
-  const res = await fetch(url, init);
-  if (!res.ok) throw new ExportHttpError(res.status, url);
-  const text = await res.text();
+  const text = await fetchDatasetText(url, init);
   const parsed = parseExportJson<T>(text, url);
   if (!bypassCache) void writeCachedPublishedDocument(url, text);
   return parsed;
@@ -272,6 +262,7 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 async function fetchBoundedJson(
   url: string,
   expectedBytes?: number,
+  timeoutMs?: number,
 ): Promise<BoundedJsonDocument> {
   const local = await readLocalDatasetDocument(url);
   let source: string;
@@ -285,9 +276,7 @@ async function fetchBoundedJson(
       source = cached.text;
       bytes = cached.bytes;
     } else {
-      const res = await fetch(url);
-      if (!res.ok) throw new ExportHttpError(res.status, url);
-      source = await res.text();
+      source = await fetchDatasetText(url, undefined, timeoutMs);
       bytes = UTF8_ENCODER.encode(source).byteLength;
       void writeCachedPublishedDocument(url, source);
     }
@@ -1330,69 +1319,50 @@ export function DataProvider({
           }
         });
 
-        const getRecipeDocument = (catIdx: number): Promise<RecipeDocument> => {
-          let promise = recipeDocumentCache.current.get(catIdx);
-          if (promise) return promise;
-
-          const category = categories[catIdx];
-          if (!category) {
-            promise = Promise.reject(
-              new Error(`Recipe index requested unknown category ${catIdx}.`),
-            );
-          } else if (!isNonnegativeSafeInteger(category.count)) {
-            promise = Promise.reject(
-              new Error(`Recipe category ${category.id} has an invalid declared count.`),
-            );
-          } else {
+        const getRecipeDocument = (catIdx: number): Promise<RecipeDocument> =>
+          loadCachedDocument(recipeDocumentCache.current, catIdx, async () => {
+            const category = categories[catIdx];
+            if (!category) {
+              throw new Error(`Recipe index requested unknown category ${catIdx}.`);
+            }
+            if (!isNonnegativeSafeInteger(category.count)) {
+              throw new Error(`Recipe category ${category.id} has an invalid declared count.`);
+            }
             const recipesUrl = versionExportUrl(
               `${base}/${category.dir}/recipes.json`,
               datasetIdentity,
             );
-            promise = fetchBoundedJson(recipesUrl).then(async ({value, bytes}) => {
-              const descriptor = parseShardedDescriptor(value, 'array', recipesUrl);
-              if (descriptor) {
-                if (descriptor.count !== category.count) {
-                  throw new Error(
-                    `Recipe descriptor ${recipesUrl} contains ${descriptor.count} entries; ` +
-                      `category metadata declares ${category.count}.`,
-                  );
-                }
-                return {kind: 'sharded', descriptor};
-              }
-              if (!Array.isArray(value)) {
+            const {value, bytes} = await fetchBoundedJson(recipesUrl, undefined, RECIPE_DOCUMENT_TIMEOUT_MS);
+            const descriptor = parseShardedDescriptor(value, 'array', recipesUrl);
+            if (descriptor) {
+              if (descriptor.count !== category.count) {
                 throw new Error(
-                  `Invalid export document ${recipesUrl}: expected a legacy recipe array or ` +
-                    `a sharded-array descriptor.`,
+                  `Recipe descriptor ${recipesUrl} contains ${descriptor.count} entries; ` +
+                    `category metadata declares ${category.count}.`,
                 );
               }
-              const recipes = await applyLegacyRecipeStructures(
-                requireRecipeArray(value, category.count, recipesUrl),
-                datasetIdentity,
-                category,
+              return {kind: 'sharded', descriptor};
+            }
+            if (!Array.isArray(value)) {
+              throw new Error(
+                `Invalid export document ${recipesUrl}: expected a legacy recipe array or ` +
+                  `a sharded-array descriptor.`,
               );
-              if (structuredDataOnly) {
-                requireStructuredDataOnlyRecipes(recipes, recipesUrl);
-              }
-              const cacheKey = `${datasetIdentity}:inline:${category.dir}`;
-              // Inline documents are the explicit small-document schema. Retain them in the same
-              // bounded cache as shards so visiting many categories cannot accumulate every list.
-              void recipePartCache.current.getOrLoad(
-                cacheKey,
-                bytes,
-                () => Promise.resolve(recipes),
-              );
-              return {
-                kind: 'inline',
-                url: recipesUrl,
-                cacheKey,
-                bytes,
-                count: category.count,
-              };
-            });
-          }
-          recipeDocumentCache.current.set(catIdx, promise);
-          return promise;
-        };
+            }
+            const recipes = await applyLegacyRecipeStructures(
+              requireRecipeArray(value, category.count, recipesUrl),
+              datasetIdentity,
+              category,
+            );
+            if (structuredDataOnly) {
+              requireStructuredDataOnlyRecipes(recipes, recipesUrl);
+            }
+            const cacheKey = `${datasetIdentity}:inline:${category.dir}`;
+            // Inline documents are the explicit small-document schema. Retain them in the same
+            // bounded cache as shards so visiting many categories cannot accumulate every list.
+            void recipePartCache.current.getOrLoad(cacheKey, bytes, () => Promise.resolve(recipes));
+            return {kind: 'inline', url: recipesUrl, cacheKey, bytes, count: category.count};
+          });
 
         const getCategoryRecipeSelection = async (
           catIdx: number,
@@ -1405,7 +1375,7 @@ export function DataProvider({
               document.cacheKey,
               document.bytes,
               async () => {
-                const {value} = await fetchBoundedJson(document.url, document.bytes);
+                const {value} = await fetchBoundedJson(document.url, document.bytes, RECIPE_DOCUMENT_TIMEOUT_MS);
                 const recipes = requireRecipeArray(value, document.count, document.url);
                 return structuredDataOnly
                   ? requireStructuredDataOnlyRecipes(recipes, document.url)
@@ -1450,7 +1420,7 @@ export function DataProvider({
                 `${datasetIdentity}:${part.path}`,
                 part.bytes,
                 async () => {
-                  const {value} = await fetchBoundedJson(shardUrl, part.bytes);
+                  const {value} = await fetchBoundedJson(shardUrl, part.bytes, RECIPE_DOCUMENT_TIMEOUT_MS);
                   if (
                     !Array.isArray(value) ||
                     value.length !== part.count ||
@@ -1504,7 +1474,7 @@ export function DataProvider({
           return previewCategoryCache.current.getOrLoad(
             `${datasetIdentity}:${path}`,
             PREVIEW_MAX_CATEGORY_BYTES,
-            () => fetchBoundedJson(url).then(({value, bytes}) => {
+            () => fetchBoundedJson(url, undefined, RECIPE_DOCUMENT_TIMEOUT_MS).then(({value, bytes}) => {
               if (bytes > PREVIEW_MAX_CATEGORY_BYTES) {
                 throw new Error(
                   `Recipe-preview category ${url} is ${bytes} bytes, above the ` +
@@ -1541,7 +1511,7 @@ export function DataProvider({
             previewManifest.assetSetId,
           );
           return previewPartCache.current.getOrLoad(cacheKey, bytes, () =>
-            fetchBoundedJson(url, bytes)
+            fetchBoundedJson(url, bytes, RECIPE_DOCUMENT_TIMEOUT_MS)
               .then(({value}) =>
                 requirePreviewEntries(value, count, url, previewManifest.packs),
               )

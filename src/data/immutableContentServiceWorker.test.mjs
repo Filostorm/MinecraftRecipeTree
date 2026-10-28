@@ -14,6 +14,8 @@ async function serviceWorkerHarness({networkResponses, failCachePut = false, bef
   const cachesByName = new Map();
   const background = [];
   let cleanupScans = 0;
+  const timers = new Map();
+  let nextTimer = 0;
   function cacheFor(name) {
     let entries = cachesByName.get(name);
     if (!entries) {
@@ -33,7 +35,7 @@ async function serviceWorkerHarness({networkResponses, failCachePut = false, bef
         return entries.get(typeof request === 'string' ? request : request.url)?.clone();
       },
       async put(request, response) {
-        await beforePut?.();
+        await beforePut?.(response.clone());
         if (failCachePut) throw new Error('The cache storage quota was exceeded.');
         entries.set(typeof request === 'string' ? request : request.url, response.clone());
       },
@@ -56,16 +58,16 @@ async function serviceWorkerHarness({networkResponses, failCachePut = false, bef
     URL,
     Uint8Array,
     AbortController,
-    setTimeout,
-    clearTimeout,
+    setTimeout(callback) {const id = ++nextTimer; timers.set(id, callback); return id;},
+    clearTimeout(id) {timers.delete(id);},
     caches: {async open(name) { return cacheFor(name); }},
     console: {
       error(...values) { errors.push(values); },
     },
-    fetch: async request => {
+    fetch: async (request, options) => {
       networkRequests += 1;
       const url = typeof request === 'string' ? request : request.url;
-      const respond = networkResponses?.(url);
+      const respond = networkResponses?.(url, options, networkRequests);
       if (respond) return respond;
       return new Response('payload', {
         status: 200,
@@ -75,12 +77,12 @@ async function serviceWorkerHarness({networkResponses, failCachePut = false, bef
     self: worker,
   });
 
-  async function dispatch(path) {
+  async function dispatch(path, init) {
     let response;
     listeners.get('fetch')({
-      request: new Request(`${ORIGIN}${path}`),
+      request: new Request(`${ORIGIN}${path}`, init),
       respondWith(value) { response = Promise.resolve(value); },
-      waitUntil(value) { background.push(value); },
+      waitUntil(value) { background.push(value); void value.catch(() => {}); },
     });
     return response;
   }
@@ -92,8 +94,69 @@ async function serviceWorkerHarness({networkResponses, failCachePut = false, bef
     cleanupScans: () => cleanupScans,
     cacheSize: name => cachesByName.get(name)?.size ?? 0,
     networkRequests: () => networkRequests,
+    expireDownloads() {for (const callback of [...timers.values()]) callback();},
+    activeTimers: () => timers.size,
   };
 }
+
+test('a stalled shared document request expires and a retry creates a new network request', async () => {
+  const started = Promise.withResolvers();
+  const harness = await serviceWorkerHarness({networkResponses: (_url, options, attempt) => {
+    if (attempt !== 1) return new Response('recipe');
+    started.resolve();
+    return new Promise((_resolve, reject) => {
+      options.signal.addEventListener('abort', () => reject(options.signal.reason), {once: true});
+    });
+  }});
+  const path = `/dataset/publications/${PUBLICATION}/exports/recipes/example/recipes.json?dataset=${PUBLICATION}`;
+  const stalled = harness.dispatch(path);
+  const rejected = assert.rejects(stalled, /abort/i);
+  await started.promise;
+  harness.expireDownloads();
+  await rejected;
+  assert.equal(harness.activeTimers(), 0);
+  const retried = await harness.dispatch(path);
+  assert.equal(await retried.text(), 'recipe');
+  assert.equal(harness.networkRequests(), 2);
+  assert.equal(harness.errors.length, 2);
+  assert.ok(harness.errors.some(entry => /new request can retry/.test(entry[0])));
+});
+
+test('a revalidated retry does not reuse a response stalled after HTTP headers', async () => {
+  const harness = await serviceWorkerHarness({
+    beforePut: response => response.arrayBuffer(),
+    networkResponses: (_url, options, attempt) => {
+      if (attempt !== 1) return new Response('fresh recipe');
+      return new Response(new ReadableStream({start(controller) {
+        options.signal.addEventListener('abort', () => controller.error(options.signal.reason), {once: true});
+        controller.enqueue(new TextEncoder().encode('partial'));
+      }}));
+    },
+  });
+  const path = `/dataset/publications/${PUBLICATION}/exports/recipes/example/recipes.json?dataset=${PUBLICATION}`;
+  const partial = await harness.dispatch(path);
+  const rejected = assert.rejects(partial.text(), /abort/i);
+  const retried = await harness.dispatch(path, {cache: 'reload', headers: {'Cache-Control': 'no-cache'}});
+  assert.equal(await retried.text(), 'fresh recipe');
+  assert.equal(harness.networkRequests(), 2);
+  harness.expireDownloads();
+  await rejected;
+  await harness.flush();
+  assert.equal(harness.activeTimers(), 0);
+  assert.equal(await (await harness.dispatch(path)).text(), 'fresh recipe');
+  assert.equal(harness.networkRequests(), 2);
+});
+
+test('an explicit reload bypasses the immutable browser cache', async () => {
+  const harness = await serviceWorkerHarness({networkResponses: (_url, _options, attempt) =>
+    new Response(attempt === 1 ? 'old response' : 'fresh response'),
+  });
+  const path = '/assets/App-abc123.js';
+  assert.equal(await (await harness.dispatch(path)).text(), 'old response');
+  await harness.flush();
+  assert.equal(await (await harness.dispatch(path, {cache: 'reload'})).text(), 'fresh response');
+  assert.equal(harness.networkRequests(), 2);
+});
 
 test('app bundle chunks are cached and served without a repeat network request', async () => {
   const harness = await serviceWorkerHarness();

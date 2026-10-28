@@ -70,8 +70,10 @@ import {AppIcon} from './src/components/AppIcon';
 import {starterItem} from './src/ui/starterItem';
 import {useCommunityViewTracking} from './src/data/useCommunityViewTracking';
 import {PackDownloadPrompt} from './src/native/PackDownloadPrompt';
+import {checkForAppUpdate, ensureCurrentAppBuild} from './src/ui/appUpdate';
 
 const LazyGraphScreen = React.lazy(async () => {
+  await ensureCurrentAppBuild();
   const module = await import('./src/graph/GraphScreen');
   return {default: module.GraphScreen};
 });
@@ -502,6 +504,25 @@ function Shell({
   const activeGraphTree = openGraphTrees.find(tree => tree.id === activeGraphTreeId) ?? null;
   const graphTreeScrollRef = useRef<ScrollView>(null);
   const [graphTreePagerSuppressed, setGraphTreePagerSuppressed] = useState(false);
+  const [appUpdateAvailable, setAppUpdateAvailable] = useState(false);
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    let alive = true;
+    const check = () => {
+      if (document.visibilityState !== 'visible') return;
+      void checkForAppUpdate().then(updated => {
+        if (alive && updated) setAppUpdateAvailable(true);
+      }).catch(error => console.error('The app update notice could not check this release.', error));
+    };
+    check();
+    window.addEventListener('focus', check);
+    document.addEventListener('visibilitychange', check);
+    return () => {
+      alive = false;
+      window.removeEventListener('focus', check);
+      document.removeEventListener('visibilitychange', check);
+    };
+  }, [tab]);
   // A tree leaves its totals published when it unmounts, so that swapping between open trees does
   // not blank the resources tab in the gap. Nothing republishes when the last one closes, though,
   // which left the resources of a tree the user had just cleared on screen.
@@ -1026,6 +1047,18 @@ function Shell({
         )}
         </NativeUiScale>
       </View>
+      {appUpdateAvailable && (
+        <View style={styles.appUpdateNotice} accessibilityRole="alert">
+          <Text style={styles.appUpdateText}>Recipe Tree update available</Text>
+          <TouchableOpacity
+            style={[styles.reloadBtn, styles.graphRecoveryButton]}
+            accessibilityRole="button"
+            accessibilityLabel="Reload Recipe Tree to update"
+            onPress={() => window.location.reload()}>
+            <Text style={styles.reloadBtnText}>Reload</Text>
+          </TouchableOpacity>
+        </View>
+      )}
       <View style={styles.workspaceViewport}>
         <View style={styles.workspace}>
           {/* All tabs stay mounted so graph expansion state survives tab switches. */}
@@ -1556,6 +1589,12 @@ const styles = StyleSheet.create({
   graphRecoveryButton: {marginTop: 0},
   shell: {flex: 1, minHeight: 0},
   headerSurface: {position: 'relative', zIndex: 200},
+  appUpdateNotice: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    paddingHorizontal: 14, paddingVertical: 8,
+    backgroundColor: theme.panelAlt, borderBottomWidth: 1, borderBottomColor: theme.border,
+  },
+  appUpdateText: {flex: 1, color: theme.text, fontSize: 13, fontWeight: '700'},
   headerDetails: {gap: 7},
   compactHeaderNavigation: {
     flexDirection: 'row',
