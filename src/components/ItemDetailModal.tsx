@@ -85,7 +85,9 @@ export function ItemDetailModal({
           zoom: interfaceZoom,
           width: `${100 / interfaceZoom}%`,
           maxWidth: 760 / interfaceZoom,
-          maxHeight: `${88 / interfaceZoom}%`,
+          // Viewport units keep the physical limit stable under CSS zoom. A
+          // percentage here can leave no room for the scrollable recipe body.
+          maxHeight: `${88 / interfaceZoom}vh`,
         } as unknown as object)
       : null;
   const key = itemStack[itemStack.length - 1];
@@ -682,10 +684,10 @@ function RefsList({
   // Retain resolved cards across pagination/filter changes, while the data layer keeps the
   // underlying parsed-shard cache bounded.
   useEffect(() => {
+    setRecipeLoadError(false);
     const missing = refsToLoad.filter(ref => !recipeForRef(ref));
     if (missing.length === 0) return;
     let alive = true;
-    setRecipeLoadError(false);
     (async () => {
       try {
         const loaded = await data.getRecipes(missing);
