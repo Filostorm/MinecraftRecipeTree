@@ -38,6 +38,15 @@ export function projecteEmcTransmutation(
   return {emc, outputItemKey, outputAmount};
 }
 
+/** These synthetic recipes have a generated conversion preview, not a JEI screenshot. */
+export function hasGeneratedProjecteEmcPreview(recipe: Recipe, categoryId: string): boolean {
+  if (categoryId !== PROJECTE_EMC_CATEGORY_ID ||
+    recipe.img !== undefined || recipe.w !== undefined || recipe.h !== undefined) return false;
+  const conversion = projecteEmcTransmutation(recipe);
+  return conversion !== null && conversion.outputAmount === 1 &&
+    conversion.outputItemKey.startsWith('item|');
+}
+
 /** Read the exact ProjectE value from one synthetic EMC source recipe. */
 export function projecteEmcValue(recipe: Recipe, outputItemKey: string): number | null {
   const producesItem = (recipe.out ?? []).some(slot =>

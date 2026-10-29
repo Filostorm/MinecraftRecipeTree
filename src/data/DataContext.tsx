@@ -63,6 +63,7 @@ import {
 import {applyRecipeStageMetadata} from './recipeStages';
 import {reconstructLegacyReplaceableInputs} from './legacyReplaceableInputs';
 import {promoteReturnedRecipeIngredients} from './returnedRecipeIngredients';
+import {hasGeneratedProjecteEmcPreview} from './projecteEmc';
 import {RecipeSessionCache, recipeSessionCacheKey} from './recipeSessionCache';
 import {
   MAX_NETWORK_DOCUMENT_BYTES,
@@ -1613,13 +1614,25 @@ export function DataProvider({
                   h: preview[4],
                 };
               }
+              if (hasGeneratedProjecteEmcPreview(recipe, categories[catIdx].id)) {
+                const generatedKey = `generated:${catIdx}`;
+                if (!missingPreviewDiagnostics.current.has(generatedKey)) {
+                  missingPreviewDiagnostics.current.add(generatedKey);
+                  console.info(
+                    'ProjectE EMC recipes use generated conversion previews; no JEI screenshot is expected.',
+                    {datasetIdentity, categoryId: categories[catIdx].id},
+                  );
+                }
+                return recipe;
+              }
               const missingKey = `${catIdx}:${recipeIdx}`;
               if (!missingPreviewDiagnostics.current.has(missingKey)) {
                 missingPreviewDiagnostics.current.add(missingKey);
                 console.error(
                   'JEI layout preview is unavailable because the exporter did not produce one; ' +
                     'the structured recipe remains visible.',
-                  {categoryIndex: catIdx, recipeIndex: recipeIdx, recipeId: recipe.id},
+                  {datasetIdentity, categoryId: categories[catIdx].id,
+                    categoryIndex: catIdx, recipeIndex: recipeIdx, recipeId: recipe.id},
                 );
               }
             }

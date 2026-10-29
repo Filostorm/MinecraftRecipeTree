@@ -13,6 +13,20 @@ const COVER_CARRIER_ITEM_IDS = new Set([
   'thermaldynamics:cover',
 ]);
 
+const EXACT_CUSTOM_TYPE_LABELS = new Map([
+  ['com.cleanroommc.draconicalchemy.alchemy.detonationinstance', 'Detonation'],
+  ['net.minecraftforge.fml.common.registry.villagerregistry_villagercareer', 'Villager career'],
+  ['github.alecsio.mmceaddons.common.integration.jei.ingredient.flux', 'Flux'],
+  ['github.alecsio.mmceaddons.common.integration.jei.ingredient.meteor', 'Meteor'],
+  ['github.alecsio.mmceaddons.common.integration.jei.ingredient.biome', 'Biome'],
+  ['github.alecsio.mmceaddons.common.integration.jei.ingredient.radiation', 'Radiation'],
+  ['github.alecsio.mmceaddons.common.integration.jei.ingredient.essentia', 'Essentia'],
+  ['kport.modularmagic.common.integration.jei.ingredient.lifeessence', 'Life Essence'],
+  ['kport.modularmagic.common.integration.jei.ingredient.starlight', 'Starlight'],
+  ['kport.modularmagic.common.integration.jei.ingredient.demonwill', 'Demon Will'],
+  ['kport.modularmagic.common.integration.jei.ingredient.impetus', 'Impetus'],
+]);
+
 const CUSTOM_TYPE_LABELS: ReadonlyArray<readonly [needle: string, label: string]> = [
   ['energyingredient', 'Energy'],
   ['hybridfluid', 'Fluid'],
@@ -127,9 +141,12 @@ export function catalogTypePresentation(type?: string): CatalogTypePresentation 
   if (!type) return null;
   if (type === 'fluid') return {label: 'Fluid', recognized: true};
   if (type === 'enchant') return {label: 'Enchantment', recognized: true};
+  if (type === 'emc') return {label: 'EMC', recognized: true};
 
   const normalized = normalizedCustomType(type);
   if (normalized.startsWith(CUSTOM_TYPE_PREFIX)) {
+    const exactLabel = EXACT_CUSTOM_TYPE_LABELS.get(normalized.slice(CUSTOM_TYPE_PREFIX.length));
+    if (exactLabel) return {label: exactLabel, recognized: true};
     for (const [needle, label] of CUSTOM_TYPE_LABELS) {
       if (normalized.includes(needle)) return {label, recognized: true};
     }

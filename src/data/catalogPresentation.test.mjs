@@ -196,6 +196,35 @@ test('keeps unknown exporter types readable and marks them for diagnostics', () 
     catalogTypePresentation('future_resource'),
     {label: 'future resource', recognized: false},
   );
+  assert.deepEqual(
+    catalogTypePresentation('custom_example.meteor_1234abcd'),
+    {label: 'Custom ingredient', recognized: false},
+  );
+});
+
+test('labels every previously unrecognized type in the published MeatballCraft catalog', () => {
+  const types = [
+    ['custom_com.cleanroommc.draconicalchemy.alchemy.detonationinstance_497aeaea', 'Detonation'],
+    ['custom_net.minecraftforge.fml.common.registry.villagerregistry_villagercareer_e4410785', 'Villager career'],
+    ['custom_github.alecsio.mmceaddons.common.integration.jei.ingredient.flux_60ecef95', 'Flux'],
+    ['custom_github.alecsio.mmceaddons.common.integration.jei.ingredient.meteor_71e4eeb4', 'Meteor'],
+    ['custom_github.alecsio.mmceaddons.common.integration.jei.ingredient.biome_ba5d9c3f', 'Biome'],
+    ['custom_github.alecsio.mmceaddons.common.integration.jei.ingredient.radiation_571e4c28', 'Radiation'],
+    ['custom_github.alecsio.mmceaddons.common.integration.jei.ingredient.essentia_d30c0981', 'Essentia'],
+    ['custom_kport.modularmagic.common.integration.jei.ingredient.lifeessence_ce9fdb59', 'Life Essence'],
+    ['custom_kport.modularmagic.common.integration.jei.ingredient.starlight_7f370b9a', 'Starlight'],
+    ['custom_kport.modularmagic.common.integration.jei.ingredient.demonwill_34d065af', 'Demon Will'],
+    ['custom_kport.modularmagic.common.integration.jei.ingredient.impetus_6d479728', 'Impetus'],
+    ['emc', 'EMC'],
+  ];
+  for (const [type, label] of types) {
+    assert.deepEqual(catalogTypePresentation(type), {label, recognized: true}, type);
+  }
+  // The suffix is an exporter identity hash, not part of the ingredient's meaning.
+  assert.deepEqual(
+    catalogTypePresentation('custom_kport.modularmagic.common.integration.jei.ingredient.impetus_ABCDEF12'),
+    {label: 'Impetus', recognized: true},
+  );
 });
 
 test('removes legacy and hexadecimal Minecraft formatting codes from item names', () => {
